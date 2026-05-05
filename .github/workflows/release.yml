@@ -29,7 +29,7 @@ jobs:
             artifact: cranamp-windows-x86_64.exe
             binary: target/release/cranamp.exe
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux audio/dialog dependencies
@@ -42,7 +42,7 @@ jobs:
         run: |
           mkdir -p release
           cp "${{ matrix.binary }}" "release/${{ matrix.artifact }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: release/${{ matrix.artifact }}
@@ -51,7 +51,7 @@ jobs:
     name: Web
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -62,7 +62,7 @@ jobs:
         run: ./build-web.sh
       - name: Package
         run: tar -czf cranamp-web.tar.gz -C dist .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cranamp-web
           path: cranamp-web.tar.gz
@@ -72,11 +72,11 @@ jobs:
     needs: [desktop, web]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Publish
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: false
           files: artifacts/**/*
