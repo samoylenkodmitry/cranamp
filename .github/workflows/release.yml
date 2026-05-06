@@ -48,9 +48,12 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           package_dir="release/cranamp-${version}-${{ matrix.platform }}"
-          mkdir -p "$package_dir" assets
+          mkdir -p "$package_dir/demo-music" assets
           cp "${{ matrix.binary }}" "$package_dir/"
           cp README.md LICENSE "$package_dir/"
+          cp assets/demo-music/generated/*.mp3 "$package_dir/demo-music/"
+          cp assets/demo-music/generated/cranamp-demo-playlist.m3u "$package_dir/demo-music/"
+          cp assets/demo-music/README.md assets/demo-music/LICENSES.md "$package_dir/demo-music/"
           if [ "${{ matrix.archive }}" = "zip" ]; then
             powershell -Command "Compress-Archive -Path '$package_dir/*' -DestinationPath 'assets/cranamp-${version}-${{ matrix.platform }}.zip'"
           else

@@ -85,13 +85,15 @@ struct WinampState {
     eq_enabled: bool,
     eq_auto: bool,
     eq_values: [f32; 11],
+    shuffle_order: Vec<usize>,
     playlist_scroll: f32,
+    playlist_visible_rows: usize,
     volume: f32,
     balance: f32,
     position: f32,
     elapsed_seconds: f32,
     duration_seconds: Option<f32>,
-    visualizer_phase: f32,
+    title_marquee_phase: f32,
     status: String,
     playlist: Vec<Track>,
     current_index: Option<usize>,
@@ -109,18 +111,36 @@ impl Default for WinampState {
             eq_enabled: true,
             eq_auto: false,
             eq_values: [0.5; 11],
+            shuffle_order: Vec::new(),
             playlist_scroll: 0.0,
+            playlist_visible_rows: DEFAULT_PLAYLIST_VISIBLE_ROWS,
             volume: 0.72,
             balance: 0.5,
             position: 0.0,
             elapsed_seconds: 0.0,
             duration_seconds: None,
-            visualizer_phase: 0.0,
+            title_marquee_phase: 0.0,
             status: "Stopped".to_string(),
             playlist: Vec::new(),
             current_index: None,
         }
     }
+}
+
+fn initial_winamp_state() -> WinampState {
+    let mut state = load_saved_player_state()
+        .map(restore_saved_player_state)
+        .unwrap_or_default();
+    if state.playlist.is_empty() {
+        let tracks = audio::demo_playlist_tracks();
+        if !tracks.is_empty() {
+            state.current_index = Some(0);
+            state.status = format!("Loaded {} Demo Track(s)", tracks.len());
+            state.playlist = tracks;
+        }
+    }
+    refresh_shuffle_order(&mut state);
+    state
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -147,6 +167,8 @@ const CRANAMP_WINAMP_MAIN_TITLE: &str = "Cranamp Winamp";
 const CRANAMP_WINAMP_EQUALIZER_TITLE: &str = "Cranamp Winamp Equalizer";
 const CRANAMP_WINAMP_PLAYLIST_TITLE: &str = "Cranamp Winamp Playlist";
 const WINAMP_DEFAULT_SCREEN_POSITION: Point = Point { x: 140.0, y: 120.0 };
+const TITLE_MARQUEE_CHARS_PER_SECOND: f32 = 2.0;
+const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 11;
 
 impl WinampWindowSize {
     fn get(self) -> Size {
@@ -203,7 +225,7 @@ pub(crate) fn remember_winamp_tab_state() -> WinampTabState {
     remember_saved_window_config(peer_windows);
 
     WinampTabState {
-        player: cranpose_core::useState(WinampState::default),
+        player: cranpose_core::useState(initial_winamp_state),
         detached: cranpose_core::useState(native_winamp_windows_available),
         inline_windows: WinampInlineWindowStates {
             main: cranpose_core::useState(|| Point::new(26.0, 22.0)),
@@ -281,6 +303,7 @@ fn remember_winamp_skin() -> Result<WinampSkin, String> {
 #[composable]
 fn WinampRuntimeEffects(state: MutableState<WinampState>, peer_windows: WinampPeerWindowStates) {
     PlaybackProgressEffect(state);
+    PlayerStatePersistence(state);
     NativeWindowPersistence(peer_windows);
 }
 
@@ -303,6 +326,22 @@ fn PlaybackProgressEffect(state: MutableState<WinampState>) {
     });
 }
 
+#[composable]
+fn PlayerStatePersistence(state: MutableState<WinampState>) {
+    let last_saved = cranpose_core::remember(|| None::<SavedPlayerState>);
+    let config = SavedPlayerState::from_state(&state.get());
+    cranpose_core::SideEffect(move || {
+        last_saved.update(|last| {
+            if last.as_ref() != Some(&config) {
+                if let Err(error) = save_player_state(&config) {
+                    eprintln!("failed to save Cranamp player state: {error}");
+                }
+                *last = Some(config);
+            }
+        });
+    });
+}
+
 fn sync_playback_progress(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     if snapshot.playback == PlaybackState::Stopped {
@@ -311,37 +350,30 @@ fn sync_playback_progress(state: MutableState<WinampState>) {
 
     match audio::playback_progress() {
         Ok(Some(progress)) => {
+            let finished = progress.finished && snapshot.playback == PlaybackState::Playing;
             state.update(|s| {
                 let duration = progress.duration_seconds.or(s.duration_seconds);
-                let elapsed =
-                    normalized_elapsed_seconds(progress.elapsed_seconds, duration, s.repeat);
+                let elapsed = normalized_elapsed_seconds(progress.elapsed_seconds, duration);
                 s.elapsed_seconds = elapsed;
                 s.duration_seconds = duration;
                 s.position = progress_fraction(elapsed, duration);
-                if s.playback == PlaybackState::Playing {
-                    s.visualizer_phase = (s.visualizer_phase + 1.0) % 10_000.0;
-                }
-                if progress.finished && !s.repeat {
-                    s.playback = PlaybackState::Stopped;
-                    s.status = "Stopped".to_string();
-                }
+                s.title_marquee_phase = elapsed * TITLE_MARQUEE_CHARS_PER_SECOND;
             });
+            if finished {
+                advance_finished_track(state);
+            }
         }
         Ok(None) => {}
         Err(error) => state.update(|s| s.status = error),
     }
 }
 
-fn normalized_elapsed_seconds(elapsed: f32, duration: Option<f32>, repeat: bool) -> f32 {
+fn normalized_elapsed_seconds(elapsed: f32, duration: Option<f32>) -> f32 {
     let elapsed = elapsed.max(0.0);
     let Some(duration) = duration.filter(|duration| *duration > 0.0) else {
         return elapsed;
     };
-    if repeat {
-        elapsed % duration
-    } else {
-        elapsed.min(duration)
-    }
+    elapsed.min(duration)
 }
 
 fn progress_fraction(elapsed: f32, duration: Option<f32>) -> f32 {
@@ -559,7 +591,7 @@ fn WinampNativeWindows(
 
 #[composable]
 pub fn WinampStandaloneApp() {
-    let state = cranpose_core::useState(WinampState::default);
+    let state = cranpose_core::useState(initial_winamp_state);
     let peer_windows = WinampPeerWindowStates {
         main: rememberWindowState(MAIN_WIDTH, MAIN_HEIGHT),
         equalizer: rememberWindowState(EQ_WIDTH, EQ_HEIGHT),
@@ -763,7 +795,7 @@ fn MainWindow(
 
             Visualizer(
                 snapshot.playback == PlaybackState::Playing,
-                snapshot.visualizer_phase,
+                audio::visualizer_bands(),
                 scale,
             );
 
@@ -781,7 +813,11 @@ fn MainWindow(
 
             BitmapWinampText(
                 skin.text.clone(),
-                ellipsize_bitmap(main_display_title(&snapshot), MAIN_TRACK_TEXT_WIDTH),
+                marquee_bitmap_text(
+                    main_display_title(&snapshot),
+                    MAIN_TRACK_TEXT_WIDTH,
+                    snapshot.title_marquee_phase,
+                ),
                 POS_MAIN_TRACK_TEXT.0,
                 POS_MAIN_TRACK_TEXT.1,
                 scale,
@@ -949,6 +985,11 @@ fn MainWindow(
                     move || {
                         state_click.update(|s| {
                             s.shuffle = !s.shuffle;
+                            if s.shuffle {
+                                refresh_shuffle_order(s);
+                            } else {
+                                s.shuffle_order.clear();
+                            }
                             s.status = if s.shuffle {
                                 "Shuffle On".to_string()
                             } else {
@@ -1419,6 +1460,12 @@ fn PlaylistEntries(
     let y = PLAYLIST_LIST_BG.1 + 4.0;
     let text_width = (list_width - 12.0).max(1.0);
 
+    cranpose_core::SideEffect(move || {
+        if state.get_non_reactive().playlist_visible_rows != max_rows {
+            state.update(|s| s.playlist_visible_rows = max_rows);
+        }
+    });
+
     if snapshot.playlist.is_empty() {
         BitmapWinampText(
             text_bitmap,
@@ -1667,6 +1714,33 @@ fn ellipsize_bitmap(text: String, width: f32) -> String {
     result
 }
 
+fn marquee_bitmap_text(text: String, width: f32, phase: f32) -> String {
+    let max_chars = (width / 5.0).floor().max(1.0) as usize;
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return text;
+    }
+
+    let max_offset = char_count - max_chars;
+    let offset = ping_pong_offset(phase, max_offset);
+    text.chars().skip(offset).take(max_chars).collect()
+}
+
+fn ping_pong_offset(position: f32, max_offset: usize) -> usize {
+    if max_offset == 0 {
+        return 0;
+    }
+
+    let span = max_offset as f32;
+    let cycle = span * 2.0;
+    let position = position.max(0.0) % cycle;
+    if position <= span {
+        position.floor() as usize
+    } else {
+        (cycle - position).floor() as usize
+    }
+}
+
 fn main_display_title(state: &WinampState) -> String {
     state
         .current_index
@@ -1691,7 +1765,8 @@ fn main_display_meta(state: &WinampState) -> String {
 }
 
 #[composable]
-fn Visualizer(playing: bool, phase: f32, scale: f32) {
+fn Visualizer(playing: bool, bands: audio::VisualizerBands, scale: f32) {
+    let bitmap = visualizer_bitmap(playing, bands);
     let width = scaled(VISUALIZER_WIDTH, scale);
     let height = scaled(VISUALIZER_HEIGHT, scale);
     Canvas(
@@ -1702,42 +1777,94 @@ fn Visualizer(playing: bool, phase: f32, scale: f32) {
                 scaled(POS_VISUALIZER.1, scale),
             ),
         move |scope| {
-            let bar_width = scaled(2.0, scale).max(1.0);
-            let gap = scaled(2.0, scale).max(1.0);
-            for bar in 0..VISUALIZER_BARS {
-                let value = if playing {
-                    visualizer_bar_height(phase, bar)
-                } else {
-                    1.0
-                };
-                let bar_height = scaled(value, scale).clamp(1.0, height);
-                let x = bar as f32 * (bar_width + gap);
-                let y = height - bar_height;
-                let color = if value > 12.0 {
-                    Color(1.0, 0.34, 0.16, 1.0)
-                } else if value > 8.0 {
-                    Color(0.95, 0.82, 0.22, 1.0)
-                } else {
-                    Color(0.22, 0.95, 0.38, 1.0)
-                };
-                scope.draw_rect_at(
-                    Rect {
-                        x,
-                        y,
-                        width: bar_width,
-                        height: bar_height,
-                    },
-                    Brush::solid(color),
-                );
-            }
+            scope.draw_image_at(
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width,
+                    height,
+                },
+                bitmap.clone(),
+                1.0,
+                None,
+            );
         },
     );
 }
 
-fn visualizer_bar_height(phase: f32, bar: usize) -> f32 {
-    let wave = (phase * 0.17 + bar as f32 * 0.77).sin() * 0.5 + 0.5;
-    let pulse = (phase * 0.07 + bar as f32 * 1.91).cos().abs();
-    2.0 + ((wave * 0.72) + (pulse * 0.28)) * 14.0
+fn visualizer_bitmap(playing: bool, bands: audio::VisualizerBands) -> ImageBitmap {
+    let width = VISUALIZER_WIDTH as u32;
+    let height = VISUALIZER_HEIGHT as u32;
+    let mut pixels = vec![0u8; width as usize * height as usize * 4];
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.copy_from_slice(&[0, 0, 0, 255]);
+    }
+
+    if !playing {
+        return ImageBitmap::from_rgba8(width, height, pixels)
+            .expect("rendered visualizer bitmap should be valid");
+    }
+
+    let max_segments = 5;
+    let bar_width = 3;
+    let bar_pitch = 4;
+    let segment_height = 2;
+    let segment_pitch = 3;
+    for bar in 0..VISUALIZER_BARS {
+        let value = visualizer_band_height(bands, bar);
+        let x = (bar * bar_pitch) as u32;
+        for segment in 0..max_segments {
+            let threshold = ((segment + 1) as f32 / max_segments as f32) * VISUALIZER_HEIGHT;
+            let color = visualizer_segment_rgba(segment, max_segments, value >= threshold);
+            let y = height as i32 - ((segment + 1) * segment_pitch) as i32 + 1;
+            fill_visualizer_rect(
+                &mut pixels,
+                width,
+                height,
+                (x, y.max(0) as u32, bar_width, segment_height),
+                color,
+            );
+        }
+    }
+
+    ImageBitmap::from_rgba8(width, height, pixels)
+        .expect("rendered visualizer bitmap should be valid")
+}
+
+fn fill_visualizer_rect(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    rect: (u32, u32, u32, u32),
+    color: [u8; 4],
+) {
+    let (x, y, rect_width, rect_height) = rect;
+    for yy in y..(y + rect_height).min(height) {
+        for xx in x..(x + rect_width).min(width) {
+            let offset = ((yy * width + xx) * 4) as usize;
+            pixels[offset..offset + 4].copy_from_slice(&color);
+        }
+    }
+}
+
+fn visualizer_band_height(bands: audio::VisualizerBands, bar: usize) -> f32 {
+    let level = bands.get(bar).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+    level * 16.0
+}
+
+fn visualizer_segment_rgba(segment: usize, max_segments: usize, lit: bool) -> [u8; 4] {
+    let color = if segment + 2 >= max_segments {
+        [255, 70, 28, 255]
+    } else if segment + 3 >= max_segments {
+        [242, 204, 31, 255]
+    } else {
+        [51, 255, 82, 255]
+    };
+    if lit {
+        color
+    } else {
+        [0, 0, 0, 255]
+    }
 }
 
 #[composable]
@@ -2281,16 +2408,19 @@ fn open_audio_files(state: MutableState<WinampState>) {
             Ok(Some(picked)) => {
                 let track = picked.track.clone();
                 let snapshot = state.get_non_reactive();
-                match audio::play_web_bytes(picked.bytes, snapshot.volume, snapshot.repeat) {
+                match audio::play_web_bytes(picked.bytes, snapshot.volume, false) {
                     Ok(()) => {
                         state.update(|s| {
                             s.playlist = vec![track.clone()];
                             s.current_index = Some(0);
+                            scroll_playlist_to_track(s, 0);
                             s.position = 0.0;
                             s.elapsed_seconds = 0.0;
                             s.duration_seconds = None;
+                            s.title_marquee_phase = 0.0;
                             s.playback = PlaybackState::Playing;
                             s.status = format!("Playing {}", track.display_title());
+                            refresh_shuffle_order(s);
                             trace_winamp_state("web-open-file", s);
                         });
                     }
@@ -2413,7 +2543,9 @@ fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     state.position = 0.0;
     state.elapsed_seconds = 0.0;
     state.duration_seconds = None;
+    state.title_marquee_phase = 0.0;
     state.status = format!("Loaded {} Track(s)", state.playlist.len());
+    refresh_shuffle_order(state);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2428,13 +2560,129 @@ fn append_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) -> bool {
         state.position = 0.0;
         state.elapsed_seconds = 0.0;
         state.duration_seconds = None;
+        state.title_marquee_phase = 0.0;
         state.status = format!("Loaded {} Track(s)", state.playlist.len());
     } else {
-        state.playlist_scroll = 1.0;
         state.status = format!("Added {added_count} Track(s)");
     }
+    refresh_shuffle_order(state);
 
     was_empty
+}
+
+fn scroll_playlist_to_track(state: &mut WinampState, index: usize) {
+    state.playlist_scroll = playlist_scroll_for_track(
+        index,
+        state.playlist.len(),
+        state.playlist_visible_rows,
+        state.playlist_scroll,
+    );
+}
+
+fn playlist_scroll_for_track(
+    index: usize,
+    len: usize,
+    visible_rows: usize,
+    current_scroll: f32,
+) -> f32 {
+    if len <= 1 {
+        return 0.0;
+    }
+
+    let visible_rows = visible_rows.max(1).min(len);
+    let max_start = len.saturating_sub(visible_rows);
+    if max_start == 0 {
+        return 0.0;
+    }
+
+    let first_visible =
+        ((current_scroll.clamp(0.0, 1.0) * max_start as f32).round() as usize).min(max_start);
+    let last_visible = first_visible + visible_rows - 1;
+    let index = index.min(len - 1);
+    if (first_visible..=last_visible).contains(&index) {
+        return current_scroll.clamp(0.0, 1.0);
+    }
+
+    let centered_start = index.saturating_sub(visible_rows / 2).min(max_start);
+    centered_start as f32 / max_start as f32
+}
+
+fn refresh_shuffle_order(state: &mut WinampState) {
+    if !state.shuffle {
+        state.shuffle_order.clear();
+        return;
+    }
+
+    let len = state.playlist.len();
+    if len == 0 {
+        state.shuffle_order.clear();
+        return;
+    }
+
+    let current = state.current_index.unwrap_or(0).min(len - 1);
+    state.shuffle_order = shuffled_order(len, current);
+}
+
+fn sync_shuffle_order_to_current(state: &mut WinampState, index: usize) {
+    if !state.shuffle {
+        state.shuffle_order.clear();
+        return;
+    }
+
+    if !valid_shuffle_order(&state.shuffle_order, state.playlist.len()) {
+        state.shuffle_order = shuffled_order(state.playlist.len(), index);
+    }
+}
+
+fn valid_shuffle_order(order: &[usize], len: usize) -> bool {
+    if order.len() != len {
+        return false;
+    }
+
+    let mut seen = vec![false; len];
+    for &index in order {
+        if index >= len || seen[index] {
+            return false;
+        }
+        seen[index] = true;
+    }
+    true
+}
+
+fn shuffled_order(len: usize, first: usize) -> Vec<usize> {
+    shuffled_order_with_seed(len, first, random_shuffle_seed())
+}
+
+fn shuffled_order_with_seed(len: usize, first: usize, seed: u64) -> Vec<usize> {
+    if len == 0 {
+        return Vec::new();
+    }
+
+    let first = first.min(len - 1);
+    let mut rest = (0..len).filter(|index| *index != first).collect::<Vec<_>>();
+    shuffle_indices(&mut rest, seed);
+
+    let mut order = Vec::with_capacity(len);
+    order.push(first);
+    order.extend(rest);
+    order
+}
+
+fn shuffle_indices(indices: &mut [usize], mut seed: u64) {
+    for i in (1..indices.len()).rev() {
+        seed = next_shuffle_seed(seed);
+        let j = (seed as usize) % (i + 1);
+        indices.swap(i, j);
+    }
+}
+
+fn next_shuffle_seed(seed: u64) -> u64 {
+    seed.wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1_442_695_040_888_963_407)
+}
+
+fn random_shuffle_seed() -> u64 {
+    getrandom::u64().unwrap_or(0x9e37_79b9_7f4a_7c15)
 }
 
 fn play_or_resume(state: MutableState<WinampState>) {
@@ -2504,6 +2752,7 @@ fn stop_playback(state: MutableState<WinampState>) {
                 s.playback = PlaybackState::Stopped;
                 s.position = 0.0;
                 s.elapsed_seconds = 0.0;
+                s.title_marquee_phase = 0.0;
                 s.status = "Stopped".to_string();
                 trace_winamp_state("stop", s);
             });
@@ -2512,36 +2761,148 @@ fn stop_playback(state: MutableState<WinampState>) {
     }
 }
 
-fn next_track(state: MutableState<WinampState>) {
-    let snapshot = state.get_non_reactive();
-    if snapshot.playlist.is_empty() {
-        state.update(|s| s.status = "Open File".to_string());
-        return;
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TrackDirection {
+    Next,
+    Previous,
+}
 
-    let current = snapshot.current_index.unwrap_or(0);
-    let next = if current + 1 >= snapshot.playlist.len() {
-        0
-    } else {
-        current + 1
-    };
-    start_track(state, next);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TrackAdvanceMode {
+    Manual,
+    Automatic,
+}
+
+fn next_track(state: MutableState<WinampState>) {
+    advance_track(state, TrackDirection::Next, TrackAdvanceMode::Manual);
 }
 
 fn previous_track(state: MutableState<WinampState>) {
+    advance_track(state, TrackDirection::Previous, TrackAdvanceMode::Manual);
+}
+
+fn advance_finished_track(state: MutableState<WinampState>) {
+    advance_track(state, TrackDirection::Next, TrackAdvanceMode::Automatic);
+}
+
+fn advance_track(
+    state: MutableState<WinampState>,
+    direction: TrackDirection,
+    mode: TrackAdvanceMode,
+) {
     let snapshot = state.get_non_reactive();
     if snapshot.playlist.is_empty() {
-        state.update(|s| s.status = "Open File".to_string());
+        state.update(|s| {
+            s.status = "Open File".to_string();
+        });
         return;
     }
 
-    let current = snapshot.current_index.unwrap_or(0);
-    let previous = if current == 0 {
-        snapshot.playlist.len() - 1
-    } else {
-        current - 1
+    let Some(plan) = playlist_advance_plan(&snapshot, direction, mode) else {
+        finish_playlist(state);
+        return;
     };
-    start_track(state, previous);
+
+    if let Some(order) = plan.shuffle_order {
+        state.update(|s| s.shuffle_order = order);
+    }
+    start_track(state, plan.index);
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TrackAdvancePlan {
+    index: usize,
+    shuffle_order: Option<Vec<usize>>,
+}
+
+fn playlist_advance_plan(
+    state: &WinampState,
+    direction: TrackDirection,
+    mode: TrackAdvanceMode,
+) -> Option<TrackAdvancePlan> {
+    let len = state.playlist.len();
+    if len == 0 {
+        return None;
+    }
+
+    let current = state.current_index.unwrap_or(0).min(len - 1);
+    let should_wrap = mode == TrackAdvanceMode::Manual || state.repeat;
+    if state.shuffle {
+        return shuffled_advance_plan(state, direction, should_wrap);
+    }
+
+    let index = sequential_advance_index(len, current, direction, should_wrap)?;
+    Some(TrackAdvancePlan {
+        index,
+        shuffle_order: None,
+    })
+}
+
+fn sequential_advance_index(
+    len: usize,
+    current: usize,
+    direction: TrackDirection,
+    should_wrap: bool,
+) -> Option<usize> {
+    match direction {
+        TrackDirection::Next if current + 1 < len => Some(current + 1),
+        TrackDirection::Next if should_wrap => Some(0),
+        TrackDirection::Previous if current > 0 => Some(current - 1),
+        TrackDirection::Previous if should_wrap => Some(len - 1),
+        _ => None,
+    }
+}
+
+fn shuffled_advance_plan(
+    state: &WinampState,
+    direction: TrackDirection,
+    should_wrap: bool,
+) -> Option<TrackAdvancePlan> {
+    let len = state.playlist.len();
+    let current = state.current_index.unwrap_or(0).min(len - 1);
+    let mut replacement_order = None;
+    let mut order = if valid_shuffle_order(&state.shuffle_order, len) {
+        state.shuffle_order.clone()
+    } else {
+        let order = shuffled_order(len, current);
+        replacement_order = Some(order.clone());
+        order
+    };
+
+    let cursor = order
+        .iter()
+        .position(|index| *index == current)
+        .unwrap_or(0);
+    let index = match direction {
+        TrackDirection::Next if cursor + 1 < order.len() => order[cursor + 1],
+        TrackDirection::Next if should_wrap => {
+            order = shuffled_order(len, current);
+            let next_index = if order.len() > 1 { order[1] } else { order[0] };
+            replacement_order = Some(order);
+            next_index
+        }
+        TrackDirection::Previous if cursor > 0 => order[cursor - 1],
+        TrackDirection::Previous if should_wrap => order[order.len() - 1],
+        _ => return None,
+    };
+
+    Some(TrackAdvancePlan {
+        index,
+        shuffle_order: replacement_order,
+    })
+}
+
+fn finish_playlist(state: MutableState<WinampState>) {
+    let stop_result = audio::stop();
+    state.update(|s| {
+        s.playback = PlaybackState::Stopped;
+        s.title_marquee_phase = 0.0;
+        s.status = match stop_result {
+            Ok(()) => "Stopped".to_string(),
+            Err(error) => error,
+        };
+        trace_winamp_state("playlist-finished", s);
+    });
 }
 
 fn activate_playlist_track(state: MutableState<WinampState>, index: usize) {
@@ -2560,6 +2921,8 @@ fn activate_playlist_track(state: MutableState<WinampState>, index: usize) {
     {
         state.update(|s| {
             s.current_index = Some(index);
+            scroll_playlist_to_track(s, index);
+            s.title_marquee_phase = 0.0;
             s.status = current_track_status(s, "Selected");
         });
         play_or_resume(state);
@@ -2576,21 +2939,55 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         return;
     };
 
-    match audio::play_track(&track, snapshot.volume, snapshot.repeat) {
+    #[cfg(target_arch = "wasm32")]
+    if track.path.is_none() {
+        match audio::seek_fraction(0.0).and_then(|()| audio::resume()) {
+            Ok(()) => {
+                state.update(|s| {
+                    s.current_index = Some(index);
+                    scroll_playlist_to_track(s, index);
+                    sync_shuffle_order_to_current(s, index);
+                    s.playback = PlaybackState::Playing;
+                    s.position = 0.0;
+                    s.elapsed_seconds = 0.0;
+                    s.duration_seconds = None;
+                    s.title_marquee_phase = 0.0;
+                    s.status = format!("Playing {}", track.display_title());
+                    trace_winamp_state("web-replay", s);
+                });
+            }
+            Err(error) => state.update(|s| {
+                s.current_index = Some(index);
+                scroll_playlist_to_track(s, index);
+                s.playback = PlaybackState::Stopped;
+                s.title_marquee_phase = 0.0;
+                s.status = error;
+                trace_winamp_state("web-replay-error", s);
+            }),
+        }
+        return;
+    }
+
+    match audio::play_track(&track, snapshot.volume, false) {
         Ok(()) => {
             state.update(|s| {
                 s.current_index = Some(index);
+                scroll_playlist_to_track(s, index);
+                sync_shuffle_order_to_current(s, index);
                 s.playback = PlaybackState::Playing;
                 s.position = 0.0;
                 s.elapsed_seconds = 0.0;
                 s.duration_seconds = None;
+                s.title_marquee_phase = 0.0;
                 s.status = format!("Playing {}", track.display_title());
                 trace_winamp_state("play", s);
             });
         }
         Err(error) => state.update(|s| {
             s.current_index = Some(index);
+            scroll_playlist_to_track(s, index);
             s.playback = PlaybackState::Stopped;
+            s.title_marquee_phase = 0.0;
             s.status = error;
             trace_winamp_state("play-error", s);
         }),
@@ -2603,6 +3000,348 @@ fn current_track_status(state: &WinampState, prefix: &str) -> String {
         .and_then(|index| state.playlist.get(index))
         .map(|track| format!("{prefix} {}", track.display_title()))
         .unwrap_or_else(|| prefix.to_string())
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SavedTrack {
+    title: String,
+    path: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SavedPlayerState {
+    shuffle: bool,
+    repeat: bool,
+    eq_visible: bool,
+    playlist_visible: bool,
+    eq_enabled: bool,
+    eq_auto: bool,
+    eq_values: [f32; 11],
+    playlist_scroll: f32,
+    volume: f32,
+    balance: f32,
+    current_index: Option<usize>,
+    tracks: Vec<SavedTrack>,
+}
+
+impl Default for SavedPlayerState {
+    fn default() -> Self {
+        Self::from_state(&WinampState::default())
+    }
+}
+
+impl SavedPlayerState {
+    fn from_state(state: &WinampState) -> Self {
+        let mut current_index = None;
+        let mut tracks = Vec::new();
+        for (index, track) in state.playlist.iter().enumerate() {
+            let Some(path) = track.path.as_ref().filter(|path| !path.is_empty()) else {
+                continue;
+            };
+            if state.current_index == Some(index) {
+                current_index = Some(tracks.len());
+            }
+            tracks.push(SavedTrack {
+                title: track.title.clone(),
+                path: path.clone(),
+            });
+        }
+
+        Self {
+            shuffle: state.shuffle,
+            repeat: state.repeat,
+            eq_visible: state.eq_visible,
+            playlist_visible: state.playlist_visible,
+            eq_enabled: state.eq_enabled,
+            eq_auto: state.eq_auto,
+            eq_values: state.eq_values.map(clamp01),
+            playlist_scroll: clamp01(state.playlist_scroll),
+            volume: clamp01(state.volume),
+            balance: clamp01(state.balance),
+            current_index,
+            tracks,
+        }
+    }
+}
+
+fn restore_saved_player_state(saved: SavedPlayerState) -> WinampState {
+    let mut state = WinampState {
+        shuffle: saved.shuffle,
+        repeat: saved.repeat,
+        eq_visible: saved.eq_visible,
+        playlist_visible: saved.playlist_visible,
+        eq_enabled: saved.eq_enabled,
+        eq_auto: saved.eq_auto,
+        eq_values: saved.eq_values.map(clamp01),
+        playlist_scroll: clamp01(saved.playlist_scroll),
+        volume: clamp01(saved.volume),
+        balance: clamp01(saved.balance),
+        ..WinampState::default()
+    };
+    let saved_current_index = saved.current_index;
+    let mut restored_current_index = None;
+    for (saved_index, track) in saved.tracks.into_iter().enumerate() {
+        let Some(track) = restore_saved_track(track) else {
+            continue;
+        };
+        if saved_current_index == Some(saved_index) {
+            restored_current_index = Some(state.playlist.len());
+        }
+        state.playlist.push(track);
+    }
+    if !state.playlist.is_empty() {
+        state.current_index = restored_current_index.or(Some(0));
+        state.status = format!("Restored {} Track(s)", state.playlist.len());
+    }
+    state
+}
+
+fn restore_saved_track(track: SavedTrack) -> Option<Track> {
+    if track.path.is_empty() {
+        return None;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if !std::path::Path::new(&track.path).is_file() {
+        return None;
+    }
+
+    let title = if track.title.is_empty() {
+        "Untitled".to_string()
+    } else {
+        track.title
+    };
+    Some(Track {
+        title,
+        path: Some(track.path),
+    })
+}
+
+fn serialize_player_state(config: &SavedPlayerState) -> String {
+    let mut lines = vec![
+        "version=1".to_string(),
+        format!("shuffle={}", bool_value(config.shuffle)),
+        format!("repeat={}", bool_value(config.repeat)),
+        format!("eq_visible={}", bool_value(config.eq_visible)),
+        format!("playlist_visible={}", bool_value(config.playlist_visible)),
+        format!("eq_enabled={}", bool_value(config.eq_enabled)),
+        format!("eq_auto={}", bool_value(config.eq_auto)),
+        format!("playlist_scroll={:.6}", clamp01(config.playlist_scroll)),
+        format!("volume={:.6}", clamp01(config.volume)),
+        format!("balance={:.6}", clamp01(config.balance)),
+        format!(
+            "current_index={}",
+            config
+                .current_index
+                .map(|index| index.to_string())
+                .unwrap_or_default()
+        ),
+        format!(
+            "eq_values={}",
+            config
+                .eq_values
+                .iter()
+                .map(|value| format!("{:.6}", clamp01(*value)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    ];
+
+    for track in &config.tracks {
+        lines.push(format!(
+            "track={}\t{}",
+            hex_encode(&track.title),
+            hex_encode(&track.path)
+        ));
+    }
+
+    lines.join("\n") + "\n"
+}
+
+fn parse_player_state(input: &str) -> SavedPlayerState {
+    let mut config = SavedPlayerState::default();
+    config.tracks.clear();
+    config.current_index = None;
+
+    for line in input.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        apply_player_state_value(&mut config, key.trim(), value.trim());
+    }
+
+    config
+}
+
+fn apply_player_state_value(config: &mut SavedPlayerState, key: &str, value: &str) {
+    match key {
+        "shuffle" => update_bool(&mut config.shuffle, value),
+        "repeat" => update_bool(&mut config.repeat, value),
+        "eq_visible" => update_bool(&mut config.eq_visible, value),
+        "playlist_visible" => update_bool(&mut config.playlist_visible, value),
+        "eq_enabled" => update_bool(&mut config.eq_enabled, value),
+        "eq_auto" => update_bool(&mut config.eq_auto, value),
+        "playlist_scroll" => update_f32(&mut config.playlist_scroll, value),
+        "volume" => update_f32(&mut config.volume, value),
+        "balance" => update_f32(&mut config.balance, value),
+        "current_index" => config.current_index = parse_optional_usize(value),
+        "eq_values" => {
+            if let Some(values) = parse_eq_values(value) {
+                config.eq_values = values;
+            }
+        }
+        "track" => {
+            if let Some(track) = parse_saved_track(value) {
+                config.tracks.push(track);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn bool_value(value: bool) -> &'static str {
+    if value {
+        "1"
+    } else {
+        "0"
+    }
+}
+
+fn update_bool(target: &mut bool, value: &str) {
+    match value {
+        "1" | "true" | "on" => *target = true,
+        "0" | "false" | "off" => *target = false,
+        _ => {}
+    }
+}
+
+fn update_f32(target: &mut f32, value: &str) {
+    if let Ok(parsed) = value.parse::<f32>() {
+        *target = clamp01(parsed);
+    }
+}
+
+fn parse_optional_usize(value: &str) -> Option<usize> {
+    if value.is_empty() || value == "none" {
+        None
+    } else {
+        value.parse::<usize>().ok()
+    }
+}
+
+fn parse_eq_values(value: &str) -> Option<[f32; 11]> {
+    let values = value
+        .split(',')
+        .map(str::trim)
+        .map(str::parse::<f32>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    values
+        .try_into()
+        .ok()
+        .map(|values: [f32; 11]| values.map(clamp01))
+}
+
+fn parse_saved_track(value: &str) -> Option<SavedTrack> {
+    let (title, path) = value.split_once('\t')?;
+    Some(SavedTrack {
+        title: hex_decode(title)?,
+        path: hex_decode(path)?,
+    })
+}
+
+fn hex_encode(input: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(input.len() * 2);
+    for byte in input.as_bytes() {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
+
+fn hex_decode(input: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    if !bytes.len().is_multiple_of(2) {
+        return None;
+    }
+
+    let mut output = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks_exact(2) {
+        let high = hex_value(pair[0])?;
+        let low = hex_value(pair[1])?;
+        output.push((high << 4) | low);
+    }
+    String::from_utf8(output).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn load_saved_player_state() -> Option<SavedPlayerState> {
+    load_player_state_text().map(|text| parse_player_state(&text))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_player_state_text() -> Option<String> {
+    std::fs::read_to_string(player_config_path()).ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_player_state_text() -> Option<String> {
+    browser_storage()?
+        .get_item(PLAYER_STORAGE_KEY)
+        .ok()
+        .flatten()
+}
+
+fn save_player_state(config: &SavedPlayerState) -> Result<(), String> {
+    save_player_state_text(&serialize_player_state(config))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_player_state_text(text: &str) -> Result<(), String> {
+    let path = player_config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    std::fs::write(&path, text)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn save_player_state_text(text: &str) -> Result<(), String> {
+    browser_storage()
+        .ok_or_else(|| "browser localStorage is unavailable".to_string())?
+        .set_item(PLAYER_STORAGE_KEY, text)
+        .map_err(js_storage_error)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn player_config_path() -> std::path::PathBuf {
+    config_home_dir().join("cranamp").join("player.conf")
+}
+
+#[cfg(target_arch = "wasm32")]
+const PLAYER_STORAGE_KEY: &str = "cranamp.player";
+
+#[cfg(target_arch = "wasm32")]
+fn browser_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn js_storage_error(value: wasm_bindgen::JsValue) -> String {
+    value
+        .as_string()
+        .unwrap_or_else(|| "browser localStorage operation failed".to_string())
 }
 
 const WINAMP_NATIVE_HOST_OFFSET_X: f32 = 640.0;
@@ -3001,9 +3740,109 @@ mod tests {
     }
 
     #[test]
-    fn repeated_elapsed_wraps_to_track_duration() {
-        assert_eq!(normalized_elapsed_seconds(130.0, Some(120.0), true), 10.0);
-        assert_eq!(normalized_elapsed_seconds(130.0, Some(120.0), false), 120.0);
+    fn playlist_scroll_tracks_current_index() {
+        assert_eq!(playlist_scroll_for_track(3, 20, 5, 0.0), 0.0);
+        assert_eq!(playlist_scroll_for_track(10, 20, 5, 0.5), 0.5);
+        assert!((playlist_scroll_for_track(10, 20, 5, 0.0) - (8.0 / 15.0)).abs() < f32::EPSILON);
+        assert_eq!(playlist_scroll_for_track(99, 20, 5, 0.0), 1.0);
+        assert_eq!(playlist_scroll_for_track(0, 1, 5, 0.5), 0.0);
+    }
+
+    #[test]
+    fn marquee_text_ping_pongs_long_titles() {
+        let title = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string();
+
+        assert_eq!(marquee_bitmap_text(title.clone(), 50.0, 0.0), "ABCDEFGHIJ");
+        assert_eq!(marquee_bitmap_text(title.clone(), 50.0, 2.0), "CDEFGHIJKL");
+        assert_eq!(marquee_bitmap_text(title, 50.0, 18.0), "OPQRSTUVWX");
+        assert_eq!(
+            marquee_bitmap_text("SHORT".to_string(), 50.0, 60.0),
+            "SHORT"
+        );
+    }
+
+    #[test]
+    fn visualizer_bitmap_contains_bright_bars() {
+        let bitmap = visualizer_bitmap(true, [0.8; audio::VISUALIZER_BAND_COUNT]);
+
+        assert_eq!(bitmap.width(), VISUALIZER_WIDTH as u32);
+        assert_eq!(bitmap.height(), VISUALIZER_HEIGHT as u32);
+        assert!(bitmap
+            .pixels()
+            .chunks_exact(4)
+            .any(|pixel| pixel[1] > 180 && pixel[3] == 255));
+    }
+
+    #[test]
+    fn visualizer_bitmap_is_blank_when_stopped() {
+        let bitmap = visualizer_bitmap(false, [0.8; audio::VISUALIZER_BAND_COUNT]);
+
+        assert!(bitmap
+            .pixels()
+            .chunks_exact(4)
+            .all(|pixel| pixel == [0, 0, 0, 255]));
+    }
+
+    #[test]
+    fn player_state_config_round_trips_settings_and_playlist() {
+        let mut eq_values = [0.5; 11];
+        eq_values[0] = 0.1;
+        eq_values[10] = 0.9;
+        let state = WinampState {
+            shuffle: true,
+            repeat: true,
+            eq_visible: false,
+            playlist_visible: false,
+            eq_enabled: false,
+            eq_auto: true,
+            eq_values,
+            playlist_scroll: 0.42,
+            volume: 0.33,
+            balance: 0.66,
+            playlist: vec![test_track("One=Track"), test_track("Two\tTrack")],
+            current_index: Some(1),
+            ..WinampState::default()
+        };
+
+        let saved = SavedPlayerState::from_state(&state);
+        let parsed = parse_player_state(&serialize_player_state(&saved));
+
+        assert_eq!(parsed, saved);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn restored_player_state_filters_missing_tracks_and_remaps_current_index() {
+        let fixture_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tone-video.mp4");
+        let saved = SavedPlayerState {
+            volume: 0.25,
+            current_index: Some(1),
+            tracks: vec![
+                SavedTrack {
+                    title: "Missing".to_string(),
+                    path: "/tmp/cranamp-definitely-missing.mp3".to_string(),
+                },
+                SavedTrack {
+                    title: "Present".to_string(),
+                    path: fixture_path.to_string_lossy().to_string(),
+                },
+            ],
+            ..SavedPlayerState::default()
+        };
+
+        let state = restore_saved_player_state(saved);
+
+        assert_eq!(state.playlist.len(), 1);
+        assert_eq!(state.playlist[0].title, "Present");
+        assert_eq!(state.current_index, Some(0));
+        assert_eq!(state.volume, 0.25);
+    }
+
+    #[test]
+    fn elapsed_time_is_clamped_to_track_duration() {
+        assert_eq!(normalized_elapsed_seconds(130.0, Some(120.0)), 120.0);
+        assert_eq!(normalized_elapsed_seconds(30.0, Some(120.0)), 30.0);
     }
 
     #[test]
@@ -3071,8 +3910,130 @@ mod tests {
         );
         assert_eq!(state.current_index, Some(0));
         assert_eq!(state.playback, PlaybackState::Playing);
-        assert_eq!(state.playlist_scroll, 1.0);
+        assert_eq!(state.playlist_scroll, 0.25);
         assert_eq!(state.status, "Added 1 Track(s)");
+    }
+
+    #[test]
+    fn automatic_advance_stops_at_playlist_end_without_repeat() {
+        let state = WinampState {
+            playlist: vec![test_track("First"), test_track("Second")],
+            current_index: Some(1),
+            ..WinampState::default()
+        };
+
+        let plan = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Automatic);
+
+        assert_eq!(plan, None);
+    }
+
+    #[test]
+    fn automatic_advance_wraps_at_playlist_end_with_repeat() {
+        let state = WinampState {
+            repeat: true,
+            playlist: vec![test_track("First"), test_track("Second")],
+            current_index: Some(1),
+            ..WinampState::default()
+        };
+
+        let plan = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Automatic);
+
+        assert_eq!(
+            plan,
+            Some(TrackAdvancePlan {
+                index: 0,
+                shuffle_order: None,
+            })
+        );
+    }
+
+    #[test]
+    fn manual_advance_wraps_without_repeat() {
+        let state = WinampState {
+            playlist: vec![test_track("First"), test_track("Second")],
+            current_index: Some(1),
+            ..WinampState::default()
+        };
+
+        let next = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Manual);
+        let previous =
+            playlist_advance_plan(&state, TrackDirection::Previous, TrackAdvanceMode::Manual);
+
+        assert_eq!(
+            next,
+            Some(TrackAdvancePlan {
+                index: 0,
+                shuffle_order: None,
+            })
+        );
+        assert_eq!(
+            previous,
+            Some(TrackAdvancePlan {
+                index: 0,
+                shuffle_order: None,
+            })
+        );
+    }
+
+    #[test]
+    fn shuffle_advance_follows_the_existing_order() {
+        let state = WinampState {
+            shuffle: true,
+            playlist: vec![
+                test_track("First"),
+                test_track("Second"),
+                test_track("Third"),
+            ],
+            current_index: Some(0),
+            shuffle_order: vec![0, 2, 1],
+            ..WinampState::default()
+        };
+
+        let plan = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Manual);
+
+        assert_eq!(
+            plan,
+            Some(TrackAdvancePlan {
+                index: 2,
+                shuffle_order: None,
+            })
+        );
+    }
+
+    #[test]
+    fn shuffle_repeat_rebuilds_order_after_exhaustion() {
+        let state = WinampState {
+            shuffle: true,
+            repeat: true,
+            playlist: vec![
+                test_track("First"),
+                test_track("Second"),
+                test_track("Third"),
+            ],
+            current_index: Some(2),
+            shuffle_order: vec![0, 1, 2],
+            ..WinampState::default()
+        };
+
+        let plan = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Automatic)
+            .expect("repeat should continue the playlist");
+        let replacement = plan
+            .shuffle_order
+            .as_ref()
+            .expect("shuffle should rebuild order on repeat wrap");
+
+        assert_ne!(plan.index, 2);
+        assert_eq!(replacement.first(), Some(&2));
+        assert_eq!(replacement.get(1), Some(&plan.index));
+        assert!(valid_shuffle_order(replacement, state.playlist.len()));
+    }
+
+    #[test]
+    fn seeded_shuffle_order_keeps_current_track_first() {
+        let order = shuffled_order_with_seed(4, 2, 42);
+
+        assert_eq!(order.first(), Some(&2));
+        assert!(valid_shuffle_order(&order, 4));
     }
 
     fn test_track(title: &str) -> Track {

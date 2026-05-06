@@ -15,6 +15,7 @@ Web widget: https://samoylenkodmitry.github.io/cranamp/
 - Eject opens audio files.
 - The top-left options control opens an audio folder on desktop.
 - Previous, play, pause, stop, next, repeat, playlist, equalizer, volume, balance, and position controls update Cranamp state and the audio backend where supported.
+- If no user playlist is loaded at startup, Cranamp loads the demo MP3 playlist from the distributable `demo-music/` folder when it is present.
 
 ## Build
 
@@ -36,7 +37,7 @@ https://samoylenkodmitry.github.io/cranamp/
 
 ## Releases
 
-Tags matching `v*` publish GitHub Release assets for Linux, macOS, Windows, Android, iOS libraries, and the WebAssembly widget bundle. The Android APK is debug-signed for sideload testing; iOS release output is a static library package until signed Xcode archive/export packaging is added.
+Tags matching `v*` publish GitHub Release assets for Linux, macOS, Windows, Android, iOS libraries, and the WebAssembly widget bundle. Desktop and web archives include demo MP3 files as separate assets rather than embedding them in the executable or WASM binary. The Android APK is debug-signed for sideload testing; iOS release output is a static library package until signed Xcode archive/export packaging is added.
 
 ## Unsafe Policy
 

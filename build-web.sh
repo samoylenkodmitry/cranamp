@@ -21,5 +21,8 @@ rm -rf pkg dist
 mkdir -p dist
 cp index.html dist/index.html
 cp -R pkg dist/pkg
+mkdir -p dist/demo-music
+cp assets/demo-music/generated/*.mp3 dist/demo-music/
+cp assets/demo-music/generated/cranamp-demo-playlist.m3u dist/demo-music/
 
 echo "WASM example written to dist/index.html"

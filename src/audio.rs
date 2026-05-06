@@ -13,6 +13,38 @@ pub struct PlaybackProgress {
     pub finished: bool,
 }
 
+pub const VISUALIZER_BAND_COUNT: usize = 19;
+pub type VisualizerBands = [f32; VISUALIZER_BAND_COUNT];
+
+struct DemoTrack {
+    title: &'static str,
+    file_name: &'static str,
+}
+
+const DEMO_MUSIC_WEB_DIR: &str = "demo-music";
+const DEMO_TRACKS: &[DemoTrack] = &[
+    DemoTrack {
+        title: "Cranamp Demo 01 - Retro Tracker",
+        file_name: "cranamp-demo-01-retro-tracker.mp3",
+    },
+    DemoTrack {
+        title: "Cranamp Demo 02 - Neon Ambient",
+        file_name: "cranamp-demo-02-neon-ambient.mp3",
+    },
+    DemoTrack {
+        title: "Cranamp Demo 03 - Lo-Fi Jungle",
+        file_name: "cranamp-demo-03-lofi-jungle.mp3",
+    },
+    DemoTrack {
+        title: "Cranamp Demo 04 - Minimal Synthwave",
+        file_name: "cranamp-demo-04-minimal-synthwave.mp3",
+    },
+    DemoTrack {
+        title: "Cranamp Demo 05 - Soft Chip Lounge",
+        file_name: "cranamp-demo-05-soft-chip-lounge.mp3",
+    },
+];
+
 impl Track {
     pub fn display_title(&self) -> &str {
         self.title.as_str()
@@ -28,11 +60,87 @@ impl Track {
             .unwrap_or("Untitled")
             .to_string();
 
-        Self {
-            title,
-            path: Some(path.to_string_lossy().to_string()),
+        track_from_title_path(title, path.to_string_lossy())
+    }
+}
+
+fn track_from_title_path(title: impl Into<String>, path: impl Into<String>) -> Track {
+    Track {
+        title: title.into(),
+        path: Some(path.into()),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn demo_playlist_tracks() -> Vec<Track> {
+    let Some(directory) = find_demo_music_directory() else {
+        return Vec::new();
+    };
+
+    DEMO_TRACKS
+        .iter()
+        .filter_map(|track| {
+            let path = directory.join(track.file_name);
+            path.is_file()
+                .then(|| track_from_title_path(track.title, path.to_string_lossy()))
+        })
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn demo_playlist_tracks() -> Vec<Track> {
+    DEMO_TRACKS
+        .iter()
+        .map(|track| {
+            track_from_title_path(
+                track.title,
+                format!("{DEMO_MUSIC_WEB_DIR}/{}", track.file_name),
+            )
+        })
+        .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn find_demo_music_directory() -> Option<std::path::PathBuf> {
+    demo_music_candidate_directories()
+        .into_iter()
+        .find(|directory| demo_music_directory_has_tracks(directory))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn demo_music_candidate_directories() -> Vec<std::path::PathBuf> {
+    let mut directories = Vec::new();
+
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(executable_dir) = executable.parent() {
+            directories.push(executable_dir.join(DEMO_MUSIC_WEB_DIR));
+            directories.push(
+                executable_dir
+                    .join("assets")
+                    .join("demo-music")
+                    .join("generated"),
+            );
         }
     }
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        directories.push(current_dir.join(DEMO_MUSIC_WEB_DIR));
+        directories.push(
+            current_dir
+                .join("assets")
+                .join("demo-music")
+                .join("generated"),
+        );
+    }
+
+    directories
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn demo_music_directory_has_tracks(directory: &std::path::Path) -> bool {
+    DEMO_TRACKS
+        .iter()
+        .any(|track| directory.join(track.file_name).is_file())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -167,12 +275,14 @@ pub async fn pick_web_audio_file() -> Result<Option<PickedWebTrack>, String> {
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
 mod native {
-    use super::Track;
+    use super::{Track, VisualizerBands, VISUALIZER_BAND_COUNT};
     use rodio::{
         ChannelCount, DeviceSinkBuilder, MixerDeviceSink, Player, Sample, SampleRate, Source,
     };
+    use std::f32::consts::PI;
     use std::fs::File;
     use std::path::Path;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
     use symphonia::core::audio::{AudioBufferRef, SampleBuffer, SignalSpec};
@@ -191,8 +301,61 @@ mod native {
     }
 
     static AUDIO: OnceLock<Mutex<Option<NativeAudio>>> = OnceLock::new();
+    static VISUALIZER_BANDS: OnceLock<[AtomicU32; VISUALIZER_BAND_COUNT]> = OnceLock::new();
+    const ANALYZER_WINDOW_SAMPLES: usize = 1024;
     type BoxedSource = Box<dyn Source + Send>;
     type SelectedAudioTrack = (u32, Box<dyn SymphoniaDecoder>, Option<Duration>);
+
+    struct AnalyzerSource {
+        inner: BoxedSource,
+        window: Vec<Sample>,
+    }
+
+    impl AnalyzerSource {
+        fn new(inner: BoxedSource) -> Self {
+            Self {
+                inner,
+                window: Vec::with_capacity(ANALYZER_WINDOW_SAMPLES),
+            }
+        }
+
+        fn analyze_sample(&mut self, sample: Sample) {
+            self.window.push(sample);
+            if self.window.len() >= ANALYZER_WINDOW_SAMPLES {
+                let bands = compute_analyzer_bands(&self.window, self.sample_rate().get());
+                publish_visualizer_bands(bands);
+                self.window.clear();
+            }
+        }
+    }
+
+    impl Iterator for AnalyzerSource {
+        type Item = Sample;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let sample = self.inner.next()?;
+            self.analyze_sample(sample);
+            Some(sample)
+        }
+    }
+
+    impl Source for AnalyzerSource {
+        fn current_span_len(&self) -> Option<usize> {
+            self.inner.current_span_len()
+        }
+
+        fn channels(&self) -> ChannelCount {
+            self.inner.channels()
+        }
+
+        fn sample_rate(&self) -> SampleRate {
+            self.inner.sample_rate()
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            self.inner.total_duration()
+        }
+    }
 
     struct IsoMp4AudioSource {
         decoder: Box<dyn SymphoniaDecoder>,
@@ -355,6 +518,72 @@ mod native {
         (spec, samples.samples().to_vec())
     }
 
+    fn analyzer_band_storage() -> &'static [AtomicU32; VISUALIZER_BAND_COUNT] {
+        VISUALIZER_BANDS.get_or_init(|| std::array::from_fn(|_| AtomicU32::new(0)))
+    }
+
+    fn publish_visualizer_bands(bands: VisualizerBands) {
+        let storage = analyzer_band_storage();
+        for (band, value) in storage.iter().zip(bands) {
+            band.store(
+                (value.clamp(0.0, 1.0) * 1000.0).round() as u32,
+                Ordering::Relaxed,
+            );
+        }
+    }
+
+    fn reset_visualizer_bands() {
+        publish_visualizer_bands([0.0; VISUALIZER_BAND_COUNT]);
+    }
+
+    pub fn visualizer_bands() -> VisualizerBands {
+        std::array::from_fn(|index| {
+            analyzer_band_storage()[index].load(Ordering::Relaxed) as f32 / 1000.0
+        })
+    }
+
+    pub(super) fn compute_analyzer_bands(samples: &[Sample], sample_rate: u32) -> VisualizerBands {
+        if samples.is_empty() || sample_rate == 0 {
+            return [0.0; VISUALIZER_BAND_COUNT];
+        }
+
+        let nyquist = sample_rate as f32 * 0.5;
+        let min_frequency = 60.0_f32;
+        let max_frequency = nyquist.min(12_000.0).max(min_frequency + 1.0);
+        let frequency_ratio = max_frequency / min_frequency;
+        let sample_count = samples.len() as f32;
+
+        std::array::from_fn(|band| {
+            let position = band as f32 / (VISUALIZER_BAND_COUNT - 1) as f32;
+            let frequency = min_frequency * frequency_ratio.powf(position);
+            let phase_step = 2.0 * PI * frequency / sample_rate as f32;
+            let mut real = 0.0;
+            let mut imaginary = 0.0;
+            for (sample_index, sample) in samples.iter().copied().enumerate() {
+                let window = hann_window(sample_index, samples.len());
+                let phase = phase_step * sample_index as f32;
+                let sample = sample * window;
+                real += sample * phase.cos();
+                imaginary -= sample * phase.sin();
+            }
+
+            let magnitude = (real.mul_add(real, imaginary * imaginary)).sqrt() / sample_count;
+            analyzer_magnitude_to_level(magnitude, band)
+        })
+    }
+
+    fn hann_window(sample_index: usize, sample_count: usize) -> f32 {
+        if sample_count <= 1 {
+            return 1.0;
+        }
+        0.5 - (0.5 * ((2.0 * PI * sample_index as f32) / (sample_count - 1) as f32).cos())
+    }
+
+    fn analyzer_magnitude_to_level(magnitude: f32, band: usize) -> f32 {
+        let high_band_boost = 1.0 + (band as f32 / (VISUALIZER_BAND_COUNT - 1) as f32) * 0.85;
+        (magnitude * 28.0 * high_band_boost).sqrt().clamp(0.0, 1.0)
+    }
+
     pub(super) fn decode_track_source(
         path: &Path,
         repeat: bool,
@@ -448,9 +677,10 @@ mod native {
                 player.stop();
             }
 
+            reset_visualizer_bands();
             let player = Player::connect_new(audio.sink.mixer());
             player.set_volume(volume.clamp(0.0, 1.0));
-            player.append(source);
+            player.append(AnalyzerSource::new(source));
             player.play();
             audio.player = Some(player);
             audio.duration = duration;
@@ -483,6 +713,7 @@ mod native {
             }
             audio.player = None;
             audio.duration = None;
+            reset_visualizer_bands();
             Ok(())
         })
     }
@@ -526,12 +757,13 @@ mod native {
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 mod web_audio {
+    use super::Track;
     use std::cell::RefCell;
     use wasm_bindgen::JsValue;
 
     struct WebAudio {
         element: web_sys::HtmlAudioElement,
-        url: String,
+        object_url: Option<String>,
     }
 
     thread_local! {
@@ -550,6 +782,24 @@ mod web_audio {
         let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).map_err(js_error)?;
         let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js_error)?;
         let element = web_sys::HtmlAudioElement::new_with_src(&url).map_err(js_error)?;
+        play_element(element, Some(url), volume, repeat)
+    }
+
+    pub fn play_track(track: &Track, volume: f32, repeat: bool) -> Result<(), String> {
+        let url = track
+            .path
+            .as_deref()
+            .ok_or_else(|| "selected track has no URL".to_string())?;
+        let element = web_sys::HtmlAudioElement::new_with_src(url).map_err(js_error)?;
+        play_element(element, None, volume, repeat)
+    }
+
+    fn play_element(
+        element: web_sys::HtmlAudioElement,
+        object_url: Option<String>,
+        volume: f32,
+        repeat: bool,
+    ) -> Result<(), String> {
         element.set_volume(volume.clamp(0.0, 1.0) as f64);
         element.set_loop(repeat);
         let _ = element.play().map_err(js_error)?;
@@ -557,9 +807,14 @@ mod web_audio {
         AUDIO.with(|audio| {
             if let Some(previous) = audio.borrow_mut().take() {
                 previous.element.pause().ok();
-                let _ = web_sys::Url::revoke_object_url(&previous.url);
+                if let Some(object_url) = previous.object_url {
+                    let _ = web_sys::Url::revoke_object_url(&object_url);
+                }
             }
-            *audio.borrow_mut() = Some(WebAudio { element, url });
+            *audio.borrow_mut() = Some(WebAudio {
+                element,
+                object_url,
+            });
         });
 
         Ok(())
@@ -602,6 +857,21 @@ mod web_audio {
         })
     }
 
+    pub fn seek_fraction(fraction: f32) -> Result<(), String> {
+        AUDIO.with(|audio| {
+            if let Some(audio) = audio.borrow().as_ref() {
+                let duration = audio.element.duration();
+                let target = if duration.is_finite() {
+                    duration * fraction.clamp(0.0, 1.0) as f64
+                } else {
+                    0.0
+                };
+                audio.element.set_current_time(target);
+            }
+            Ok(())
+        })
+    }
+
     pub fn playback_progress() -> Result<Option<super::PlaybackProgress>, String> {
         AUDIO.with(|audio| {
             let audio = audio.borrow();
@@ -629,9 +899,17 @@ pub fn play_track(track: &Track, volume: f32, repeat: bool) -> Result<(), String
     native::play_track(track, volume, repeat)
 }
 
-#[cfg(not(all(not(target_arch = "wasm32"), feature = "native-audio")))]
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub fn play_track(track: &Track, volume: f32, repeat: bool) -> Result<(), String> {
+    web_audio::play_track(track, volume, repeat)
+}
+
+#[cfg(not(any(
+    all(not(target_arch = "wasm32"), feature = "native-audio"),
+    all(feature = "web", target_arch = "wasm32")
+)))]
 pub fn play_track(_track: &Track, _volume: f32, _repeat: bool) -> Result<(), String> {
-    Err("native audio playback is not enabled for this target".to_string())
+    Err("audio playback is not enabled for this target".to_string())
 }
 
 pub fn resume() -> Result<(), String> {
@@ -712,7 +990,14 @@ pub fn seek_fraction(fraction: f32) -> Result<(), String> {
     {
         native::seek_fraction(fraction)
     }
-    #[cfg(not(all(not(target_arch = "wasm32"), feature = "native-audio")))]
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        web_audio::seek_fraction(fraction)
+    }
+    #[cfg(not(any(
+        all(not(target_arch = "wasm32"), feature = "native-audio"),
+        all(feature = "web", target_arch = "wasm32")
+    )))]
     {
         let _ = fraction;
         Ok(())
@@ -734,6 +1019,17 @@ pub fn playback_progress() -> Result<Option<PlaybackProgress>, String> {
     )))]
     {
         Ok(None)
+    }
+}
+
+pub fn visualizer_bands() -> VisualizerBands {
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
+    {
+        native::visualizer_bands()
+    }
+    #[cfg(not(all(not(target_arch = "wasm32"), feature = "native-audio")))]
+    {
+        [0.0; VISUALIZER_BAND_COUNT]
     }
 }
 
@@ -781,6 +1077,21 @@ mod tests {
         assert_eq!(tracks[1].title, "video");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn demo_playlist_uses_external_mp3_files() {
+        let tracks = super::demo_playlist_tracks();
+
+        assert_eq!(tracks.len(), 5);
+        assert!(tracks.iter().all(|track| {
+            track
+                .path
+                .as_deref()
+                .map(|path| path.ends_with(".mp3"))
+                .unwrap_or(false)
+        }));
+    }
+
     #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
     #[test]
     fn mp4_video_container_decodes_audio_track() {
@@ -790,5 +1101,21 @@ mod tests {
             .expect("video mp4 should decode its AAC audio track");
         assert!(duration.is_some());
         assert!(source.by_ref().take(4096).count() > 0);
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
+    #[test]
+    fn analyzer_bands_follow_sample_energy() {
+        let sample_rate = 44_100;
+        let samples = (0..2048)
+            .map(|sample| {
+                let phase = (sample as f32 * 440.0 * std::f32::consts::TAU) / sample_rate as f32;
+                phase.sin() * 0.8
+            })
+            .collect::<Vec<_>>();
+
+        let bands = super::native::compute_analyzer_bands(&samples, sample_rate);
+
+        assert!(bands.iter().any(|band| *band > 0.2));
     }
 }
