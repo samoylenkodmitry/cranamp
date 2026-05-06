@@ -1965,7 +1965,11 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
                 trace_winamp_state("play", s);
             });
         }
-        Err(error) => state.update(|s| s.status = error),
+        Err(error) => state.update(|s| {
+            s.current_index = Some(index);
+            s.playback = PlaybackState::Stopped;
+            s.status = error;
+        }),
     }
 }
 

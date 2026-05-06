@@ -37,9 +37,18 @@ pub struct PickedWebTrack {
 
 pub fn supported_audio_extensions() -> &'static [&'static str] {
     &[
-        "aac", "aiff", "alac", "caf", "flac", "m4a", "m4b", "mp1", "mp2", "mp3", "mp4", "oga",
-        "ogg", "opus", "wav", "wave", "webm",
+        "aac", "aiff", "alac", "caf", "flac", "m4a", "m4b", "m4v", "mov", "mp1", "mp2", "mp3",
+        "mp4", "oga", "ogg", "opus", "wav", "wave", "webm",
     ]
+}
+
+fn dialog_audio_extensions() -> Vec<String> {
+    let mut extensions = Vec::with_capacity(supported_audio_extensions().len() * 2);
+    for extension in supported_audio_extensions() {
+        extensions.push((*extension).to_string());
+        extensions.push(extension.to_ascii_uppercase());
+    }
+    extensions
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -62,9 +71,10 @@ fn is_audio_path(path: &std::path::Path) -> bool {
     feature = "native-dialogs"
 ))]
 pub fn pick_audio_files() -> Result<Option<Vec<Track>>, String> {
+    let extensions = dialog_audio_extensions();
     let files = rfd::FileDialog::new()
         .set_title("Open audio files")
-        .add_filter("Audio", supported_audio_extensions())
+        .add_filter("Audio", &extensions)
         .pick_files();
 
     Ok(files.map(|paths| {
@@ -128,9 +138,10 @@ pub fn pick_audio_folder() -> Result<Option<Vec<Track>>, String> {
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub async fn pick_web_audio_file() -> Result<Option<PickedWebTrack>, String> {
+    let extensions = dialog_audio_extensions();
     let Some(handle) = rfd::AsyncFileDialog::new()
         .set_title("Open audio file")
-        .add_filter("Audio", supported_audio_extensions())
+        .add_filter("Audio", &extensions)
         .pick_file()
         .await
     else {
@@ -148,11 +159,21 @@ pub async fn pick_web_audio_file() -> Result<Option<PickedWebTrack>, String> {
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
 mod native {
     use super::Track;
-    use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player, Source};
+    use rodio::{
+        ChannelCount, DeviceSinkBuilder, MixerDeviceSink, Player, Sample, SampleRate, Source,
+    };
     use std::fs::File;
-    use std::io::BufReader;
+    use std::path::Path;
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
+    use symphonia::core::audio::{AudioBufferRef, SampleBuffer, SignalSpec};
+    use symphonia::core::codecs::{Decoder as SymphoniaDecoder, DecoderOptions, CODEC_TYPE_NULL};
+    use symphonia::core::errors::Error as SymphoniaError;
+    use symphonia::core::formats::{FormatOptions, FormatReader};
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+    use symphonia::core::units;
 
     struct NativeAudio {
         sink: MixerDeviceSink,
@@ -160,6 +181,226 @@ mod native {
     }
 
     static AUDIO: OnceLock<Mutex<Option<NativeAudio>>> = OnceLock::new();
+    type BoxedSource = Box<dyn Source + Send>;
+    type SelectedAudioTrack = (u32, Box<dyn SymphoniaDecoder>, Option<Duration>);
+
+    struct IsoMp4AudioSource {
+        decoder: Box<dyn SymphoniaDecoder>,
+        format: Box<dyn FormatReader>,
+        track_id: u32,
+        samples: Vec<Sample>,
+        sample_offset: usize,
+        spec: SignalSpec,
+        total_duration: Option<Duration>,
+        exhausted: bool,
+    }
+
+    impl IsoMp4AudioSource {
+        fn new(file: File, extension_hint: Option<&str>) -> Result<Self, String> {
+            let mut hint = Hint::new();
+            if let Some(extension_hint) = extension_hint {
+                hint.with_extension(extension_hint);
+            }
+
+            let stream = MediaSourceStream::new(Box::new(file), Default::default());
+            let mut probed = symphonia::default::get_probe()
+                .format(
+                    &hint,
+                    stream,
+                    &FormatOptions::default(),
+                    &MetadataOptions::default(),
+                )
+                .map_err(format_symphonia_error)?;
+
+            let (track_id, mut decoder, total_duration) = select_audio_track(&*probed.format)?;
+            let (spec, samples) =
+                read_next_audio_buffer(&mut *probed.format, &mut *decoder, track_id)?
+                    .ok_or_else(|| "no decodable audio packets found".to_string())?;
+
+            Ok(Self {
+                decoder,
+                format: probed.format,
+                track_id,
+                samples,
+                sample_offset: 0,
+                spec,
+                total_duration,
+                exhausted: false,
+            })
+        }
+
+        fn load_next_buffer(&mut self) -> bool {
+            match read_next_audio_buffer(&mut *self.format, &mut *self.decoder, self.track_id) {
+                Ok(Some((spec, samples))) => {
+                    self.spec = spec;
+                    self.samples = samples;
+                    self.sample_offset = 0;
+                    true
+                }
+                Ok(None) | Err(_) => {
+                    self.exhausted = true;
+                    false
+                }
+            }
+        }
+    }
+
+    impl Iterator for IsoMp4AudioSource {
+        type Item = Sample;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.sample_offset >= self.samples.len() && !self.load_next_buffer() {
+                return None;
+            }
+
+            let sample = self.samples[self.sample_offset];
+            self.sample_offset += 1;
+            Some(sample)
+        }
+    }
+
+    impl Source for IsoMp4AudioSource {
+        fn current_span_len(&self) -> Option<usize> {
+            if self.exhausted {
+                Some(0)
+            } else {
+                Some(self.samples.len())
+            }
+        }
+
+        fn channels(&self) -> ChannelCount {
+            ChannelCount::new(
+                self.spec
+                    .channels
+                    .count()
+                    .try_into()
+                    .expect("audio channel count exceeds u16::MAX"),
+            )
+            .expect("audio should have at least one channel")
+        }
+
+        fn sample_rate(&self) -> SampleRate {
+            SampleRate::new(self.spec.rate).expect("audio should have a non-zero sample rate")
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            self.total_duration
+        }
+    }
+
+    fn select_audio_track(format: &dyn FormatReader) -> Result<SelectedAudioTrack, String> {
+        for track in format.tracks() {
+            let params = &track.codec_params;
+            if params.codec == CODEC_TYPE_NULL {
+                continue;
+            }
+
+            let Ok(decoder) =
+                symphonia::default::get_codecs().make(params, &DecoderOptions::default())
+            else {
+                continue;
+            };
+
+            let total_duration = params
+                .time_base
+                .zip(params.n_frames)
+                .map(|(base, frames)| base.calc_time(frames).into())
+                .filter(|duration: &Duration| !duration.is_zero());
+
+            return Ok((track.id, decoder, total_duration));
+        }
+
+        Err("no supported audio track found".to_string())
+    }
+
+    fn read_next_audio_buffer(
+        format: &mut dyn FormatReader,
+        decoder: &mut dyn SymphoniaDecoder,
+        track_id: u32,
+    ) -> Result<Option<(SignalSpec, Vec<Sample>)>, String> {
+        loop {
+            let packet = match format.next_packet() {
+                Ok(packet) => packet,
+                Err(SymphoniaError::IoError(_)) => return Ok(None),
+                Err(error) => return Err(format_symphonia_error(error)),
+            };
+
+            if packet.track_id() != track_id {
+                continue;
+            }
+
+            match decoder.decode(&packet) {
+                Ok(decoded) => return Ok(Some(copy_audio_buffer(decoded))),
+                Err(SymphoniaError::DecodeError(_)) | Err(SymphoniaError::IoError(_)) => continue,
+                Err(error) => return Err(format_symphonia_error(error)),
+            }
+        }
+    }
+
+    fn copy_audio_buffer(decoded: AudioBufferRef<'_>) -> (SignalSpec, Vec<Sample>) {
+        let spec = *decoded.spec();
+        let mut samples =
+            SampleBuffer::<Sample>::new(units::Duration::from(decoded.capacity() as u64), spec);
+        samples.copy_interleaved_ref(decoded);
+        (spec, samples.samples().to_vec())
+    }
+
+    pub(super) fn decode_track_source(path: &Path, repeat: bool) -> Result<BoxedSource, String> {
+        let file = File::open(path)
+            .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+        let extension_hint = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase);
+
+        if extension_hint
+            .as_deref()
+            .map(is_iso_mp4_extension)
+            .unwrap_or(false)
+        {
+            let source = IsoMp4AudioSource::new(file, extension_hint.as_deref())?;
+            return if repeat {
+                Ok(Box::new(source.repeat_infinite()))
+            } else {
+                Ok(Box::new(source))
+            };
+        }
+
+        let byte_len = file
+            .metadata()
+            .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?
+            .len();
+        let mut builder = rodio::Decoder::builder()
+            .with_data(file)
+            .with_byte_len(byte_len)
+            .with_seekable(true);
+        if let Some(extension_hint) = extension_hint.as_deref() {
+            builder = builder.with_hint(extension_hint);
+        }
+
+        if repeat {
+            builder
+                .build_looped()
+                .map(|source| Box::new(source) as BoxedSource)
+                .map_err(|error| error.to_string())
+        } else {
+            builder
+                .build()
+                .map(|source| Box::new(source) as BoxedSource)
+                .map_err(|error| error.to_string())
+        }
+    }
+
+    fn is_iso_mp4_extension(extension: &str) -> bool {
+        matches!(extension, "m4a" | "m4b" | "m4v" | "mov" | "mp4")
+    }
+
+    fn format_symphonia_error(error: SymphoniaError) -> String {
+        match error {
+            SymphoniaError::Unsupported(reason) => reason.to_string(),
+            other => other.to_string(),
+        }
+    }
 
     fn with_audio<T>(f: impl FnOnce(&mut NativeAudio) -> Result<T, String>) -> Result<T, String> {
         let audio = AUDIO.get_or_init(|| Mutex::new(None));
@@ -185,7 +426,8 @@ mod native {
             .path
             .as_deref()
             .ok_or_else(|| "selected track has no filesystem path".to_string())?;
-        let file = File::open(path).map_err(|error| format!("failed to open {path}: {error}"))?;
+        let source = decode_track_source(Path::new(path), repeat)
+            .map_err(|error| format!("failed to decode {}: {error}", track.title))?;
 
         with_audio(|audio| {
             if let Some(player) = audio.player.take() {
@@ -194,19 +436,7 @@ mod native {
 
             let player = Player::connect_new(audio.sink.mixer());
             player.set_volume(volume.clamp(0.0, 1.0));
-
-            if repeat {
-                let source = rodio::Decoder::new_looped(BufReader::new(file))
-                    .map_err(|error| format!("failed to decode {}: {error}", track.title))?
-                    .amplify(1.0);
-                player.append(source);
-            } else {
-                let source = rodio::Decoder::try_from(file)
-                    .map_err(|error| format!("failed to decode {}: {error}", track.title))?
-                    .amplify(1.0);
-                player.append(source);
-            }
-
+            player.append(source);
             player.play();
             audio.player = Some(player);
             Ok(())
@@ -442,14 +672,42 @@ pub fn seek_fraction(fraction: f32) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::supported_audio_extensions;
+    use super::{dialog_audio_extensions, supported_audio_extensions};
 
     #[test]
     fn extensions_include_common_winamp_formats() {
         let extensions = supported_audio_extensions();
         assert!(extensions.contains(&"mp3"));
         assert!(extensions.contains(&"flac"));
+        assert!(extensions.contains(&"m4a"));
+        assert!(extensions.contains(&"mp4"));
         assert!(extensions.contains(&"ogg"));
         assert!(extensions.contains(&"wav"));
+    }
+
+    #[test]
+    fn dialog_extensions_include_uppercase_variants() {
+        let extensions = dialog_audio_extensions();
+        assert!(extensions.iter().any(|extension| extension == "MP4"));
+        assert!(extensions.iter().any(|extension| extension == "M4A"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn audio_path_detection_is_case_insensitive() {
+        assert!(super::is_audio_path(std::path::Path::new("SONG.MP4")));
+        assert!(super::is_audio_path(std::path::Path::new(
+            "Album/Track.FLAC"
+        )));
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
+    #[test]
+    fn mp4_video_container_decodes_audio_track() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tone-video.mp4");
+        let mut source = super::native::decode_track_source(&path, false)
+            .expect("video mp4 should decode its AAC audio track");
+        assert!(source.by_ref().take(4096).count() > 0);
     }
 }

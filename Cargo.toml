@@ -36,7 +36,7 @@ web = [
     "dep:wasm-logger",
     "dep:web-sys",
 ]
-native-audio = ["dep:rodio"]
+native-audio = ["dep:rodio", "dep:symphonia"]
 native-dialogs = ["dep:rfd", "dep:walkdir"]
 logging = ["dep:env_logger"]
 
@@ -61,6 +61,7 @@ zip = { version = "8.2.0", default-features = false, features = ["deflate-flate2
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3", "flac", "vorbis", "wav", "mp4", "symphonia-all"], optional = true }
+symphonia = { version = "0.5.5", default-features = false, features = ["all-codecs", "all-formats"], optional = true }
 
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))'.dependencies]
 env_logger = { version = "0.11", optional = true }
