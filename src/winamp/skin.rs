@@ -20,6 +20,7 @@ pub struct WinampSkin {
     pub numbers: ImageBitmap,
     pub eqmain: ImageBitmap,
     pub pledit: ImageBitmap,
+    pub text: ImageBitmap,
 }
 
 /// Loads a classic Winamp skin from `.wsz` bytes.
@@ -59,6 +60,7 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
         numbers: decode("numbers.bmp")?,
         eqmain: decode("eqmain.bmp")?,
         pledit: decode("pledit.bmp")?,
+        text: decode("text.bmp")?,
     })
 }
 
@@ -107,5 +109,7 @@ mod tests {
         assert_eq!(skin.cbuttons.height(), 36);
         assert_eq!(skin.posbar.width(), 307);
         assert_eq!(skin.posbar.height(), 10);
+        assert_eq!(skin.text.width(), 155);
+        assert_eq!(skin.text.height(), 18);
     }
 }

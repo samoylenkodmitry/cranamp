@@ -113,8 +113,16 @@ pub const BALANCE_THUMB_ACTIVE: SpriteRect = (0.0, 422.0, 14.0, 11.0);
 pub const POS_STATUS: (f32, f32) = (26.0, 28.0);
 pub const POS_TIME_DIGITS: [(f32, f32); 4] =
     [(48.0, 26.0), (60.0, 26.0), (78.0, 26.0), (90.0, 26.0)];
+pub const POS_VISUALIZER: (f32, f32) = (24.0, 43.0);
+pub const VISUALIZER_WIDTH: f32 = 76.0;
+pub const VISUALIZER_HEIGHT: f32 = 16.0;
+pub const VISUALIZER_BARS: usize = 19;
 pub const POS_MONO: (f32, f32) = (212.0, 41.0);
 pub const POS_STEREO: (f32, f32) = (239.0, 41.0);
+pub const POS_MAIN_TRACK_TEXT: (f32, f32) = (111.0, 27.0);
+pub const MAIN_TRACK_TEXT_WIDTH: f32 = 150.0;
+pub const POS_MAIN_META_TEXT: (f32, f32) = (111.0, 43.0);
+pub const MAIN_META_TEXT_WIDTH: f32 = 94.0;
 
 pub const POS_POSBAR: (f32, f32) = (17.0, 72.0);
 pub const POS_CBUTTONS: (f32, f32) = (16.0, 88.0);
@@ -209,3 +217,4 @@ pub const POS_PLAYLIST_BOTTOM_RIGHT: (f32, f32) = (125.0, 165.0);
 pub const POS_PLAYLIST_VIS_BG: (f32, f32) = (200.0, 165.0);
 pub const PLAYLIST_LIST_BG: SpriteRect = (12.0, 20.0, 243.0, 145.0);
 pub const PLAYLIST_SCROLL_TRACK: SpriteRect = (260.0, 20.0, 8.0, 145.0);
+pub const PLAYLIST_ADD_BUTTON_HIT_AREA: SpriteRect = (10.0, 7.0, 28.0, 18.0);

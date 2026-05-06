@@ -6,6 +6,13 @@ pub struct Track {
     pub path: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaybackProgress {
+    pub elapsed_seconds: f32,
+    pub duration_seconds: Option<f32>,
+    pub finished: bool,
+}
+
 impl Track {
     pub fn display_title(&self) -> &str {
         self.title.as_str()
@@ -64,6 +71,17 @@ fn is_audio_path(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn tracks_from_selected_paths(paths: impl IntoIterator<Item = std::path::PathBuf>) -> Vec<Track> {
+    sort_tracks(paths.into_iter().map(Track::from_path).collect())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sort_tracks(mut tracks: Vec<Track>) -> Vec<Track> {
+    tracks.sort_by(|left, right| left.title.cmp(&right.title));
+    tracks
+}
+
 #[cfg(all(
     not(target_arch = "wasm32"),
     not(target_os = "android"),
@@ -77,15 +95,7 @@ pub fn pick_audio_files() -> Result<Option<Vec<Track>>, String> {
         .add_filter("Audio", &extensions)
         .pick_files();
 
-    Ok(files.map(|paths| {
-        let mut tracks = paths
-            .into_iter()
-            .filter(|path| is_audio_path(path))
-            .map(Track::from_path)
-            .collect::<Vec<_>>();
-        tracks.sort_by(|left, right| left.title.cmp(&right.title));
-        tracks
-    }))
+    Ok(files.map(tracks_from_selected_paths))
 }
 
 #[cfg(not(all(
@@ -112,7 +122,7 @@ pub fn pick_audio_folder() -> Result<Option<Vec<Track>>, String> {
         return Ok(None);
     };
 
-    let mut tracks = walkdir::WalkDir::new(folder)
+    let tracks = walkdir::WalkDir::new(folder)
         .follow_links(true)
         .into_iter()
         .filter_map(Result::ok)
@@ -122,8 +132,7 @@ pub fn pick_audio_folder() -> Result<Option<Vec<Track>>, String> {
         .map(Track::from_path)
         .collect::<Vec<_>>();
 
-    tracks.sort_by(|left, right| left.title.cmp(&right.title));
-    Ok(Some(tracks))
+    Ok(Some(sort_tracks(tracks)))
 }
 
 #[cfg(not(all(
@@ -178,6 +187,7 @@ mod native {
     struct NativeAudio {
         sink: MixerDeviceSink,
         player: Option<Player>,
+        duration: Option<Duration>,
     }
 
     static AUDIO: OnceLock<Mutex<Option<NativeAudio>>> = OnceLock::new();
@@ -345,7 +355,10 @@ mod native {
         (spec, samples.samples().to_vec())
     }
 
-    pub(super) fn decode_track_source(path: &Path, repeat: bool) -> Result<BoxedSource, String> {
+    pub(super) fn decode_track_source(
+        path: &Path,
+        repeat: bool,
+    ) -> Result<(BoxedSource, Option<Duration>), String> {
         let file = File::open(path)
             .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
         let extension_hint = path
@@ -359,10 +372,11 @@ mod native {
             .unwrap_or(false)
         {
             let source = IsoMp4AudioSource::new(file, extension_hint.as_deref())?;
+            let duration = source.total_duration();
             return if repeat {
-                Ok(Box::new(source.repeat_infinite()))
+                Ok((Box::new(source.repeat_infinite()), duration))
             } else {
-                Ok(Box::new(source))
+                Ok((Box::new(source), duration))
             };
         }
 
@@ -378,16 +392,12 @@ mod native {
             builder = builder.with_hint(extension_hint);
         }
 
+        let source = builder.build().map_err(|error| error.to_string())?;
+        let duration = source.total_duration();
         if repeat {
-            builder
-                .build_looped()
-                .map(|source| Box::new(source) as BoxedSource)
-                .map_err(|error| error.to_string())
+            Ok((Box::new(source.repeat_infinite()), duration))
         } else {
-            builder
-                .build()
-                .map(|source| Box::new(source) as BoxedSource)
-                .map_err(|error| error.to_string())
+            Ok((Box::new(source), duration))
         }
     }
 
@@ -412,7 +422,11 @@ mod native {
             let mut sink = DeviceSinkBuilder::open_default_sink()
                 .map_err(|error| format!("failed to open default audio device: {error}"))?;
             sink.log_on_drop(false);
-            *audio = Some(NativeAudio { sink, player: None });
+            *audio = Some(NativeAudio {
+                sink,
+                player: None,
+                duration: None,
+            });
         }
 
         let audio = audio
@@ -426,7 +440,7 @@ mod native {
             .path
             .as_deref()
             .ok_or_else(|| "selected track has no filesystem path".to_string())?;
-        let source = decode_track_source(Path::new(path), repeat)
+        let (source, duration) = decode_track_source(Path::new(path), repeat)
             .map_err(|error| format!("failed to decode {}: {error}", track.title))?;
 
         with_audio(|audio| {
@@ -439,6 +453,7 @@ mod native {
             player.append(source);
             player.play();
             audio.player = Some(player);
+            audio.duration = duration;
             Ok(())
         })
     }
@@ -467,6 +482,7 @@ mod native {
                 player.stop();
             }
             audio.player = None;
+            audio.duration = None;
             Ok(())
         })
     }
@@ -483,10 +499,27 @@ mod native {
     pub fn seek_fraction(fraction: f32) -> Result<(), String> {
         with_audio(|audio| {
             if let Some(player) = &audio.player {
-                let seconds = (fraction.clamp(0.0, 1.0) * 300.0).round();
-                let _ = player.try_seek(Duration::from_secs(seconds as u64));
+                let duration = audio.duration.unwrap_or_else(|| Duration::from_secs(300));
+                let target = duration.mul_f32(fraction.clamp(0.0, 1.0));
+                player
+                    .try_seek(target)
+                    .map_err(|error| format!("seek failed: {error}"))?;
             }
             Ok(())
+        })
+    }
+
+    pub fn playback_progress() -> Result<Option<super::PlaybackProgress>, String> {
+        with_audio(|audio| {
+            let Some(player) = &audio.player else {
+                return Ok(None);
+            };
+
+            Ok(Some(super::PlaybackProgress {
+                elapsed_seconds: player.get_pos().as_secs_f32(),
+                duration_seconds: audio.duration.map(|duration| duration.as_secs_f32()),
+                finished: player.empty(),
+            }))
         })
     }
 }
@@ -566,6 +599,22 @@ mod web_audio {
                 audio.element.set_volume(volume.clamp(0.0, 1.0) as f64);
             }
             Ok(())
+        })
+    }
+
+    pub fn playback_progress() -> Result<Option<super::PlaybackProgress>, String> {
+        AUDIO.with(|audio| {
+            let audio = audio.borrow();
+            let Some(audio) = audio.as_ref() else {
+                return Ok(None);
+            };
+
+            let duration = audio.element.duration();
+            Ok(Some(super::PlaybackProgress {
+                elapsed_seconds: audio.element.current_time() as f32,
+                duration_seconds: duration.is_finite().then_some(duration as f32),
+                finished: audio.element.ended(),
+            }))
         })
     }
 }
@@ -670,6 +719,24 @@ pub fn seek_fraction(fraction: f32) -> Result<(), String> {
     }
 }
 
+pub fn playback_progress() -> Result<Option<PlaybackProgress>, String> {
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
+    {
+        native::playback_progress()
+    }
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        web_audio::playback_progress()
+    }
+    #[cfg(not(any(
+        all(not(target_arch = "wasm32"), feature = "native-audio"),
+        all(feature = "web", target_arch = "wasm32")
+    )))]
+    {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{dialog_audio_extensions, supported_audio_extensions};
@@ -701,13 +768,27 @@ mod tests {
         )));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn explicit_file_selection_is_preserved_for_decoder_feedback() {
+        let tracks = super::tracks_from_selected_paths([
+            std::path::PathBuf::from("/tmp/video.mp4"),
+            std::path::PathBuf::from("/tmp/unknown-extension.custom"),
+        ]);
+
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].title, "unknown-extension");
+        assert_eq!(tracks[1].title, "video");
+    }
+
     #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
     #[test]
     fn mp4_video_container_decodes_audio_track() {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tone-video.mp4");
-        let mut source = super::native::decode_track_source(&path, false)
+        let (mut source, duration) = super::native::decode_track_source(&path, false)
             .expect("video mp4 should decode its AAC audio track");
+        assert!(duration.is_some());
         assert!(source.by_ref().take(4096).count() > 0);
     }
 }
