@@ -15,7 +15,9 @@
 
 ## Phase 2: Mobile Packaging
 
-- [ ] Add Android Gradle project and signed APK/AAB release packaging.
+- [x] Add Android Gradle project and debug-signed APK release packaging.
+- [x] Attach iOS device/simulator static library packages to tag releases.
+- [ ] Add signed Android APK/AAB release packaging.
 - [ ] Add iOS Xcode project and archive/export workflow.
 - [ ] Implement Android Storage Access Framework file/folder picker.
 - [ ] Implement iOS document picker integration.

@@ -24,8 +24,8 @@ default = ["renderer-wgpu", "desktop"]
 renderer-wgpu = ["cranpose/renderer-wgpu"]
 renderer-pixels = ["cranpose/renderer-pixels"]
 desktop = ["cranpose/desktop", "native-audio", "native-dialogs"]
-android = ["cranpose/android", "native-audio"]
-ios = ["cranpose/ios", "native-audio"]
+android = ["cranpose/android"]
+ios = ["cranpose/ios"]
 web = [
     "cranpose/web",
     "dep:console_error_panic_hook",
