@@ -41,7 +41,7 @@ native-dialogs = ["dep:rfd", "dep:walkdir"]
 logging = ["dep:env_logger"]
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [lints.clippy]
 clone_on_copy = "deny"

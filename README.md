@@ -40,4 +40,4 @@ Tags matching `v*` publish GitHub Release assets for Linux, macOS, Windows, Andr
 
 ## Unsafe Policy
 
-Application code forbids `unsafe` with crate-level and Cargo lints. Third-party dependencies may use unsafe internally where their platform integrations require it.
+Application code denies `unsafe` with crate-level and Cargo lints and contains no unsafe blocks. The Android/iOS loader entry symbols narrowly allow Rust's `unsafe_code` lint around `#[no_mangle]`, because those platforms require stable exported entry-point names. Third-party dependencies may use unsafe internally where their platform integrations require it.
