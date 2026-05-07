@@ -26,6 +26,9 @@ pub enum AndroidBridgeResult {
     PlaylistExport {
         target: String,
     },
+    SkinImport {
+        path: PathBuf,
+    },
     Cancelled {
         operation: &'static str,
     },
@@ -99,6 +102,10 @@ pub fn request_playlist_import() -> Result<(), String> {
     call_android_picker("cranampImportPlaylist", "()V", &[])
 }
 
+pub fn request_skin_import() -> Result<(), String> {
+    call_android_picker("cranampPickSkinFile", "()V", &[])
+}
+
 pub fn request_playlist_export(text: &str) -> Result<(), String> {
     let Some(bridge) = BRIDGE.get() else {
         return Err("Android activity bridge is not initialized".to_string());
@@ -140,6 +147,7 @@ pub fn take_results() -> Vec<AndroidBridgeResult> {
     );
     collect_playlist_import_result(&bridge.bridge_dir, &mut results);
     collect_playlist_export_result(&bridge.bridge_dir, &mut results);
+    collect_skin_import_result(&bridge.bridge_dir, &mut results);
     results
 }
 
@@ -231,6 +239,22 @@ fn collect_playlist_export_result(
         });
     }
     collect_cancel_error(bridge_dir, "playlist_export", "Playlist Export", results);
+}
+
+fn collect_skin_import_result(
+    bridge_dir: &std::path::Path,
+    results: &mut Vec<AndroidBridgeResult>,
+) {
+    let path_file = bridge_dir.join("skin_import.path");
+    if let Some(path) = take_file_to_string(&path_file) {
+        let path = path.trim();
+        if !path.is_empty() {
+            results.push(AndroidBridgeResult::SkinImport {
+                path: PathBuf::from(path),
+            });
+        }
+    }
+    collect_cancel_error(bridge_dir, "skin_import", "Skin Import", results);
 }
 
 fn collect_cancel_error(

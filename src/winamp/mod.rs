@@ -11,6 +11,7 @@ mod sprites;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::OnceLock;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cranpose::{
@@ -21,13 +22,15 @@ use cranpose_core::{self, MutableState};
 use cranpose_foundation::text::{TextFieldState, TextRange};
 use cranpose_foundation::PointerButton;
 use cranpose_ui::text::TextUnit;
+#[cfg(target_os = "android")]
+use cranpose_ui::BoxWithConstraints;
+#[cfg(target_os = "android")]
+use cranpose_ui::BoxWithConstraintsScope;
 use cranpose_ui::{
     composable, current_density, BasicTextField, Box, BoxSpec, Button, Canvas, Color, Column,
     ColumnSpec, Modifier, Point, PointerEventKind, PointerInputScope, Size, SpanStyle, Text,
     TextStyle,
 };
-#[cfg(target_os = "android")]
-use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
 #[cfg(target_os = "android")]
@@ -35,6 +38,8 @@ use crate::android_bridge::{self, AndroidBridgeResult, AndroidLoadMode};
 use crate::audio::{self, Track};
 use skin::{load_skin, WinampSkin};
 use sprites::*;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use wasm_bindgen::{JsCast, JsValue};
 
 fn winamp_press_debug_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
@@ -44,6 +49,23 @@ fn winamp_press_debug_enabled() -> bool {
 fn winamp_native_trace_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var_os("CRANPOSE_NATIVE_TRACE").is_some())
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn winamp_web_pointer_debug_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        web_sys::window()
+            .and_then(|window| window.location().search().ok())
+            .is_some_and(|query| {
+                query.contains("cranamp-pointer-debug=1") || query.contains("cranampPointerDebug=1")
+            })
+    })
+}
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+fn winamp_web_pointer_debug_enabled() -> bool {
+    false
 }
 
 fn trace_winamp_state(action: &str, state: &WinampState) {
@@ -170,7 +192,7 @@ fn initial_winamp_state() -> WinampState {
 #[derive(Clone, Copy, PartialEq)]
 enum WinampDragTarget {
     Inline(MutableState<Point>),
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
     Fixed(Point),
     NativeGroup,
 }
@@ -231,6 +253,8 @@ const PLAYLIST_TEXT_COLOR: [u8; 4] = [255, 200, 108, 255];
 const PLAYLIST_CURRENT_TEXT_COLOR: [u8; 4] = [255, 255, 255, 255];
 // PLEDIT.TXT selected background #42351e converted from sRGB to linear.
 const PLAYLIST_SELECTED_BG: Color = Color(0.05448, 0.03560, 0.01298, 1.0);
+
+type WinampSkinState = MutableState<Result<WinampSkin, String>>;
 
 impl WinampWindowSize {
     fn get(self) -> Size {
@@ -305,8 +329,9 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
     let native_available = native_winamp_windows_available();
     let detached = native_available && tab_state.detached.get();
     let snapshot = state.get();
-    WinampRuntimeEffects(state, tab_state.peer_windows);
-    let skin = match remember_winamp_skin() {
+    let skin_state = remember_winamp_skin();
+    WinampRuntimeEffects(state, tab_state.peer_windows, skin_state);
+    let skin = match skin_state.get() {
         Ok(skin) => skin,
         Err(error) => {
             WinampSkinError(error);
@@ -339,11 +364,18 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
             }
 
             if !detached {
-                WinampInlineStage(skin.clone(), state, tab_state.inline_windows, scale);
+                WinampInlineStage(
+                    skin.clone(),
+                    state,
+                    skin_state,
+                    tab_state.inline_windows,
+                    scale,
+                );
             } else {
                 WinampNativeWindows(
                     skin.clone(),
                     state,
+                    skin_state,
                     tab_state.inline_windows,
                     tab_state.peer_windows,
                     scale,
@@ -354,25 +386,31 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
     );
 }
 
-fn remember_winamp_skin() -> Result<WinampSkin, String> {
-    cranpose_core::remember(|| {
-        let wsz = include_bytes!("../../assets/winamp.wsz");
-        load_skin(wsz).map_err(|err| format!("{err:#}"))
-    })
-    .with(|result| result.clone())
+fn remember_winamp_skin() -> WinampSkinState {
+    cranpose_core::useState(bundled_skin)
+}
+
+fn bundled_skin() -> Result<WinampSkin, String> {
+    let wsz = include_bytes!("../../assets/winamp.wsz");
+    load_skin(wsz).map_err(|err| format!("{err:#}"))
 }
 
 #[composable]
-fn WinampRuntimeEffects(state: MutableState<WinampState>, peer_windows: WinampPeerWindowStates) {
+fn WinampRuntimeEffects(
+    state: MutableState<WinampState>,
+    peer_windows: WinampPeerWindowStates,
+    skin_state: WinampSkinState,
+) {
     PlaybackProgressEffect(state);
-    AndroidPickerEffect(state);
+    AndroidPickerEffect(state, skin_state);
+    WebSurfaceSizeEffect(state);
     PlayerStatePersistence(state);
     NativeWindowPersistence(peer_windows);
 }
 
 #[cfg(target_os = "android")]
 #[composable]
-fn AndroidPickerEffect(state: MutableState<WinampState>) {
+fn AndroidPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinState) {
     cranpose_core::LaunchedEffectAsync!((), move |scope| {
         Box::pin(async move {
             let clock = scope.runtime().frame_clock();
@@ -384,7 +422,7 @@ fn AndroidPickerEffect(state: MutableState<WinampState>) {
                 if !scope.is_active() {
                     break;
                 }
-                handle_android_bridge_results(state);
+                handle_android_bridge_results(state, skin_state);
             }
         })
     });
@@ -392,7 +430,41 @@ fn AndroidPickerEffect(state: MutableState<WinampState>) {
 
 #[cfg(not(target_os = "android"))]
 #[composable]
-fn AndroidPickerEffect(_state: MutableState<WinampState>) {}
+fn AndroidPickerEffect(_state: MutableState<WinampState>, _skin_state: WinampSkinState) {}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[composable]
+fn WebSurfaceSizeEffect(state: MutableState<WinampState>) {
+    let snapshot = state.get();
+    cranpose_core::SideEffect(move || {
+        let layout = web_stacked_layout(&snapshot);
+        publish_web_surface_size(
+            stacked_surface_width(layout),
+            stacked_surface_height(&snapshot, layout),
+        );
+    });
+}
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+#[composable]
+fn WebSurfaceSizeEffect(_state: MutableState<WinampState>) {}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn publish_web_surface_size(width: f32, height: f32) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(callback) = js_sys::Reflect::get(&window, &JsValue::from_str("cranampApplySurfaceSize"))
+        .and_then(|value| value.dyn_into::<js_sys::Function>().map_err(Into::into))
+    else {
+        return;
+    };
+    let _ = callback.call2(
+        &window,
+        &JsValue::from_f64(width as f64),
+        &JsValue::from_f64(height as f64),
+    );
+}
 
 #[composable]
 fn PlaybackProgressEffect(state: MutableState<WinampState>) {
@@ -477,15 +549,24 @@ pub fn WinampFullscreenApp() {
 
 #[composable]
 pub fn WinampWidgetApp() {
-    WinampSurfaceApp();
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        WinampWebStackedApp();
+    }
+
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+    {
+        WinampSurfaceApp();
+    }
 }
 
 #[cfg(target_os = "android")]
 #[composable]
 pub fn WinampAndroidApp() {
     let tab_state = remember_winamp_tab_state();
-    WinampRuntimeEffects(tab_state.player, tab_state.peer_windows);
-    let skin = match remember_winamp_skin() {
+    let skin_state = remember_winamp_skin();
+    WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
+    let skin = match skin_state.get() {
         Ok(skin) => skin,
         Err(error) => {
             WinampSkinError(error);
@@ -503,14 +584,47 @@ pub fn WinampAndroidApp() {
             let skin_for_stack = skin.clone();
             BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
                 let snapshot = tab_state.player.get();
-                let layout = android_stacked_layout(
+                let layout = resizable_stacked_layout(
                     scope.max_width().0,
                     scope.max_height().0,
                     &snapshot,
                     ui_scale(),
                 );
-                WinampStackedStage(skin_for_stack.clone(), tab_state.player, layout);
+                WinampStackedStage(skin_for_stack.clone(), tab_state.player, skin_state, layout);
             });
+        },
+    );
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[composable]
+pub fn WinampWebStackedApp() {
+    let tab_state = remember_winamp_tab_state();
+    let skin_state = remember_winamp_skin();
+    WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
+    let skin = match skin_state.get() {
+        Ok(skin) => skin,
+        Err(error) => {
+            WinampSkinError(error);
+            return;
+        }
+    };
+
+    Box(
+        Modifier::empty()
+            .fill_max_size()
+            .clip_to_bounds()
+            .background(Color(0.02, 0.02, 0.03, 1.0)),
+        BoxSpec::default(),
+        move || {
+            let skin_for_stack = skin.clone();
+            let snapshot = tab_state.player.get();
+            WinampStackedStage(
+                skin_for_stack,
+                tab_state.player,
+                skin_state,
+                web_stacked_layout(&snapshot),
+            );
         },
     );
 }
@@ -518,8 +632,9 @@ pub fn WinampAndroidApp() {
 #[composable]
 fn WinampSurfaceApp() {
     let tab_state = remember_winamp_tab_state();
-    WinampRuntimeEffects(tab_state.player, tab_state.peer_windows);
-    let skin = match remember_winamp_skin() {
+    let skin_state = remember_winamp_skin();
+    WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
+    let skin = match skin_state.get() {
         Ok(skin) => skin,
         Err(error) => {
             WinampSkinError(error);
@@ -537,6 +652,7 @@ fn WinampSurfaceApp() {
             WinampInlineStage(
                 skin.clone(),
                 tab_state.player,
+                skin_state,
                 tab_state.inline_windows,
                 ui_scale(),
             );
@@ -585,6 +701,7 @@ fn DockToggleButton(detached_state: MutableState<bool>, detached: bool) {
 fn WinampInlineStage(
     skin: WinampSkin,
     state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
     windows: WinampInlineWindowStates,
     scale: f32,
 ) {
@@ -599,6 +716,7 @@ fn WinampInlineStage(
             MainWindow(
                 skin.clone(),
                 state,
+                skin_state,
                 WinampDragTarget::Inline(windows.main),
                 WinampCloseAction::SetStatus,
                 scale,
@@ -627,11 +745,12 @@ fn WinampInlineStage(
     );
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 #[composable]
 fn WinampStackedStage(
     skin: WinampSkin,
     state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
     layout: AndroidStackedLayout,
 ) {
     let snapshot = state.get();
@@ -658,6 +777,7 @@ fn WinampStackedStage(
             MainWindow(
                 skin.clone(),
                 state,
+                skin_state,
                 WinampDragTarget::Fixed(Point::new(0.0, main_y)),
                 WinampCloseAction::SetStatus,
                 scale,
@@ -686,34 +806,31 @@ fn WinampStackedStage(
                 );
             }
 
+            #[cfg(target_os = "android")]
             AndroidWindowMoveTarget(MAIN_WIDTH, y, scale, snapshot.clone(), layout);
         },
     );
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct AndroidStackedLayout {
     scale: f32,
     playlist_height: f32,
 }
 
-#[cfg(target_os = "android")]
-fn android_stacked_layout(
+#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
+fn resizable_stacked_layout(
     available_width: f32,
     available_height: f32,
     snapshot: &WinampState,
-    fallback: f32,
+    fallback_scale: f32,
 ) -> AndroidStackedLayout {
-    let width_scale = bounded_scale(available_width, MAIN_WIDTH);
-    let height_scale = bounded_scale(available_height, android_stacked_height(snapshot));
-    let scale = (match (width_scale, height_scale) {
-        (Some(width), Some(_)) if snapshot.playlist_visible => width,
-        (Some(width), Some(height)) => width.min(height),
-        (Some(width), None) => width,
-        (None, Some(height)) => height,
-        (None, None) => fallback,
-    })
+    let scale = if available_width.is_finite() && available_width > 0.0 {
+        available_width / MAIN_WIDTH
+    } else {
+        fallback_scale
+    }
     .clamp(0.5, 4.0);
 
     let base_height = MAIN_HEIGHT + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
@@ -734,15 +851,51 @@ fn android_stacked_layout(
     }
 }
 
-#[cfg(target_os = "android")]
-fn android_stacked_height(snapshot: &WinampState) -> f32 {
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn web_stacked_layout(snapshot: &WinampState) -> AndroidStackedLayout {
+    let fallback_height = stacked_skin_height(snapshot, PLAYLIST_HEIGHT);
+    let available =
+        web_current_surface_size().unwrap_or_else(|| Size::new(MAIN_WIDTH, fallback_height));
+    resizable_stacked_layout(available.width, available.height, snapshot, ui_scale())
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn web_current_surface_size() -> Option<Size> {
+    let window = web_sys::window()?;
+    let callback = js_sys::Reflect::get(&window, &JsValue::from_str("cranampCurrentSurfaceSize"))
+        .ok()?
+        .dyn_into::<js_sys::Function>()
+        .ok()?;
+    let size = callback.call0(&window).ok()?;
+    let width = js_sys::Reflect::get(&size, &JsValue::from_str("width"))
+        .ok()?
+        .as_f64()? as f32;
+    let height = js_sys::Reflect::get(&size, &JsValue::from_str("height"))
+        .ok()?
+        .as_f64()? as f32;
+    (width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0)
+        .then_some(Size::new(width, height))
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn stacked_skin_height(snapshot: &WinampState, playlist_height: f32) -> f32 {
     MAIN_HEIGHT
         + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 }
         + if snapshot.playlist_visible {
-            PLAYLIST_HEIGHT
+            playlist_height
         } else {
             0.0
         }
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn stacked_surface_width(layout: AndroidStackedLayout) -> f32 {
+    MAIN_WIDTH * layout.scale
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn stacked_surface_height(snapshot: &WinampState, layout: AndroidStackedLayout) -> f32 {
+    stacked_skin_height(snapshot, layout.playlist_height) * layout.scale
 }
 
 #[cfg(target_os = "android")]
@@ -974,19 +1127,11 @@ fn rect_contains(rect: SpriteRect, x: f32, y: f32) -> bool {
     x >= rect.0 && x <= rect.0 + rect.2 && y >= rect.1 && y <= rect.1 + rect.3
 }
 
-#[cfg(target_os = "android")]
-fn bounded_scale(available: f32, desired: f32) -> Option<f32> {
-    if available.is_finite() && available > 0.0 && desired > 0.0 {
-        Some(available / desired)
-    } else {
-        None
-    }
-}
-
 #[composable]
 fn WinampNativeWindows(
     skin: WinampSkin,
     state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
     inline_windows: WinampInlineWindowStates,
     peer_windows: WinampPeerWindowStates,
     scale: f32,
@@ -1006,6 +1151,7 @@ fn WinampNativeWindows(
                     MainWindow(
                         skin.clone(),
                         state,
+                        skin_state,
                         WinampDragTarget::NativeGroup,
                         WinampCloseAction::SetStatus,
                         scale,
@@ -1076,12 +1222,13 @@ pub fn WinampStandaloneApp() {
         playlist: rememberWindowState(PLAYLIST_WIDTH, PLAYLIST_HEIGHT),
     };
     remember_saved_window_config(peer_windows);
-    WinampRuntimeEffects(state, peer_windows);
+    let skin_state = remember_winamp_skin();
+    WinampRuntimeEffects(state, peer_windows, skin_state);
     let snapshot = state.get();
     if snapshot.closed {
         return;
     }
-    let skin = match remember_winamp_skin() {
+    let skin = match skin_state.get() {
         Ok(skin) => skin,
         Err(error) => {
             WinampSkinError(error);
@@ -1103,6 +1250,7 @@ pub fn WinampStandaloneApp() {
                     MainWindow(
                         skin.clone(),
                         state,
+                        skin_state,
                         WinampDragTarget::NativeGroup,
                         WinampCloseAction::CloseApp,
                         ui_scale(),
@@ -1170,6 +1318,7 @@ pub fn WinampStandaloneApp() {
 fn MainWindow(
     skin: WinampSkin,
     state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
     drag_target: WinampDragTarget,
     close_action: WinampCloseAction,
     scale: f32,
@@ -1193,6 +1342,7 @@ fn MainWindow(
 
             {
                 let state_click = state;
+                let skin_click = skin_state;
                 PressableSprite(
                     skin.titlebar.clone(),
                     MAIN_OPTIONS_BUTTON,
@@ -1201,7 +1351,7 @@ fn MainWindow(
                     POS_OPTIONS_BUTTON.1,
                     scale,
                     move || {
-                        open_audio_folder(state_click);
+                        open_skin_file(state_click, skin_click);
                     },
                 );
             }
@@ -3239,12 +3389,30 @@ fn DragSlider(
                                             dragging = true;
                                             let value = (event.position.x / scaled(width, scale))
                                                 .clamp(0.0, 1.0);
+                                            log_slider_pointer_event(
+                                                "horizontal",
+                                                "down",
+                                                event.position,
+                                                scaled(width, scale),
+                                                value,
+                                                scale,
+                                                (width, height),
+                                            );
                                             on_change(value);
                                             event.consume();
                                         }
                                         PointerEventKind::Move if dragging => {
                                             let value = (event.position.x / scaled(width, scale))
                                                 .clamp(0.0, 1.0);
+                                            log_slider_pointer_event(
+                                                "horizontal",
+                                                "move",
+                                                event.position,
+                                                scaled(width, scale),
+                                                value,
+                                                scale,
+                                                (width, height),
+                                            );
                                             on_change(value);
                                             event.consume();
                                         }
@@ -3294,13 +3462,33 @@ fn VerticalDragSlider(
                                             dragging = true;
                                             let raw = (event.position.y / scaled(height, scale))
                                                 .clamp(0.0, 1.0);
-                                            on_change(if invert { 1.0 - raw } else { raw });
+                                            let value = if invert { 1.0 - raw } else { raw };
+                                            log_slider_pointer_event(
+                                                "vertical",
+                                                "down",
+                                                event.position,
+                                                scaled(height, scale),
+                                                value,
+                                                scale,
+                                                (width, height),
+                                            );
+                                            on_change(value);
                                             event.consume();
                                         }
                                         PointerEventKind::Move if dragging => {
                                             let raw = (event.position.y / scaled(height, scale))
                                                 .clamp(0.0, 1.0);
-                                            on_change(if invert { 1.0 - raw } else { raw });
+                                            let value = if invert { 1.0 - raw } else { raw };
+                                            log_slider_pointer_event(
+                                                "vertical",
+                                                "move",
+                                                event.position,
+                                                scaled(height, scale),
+                                                value,
+                                                scale,
+                                                (width, height),
+                                            );
+                                            on_change(value);
                                             event.consume();
                                         }
                                         PointerEventKind::Up | PointerEventKind::Cancel => {
@@ -3319,6 +3507,34 @@ fn VerticalDragSlider(
     );
 }
 
+fn log_slider_pointer_event(
+    axis: &str,
+    phase: &str,
+    position: Point,
+    denominator: f32,
+    value: f32,
+    scale: f32,
+    skin_size: (f32, f32),
+) {
+    if !winamp_web_pointer_debug_enabled() {
+        return;
+    }
+
+    log::info!(
+        "CRANAMP_SLIDER axis={} phase={} local=({:.3},{:.3}) denominator={:.3} value={:.6} ui_scale={:.3} density={:.3} skin_size=({:.3},{:.3})",
+        axis,
+        phase,
+        position.x,
+        position.y,
+        denominator,
+        value,
+        scale,
+        current_density(),
+        skin_size.0,
+        skin_size.1,
+    );
+}
+
 #[composable]
 fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32) {
     let modifier = Modifier::empty()
@@ -3329,7 +3545,7 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
         WinampDragTarget::NativeGroup => {
             Box(modifier.window_drag_area(), BoxSpec::default(), || {});
         }
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
         WinampDragTarget::Fixed(_) => {
             Box(modifier, BoxSpec::default(), || {});
         }
@@ -3505,6 +3721,99 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
     }
 }
 
+fn apply_loaded_skin(
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    bytes: &[u8],
+    label: &str,
+) {
+    match load_skin(bytes) {
+        Ok(skin) => {
+            skin_state.set(Ok(skin));
+            state.update(|s| {
+                s.status = if label.is_empty() {
+                    "Loaded Skin".to_string()
+                } else {
+                    format!("Loaded Skin {label}")
+                };
+            });
+        }
+        Err(error) => {
+            state.update(|s| s.status = format!("Skin Load Failed: {error:#}"));
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
+    state.update(|s| s.status = "Opening Android Skin Picker".to_string());
+    match android_bridge::request_skin_import() {
+        Ok(()) => {}
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    feature = "native-dialogs"
+))]
+fn open_skin_file(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+    state.update(|s| s.status = "Opening Skin".to_string());
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Open Winamp skin")
+        .add_filter("Winamp skin", &["wsz", "zip"])
+        .pick_file()
+    else {
+        state.update(|s| s.status = "Skin Open Cancelled".to_string());
+        return;
+    };
+
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let label = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("skin.wsz");
+            apply_loaded_skin(state, skin_state, &bytes, label);
+        }
+        Err(error) => state.update(|s| s.status = format!("Skin Read Failed: {error}")),
+    }
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(feature = "native-dialogs")
+))]
+fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
+    state.update(|s| s.status = "Native skin picker is unavailable".to_string());
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn open_skin_file(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+    state.update(|s| s.status = "Opening Skin".to_string());
+    wasm_bindgen_futures::spawn_local(async move {
+        let Some(handle) = rfd::AsyncFileDialog::new()
+            .set_title("Open Winamp skin")
+            .add_filter("Winamp skin", &["wsz", "zip"])
+            .pick_file()
+            .await
+        else {
+            state.update(|s| s.status = "Skin Open Cancelled".to_string());
+            return;
+        };
+        let label = handle.file_name();
+        let bytes = handle.read().await;
+        apply_loaded_skin(state, skin_state, &bytes, &label);
+    });
+}
+
+#[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
+fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
+    state.update(|s| s.status = "Web skin picker is not enabled".to_string());
+}
+
 #[cfg(target_os = "android")]
 fn open_audio_files(state: MutableState<WinampState>) {
     state.update(|s| s.status = "Opening Android File Picker".to_string());
@@ -3619,35 +3928,6 @@ fn add_audio_folder(state: MutableState<WinampState>) {
 
 #[cfg(target_arch = "wasm32")]
 fn add_audio_folder(state: MutableState<WinampState>) {
-    state.update(|s| {
-        s.status = "Folder picker unavailable in the web widget".to_string();
-    });
-}
-
-#[cfg(target_os = "android")]
-fn open_audio_folder(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Opening Android Folder Picker".to_string());
-    match android_bridge::request_audio_folder(AndroidLoadMode::Replace) {
-        Ok(()) => {}
-        Err(error) => state.update(|s| s.status = error),
-    }
-}
-
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn open_audio_folder(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Opening Folder".to_string());
-    match audio::pick_audio_folder() {
-        Ok(Some(tracks)) => {
-            trace_tracks("open-folder-picked", &tracks);
-            replace_playlist_and_play(state, tracks);
-        }
-        Ok(None) => state.update(|s| s.status = "Open Cancelled".to_string()),
-        Err(error) => state.update(|s| s.status = error),
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn open_audio_folder(state: MutableState<WinampState>) {
     state.update(|s| {
         s.status = "Folder picker unavailable in the web widget".to_string();
     });
@@ -4585,7 +4865,7 @@ fn format_m3u_playlist(playlist: &[Track]) -> String {
 }
 
 #[cfg(target_os = "android")]
-fn handle_android_bridge_results(state: MutableState<WinampState>) {
+fn handle_android_bridge_results(state: MutableState<WinampState>, skin_state: WinampSkinState) {
     for result in android_bridge::take_results() {
         match result {
             AndroidBridgeResult::AudioPaths { mode, paths } => {
@@ -4631,6 +4911,17 @@ fn handle_android_bridge_results(state: MutableState<WinampState>) {
                     };
                 });
             }
+            AndroidBridgeResult::SkinImport { path } => match std::fs::read(&path) {
+                Ok(bytes) => {
+                    let label = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("skin.wsz")
+                        .to_string();
+                    apply_loaded_skin(state, skin_state, &bytes, &label);
+                }
+                Err(error) => state.update(|s| s.status = format!("Skin Read Failed: {error}")),
+            },
             AndroidBridgeResult::Cancelled { operation } => {
                 state.update(|s| s.status = format!("{operation} Cancelled"));
             }
@@ -5154,6 +5445,17 @@ fn select_playlist_row_in_state(
     };
 }
 
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn current_time_ms() -> u64 {
+    js_sys::Date::now().max(0.0).min(u64::MAX as f64) as u64
+}
+
+#[cfg(all(target_arch = "wasm32", not(feature = "web")))]
+fn current_time_ms() -> u64 {
+    0
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn current_time_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -5875,7 +6177,7 @@ fn winamp_window_modifier(
             let position = position.get();
             modifier.offset(snap_to_pixel(position.x), snap_to_pixel(position.y))
         }
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
         WinampDragTarget::Fixed(position) => {
             modifier.offset(scaled(position.x, scale), scaled(position.y, scale))
         }

@@ -24,6 +24,14 @@ pub fn create_surface_app() -> AppLauncher {
         .with_fonts(fonts::APP_FONTS)
 }
 
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub fn create_web_app() -> AppLauncher {
+    AppLauncher::new()
+        .with_title(TITLE)
+        .with_size(275, 493)
+        .with_fonts(fonts::APP_FONTS)
+}
+
 #[cfg(target_os = "android")]
 pub fn create_android_app() -> AppLauncher {
     AppLauncher::new()
@@ -62,7 +70,7 @@ pub fn web_init() {
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 #[wasm_bindgen]
 pub async fn run_app() -> Result<(), JsValue> {
-    create_surface_app()
+    create_web_app()
         .run_web("cranamp-canvas", winamp::WinampWidgetApp)
         .await
 }

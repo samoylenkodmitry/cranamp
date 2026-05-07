@@ -77,12 +77,34 @@ Reference inputs:
 - [x] Wire Android picker results into Cranamp replace/append/import/export playlist behavior.
 - [x] Keep Android manifest freeform metadata aligned with the full stacked Winamp height.
 - [x] Track Cranpose blockers for true always-on-top overlay hosting and app-driven Android native window resizing, which are not exposed by Cranpose 0.0.61 (`samoylenkodmitry/Cranpose#232`, `samoylenkodmitry/Cranpose#238`).
-- [x] Make the Android stacked composition scale from the live floating-window constraints and set the default Android freeform width to the Winamp skin width so the rendered content matches the host area as closely as Cranpose allows.
-- [x] Stretch the Android playlist panel height from the remaining native-surface space so the stacked Winamp surface fills Samsung freeform windows that include decor/surface insets.
-- [x] Keep Android stacked layout on the full native surface so the Winamp skin fills Samsung freeform windows.
+- [x] Scale the Android stacked composition to the live freeform/native-surface width.
+- [x] Stretch the Android playlist panel height from the remaining native-surface space so the stacked Winamp surface fills resizable freeform windows.
+- [x] Keep Android pointer hit testing in scaled skin coordinates while using the responsive freeform layout.
 - [x] Patch Cranpose Android pointer conversion to add the native-surface/content-rect inset, keeping finger hits aligned when Samsung inflates the surface for freeform shadows.
 - [x] Add Cranamp-side Android drag hit testing for non-interactive Winamp skin areas.
 - [ ] Blocked: app-driven Android `NativeActivity` freeform task moving is not exposed reliably. `View.startMovingTask`, `IWindowSession.startMovingTask`, hidden API exemptions, and UI-thread `Window.setAttributes()` were tested on Samsung DeX/freeform; task bounds did not move, and `Window.setAttributes()` caused native-surface resize churn.
 - [x] Add the freeform move attempt as a best-effort Android bridge and fail it once per gesture when the platform blocks movement.
 - [x] Subtract Android surface insets when starting a freeform move so the raw drag anchor stays under the finger.
 - [x] File the Cranpose input-coordinate blocker for Android freeform `surfaceInsets` (`samoylenkodmitry/Cranpose#240`) and add the freeform movement findings to the existing overlay blocker (`samoylenkodmitry/Cranpose#232`).
+
+## Floating Surface Strategy
+
+- [x] Reclassify Android freeform support as an optional desktop/tablet UX, not the core always-on-top floating player.
+- [x] Identify the true Android floating-player path: `SYSTEM_ALERT_WINDOW` permission, `Settings.canDrawOverlays`, `Settings.ACTION_MANAGE_OVERLAY_PERMISSION`, an explicit overlay lifecycle, and `WindowManager.addView()` with `TYPE_APPLICATION_OVERLAY`, `FLAG_NOT_FOCUSABLE`, and `PixelFormat.TRANSLUCENT`.
+- [x] Confirm that Cranpose's current Android runtime only renders into the launcher `NativeActivity` `ANativeWindow`, so a skinned always-on-top overlay cannot be implemented correctly in Cranamp alone.
+- [x] Keep the Cranpose blocker tracked in `samoylenkodmitry/Cranpose#232`: Android overlay support needs a service-owned `Surface`/`SurfaceView`/`TextureView` or equivalent `ANativeWindow` host API, pointer translation, and lifecycle handling outside the Activity window.
+- [ ] After Cranpose exposes an overlay-capable Android surface host, add a Cranamp `OverlayService` that owns permission checks, overlay creation/destruction, drag/dismiss gestures, and a compact stacked Winamp surface.
+- [ ] Add an Android in-app "floating mini-player" action that requests overlay permission when needed, starts the overlay service when allowed, and falls back to the normal Activity/freeform path when denied or revoked.
+- [ ] Decouple Android playback/controller state enough that the overlay and full Activity can issue transport, seek, volume, load, import, and export commands without depending on the Activity window being foregrounded.
+- [ ] Treat Android freeform launch metadata as a debug/desktop fallback only; do not rely on it for always-on-top behavior.
+- [x] Identify the browser/WASM experimental path: Chromium Document Picture-in-Picture can host the existing Cranamp canvas after a user gesture, but it is browser-controlled and not equivalent to a native transparent overlay.
+- [x] Add a web-only Document Picture-in-Picture path that reparents the live Cranamp canvas into the PiP document and restores it to the main page when PiP closes.
+- [x] Keep the PiP path feature-detected, with a disabled launcher and normal embedded widget fallback when unsupported.
+- [x] Resize the web Cranamp host/PiP window from the stacked Cranamp surface size.
+- [x] Let the web PiP canvas fill a resized PiP viewport, then scale Winamp to the canvas width and stretch the playlist to the remaining height.
+
+## Skin Loading
+
+- [x] Replace the bundled Winamp skin with `~/Downloads/cranampskin.wsz`.
+- [x] Make the main-window logo/menu button open an external `.wsz/.zip` skin picker on desktop and web.
+- [x] Add Android SAF skin import support so selected `.wsz/.zip` archives are copied into app-private storage and decoded by Cranamp.

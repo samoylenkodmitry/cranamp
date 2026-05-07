@@ -63,6 +63,7 @@ renderer-wgpu = [
 robot = ["cranpose-app-shell/test-support"]
 web = [
     "cranpose-platform-web",
+    "dep:js-sys",
     "dep:wasm-bindgen",
     "dep:web-sys",
 ]
@@ -102,6 +103,10 @@ version = "0.0.61"
 
 [dependencies.cranpose-ui]
 version = "0.0.61"
+
+[dependencies.js-sys]
+version = "0.3"
+optional = true
 
 [dependencies.log]
 version = "0.4"

@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "cranamp"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "android-activity",
  "anyhow",
@@ -977,6 +977,7 @@ dependencies = [
  "cranpose-services",
  "cranpose-ui",
  "jni 0.21.1",
+ "js-sys",
  "log",
  "pixels",
  "pollster 0.4.0",

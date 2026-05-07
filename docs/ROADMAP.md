@@ -17,11 +17,13 @@
 
 - [x] Add Android Gradle project and debug-signed APK release packaging.
 - [x] Attach iOS device/simulator static library packages to tag releases.
+- [x] Implement Android Storage Access Framework file/folder picker.
 - [ ] Add signed Android APK/AAB release packaging.
 - [ ] Add iOS Xcode project and archive/export workflow.
-- [ ] Implement Android Storage Access Framework file/folder picker.
 - [ ] Implement iOS document picker integration.
 - [ ] Persist playlist and skin selection across launches.
+- [ ] Implement Android system overlay mini-player after Cranpose can host a
+  service-owned overlay surface.
 
 ## Phase 3: Winamp Compatibility
 
@@ -37,3 +39,5 @@
 - [ ] Add audio backend tests around playlist transitions.
 - [ ] Add packaging metadata and icons per platform.
 - [ ] Add crash/error reporting hooks appropriate for each target.
+- [x] Add an experimental browser Document Picture-in-Picture Cranamp window for
+  Chromium-based browsers.

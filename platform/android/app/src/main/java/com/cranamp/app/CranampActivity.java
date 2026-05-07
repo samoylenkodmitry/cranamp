@@ -38,6 +38,7 @@ public class CranampActivity extends NativeActivity {
     private static final int REQ_FOLDER_APPEND = 1004;
     private static final int REQ_IMPORT_PLAYLIST = 1005;
     private static final int REQ_EXPORT_PLAYLIST = 1006;
+    private static final int REQ_IMPORT_SKIN = 1007;
 
     private static boolean moveUnavailableLogged = false;
 
@@ -58,6 +59,7 @@ public class CranampActivity extends NativeActivity {
         super.onCreate(savedInstanceState);
         ensureBridgeDir();
         ensureMediaDir();
+        ensureSkinDir();
     }
 
     public String cranampBridgeDirectory() {
@@ -124,6 +126,22 @@ public class CranampActivity extends NativeActivity {
         });
     }
 
+    public void cranampPickSkinFile() {
+        runOnUiThread(() -> {
+            clearResult("skin_import");
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                    "application/zip",
+                    "application/octet-stream",
+                    "application/x-zip-compressed"
+            });
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            launchIntent(intent, REQ_IMPORT_SKIN, "skin_import");
+        });
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -151,6 +169,9 @@ public class CranampActivity extends NativeActivity {
                     break;
                 case REQ_EXPORT_PLAYLIST:
                     writePlaylistExport(data.getData());
+                    break;
+                case REQ_IMPORT_SKIN:
+                    writeSkinImport(data.getData());
                     break;
                 default:
                     break;
@@ -346,6 +367,16 @@ public class CranampActivity extends NativeActivity {
         writeAtomic("playlist_export.ok", uri.toString());
     }
 
+    private void writeSkinImport(Uri uri) throws IOException {
+        if (uri == null) {
+            writeCancel("skin_import");
+            return;
+        }
+        String displayName = displayNameForUri(uri, "skin.wsz");
+        File copied = copyUriToSkinFile(uri, displayName);
+        writeAtomic("skin_import.path", copied.getAbsolutePath());
+    }
+
     private String readUriText(Uri uri) throws IOException {
         try (InputStream input = getContentResolver().openInputStream(uri)) {
             if (input == null) {
@@ -368,6 +399,33 @@ public class CranampActivity extends NativeActivity {
             safeName = "track-" + index + ".mp3";
         }
         File outputFile = uniqueFile(mediaDir, safeName, index);
+        try (
+                InputStream input = getContentResolver().openInputStream(uri);
+                OutputStream output = new FileOutputStream(outputFile)
+        ) {
+            if (input == null) {
+                throw new IOException("Android returned no input stream");
+            }
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                output.write(buffer, 0, read);
+            }
+        }
+        return outputFile;
+    }
+
+    private File copyUriToSkinFile(Uri uri, String displayName) throws IOException {
+        File skinDir = ensureSkinDir();
+        String safeName = safeFileName(displayName);
+        if (safeName.isEmpty()) {
+            safeName = "skin.wsz";
+        }
+        if (!safeName.toLowerCase(Locale.US).endsWith(".wsz")
+                && !safeName.toLowerCase(Locale.US).endsWith(".zip")) {
+            safeName = safeName + ".wsz";
+        }
+        File outputFile = uniqueFile(skinDir, safeName, 0);
         try (
                 InputStream input = getContentResolver().openInputStream(uri);
                 OutputStream output = new FileOutputStream(outputFile)
@@ -446,9 +504,18 @@ public class CranampActivity extends NativeActivity {
         return dir;
     }
 
+    private File ensureSkinDir() {
+        File dir = new File(getFilesDir(), "cranamp_skins");
+        if (!dir.isDirectory() && !dir.mkdirs()) {
+            throw new IllegalStateException("failed to create " + dir);
+        }
+        return dir;
+    }
+
     private void clearResult(String name) {
         deleteResultFile(name + ".paths");
         deleteResultFile(name + ".m3u");
+        deleteResultFile(name + ".path");
         deleteResultFile(name + ".ok");
         deleteResultFile(name + ".cancel");
         deleteResultFile(name + ".error");
@@ -502,6 +569,8 @@ public class CranampActivity extends NativeActivity {
                 return "playlist_import";
             case REQ_EXPORT_PLAYLIST:
                 return "playlist_export";
+            case REQ_IMPORT_SKIN:
+                return "skin_import";
             default:
                 return "";
         }

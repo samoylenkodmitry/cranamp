@@ -10,9 +10,12 @@ Web widget: https://samoylenkodmitry.github.io/cranamp/
 - Android: Cranpose surface entry point packaged as a resizable activity. The
   app uses one stacked Winamp surface, Android document pickers for
   file/folder/playlist import and export, and Rodio playback through copied
-  app-private media files.
+  app-private media files. Freeform Activity mode is optional desktop/tablet
+  windowing, not the true always-on-top overlay path.
 - iOS: fullscreen Cranpose surface entry point is wired through the library crate.
-- WebAssembly: embeddable canvas widget built with `wasm-pack`; GitHub Pages deploys the widget from `dist/`.
+- WebAssembly: embeddable canvas widget built with `wasm-pack`; GitHub Pages
+  deploys the widget from `dist/`. Chromium browsers can open an experimental
+  Document Picture-in-Picture window containing the live Cranamp canvas.
 
 ## Current Controls
 
@@ -41,6 +44,13 @@ https://samoylenkodmitry.github.io/cranamp/
 
 ## Android Freeform
 
+Freeform Activity mode is a fallback and debug-friendly desktop/tablet UX. It
+does not provide a chat-head style always-on-top mini-player. The true Android
+floating-player path needs a `TYPE_APPLICATION_OVERLAY` service surface after
+overlay permission is granted; Cranpose support for rendering into that kind of
+service-owned Android surface is tracked upstream in
+`samoylenkodmitry/Cranpose#232`.
+
 Use a freeform-capable emulator profile, such as the SDK's `13.5in Freeform`
 device, then enable Android's developer freeform flags before launching:
 
@@ -53,6 +63,9 @@ adb shell am start --windowingMode 5 --activity-task-on-home -n com.cranamp.app/
 
 Phone-shaped Pixel AVDs can still force fullscreen even when the app manifest is
 resizeable.
+
+See `docs/FLOATING_SURFACES.md` for the Android overlay, Android freeform, and
+browser Document Picture-in-Picture split.
 
 ## Releases
 
