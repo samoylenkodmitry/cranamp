@@ -1,9 +1,10 @@
 #![allow(clippy::missing_errors_doc)]
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Track {
     pub title: String,
     pub path: Option<String>,
+    pub duration_seconds: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,6 +20,7 @@ pub type VisualizerBands = [f32; VISUALIZER_BAND_COUNT];
 struct DemoTrack {
     title: &'static str,
     file_name: &'static str,
+    duration_seconds: f32,
 }
 
 const DEMO_MUSIC_WEB_DIR: &str = "demo-music";
@@ -26,22 +28,27 @@ const DEMO_TRACKS: &[DemoTrack] = &[
     DemoTrack {
         title: "Cranamp Demo 01 - Retro Tracker",
         file_name: "cranamp-demo-01-retro-tracker.mp3",
+        duration_seconds: 100.0,
     },
     DemoTrack {
         title: "Cranamp Demo 02 - Neon Ambient",
         file_name: "cranamp-demo-02-neon-ambient.mp3",
+        duration_seconds: 90.0,
     },
     DemoTrack {
         title: "Cranamp Demo 03 - Lo-Fi Jungle",
         file_name: "cranamp-demo-03-lofi-jungle.mp3",
+        duration_seconds: 120.0,
     },
     DemoTrack {
         title: "Cranamp Demo 04 - Minimal Synthwave",
         file_name: "cranamp-demo-04-minimal-synthwave.mp3",
+        duration_seconds: 100.0,
     },
     DemoTrack {
         title: "Cranamp Demo 05 - Soft Chip Lounge",
         file_name: "cranamp-demo-05-soft-chip-lounge.mp3",
+        duration_seconds: 90.0,
     },
 ];
 
@@ -64,11 +71,25 @@ impl Track {
     }
 }
 
-fn track_from_title_path(title: impl Into<String>, path: impl Into<String>) -> Track {
+pub(crate) fn track_from_title_path(title: impl Into<String>, path: impl Into<String>) -> Track {
+    let path = path.into();
+    let duration_seconds = known_demo_duration_seconds(&path);
     Track {
         title: title.into(),
-        path: Some(path.into()),
+        path: Some(path),
+        duration_seconds,
     }
+}
+
+fn known_demo_duration_seconds(path: &str) -> Option<f32> {
+    let file_name = path
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())?;
+    DEMO_TRACKS
+        .iter()
+        .find(|track| track.file_name == file_name)
+        .map(|track| track.duration_seconds)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -268,7 +289,11 @@ pub async fn pick_web_audio_file() -> Result<Option<PickedWebTrack>, String> {
     let title = handle.file_name();
     let bytes = handle.read().await;
     Ok(Some(PickedWebTrack {
-        track: Track { title, path: None },
+        track: Track {
+            title,
+            path: None,
+            duration_seconds: None,
+        },
         bytes,
     }))
 }
@@ -1090,6 +1115,19 @@ mod tests {
                 .map(|path| path.ends_with(".mp3"))
                 .unwrap_or(false)
         }));
+        assert_eq!(
+            tracks
+                .iter()
+                .map(|track| track.duration_seconds)
+                .collect::<Vec<_>>(),
+            vec![
+                Some(100.0),
+                Some(90.0),
+                Some(120.0),
+                Some(100.0),
+                Some(90.0)
+            ]
+        );
     }
 
     #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]

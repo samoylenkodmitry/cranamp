@@ -192,7 +192,7 @@ pub const EQ_THUMB_XS: [f32; 11] = [
 
 // Playlist window geometry and source slices (PLEDIT.BMP)
 pub const PLAYLIST_WIDTH: f32 = 275.0;
-pub const PLAYLIST_HEIGHT: f32 = 203.0;
+pub const PLAYLIST_HEIGHT: f32 = 261.0;
 pub const PLAYLIST_DRAG_AREA: SpriteRect = (0.0, 0.0, PLAYLIST_WIDTH, 20.0);
 
 pub const PLAYLIST_TOP_LEFT_CORNER: SpriteRect = (0.0, 21.0, 25.0, 20.0);
@@ -218,3 +218,13 @@ pub const POS_PLAYLIST_VIS_BG: (f32, f32) = (200.0, 165.0);
 pub const PLAYLIST_LIST_BG: SpriteRect = (12.0, 20.0, 243.0, 145.0);
 pub const PLAYLIST_SCROLL_TRACK: SpriteRect = (260.0, 20.0, 8.0, 145.0);
 pub const PLAYLIST_ADD_BUTTON_HIT_AREA: SpriteRect = (10.0, 7.0, 28.0, 18.0);
+pub const PLAYLIST_REM_BUTTON_HIT_AREA: SpriteRect = (39.0, 7.0, 28.0, 18.0);
+pub const PLAYLIST_SEL_BUTTON_HIT_AREA: SpriteRect = (69.0, 7.0, 28.0, 18.0);
+pub const PLAYLIST_MISC_BUTTON_HIT_AREA: SpriteRect = (99.0, 7.0, 36.0, 18.0);
+pub const PLAYLIST_LIST_BUTTON_HIT_AREA: SpriteRect = (228.0, 7.0, 28.0, 18.0);
+pub const PLAYLIST_PREV_BUTTON_HIT_AREA: SpriteRect = (139.0, 25.0, 8.0, 8.0);
+pub const PLAYLIST_PLAY_BUTTON_HIT_AREA: SpriteRect = (148.0, 25.0, 8.0, 8.0);
+pub const PLAYLIST_PAUSE_BUTTON_HIT_AREA: SpriteRect = (157.0, 25.0, 8.0, 8.0);
+pub const PLAYLIST_STOP_BUTTON_HIT_AREA: SpriteRect = (166.0, 25.0, 8.0, 8.0);
+pub const PLAYLIST_NEXT_BUTTON_HIT_AREA: SpriteRect = (175.0, 25.0, 8.0, 8.0);
+pub const PLAYLIST_EJECT_BUTTON_HIT_AREA: SpriteRect = (185.0, 25.0, 12.0, 8.0);

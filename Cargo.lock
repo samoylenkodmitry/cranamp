@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "cranamp"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "android-activity",
  "anyhow",
@@ -955,6 +955,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-logger",
  "web-sys",
+ "x11rb",
  "zip",
 ]
 

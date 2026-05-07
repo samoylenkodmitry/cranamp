@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -67,6 +67,7 @@ symphonia = { version = "0.5.5", default-features = false, features = ["all-code
 env_logger = { version = "0.11", optional = true }
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"], optional = true }
 walkdir = { version = "2.5", optional = true }
+x11rb = "0.13.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6", features = ["native-activity"] }

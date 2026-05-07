@@ -8,18 +8,23 @@
 mod skin;
 mod sprites;
 
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use cranpose::{
     rememberWindowState, WindowAttachPolicy, WindowConfig, WindowGroup, WindowId,
     WindowModifierExt, WindowMoveMode, WindowNode, WindowResizeDirection, WindowState,
 };
 use cranpose_core::{self, MutableState};
+use cranpose_foundation::text::{TextFieldState, TextRange};
 use cranpose_foundation::PointerButton;
+use cranpose_ui::text::TextUnit;
 use cranpose_ui::{
-    composable, current_density, Box, BoxSpec, Button, Canvas, Color, Column, ColumnSpec, Modifier,
-    Point, PointerEventKind, PointerInputScope, Size, Text, TextStyle,
+    composable, current_density, BasicTextField, Box, BoxSpec, Button, Canvas, Color, Column,
+    ColumnSpec, Modifier, Point, PointerEventKind, PointerInputScope, Size, SpanStyle, Text,
+    TextStyle,
 };
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
@@ -97,6 +102,13 @@ struct WinampState {
     status: String,
     playlist: Vec<Track>,
     current_index: Option<usize>,
+    selected_indices: Vec<usize>,
+    selection_anchor: Option<usize>,
+    playlist_last_click_index: Option<usize>,
+    playlist_last_click_ms: u64,
+    playlist_search_visible: bool,
+    playlist_search_query: String,
+    playlist_search_revision: u64,
 }
 
 impl Default for WinampState {
@@ -110,7 +122,7 @@ impl Default for WinampState {
             playlist_visible: true,
             eq_enabled: true,
             eq_auto: false,
-            eq_values: [0.5; 11],
+            eq_values: DEFAULT_EQ_VALUES,
             shuffle_order: Vec::new(),
             playlist_scroll: 0.0,
             playlist_visible_rows: DEFAULT_PLAYLIST_VISIBLE_ROWS,
@@ -123,6 +135,13 @@ impl Default for WinampState {
             status: "Stopped".to_string(),
             playlist: Vec::new(),
             current_index: None,
+            selected_indices: Vec::new(),
+            selection_anchor: None,
+            playlist_last_click_index: None,
+            playlist_last_click_ms: 0,
+            playlist_search_visible: false,
+            playlist_search_query: String::new(),
+            playlist_search_revision: 0,
         }
     }
 }
@@ -137,6 +156,7 @@ fn initial_winamp_state() -> WinampState {
             state.current_index = Some(0);
             state.status = format!("Loaded {} Demo Track(s)", tracks.len());
             state.playlist = tracks;
+            set_playlist_selection(&mut state, [0]);
         }
     }
     refresh_shuffle_order(&mut state);
@@ -161,6 +181,33 @@ enum WinampWindowSize {
     State(WindowState),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlaylistFooterMenu {
+    Add,
+    Remove,
+    Select,
+    Misc,
+    List,
+}
+
+#[derive(Clone, Copy)]
+struct PlaylistMenuItem {
+    label: &'static str,
+    action: fn(MutableState<WinampState>),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PlaylistClickModifiers {
+    shift: bool,
+    ctrl: bool,
+}
+
+impl PlaylistClickModifiers {
+    fn any(self) -> bool {
+        self.shift || self.ctrl
+    }
+}
+
 const MAIN_TITLE_DRAG_HIT_AREA: SpriteRect = (16.0, 0.0, 228.0, 14.0);
 const EQ_TITLE_DRAG_HIT_AREA: SpriteRect = (0.0, 0.0, 264.0, 14.0);
 const CRANAMP_WINAMP_MAIN_TITLE: &str = "Cranamp Winamp";
@@ -168,7 +215,16 @@ const CRANAMP_WINAMP_EQUALIZER_TITLE: &str = "Cranamp Winamp Equalizer";
 const CRANAMP_WINAMP_PLAYLIST_TITLE: &str = "Cranamp Winamp Playlist";
 const WINAMP_DEFAULT_SCREEN_POSITION: Point = Point { x: 140.0, y: 120.0 };
 const TITLE_MARQUEE_CHARS_PER_SECOND: f32 = 2.0;
-const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 11;
+const PLAYLIST_DOUBLE_CLICK_MS: u64 = 500;
+const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 19;
+const DEFAULT_EQ_VALUES: [f32; 11] = [
+    0.50, 0.58, 0.48, 0.43, 0.62, 0.50, 0.57, 0.50, 0.64, 0.66, 0.66,
+];
+const WINAMP_DISPLAY_TEXT_COLOR: [u8; 4] = [153, 204, 236, 255];
+const PLAYLIST_TEXT_COLOR: [u8; 4] = [255, 200, 108, 255];
+const PLAYLIST_CURRENT_TEXT_COLOR: [u8; 4] = [255, 255, 255, 255];
+// PLEDIT.TXT selected background #42351e converted from sRGB to linear.
+const PLAYLIST_SELECTED_BG: Color = Color(0.05448, 0.03560, 0.01298, 1.0);
 
 impl WinampWindowSize {
     fn get(self) -> Size {
@@ -821,16 +877,9 @@ fn MainWindow(
                 POS_MAIN_TRACK_TEXT.0,
                 POS_MAIN_TRACK_TEXT.1,
                 scale,
-                [82, 242, 122, 255],
+                WINAMP_DISPLAY_TEXT_COLOR,
             );
-            BitmapWinampText(
-                skin.text.clone(),
-                ellipsize_bitmap(main_display_meta(&snapshot), MAIN_META_TEXT_WIDTH),
-                POS_MAIN_META_TEXT.0,
-                POS_MAIN_META_TEXT.1,
-                scale,
-                [82, 242, 122, 255],
-            );
+            MainMetaReadouts(skin.text.clone(), snapshot.clone(), scale);
 
             Sprite(
                 skin.monoster.clone(),
@@ -841,7 +890,11 @@ fn MainWindow(
             );
             Sprite(
                 skin.monoster.clone(),
-                STEREO_OFF,
+                if snapshot.current_index.is_some() {
+                    STEREO_ON
+                } else {
+                    STEREO_OFF
+                },
                 POS_STEREO.0,
                 POS_STEREO.1,
                 scale,
@@ -1130,6 +1183,9 @@ fn EqualizerWindow(
                 POS_EQ_PREAMP_LINE.1,
                 scale,
             );
+            if snapshot.eq_enabled {
+                EqCurve(snapshot.eq_values, scale);
+            }
 
             WindowDragHandle(drag_target, EQ_TITLE_DRAG_HIT_AREA, scale);
 
@@ -1284,7 +1340,9 @@ fn PlaylistWindow(
     scale: f32,
 ) {
     let snapshot = state.get();
-    let add_menu_open = cranpose_core::useState(|| false);
+    let footer_menu = cranpose_core::useState(|| None::<PlaylistFooterMenu>);
+    let search_field =
+        cranpose_core::remember(|| TextFieldState::new("")).with(|field| field.clone());
     let window_size = window_size.get();
     let skin_scale = scale.max(f32::EPSILON);
     let width = (window_size.width / skin_scale).max(PLAYLIST_WIDTH);
@@ -1390,6 +1448,18 @@ fn PlaylistWindow(
                 list_height,
                 scale,
             );
+            PlaylistFooterReadouts(text.clone(), snapshot.clone(), bottom_y, scale);
+            PlaylistFooterControls(state, footer_menu, bottom_y, scale);
+            if snapshot.playlist_search_visible {
+                PlaylistSearchOverlay(
+                    text.clone(),
+                    state,
+                    snapshot.clone(),
+                    search_field.clone(),
+                    list_width,
+                    scale,
+                );
+            }
 
             {
                 let state_drag = state;
@@ -1406,31 +1476,26 @@ fn PlaylistWindow(
                 );
             }
 
-            {
-                let menu_state = add_menu_open;
-                ClickTarget(
-                    PLAYLIST_ADD_BUTTON_HIT_AREA.0,
-                    bottom_y + PLAYLIST_ADD_BUTTON_HIT_AREA.1,
-                    PLAYLIST_ADD_BUTTON_HIT_AREA.2,
-                    PLAYLIST_ADD_BUTTON_HIT_AREA.3,
-                    scale,
-                    move || {
-                        menu_state.update(|open| *open = !*open);
-                    },
-                );
-            }
-
-            if add_menu_open.get() {
-                AddMenu(
+            if let Some(menu) = footer_menu.get() {
+                PlaylistMenu(
                     text.clone(),
                     state,
-                    add_menu_open,
-                    PLAYLIST_ADD_BUTTON_HIT_AREA.0,
-                    bottom_y - 31.0,
+                    footer_menu,
+                    menu,
+                    width,
+                    bottom_y,
                     scale,
                 );
             }
 
+            PlaylistWheelScrollTarget(
+                state,
+                PLAYLIST_LIST_BG.0,
+                PLAYLIST_LIST_BG.1,
+                list_width,
+                list_height,
+                scale,
+            );
             WindowDragHandle(drag_target, (0.0, 0.0, width, PLAYLIST_DRAG_AREA.3), scale);
             WindowResizeHandle(
                 drag_target,
@@ -1454,11 +1519,10 @@ fn PlaylistEntries(
     list_height: f32,
     scale: f32,
 ) {
-    let row_height = 12.0;
+    let row_height = 10.0;
     let max_rows = ((list_height - 8.0) / row_height).floor().max(1.0) as usize;
     let x = PLAYLIST_LIST_BG.0 + 4.0;
     let y = PLAYLIST_LIST_BG.1 + 4.0;
-    let text_width = (list_width - 12.0).max(1.0);
 
     cranpose_core::SideEffect(move || {
         if state.get_non_reactive().playlist_visible_rows != max_rows {
@@ -1473,7 +1537,7 @@ fn PlaylistEntries(
             x,
             y + 2.0,
             scale,
-            [82, 242, 122, 255],
+            PLAYLIST_TEXT_COLOR,
         );
         return;
     }
@@ -1487,23 +1551,64 @@ fn PlaylistEntries(
         .skip(start)
         .take(max_rows)
     {
-        let active = snapshot.current_index == Some(row);
-        let title = ellipsize(
-            format!("{:02}. {}", row + 1, track.display_title()),
-            text_width,
-        );
+        let current = snapshot.current_index == Some(row);
+        let selected = snapshot.selected_indices.contains(&row);
+        let row_y = y + ((row - start) as f32 * row_height);
+        let duration = playlist_duration_text(track.duration_seconds);
+        let duration_width = duration
+            .as_ref()
+            .map(|duration| bitmap_text_width(duration))
+            .unwrap_or(0.0);
+        let title_width = if duration.is_some() {
+            (list_width - duration_width - 12.0).max(1.0)
+        } else {
+            (list_width - 8.0).max(1.0)
+        };
+        let title = if current && snapshot.playback == PlaybackState::Playing {
+            marquee_bitmap_text(
+                track.display_title().to_string(),
+                title_width,
+                snapshot.title_marquee_phase,
+            )
+        } else {
+            clip_bitmap_text(track.display_title().to_string(), title_width)
+        };
+        if selected {
+            FilledRect(
+                PLAYLIST_LIST_BG.0 + 2.0,
+                PLAYLIST_LIST_BG.1 + ((row - start) as f32 * row_height) + 1.0,
+                list_width - 4.0,
+                row_height,
+                scale,
+                PLAYLIST_SELECTED_BG,
+            );
+        }
         BitmapWinampText(
             text_bitmap.clone(),
             title,
             x,
-            y + ((row - start) as f32 * row_height) + 2.0,
+            row_y + 2.0,
             scale,
-            if active {
-                [242, 255, 148, 255]
+            if selected {
+                PLAYLIST_CURRENT_TEXT_COLOR
             } else {
-                [82, 242, 122, 255]
+                PLAYLIST_TEXT_COLOR
             },
         );
+        if let Some(duration) = duration {
+            BitmapWinampText(
+                text_bitmap.clone(),
+                duration,
+                PLAYLIST_LIST_BG.0 + list_width - 2.0 - duration_width,
+                row_y + 2.0,
+                scale,
+                if selected {
+                    PLAYLIST_CURRENT_TEXT_COLOR
+                } else {
+                    PLAYLIST_TEXT_COLOR
+                },
+            );
+        }
 
         {
             let state_click = state;
@@ -1514,7 +1619,7 @@ fn PlaylistEntries(
                 row_height,
                 scale,
                 move || {
-                    activate_playlist_track(state_click, row);
+                    handle_playlist_row_click(state_click, row);
                 },
             );
         }
@@ -1522,62 +1627,495 @@ fn PlaylistEntries(
 }
 
 #[composable]
-fn AddMenu(
+fn PlaylistFooterReadouts(
     text_bitmap: ImageBitmap,
-    state: MutableState<WinampState>,
-    menu_open: MutableState<bool>,
-    x: f32,
-    y: f32,
+    snapshot: WinampState,
+    bottom_y: f32,
     scale: f32,
 ) {
-    let width = 72.0;
-    let row_height = 14.0;
-    let height = row_height * 2.0;
+    let summary = playlist_footer_summary(&snapshot);
+    BitmapWinampText(
+        text_bitmap.clone(),
+        summary,
+        132.0,
+        bottom_y + 10.0,
+        scale,
+        WINAMP_DISPLAY_TEXT_COLOR,
+    );
+
+    let elapsed = format_duration_compact(snapshot.elapsed_seconds);
+    let elapsed_x = 221.0 - bitmap_text_width(&elapsed);
+    BitmapWinampText(
+        text_bitmap,
+        elapsed,
+        elapsed_x,
+        bottom_y + 24.0,
+        scale,
+        WINAMP_DISPLAY_TEXT_COLOR,
+    );
+}
+
+#[composable]
+fn PlaylistSearchOverlay(
+    text_bitmap: ImageBitmap,
+    state: MutableState<WinampState>,
+    snapshot: WinampState,
+    search_field: TextFieldState,
+    list_width: f32,
+    scale: f32,
+) {
+    let x = PLAYLIST_LIST_BG.0 + 14.0;
+    let y = PLAYLIST_LIST_BG.1 + 34.0;
+    let width = (list_width - 28.0).clamp(150.0, 260.0);
+    let height = 40.0;
+    let query = search_field.text();
+    let last_revision = cranpose_core::useState(|| 0u64);
+
+    {
+        let state_for_sync = state;
+        let field_for_sync = search_field.clone();
+        let snapshot_query = snapshot.playlist_search_query.clone();
+        let snapshot_revision = snapshot.playlist_search_revision;
+        let query_for_sync = query.clone();
+        cranpose_core::SideEffect(move || {
+            if last_revision.get() != snapshot_revision {
+                set_text_field_text(&field_for_sync, &snapshot_query);
+                last_revision.set(snapshot_revision);
+                return;
+            }
+            if query_for_sync != state_for_sync.get_non_reactive().playlist_search_query {
+                state_for_sync.update(|s| {
+                    s.playlist_search_query = query_for_sync.clone();
+                    apply_playlist_search_filter_in_state(s, &query_for_sync);
+                    s.status = format!("Selected {} Match(es)", s.selected_indices.len());
+                    trace_winamp_state("playlist-search-filter", s);
+                });
+            }
+        });
+    }
 
     FilledRect(x, y, width, height, scale, Color(0.01, 0.015, 0.012, 1.0));
     FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
     FilledRect(
         x,
-        y + row_height,
+        y + height - 1.0,
         width,
         1.0,
         scale,
         Color(0.12, 0.20, 0.24, 1.0),
     );
-
     BitmapWinampText(
         text_bitmap.clone(),
-        "ADD FILE".to_string(),
-        x + 5.0,
-        y + 4.0,
+        "SEARCH".to_string(),
+        x + 6.0,
+        y + 5.0,
         scale,
-        [82, 242, 122, 255],
+        PLAYLIST_TEXT_COLOR,
     );
     BitmapWinampText(
         text_bitmap,
-        "ADD FOLDER".to_string(),
-        x + 5.0,
-        y + row_height + 4.0,
+        "CLOSE".to_string(),
+        x + width - 33.0,
+        y + 5.0,
         scale,
-        [82, 242, 122, 255],
+        PLAYLIST_TEXT_COLOR,
+    );
+
+    FilledRect(
+        x + 6.0,
+        y + 18.0,
+        width - 12.0,
+        14.0,
+        scale,
+        Color(0.0, 0.0, 0.0, 1.0),
+    );
+    BasicTextField(
+        search_field,
+        Modifier::empty()
+            .size_points(scaled(width - 16.0, scale), scaled(12.0, scale))
+            .absolute_offset(scaled(x + 8.0, scale), scaled(y + 18.0, scale)),
+        TextStyle::from_span_style(SpanStyle {
+            color: Some(Color(0.72, 0.86, 0.94, 1.0)),
+            font_size: TextUnit::Sp(10.0),
+            ..SpanStyle::default()
+        }),
     );
 
     {
         let state_click = state;
-        let menu_state = menu_open;
-        ClickTarget(x, y, width, row_height, scale, move || {
-            menu_state.set(false);
-            add_audio_files(state_click);
+        ClickTarget(x + width - 38.0, y, 38.0, 15.0, scale, move || {
+            state_click.update(|s| {
+                s.playlist_search_visible = false;
+                trace_winamp_state("playlist-search-close", s);
+            });
+        });
+    }
+}
+
+#[composable]
+fn PlaylistFooterControls(
+    state: MutableState<WinampState>,
+    footer_menu: MutableState<Option<PlaylistFooterMenu>>,
+    bottom_y: f32,
+    scale: f32,
+) {
+    {
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_ADD_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Add);
+        });
+    }
+    {
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_REM_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Remove);
+        });
+    }
+    {
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_SEL_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Select);
+        });
+    }
+    {
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_MISC_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Misc);
+        });
+    }
+    {
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_LIST_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::List);
         });
     }
     {
         let state_click = state;
-        let menu_state = menu_open;
-        ClickTarget(x, y + row_height, width, row_height, scale, move || {
-            menu_state.set(false);
-            add_audio_folder(state_click);
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_PREV_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            menu_state.set(None);
+            previous_track(state_click);
         });
     }
+    {
+        let state_click = state;
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_PLAY_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            menu_state.set(None);
+            play_or_resume(state_click);
+        });
+    }
+    {
+        let state_click = state;
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_PAUSE_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            menu_state.set(None);
+            pause_playback(state_click);
+        });
+    }
+    {
+        let state_click = state;
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_STOP_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            menu_state.set(None);
+            stop_playback(state_click);
+        });
+    }
+    {
+        let state_click = state;
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_NEXT_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            menu_state.set(None);
+            next_track(state_click);
+        });
+    }
+    {
+        let state_click = state;
+        let menu_state = footer_menu;
+        PlaylistFooterClickTarget(PLAYLIST_EJECT_BUTTON_HIT_AREA, bottom_y, scale, move || {
+            menu_state.set(None);
+            open_audio_files(state_click);
+        });
+    }
+}
+
+fn toggle_playlist_footer_menu(
+    menu_state: MutableState<Option<PlaylistFooterMenu>>,
+    menu: PlaylistFooterMenu,
+) {
+    menu_state.update(|open| {
+        *open = if *open == Some(menu) {
+            None
+        } else {
+            Some(menu)
+        };
+    });
+}
+
+#[composable]
+fn PlaylistFooterClickTarget(
+    area: SpriteRect,
+    bottom_y: f32,
+    scale: f32,
+    on_click: impl Fn() + 'static,
+) {
+    ClickTarget(area.0, bottom_y + area.1, area.2, area.3, scale, on_click);
+}
+
+#[composable]
+fn PlaylistWheelScrollTarget(
+    state: MutableState<WinampState>,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    scale: f32,
+) {
+    Box(
+        Modifier::empty()
+            .size_points(scaled(width, scale), scaled(height, scale))
+            .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .pointer_input((), move |scope: PointerInputScope| async move {
+                scope
+                    .await_pointer_event_scope(|await_scope| async move {
+                        loop {
+                            let event = await_scope.await_pointer_event().await;
+                            if event.kind == PointerEventKind::Scroll {
+                                let rows = if event.scroll_delta.y < 0.0 { 3 } else { -3 };
+                                scroll_playlist_by_rows(state, rows);
+                                event.consume();
+                            }
+                        }
+                    })
+                    .await;
+            }),
+        BoxSpec::default(),
+        || {},
+    );
+}
+
+fn playlist_footer_summary(state: &WinampState) -> String {
+    let current = state
+        .current_index
+        .and_then(|index| state.playlist.get(index))
+        .and_then(|track| state.duration_seconds.or(track.duration_seconds))
+        .map(format_duration_compact)
+        .unwrap_or_else(|| "0:00".to_string());
+    let total = playlist_total_duration_seconds(&state.playlist)
+        .map(format_duration_compact)
+        .unwrap_or_else(|| "0:00".to_string());
+
+    format!("{current}/{total}")
+}
+
+fn playlist_total_duration_seconds(playlist: &[Track]) -> Option<f32> {
+    let mut total = 0.0;
+    let mut found = false;
+    for track in playlist {
+        if let Some(duration) = track.duration_seconds.filter(|duration| *duration > 0.0) {
+            total += duration;
+            found = true;
+        }
+    }
+    found.then_some(total)
+}
+
+fn playlist_duration_text(duration_seconds: Option<f32>) -> Option<String> {
+    duration_seconds
+        .filter(|duration| *duration > 0.0)
+        .map(format_duration_compact)
+}
+
+fn format_duration_compact(seconds: f32) -> String {
+    let seconds = seconds.max(0.0).round() as u32;
+    let hours = seconds / 3600;
+    let minutes = (seconds / 60) % 60;
+    let seconds = seconds % 60;
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+fn bitmap_text_width(text: &str) -> f32 {
+    text.chars().count() as f32 * 5.0
+}
+
+fn clip_bitmap_text(text: String, width: f32) -> String {
+    let max_chars = (width / 5.0).floor().max(1.0) as usize;
+    if text.chars().count() <= max_chars {
+        return text;
+    }
+
+    text.chars().take(max_chars).collect()
+}
+
+#[composable]
+fn PlaylistMenu(
+    text_bitmap: ImageBitmap,
+    state: MutableState<WinampState>,
+    menu_open: MutableState<Option<PlaylistFooterMenu>>,
+    menu: PlaylistFooterMenu,
+    window_width: f32,
+    bottom_y: f32,
+    scale: f32,
+) {
+    let items = playlist_footer_menu_items(menu);
+    let width = playlist_footer_menu_width(menu);
+    let row_height = 14.0;
+    let height = row_height * items.len() as f32;
+    let x = playlist_footer_menu_x(menu, window_width, width);
+    let y = (bottom_y - height - 3.0).max(PLAYLIST_TOP_LEFT_CORNER.3);
+
+    FilledRect(x, y, width, height, scale, Color(0.01, 0.015, 0.012, 1.0));
+    FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
+
+    for (index, item) in items.iter().copied().enumerate() {
+        let row_y = y + row_height * index as f32;
+        if index > 0 {
+            FilledRect(x, row_y, width, 1.0, scale, Color(0.12, 0.20, 0.24, 1.0));
+        }
+
+        BitmapWinampText(
+            text_bitmap.clone(),
+            item.label.to_string(),
+            x + 5.0,
+            row_y + 4.0,
+            scale,
+            PLAYLIST_TEXT_COLOR,
+        );
+
+        let state_click = state;
+        let menu_state = menu_open;
+        ClickTarget(x, row_y, width, row_height, scale, move || {
+            menu_state.set(None);
+            (item.action)(state_click);
+        });
+    }
+}
+
+fn playlist_footer_menu_items(menu: PlaylistFooterMenu) -> Vec<PlaylistMenuItem> {
+    match menu {
+        PlaylistFooterMenu::Add => vec![
+            PlaylistMenuItem {
+                label: "ADD FILE",
+                action: add_audio_files,
+            },
+            PlaylistMenuItem {
+                label: "ADD FOLDER",
+                action: add_audio_folder,
+            },
+        ],
+        PlaylistFooterMenu::Remove => vec![
+            PlaylistMenuItem {
+                label: "REM ALL",
+                action: remove_all_tracks,
+            },
+            PlaylistMenuItem {
+                label: "DUPLICATES",
+                action: remove_duplicate_tracks,
+            },
+            PlaylistMenuItem {
+                label: "SELECTED",
+                action: remove_selected_tracks,
+            },
+            PlaylistMenuItem {
+                label: "UNSELECTED",
+                action: remove_unselected_tracks,
+            },
+        ],
+        PlaylistFooterMenu::Select => vec![
+            PlaylistMenuItem {
+                label: "NONE",
+                action: select_no_tracks,
+            },
+            PlaylistMenuItem {
+                label: "ALL",
+                action: select_all_tracks,
+            },
+            PlaylistMenuItem {
+                label: "SEARCH",
+                action: select_search_matches,
+            },
+            PlaylistMenuItem {
+                label: "INVERT",
+                action: invert_track_selection,
+            },
+        ],
+        PlaylistFooterMenu::Misc => vec![
+            PlaylistMenuItem {
+                label: "SORT TITLE",
+                action: sort_playlist_by_title,
+            },
+            PlaylistMenuItem {
+                label: "SORT ARTIST",
+                action: sort_playlist_by_artist,
+            },
+            PlaylistMenuItem {
+                label: "SORT FILE",
+                action: sort_playlist_by_file_name,
+            },
+            PlaylistMenuItem {
+                label: "SORT PATH",
+                action: sort_playlist_by_path,
+            },
+            PlaylistMenuItem {
+                label: "SORT EXT",
+                action: sort_playlist_by_extension,
+            },
+            PlaylistMenuItem {
+                label: "SORT GENRE",
+                action: sort_playlist_by_genre,
+            },
+            PlaylistMenuItem {
+                label: "SORT TIME",
+                action: sort_playlist_by_duration,
+            },
+            PlaylistMenuItem {
+                label: "SORT TAG",
+                action: sort_playlist_by_tag,
+            },
+            PlaylistMenuItem {
+                label: "RANDOMIZE",
+                action: randomize_playlist,
+            },
+        ],
+        PlaylistFooterMenu::List => vec![
+            PlaylistMenuItem {
+                label: "NEW LIST",
+                action: new_playlist,
+            },
+            PlaylistMenuItem {
+                label: "IMPORT M3U",
+                action: import_playlist,
+            },
+            PlaylistMenuItem {
+                label: "EXPORT M3U",
+                action: export_playlist,
+            },
+        ],
+    }
+}
+
+fn playlist_footer_menu_width(menu: PlaylistFooterMenu) -> f32 {
+    match menu {
+        PlaylistFooterMenu::Misc => 78.0,
+        PlaylistFooterMenu::Remove => 78.0,
+        PlaylistFooterMenu::List => 76.0,
+        PlaylistFooterMenu::Select | PlaylistFooterMenu::Add => 72.0,
+    }
+}
+
+fn playlist_footer_menu_x(menu: PlaylistFooterMenu, window_width: f32, menu_width: f32) -> f32 {
+    let button_x = match menu {
+        PlaylistFooterMenu::Add => PLAYLIST_ADD_BUTTON_HIT_AREA.0,
+        PlaylistFooterMenu::Remove => PLAYLIST_REM_BUTTON_HIT_AREA.0,
+        PlaylistFooterMenu::Select => PLAYLIST_SEL_BUTTON_HIT_AREA.0,
+        PlaylistFooterMenu::Misc => PLAYLIST_MISC_BUTTON_HIT_AREA.0,
+        PlaylistFooterMenu::List => PLAYLIST_LIST_BUTTON_HIT_AREA.0,
+    };
+    button_x.clamp(4.0, (window_width - menu_width - 4.0).max(4.0))
 }
 
 #[composable]
@@ -1690,18 +2228,6 @@ fn winamp_text_glyph(ch: char) -> Option<(usize, usize)> {
     Some((index * 5, 6))
 }
 
-fn ellipsize(text: String, width: f32) -> String {
-    let max_chars = (width / 6.0).floor().max(1.0) as usize;
-    if text.chars().count() <= max_chars {
-        return text;
-    }
-
-    let keep = max_chars.saturating_sub(1);
-    let mut result = text.chars().take(keep).collect::<String>();
-    result.push('~');
-    result
-}
-
 fn ellipsize_bitmap(text: String, width: f32) -> String {
     let max_chars = (width / 5.0).floor().max(1.0) as usize;
     if text.chars().count() <= max_chars {
@@ -1749,7 +2275,51 @@ fn main_display_title(state: &WinampState) -> String {
         .unwrap_or_else(|| state.status.clone())
 }
 
+#[composable]
+fn MainMetaReadouts(text_bitmap: ImageBitmap, state: WinampState, scale: f32) {
+    if state
+        .current_index
+        .and_then(|index| state.playlist.get(index))
+        .is_some()
+    {
+        BitmapWinampText(
+            text_bitmap.clone(),
+            "320".to_string(),
+            POS_MAIN_META_TEXT.0,
+            POS_MAIN_META_TEXT.1,
+            scale,
+            WINAMP_DISPLAY_TEXT_COLOR,
+        );
+        BitmapWinampText(
+            text_bitmap,
+            "44".to_string(),
+            POS_MAIN_META_TEXT.0 + 45.0,
+            POS_MAIN_META_TEXT.1,
+            scale,
+            WINAMP_DISPLAY_TEXT_COLOR,
+        );
+        return;
+    }
+
+    BitmapWinampText(
+        text_bitmap,
+        ellipsize_bitmap(main_display_meta(&state), MAIN_META_TEXT_WIDTH),
+        POS_MAIN_META_TEXT.0,
+        POS_MAIN_META_TEXT.1,
+        scale,
+        WINAMP_DISPLAY_TEXT_COLOR,
+    );
+}
+
 fn main_display_meta(state: &WinampState) -> String {
+    if state
+        .current_index
+        .and_then(|index| state.playlist.get(index))
+        .is_some()
+    {
+        return "320kbps 44khz".to_string();
+    }
+
     let prefix = match state.playback {
         PlaybackState::Playing => "PLAY",
         PlaybackState::Paused => "PAUSE",
@@ -1790,6 +2360,117 @@ fn Visualizer(playing: bool, bands: audio::VisualizerBands, scale: f32) {
             );
         },
     );
+}
+
+#[composable]
+fn EqCurve(values: [f32; 11], scale: f32) {
+    let bitmap = eq_curve_bitmap(values);
+    let width = scaled(EQ_GRAPH_BG.2, scale);
+    let height = scaled(EQ_GRAPH_BG.3, scale);
+
+    Canvas(
+        Modifier::empty()
+            .size_points(width, height)
+            .absolute_offset(
+                scaled(POS_EQ_GRAPH_BG.0, scale),
+                scaled(POS_EQ_GRAPH_BG.1, scale),
+            ),
+        move |scope| {
+            scope.draw_image_at(
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width,
+                    height,
+                },
+                bitmap.clone(),
+                1.0,
+                None,
+            );
+        },
+    );
+}
+
+fn eq_curve_bitmap(values: [f32; 11]) -> ImageBitmap {
+    let width = EQ_GRAPH_BG.2 as u32;
+    let height = EQ_GRAPH_BG.3 as u32;
+    let mut pixels = vec![0u8; width as usize * height as usize * 4];
+    let band_values = &values[1..];
+    let mut points = Vec::with_capacity(band_values.len());
+
+    for (index, value) in band_values.iter().copied().enumerate() {
+        let x = if band_values.len() <= 1 {
+            0
+        } else {
+            ((index as f32 / (band_values.len() - 1) as f32) * (width - 1) as f32).round() as i32
+        };
+        let y = ((1.0 - clamp01(value)) * (height - 1) as f32).round() as i32;
+        points.push((x, y));
+    }
+
+    for pair in points.windows(2) {
+        let from = pair[0];
+        let to = pair[1];
+        draw_bitmap_line(&mut pixels, width, height, from, to, [38, 91, 132, 255]);
+        draw_bitmap_line(
+            &mut pixels,
+            width,
+            height,
+            (from.0, from.1 - 1),
+            (to.0, to.1 - 1),
+            WINAMP_DISPLAY_TEXT_COLOR,
+        );
+    }
+
+    ImageBitmap::from_rgba8(width, height, pixels)
+        .expect("rendered EQ curve bitmap should be valid")
+}
+
+fn draw_bitmap_line(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    from: (i32, i32),
+    to: (i32, i32),
+    color: [u8; 4],
+) {
+    let (mut x0, mut y0) = from;
+    let (x1, y1) = to;
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+
+    loop {
+        set_bitmap_pixel(pixels, width, height, x0, y0, color);
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let e2 = err * 2;
+        if e2 >= dy {
+            err += dy;
+            x0 += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+fn set_bitmap_pixel(pixels: &mut [u8], width: u32, height: u32, x: i32, y: i32, color: [u8; 4]) {
+    if x < 0 || y < 0 {
+        return;
+    }
+    let x = x as u32;
+    let y = y as u32;
+    if x >= width || y >= height {
+        return;
+    }
+
+    let offset = ((y * width + x) * 4) as usize;
+    pixels[offset..offset + 4].copy_from_slice(&color);
 }
 
 fn visualizer_bitmap(playing: bool, bands: audio::VisualizerBands) -> ImageBitmap {
@@ -2413,6 +3094,7 @@ fn open_audio_files(state: MutableState<WinampState>) {
                         state.update(|s| {
                             s.playlist = vec![track.clone()];
                             s.current_index = Some(0);
+                            set_playlist_selection(s, [0]);
                             scroll_playlist_to_track(s, 0);
                             s.position = 0.0;
                             s.elapsed_seconds = 0.0;
@@ -2535,10 +3217,10 @@ fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     state.playlist = tracks;
     state.current_index = Some(0);
+    set_playlist_selection(state, [0]);
     state.playlist_scroll = 0.0;
     state.position = 0.0;
     state.elapsed_seconds = 0.0;
@@ -2548,7 +3230,6 @@ fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     refresh_shuffle_order(state);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn append_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) -> bool {
     let was_empty = state.playlist.is_empty();
     let added_count = tracks.len();
@@ -2556,6 +3237,7 @@ fn append_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) -> bool {
     state.playlist.extend(tracks);
     if was_empty {
         state.current_index = Some(0);
+        set_playlist_selection(state, [0]);
         state.playlist_scroll = 0.0;
         state.position = 0.0;
         state.elapsed_seconds = 0.0;
@@ -2563,11 +3245,868 @@ fn append_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) -> bool {
         state.title_marquee_phase = 0.0;
         state.status = format!("Loaded {} Track(s)", state.playlist.len());
     } else {
+        normalize_playlist_selection(state);
         state.status = format!("Added {added_count} Track(s)");
     }
     refresh_shuffle_order(state);
 
     was_empty
+}
+
+fn set_playlist_selection<I>(state: &mut WinampState, indices: I)
+where
+    I: IntoIterator<Item = usize>,
+{
+    state.selected_indices = indices.into_iter().collect();
+    normalize_playlist_selection(state);
+    state.selection_anchor = state.selected_indices.last().copied();
+}
+
+fn normalize_playlist_selection(state: &mut WinampState) {
+    state.selected_indices.sort_unstable();
+    state.selected_indices.dedup();
+    let len = state.playlist.len();
+    state.selected_indices.retain(|index| *index < len);
+    if state
+        .selection_anchor
+        .is_some_and(|anchor| anchor >= state.playlist.len())
+    {
+        state.selection_anchor = state.selected_indices.last().copied();
+    }
+}
+
+fn selected_playlist_indices_or_current(state: &WinampState) -> Vec<usize> {
+    let mut indices = state
+        .selected_indices
+        .iter()
+        .copied()
+        .filter(|index| *index < state.playlist.len())
+        .collect::<Vec<_>>();
+    if indices.is_empty() {
+        if let Some(index) = state
+            .current_index
+            .filter(|index| *index < state.playlist.len())
+        {
+            indices.push(index);
+        }
+    }
+    indices.sort_unstable();
+    indices.dedup();
+    indices
+}
+
+fn remove_all_tracks(state: MutableState<WinampState>) {
+    let snapshot = state.get_non_reactive();
+    if snapshot.playlist.is_empty() {
+        state.update(|s| s.status = "Playlist Empty".to_string());
+        return;
+    }
+    if snapshot.playback != PlaybackState::Stopped {
+        let _ = audio::stop();
+    }
+    state.update(|s| {
+        clear_playlist_state(s);
+        trace_winamp_state("playlist-remove-all", s);
+    });
+}
+
+fn clear_playlist_state(state: &mut WinampState) {
+    state.playlist.clear();
+    state.current_index = None;
+    state.selected_indices.clear();
+    state.selection_anchor = None;
+    state.shuffle_order.clear();
+    state.playlist_scroll = 0.0;
+    state.playback = PlaybackState::Stopped;
+    state.position = 0.0;
+    state.elapsed_seconds = 0.0;
+    state.duration_seconds = None;
+    state.title_marquee_phase = 0.0;
+    state.status = "Playlist Empty".to_string();
+}
+
+fn remove_selected_tracks(state: MutableState<WinampState>) {
+    let snapshot = state.get_non_reactive();
+    let indices = selected_playlist_indices_or_current(&snapshot);
+    remove_playlist_indices_action(state, indices, "playlist-remove-selected");
+}
+
+fn remove_unselected_tracks(state: MutableState<WinampState>) {
+    let snapshot = state.get_non_reactive();
+    let selected = selected_playlist_indices_or_current(&snapshot)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let indices = snapshot
+        .playlist
+        .iter()
+        .enumerate()
+        .filter_map(|(index, _)| (!selected.contains(&index)).then_some(index))
+        .collect::<Vec<_>>();
+    remove_playlist_indices_action(state, indices, "playlist-remove-unselected");
+}
+
+fn remove_duplicate_tracks(state: MutableState<WinampState>) {
+    let snapshot = state.get_non_reactive();
+    let indices = duplicate_playlist_indices(&snapshot.playlist);
+    remove_playlist_indices_action(state, indices, "playlist-remove-duplicates");
+}
+
+fn duplicate_playlist_indices(playlist: &[Track]) -> Vec<usize> {
+    let mut seen = HashSet::new();
+    let mut indices = Vec::new();
+    for (index, track) in playlist.iter().enumerate() {
+        if !seen.insert(duplicate_track_key(track)) {
+            indices.push(index);
+        }
+    }
+    indices
+}
+
+fn duplicate_track_key(track: &Track) -> String {
+    track
+        .path
+        .as_deref()
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| track.display_title())
+        .to_ascii_lowercase()
+}
+
+fn remove_playlist_indices_action(
+    state: MutableState<WinampState>,
+    indices: Vec<usize>,
+    trace_action: &'static str,
+) {
+    let snapshot = state.get_non_reactive();
+    if snapshot.playlist.is_empty() {
+        state.update(|s| s.status = "Playlist Empty".to_string());
+        return;
+    }
+    if indices.is_empty() {
+        state.update(|s| s.status = "No Tracks Removed".to_string());
+        return;
+    }
+    if snapshot
+        .current_index
+        .is_some_and(|current| indices.contains(&current))
+        && snapshot.playback != PlaybackState::Stopped
+    {
+        let _ = audio::stop();
+    }
+
+    state.update(|s| {
+        let removed = remove_playlist_indices(s, &indices);
+        if removed > 0 && !s.playlist.is_empty() {
+            s.status = format!("Removed {removed} Track(s)");
+        }
+        trace_winamp_state(trace_action, s);
+    });
+}
+
+fn remove_playlist_indices(state: &mut WinampState, indices: &[usize]) -> usize {
+    let len = state.playlist.len();
+    if len == 0 {
+        clear_playlist_state(state);
+        return 0;
+    }
+
+    let mut remove = vec![false; len];
+    for index in indices.iter().copied().filter(|index| *index < len) {
+        remove[index] = true;
+    }
+    let removed_count = remove.iter().filter(|remove| **remove).count();
+    if removed_count == 0 {
+        return 0;
+    }
+
+    let old_current = state.current_index.filter(|index| *index < len);
+    let removed_current = old_current.is_some_and(|index| remove[index]);
+    let old_selected = state.selected_indices.clone();
+    let old_playlist = std::mem::take(&mut state.playlist);
+    let mut old_to_new = vec![None; len];
+    let mut new_playlist = Vec::with_capacity(len - removed_count);
+
+    for (old_index, track) in old_playlist.into_iter().enumerate() {
+        if remove[old_index] {
+            continue;
+        }
+        old_to_new[old_index] = Some(new_playlist.len());
+        new_playlist.push(track);
+    }
+
+    state.playlist = new_playlist;
+    if state.playlist.is_empty() {
+        clear_playlist_state(state);
+        return removed_count;
+    }
+
+    state.current_index = old_current
+        .and_then(|index| old_to_new[index])
+        .or_else(|| nearest_surviving_playlist_index(old_current.unwrap_or(0), &old_to_new))
+        .or(Some(0));
+
+    if removed_current {
+        state.playback = PlaybackState::Stopped;
+        state.position = 0.0;
+        state.elapsed_seconds = 0.0;
+        state.duration_seconds = None;
+        state.title_marquee_phase = 0.0;
+    }
+
+    state.selected_indices = old_selected
+        .into_iter()
+        .filter_map(|index| old_to_new.get(index).copied().flatten())
+        .collect();
+    normalize_playlist_selection(state);
+    if state.selected_indices.is_empty() {
+        if let Some(current) = state.current_index {
+            set_playlist_selection(state, [current]);
+        }
+    }
+    if let Some(current) = state.current_index {
+        scroll_playlist_to_track(state, current);
+    }
+    refresh_shuffle_order(state);
+    removed_count
+}
+
+fn nearest_surviving_playlist_index(
+    old_index: usize,
+    old_to_new: &[Option<usize>],
+) -> Option<usize> {
+    old_to_new
+        .iter()
+        .skip(old_index)
+        .find_map(|index| *index)
+        .or_else(|| {
+            old_to_new
+                .iter()
+                .take(old_index)
+                .rev()
+                .find_map(|index| *index)
+        })
+}
+
+#[cfg(test)]
+fn remove_playlist_track_at(state: &mut WinampState, index: usize) -> bool {
+    if index >= state.playlist.len() {
+        state.status = "Track Missing".to_string();
+        return false;
+    }
+
+    let removed_number = index + 1;
+    remove_playlist_indices(state, &[index]);
+    if !state.playlist.is_empty() {
+        state.status = format!("Removed Track {removed_number}");
+    }
+    true
+}
+
+fn select_no_tracks(state: MutableState<WinampState>) {
+    state.update(|s| {
+        s.selected_indices.clear();
+        s.selection_anchor = None;
+        s.status = "Selection Cleared".to_string();
+        trace_winamp_state("playlist-select-none", s);
+    });
+}
+
+fn select_all_tracks(state: MutableState<WinampState>) {
+    state.update(|s| {
+        let len = s.playlist.len();
+        set_playlist_selection(s, 0..len);
+        s.status = format!("Selected {} Track(s)", s.selected_indices.len());
+        trace_winamp_state("playlist-select-all", s);
+    });
+}
+
+fn invert_track_selection(state: MutableState<WinampState>) {
+    state.update(|s| {
+        let selected = s.selected_indices.iter().copied().collect::<HashSet<_>>();
+        let inverted = (0..s.playlist.len())
+            .filter(|index| !selected.contains(index))
+            .collect::<Vec<_>>();
+        set_playlist_selection(s, inverted);
+        s.status = format!("Selected {} Track(s)", s.selected_indices.len());
+        trace_winamp_state("playlist-select-invert", s);
+    });
+}
+
+fn select_search_matches(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if !s.playlist_search_visible {
+            s.playlist_search_query = playlist_search_query(s).unwrap_or_default();
+            s.playlist_search_revision = s.playlist_search_revision.wrapping_add(1);
+        }
+        s.playlist_search_visible = true;
+        let query = s.playlist_search_query.clone();
+        apply_playlist_search_filter_in_state(s, &query);
+        s.status = format!("Selected {} Match(es)", s.selected_indices.len());
+        trace_winamp_state("playlist-select-search", s);
+    });
+}
+
+fn apply_playlist_search_filter_in_state(state: &mut WinampState, query: &str) {
+    let query = query.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        state.selected_indices.clear();
+        state.selection_anchor = None;
+        return;
+    }
+    let matches = state
+        .playlist
+        .iter()
+        .enumerate()
+        .filter_map(|(index, track)| {
+            let title = track.display_title().to_ascii_lowercase();
+            let path = track.path.as_deref().unwrap_or("").to_ascii_lowercase();
+            (title.contains(&query) || path.contains(&query)).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    set_playlist_selection(state, matches);
+}
+
+fn set_text_field_text(field: &TextFieldState, text: &str) {
+    if field.text() == text {
+        return;
+    }
+    field.edit(|buffer| {
+        let len = buffer.text().len();
+        buffer.replace(TextRange::new(0, len), text);
+        buffer.place_cursor_at_end();
+    });
+}
+
+fn playlist_search_query(state: &WinampState) -> Option<String> {
+    let index = state
+        .selection_anchor
+        .or(state.current_index)
+        .filter(|index| *index < state.playlist.len())?;
+    let title = state.playlist[index].display_title();
+    let artist = parsed_track_artist(title);
+    let query = artist.filter(|artist| artist.len() >= 2).unwrap_or(title);
+    let query = query.trim();
+    (!query.is_empty()).then(|| query.to_string())
+}
+
+fn sort_playlist_by_title(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if sort_playlist_tracks_by_field(s, PlaylistSortField::Title) {
+            trace_winamp_state("playlist-sort-title", s);
+        }
+    });
+}
+
+#[cfg(test)]
+fn sort_playlist_tracks_by_title(state: &mut WinampState) -> bool {
+    sort_playlist_tracks_by_field(state, PlaylistSortField::Title)
+}
+
+fn sort_playlist_by_artist(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if sort_playlist_tracks_by_field(s, PlaylistSortField::Artist) {
+            trace_winamp_state("playlist-sort-artist", s);
+        }
+    });
+}
+
+fn sort_playlist_by_file_name(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if sort_playlist_tracks_by_field(s, PlaylistSortField::FileName) {
+            trace_winamp_state("playlist-sort-file", s);
+        }
+    });
+}
+
+fn sort_playlist_by_path(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if sort_playlist_tracks_by_field(s, PlaylistSortField::Path) {
+            trace_winamp_state("playlist-sort-path", s);
+        }
+    });
+}
+
+fn sort_playlist_by_extension(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if sort_playlist_tracks_by_field(s, PlaylistSortField::Extension) {
+            trace_winamp_state("playlist-sort-extension", s);
+        }
+    });
+}
+
+fn sort_playlist_by_duration(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if sort_playlist_tracks_by_field(s, PlaylistSortField::Duration) {
+            trace_winamp_state("playlist-sort-duration", s);
+        }
+    });
+}
+
+fn sort_playlist_by_genre(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if sort_playlist_tracks_by_field(s, PlaylistSortField::Genre) {
+            trace_winamp_state("playlist-sort-genre", s);
+        }
+    });
+}
+
+fn sort_playlist_by_tag(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if sort_playlist_tracks_by_field(s, PlaylistSortField::Tag) {
+            trace_winamp_state("playlist-sort-tag", s);
+        }
+    });
+}
+
+#[derive(Clone, Copy)]
+enum PlaylistSortField {
+    Title,
+    Artist,
+    FileName,
+    Path,
+    Extension,
+    Genre,
+    Duration,
+    Tag,
+}
+
+fn sort_playlist_tracks_by_field(state: &mut WinampState, field: PlaylistSortField) -> bool {
+    if state.playlist.len() < 2 {
+        state.status = "Playlist Sorted".to_string();
+        return false;
+    }
+
+    let current_track = state
+        .current_index
+        .and_then(|index| state.playlist.get(index))
+        .cloned();
+    let selected_tracks = selected_tracks_snapshot(state);
+
+    state.playlist.sort_by(|left, right| {
+        compare_tracks_by_field(left, right, field)
+            .then_with(|| left.title.cmp(&right.title))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    restore_current_and_selection_after_reorder(state, current_track, selected_tracks);
+    state.status = "Playlist Sorted".to_string();
+    refresh_shuffle_order(state);
+    true
+}
+
+fn compare_tracks_by_field(
+    left: &Track,
+    right: &Track,
+    field: PlaylistSortField,
+) -> std::cmp::Ordering {
+    match field {
+        PlaylistSortField::Duration => left
+            .duration_seconds
+            .unwrap_or(f32::MAX)
+            .total_cmp(&right.duration_seconds.unwrap_or(f32::MAX)),
+        _ => playlist_sort_key(left, field).cmp(&playlist_sort_key(right, field)),
+    }
+}
+
+fn playlist_sort_key(track: &Track, field: PlaylistSortField) -> String {
+    match field {
+        PlaylistSortField::Title => track.display_title().to_ascii_lowercase(),
+        PlaylistSortField::Artist => parsed_track_artist(track.display_title())
+            .unwrap_or(track.display_title())
+            .to_ascii_lowercase(),
+        PlaylistSortField::FileName => playlist_file_stem(track).to_ascii_lowercase(),
+        PlaylistSortField::Path => track.path.as_deref().unwrap_or("").to_ascii_lowercase(),
+        PlaylistSortField::Extension => playlist_path_extension(track).to_ascii_lowercase(),
+        PlaylistSortField::Genre => playlist_parent_folder(track).to_ascii_lowercase(),
+        PlaylistSortField::Duration => String::new(),
+        PlaylistSortField::Tag => format!(
+            "{} {} {}",
+            parsed_track_artist(track.display_title()).unwrap_or(""),
+            parsed_track_title(track.display_title()),
+            playlist_file_stem(track)
+        )
+        .to_ascii_lowercase(),
+    }
+}
+
+fn parsed_track_artist(title: &str) -> Option<&str> {
+    title
+        .split_once(" - ")
+        .map(|(artist, _)| artist.trim())
+        .filter(|artist| !artist.is_empty())
+}
+
+fn parsed_track_title(title: &str) -> &str {
+    title
+        .split_once(" - ")
+        .map(|(_, title)| title.trim())
+        .filter(|title| !title.is_empty())
+        .unwrap_or(title)
+}
+
+fn playlist_file_stem(track: &Track) -> String {
+    track
+        .path
+        .as_deref()
+        .and_then(|path| {
+            std::path::Path::new(path)
+                .file_stem()
+                .or_else(|| std::path::Path::new(path).file_name())
+                .and_then(|name| name.to_str())
+        })
+        .unwrap_or_else(|| track.display_title())
+        .to_string()
+}
+
+fn playlist_parent_folder(track: &Track) -> String {
+    track
+        .path
+        .as_deref()
+        .and_then(|path| std::path::Path::new(path).parent())
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn playlist_path_extension(track: &Track) -> String {
+    track
+        .path
+        .as_deref()
+        .and_then(|path| std::path::Path::new(path).extension())
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn selected_tracks_snapshot(state: &WinampState) -> Vec<Track> {
+    state
+        .selected_indices
+        .iter()
+        .filter_map(|index| state.playlist.get(*index).cloned())
+        .collect()
+}
+
+fn restore_current_and_selection_after_reorder(
+    state: &mut WinampState,
+    current_track: Option<Track>,
+    selected_tracks: Vec<Track>,
+) {
+    state.current_index = current_track
+        .as_ref()
+        .and_then(|current| state.playlist.iter().position(|track| track == current))
+        .or_else(|| (!state.playlist.is_empty()).then_some(0));
+    state.selected_indices = indices_for_tracks(&state.playlist, &selected_tracks);
+    normalize_playlist_selection(state);
+    if state.selected_indices.is_empty() {
+        if let Some(current) = state.current_index {
+            set_playlist_selection(state, [current]);
+        }
+    } else {
+        state.selection_anchor = state.selected_indices.last().copied();
+    }
+    if let Some(index) = state.current_index {
+        scroll_playlist_to_track(state, index);
+    }
+}
+
+fn indices_for_tracks(playlist: &[Track], targets: &[Track]) -> Vec<usize> {
+    let mut used = vec![false; targets.len()];
+    let mut indices = Vec::new();
+    for (playlist_index, track) in playlist.iter().enumerate() {
+        if let Some(target_index) = targets
+            .iter()
+            .enumerate()
+            .find_map(|(target_index, target)| {
+                (!used[target_index] && target == track).then_some(target_index)
+            })
+        {
+            used[target_index] = true;
+            indices.push(playlist_index);
+        }
+    }
+    indices
+}
+
+fn randomize_playlist(state: MutableState<WinampState>) {
+    state.update(|s| {
+        if randomize_playlist_tracks(s) {
+            trace_winamp_state("playlist-randomize", s);
+        }
+    });
+}
+
+fn randomize_playlist_tracks(state: &mut WinampState) -> bool {
+    if state.playlist.len() < 2 {
+        state.status = "Playlist Randomized".to_string();
+        return false;
+    }
+
+    let current_track = state
+        .current_index
+        .and_then(|index| state.playlist.get(index))
+        .cloned();
+    let selected_tracks = selected_tracks_snapshot(state);
+    let old_playlist = state.playlist.clone();
+    let mut order = (0..old_playlist.len()).collect::<Vec<_>>();
+    shuffle_indices(&mut order, random_shuffle_seed());
+    state.playlist = order
+        .into_iter()
+        .map(|index| old_playlist[index].clone())
+        .collect();
+    restore_current_and_selection_after_reorder(state, current_track, selected_tracks);
+    state.status = "Playlist Randomized".to_string();
+    refresh_shuffle_order(state);
+    true
+}
+
+fn new_playlist(state: MutableState<WinampState>) {
+    let snapshot = state.get_non_reactive();
+    if snapshot.playback != PlaybackState::Stopped {
+        let _ = audio::stop();
+    }
+    state.update(|s| {
+        clear_playlist_state(s);
+        s.status = "New Playlist".to_string();
+        trace_winamp_state("playlist-new", s);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn import_playlist(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Importing Playlist".to_string());
+    match pick_playlist_file().and_then(|path| {
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        let text = std::fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        let tracks = parse_m3u_playlist(&text, path.parent());
+        Ok(Some(tracks))
+    }) {
+        Ok(Some(tracks)) if tracks.is_empty() => {
+            state.update(|s| s.status = "No Playlist Tracks".to_string());
+        }
+        Ok(Some(tracks)) => {
+            let _ = audio::stop();
+            state.update(|s| {
+                replace_playlist_tracks(s, tracks);
+                s.playback = PlaybackState::Stopped;
+                s.status = format!("Imported {} Track(s)", s.playlist.len());
+                trace_winamp_state("playlist-import", s);
+            });
+        }
+        Ok(None) => state.update(|s| s.status = "Import Cancelled".to_string()),
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn import_playlist(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Playlist import unavailable in the web widget".to_string());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn export_playlist(state: MutableState<WinampState>) {
+    let snapshot = state.get_non_reactive();
+    if snapshot.playlist.is_empty() {
+        state.update(|s| s.status = "Playlist Empty".to_string());
+        return;
+    }
+
+    state.update(|s| s.status = "Exporting Playlist".to_string());
+    match save_playlist_file().and_then(|path| {
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        let text = format_m3u_playlist(&snapshot.playlist);
+        std::fs::write(&path, text)
+            .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        Ok(Some(path))
+    }) {
+        Ok(Some(path)) => {
+            state.update(|s| s.status = format!("Exported {}", path.display()));
+        }
+        Ok(None) => state.update(|s| s.status = "Export Cancelled".to_string()),
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn export_playlist(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Playlist export unavailable in the web widget".to_string());
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+))]
+fn pick_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
+    Ok(rfd::FileDialog::new()
+        .set_title("Import playlist")
+        .add_filter("Playlist", &["m3u", "m3u8", "M3U", "M3U8"])
+        .pick_file())
+}
+
+#[cfg(not(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+)))]
+#[cfg(not(target_arch = "wasm32"))]
+fn pick_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
+    Err("native playlist picker is not available on this target yet".to_string())
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+))]
+fn save_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
+    Ok(rfd::FileDialog::new()
+        .set_title("Export playlist")
+        .set_file_name("playlist.m3u")
+        .add_filter("Playlist", &["m3u", "m3u8"])
+        .save_file())
+}
+
+#[cfg(not(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+)))]
+#[cfg(not(target_arch = "wasm32"))]
+fn save_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
+    Err("native playlist saver is not available on this target yet".to_string())
+}
+
+fn parse_m3u_playlist(input: &str, base_dir: Option<&std::path::Path>) -> Vec<Track> {
+    let mut tracks = Vec::new();
+    let mut pending_extinf = None::<(Option<f32>, String)>;
+
+    for line in input.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(extinf) = line.strip_prefix("#EXTINF:") {
+            pending_extinf = parse_extinf(extinf);
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+
+        let resolved_path = resolve_playlist_path(line, base_dir);
+        if !is_supported_playlist_path(&resolved_path) {
+            pending_extinf = None;
+            continue;
+        }
+        let (duration_seconds, title) = pending_extinf
+            .take()
+            .unwrap_or_else(|| (None, playlist_title_from_path(&resolved_path)));
+        tracks.push(Track {
+            title: if title.is_empty() {
+                playlist_title_from_path(&resolved_path)
+            } else {
+                title
+            },
+            path: Some(resolved_path),
+            duration_seconds,
+        });
+    }
+
+    tracks
+}
+
+fn parse_extinf(input: &str) -> Option<(Option<f32>, String)> {
+    let (duration, title) = input.split_once(',').unwrap_or((input, ""));
+    let duration_seconds = duration
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|duration| *duration > 0.0);
+    Some((duration_seconds, title.trim().to_string()))
+}
+
+fn resolve_playlist_path(path: &str, base_dir: Option<&std::path::Path>) -> String {
+    let path = path.trim();
+    if path.starts_with("file://") {
+        return path.trim_start_matches("file://").to_string();
+    }
+    let candidate = std::path::Path::new(path);
+    if candidate.is_absolute() {
+        return path.to_string();
+    }
+    base_dir
+        .map(|base| base.join(candidate).to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn is_supported_playlist_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            let extension = extension.to_ascii_lowercase();
+            audio::supported_audio_extensions()
+                .iter()
+                .any(|candidate| *candidate == extension)
+        })
+        .unwrap_or(false)
+}
+
+fn playlist_title_from_path(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .or_else(|| std::path::Path::new(path).file_name())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Untitled")
+        .to_string()
+}
+
+fn format_m3u_playlist(playlist: &[Track]) -> String {
+    let mut lines = vec!["#EXTM3U".to_string()];
+    for track in playlist {
+        if let Some(duration) = track.duration_seconds {
+            lines.push(format!(
+                "#EXTINF:{},{}",
+                duration.round().max(0.0) as u32,
+                track.display_title()
+            ));
+        }
+        lines.push(
+            track
+                .path
+                .clone()
+                .unwrap_or_else(|| track.display_title().to_string()),
+        );
+    }
+    lines.join("\n") + "\n"
+}
+
+fn scroll_playlist_by_rows(state: MutableState<WinampState>, rows: i32) {
+    state.update(|s| scroll_playlist_by_rows_in_state(s, rows));
+}
+
+fn scroll_playlist_by_rows_in_state(state: &mut WinampState, rows: i32) {
+    let max_start = state
+        .playlist
+        .len()
+        .saturating_sub(state.playlist_visible_rows.max(1));
+    if max_start == 0 {
+        state.playlist_scroll = 0.0;
+        return;
+    }
+
+    let start = (state.playlist_scroll.clamp(0.0, 1.0) * max_start as f32).round() as i32;
+    let next = (start + rows).clamp(0, max_start as i32);
+    state.playlist_scroll = next as f32 / max_start as f32;
 }
 
 fn scroll_playlist_to_track(state: &mut WinampState, index: usize) {
@@ -2905,33 +4444,6 @@ fn finish_playlist(state: MutableState<WinampState>) {
     });
 }
 
-fn activate_playlist_track(state: MutableState<WinampState>, index: usize) {
-    let snapshot = state.get_non_reactive();
-    if index >= snapshot.playlist.len() {
-        state.update(|s| s.status = "Track Missing".to_string());
-        return;
-    }
-
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
-    if snapshot
-        .playlist
-        .get(index)
-        .map(|track| track.path.is_none())
-        .unwrap_or(false)
-    {
-        state.update(|s| {
-            s.current_index = Some(index);
-            scroll_playlist_to_track(s, index);
-            s.title_marquee_phase = 0.0;
-            s.status = current_track_status(s, "Selected");
-        });
-        play_or_resume(state);
-        return;
-    }
-
-    start_track(state, index);
-}
-
 fn start_track(state: MutableState<WinampState>, index: usize) {
     let snapshot = state.get_non_reactive();
     let Some(track) = snapshot.playlist.get(index).cloned() else {
@@ -2945,6 +4457,7 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
             Ok(()) => {
                 state.update(|s| {
                     s.current_index = Some(index);
+                    set_playlist_selection(s, [index]);
                     scroll_playlist_to_track(s, index);
                     sync_shuffle_order_to_current(s, index);
                     s.playback = PlaybackState::Playing;
@@ -2958,6 +4471,7 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
             }
             Err(error) => state.update(|s| {
                 s.current_index = Some(index);
+                set_playlist_selection(s, [index]);
                 scroll_playlist_to_track(s, index);
                 s.playback = PlaybackState::Stopped;
                 s.title_marquee_phase = 0.0;
@@ -2972,6 +4486,7 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         Ok(()) => {
             state.update(|s| {
                 s.current_index = Some(index);
+                set_playlist_selection(s, [index]);
                 scroll_playlist_to_track(s, index);
                 sync_shuffle_order_to_current(s, index);
                 s.playback = PlaybackState::Playing;
@@ -2985,6 +4500,7 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         }
         Err(error) => state.update(|s| {
             s.current_index = Some(index);
+            set_playlist_selection(s, [index]);
             scroll_playlist_to_track(s, index);
             s.playback = PlaybackState::Stopped;
             s.title_marquee_phase = 0.0;
@@ -2992,6 +4508,166 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
             trace_winamp_state("play-error", s);
         }),
     }
+}
+
+fn handle_playlist_row_click(state: MutableState<WinampState>, index: usize) {
+    let now_ms = current_time_ms();
+    let modifiers = current_playlist_click_modifiers();
+
+    let should_play = state.update(|s| {
+        let should_play = handle_playlist_row_click_in_state(s, index, now_ms, modifiers);
+        trace_winamp_state("playlist-row-select", s);
+        should_play
+    });
+    if should_play {
+        start_track(state, index);
+    }
+}
+
+fn handle_playlist_row_click_in_state(
+    state: &mut WinampState,
+    index: usize,
+    now_ms: u64,
+    modifiers: PlaylistClickModifiers,
+) -> bool {
+    if index >= state.playlist.len() {
+        state.status = "Track Missing".to_string();
+        return false;
+    }
+
+    let should_play = state.playlist_last_click_index == Some(index)
+        && now_ms.saturating_sub(state.playlist_last_click_ms) <= PLAYLIST_DOUBLE_CLICK_MS
+        && !modifiers.any();
+    if should_play {
+        state.playlist_last_click_index = None;
+        state.playlist_last_click_ms = 0;
+        return true;
+    }
+
+    select_playlist_row_in_state(state, index, modifiers);
+    state.playlist_last_click_index = Some(index);
+    state.playlist_last_click_ms = now_ms;
+    false
+}
+
+fn select_playlist_row_in_state(
+    state: &mut WinampState,
+    index: usize,
+    modifiers: PlaylistClickModifiers,
+) {
+    if index >= state.playlist.len() {
+        state.status = "Track Missing".to_string();
+        return;
+    }
+
+    if modifiers.shift {
+        let anchor = state
+            .selection_anchor
+            .or_else(|| state.selected_indices.last().copied())
+            .or(state.current_index)
+            .unwrap_or(index)
+            .min(state.playlist.len() - 1);
+        let (start, end) = if anchor <= index {
+            (anchor, index)
+        } else {
+            (index, anchor)
+        };
+        let range = start..=end;
+        if modifiers.ctrl {
+            state.selected_indices.extend(range);
+            normalize_playlist_selection(state);
+        } else {
+            set_playlist_selection(state, range);
+        }
+        state.selection_anchor = Some(anchor);
+    } else if modifiers.ctrl {
+        if state.selected_indices.contains(&index) {
+            state.selected_indices.retain(|selected| *selected != index);
+            normalize_playlist_selection(state);
+        } else {
+            state.selected_indices.push(index);
+            normalize_playlist_selection(state);
+            state.selection_anchor = Some(index);
+        }
+    } else {
+        set_playlist_selection(state, [index]);
+    }
+
+    scroll_playlist_to_track(state, index);
+    state.status = if state.selected_indices.len() == 1 {
+        state
+            .playlist
+            .get(index)
+            .map(|track| format!("Selected {}", track.display_title()))
+            .unwrap_or_else(|| "Selected".to_string())
+    } else {
+        format!("Selected {} Track(s)", state.selected_indices.len())
+    };
+}
+
+fn current_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
+
+fn current_playlist_click_modifiers() -> PlaylistClickModifiers {
+    native_playlist_click_modifiers().unwrap_or_default()
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios")
+))]
+fn native_playlist_click_modifiers() -> Option<PlaylistClickModifiers> {
+    use x11rb::protocol::xproto::ConnectionExt as _;
+
+    let (connection, _) = x11rb::connect(None).ok()?;
+    let modifier_mapping = connection.get_modifier_mapping().ok()?.reply().ok()?;
+    let keymap = connection.query_keymap().ok()?.reply().ok()?;
+    let per_modifier = usize::from(modifier_mapping.keycodes_per_modifier());
+    if per_modifier == 0 {
+        return None;
+    }
+
+    let keycodes = modifier_mapping.keycodes;
+    let key_active = |keycode: u8| -> bool {
+        if keycode == 0 {
+            return false;
+        }
+        let byte = usize::from(keycode / 8);
+        let bit = keycode % 8;
+        keymap
+            .keys
+            .get(byte)
+            .is_some_and(|value| (value & (1 << bit)) != 0)
+    };
+    let group_active = |group: usize| -> bool {
+        let start = group * per_modifier;
+        let end = start + per_modifier;
+        keycodes
+            .get(start..end)
+            .unwrap_or(&[])
+            .iter()
+            .copied()
+            .any(key_active)
+    };
+
+    Some(PlaylistClickModifiers {
+        shift: group_active(0),
+        ctrl: group_active(2),
+    })
+}
+
+#[cfg(not(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios")
+)))]
+fn native_playlist_click_modifiers() -> Option<PlaylistClickModifiers> {
+    None
 }
 
 fn current_track_status(state: &WinampState, prefix: &str) -> String {
@@ -3091,6 +4767,9 @@ fn restore_saved_player_state(saved: SavedPlayerState) -> WinampState {
     }
     if !state.playlist.is_empty() {
         state.current_index = restored_current_index.or(Some(0));
+        if let Some(index) = state.current_index {
+            set_playlist_selection(&mut state, [index]);
+        }
         state.status = format!("Restored {} Track(s)", state.playlist.len());
     }
     state
@@ -3111,10 +4790,7 @@ fn restore_saved_track(track: SavedTrack) -> Option<Track> {
     } else {
         track.title
     };
-    Some(Track {
-        title,
-        path: Some(track.path),
-    })
+    Some(audio::track_from_title_path(title, track.path))
 }
 
 fn serialize_player_state(config: &SavedPlayerState) -> String {
@@ -3915,6 +5591,310 @@ mod tests {
     }
 
     #[test]
+    fn playlist_single_click_selects_without_playing() {
+        let mut state = WinampState {
+            playlist: vec![test_track("First"), test_track("Second")],
+            current_index: Some(0),
+            selected_indices: vec![0],
+            selection_anchor: Some(0),
+            ..WinampState::default()
+        };
+
+        let should_play = handle_playlist_row_click_in_state(
+            &mut state,
+            1,
+            1000,
+            PlaylistClickModifiers::default(),
+        );
+
+        assert!(!should_play);
+        assert_eq!(state.current_index, Some(0));
+        assert_eq!(state.playback, PlaybackState::Stopped);
+        assert_eq!(state.selected_indices, vec![1]);
+        assert_eq!(state.selection_anchor, Some(1));
+        assert_eq!(state.playlist_last_click_index, Some(1));
+    }
+
+    #[test]
+    fn playlist_second_plain_click_requests_play() {
+        let mut state = WinampState {
+            playlist: vec![test_track("First"), test_track("Second")],
+            playlist_last_click_index: Some(1),
+            playlist_last_click_ms: 1000,
+            ..WinampState::default()
+        };
+
+        let should_play = handle_playlist_row_click_in_state(
+            &mut state,
+            1,
+            1200,
+            PlaylistClickModifiers::default(),
+        );
+
+        assert!(should_play);
+        assert_eq!(state.playlist_last_click_index, None);
+        assert_eq!(state.playlist_last_click_ms, 0);
+    }
+
+    #[test]
+    fn playlist_shift_and_ctrl_click_match_winamp_selection_rules() {
+        let mut state = WinampState {
+            playlist: vec![
+                test_track("First"),
+                test_track("Second"),
+                test_track("Third"),
+                test_track("Fourth"),
+            ],
+            selected_indices: vec![1],
+            selection_anchor: Some(1),
+            ..WinampState::default()
+        };
+
+        select_playlist_row_in_state(
+            &mut state,
+            3,
+            PlaylistClickModifiers {
+                shift: true,
+                ctrl: false,
+            },
+        );
+        assert_eq!(state.selected_indices, vec![1, 2, 3]);
+        assert_eq!(state.selection_anchor, Some(1));
+
+        select_playlist_row_in_state(
+            &mut state,
+            2,
+            PlaylistClickModifiers {
+                shift: false,
+                ctrl: true,
+            },
+        );
+        assert_eq!(state.selected_indices, vec![1, 3]);
+        assert_eq!(state.selection_anchor, Some(1));
+
+        select_playlist_row_in_state(
+            &mut state,
+            0,
+            PlaylistClickModifiers {
+                shift: false,
+                ctrl: true,
+            },
+        );
+        assert_eq!(state.selected_indices, vec![0, 1, 3]);
+        assert_eq!(state.selection_anchor, Some(0));
+    }
+
+    #[test]
+    fn remove_playlist_track_at_stops_removed_current_and_keeps_next_selected() {
+        let mut state = WinampState {
+            playback: PlaybackState::Playing,
+            playlist: vec![
+                test_track("First"),
+                test_track("Second"),
+                test_track("Third"),
+            ],
+            current_index: Some(1),
+            position: 0.5,
+            elapsed_seconds: 12.0,
+            duration_seconds: Some(120.0),
+            ..WinampState::default()
+        };
+
+        assert!(remove_playlist_track_at(&mut state, 1));
+
+        assert_eq!(
+            state.playlist,
+            vec![test_track("First"), test_track("Third")]
+        );
+        assert_eq!(state.current_index, Some(1));
+        assert_eq!(state.playback, PlaybackState::Stopped);
+        assert_eq!(state.position, 0.0);
+        assert_eq!(state.elapsed_seconds, 0.0);
+        assert_eq!(state.duration_seconds, None);
+        assert_eq!(state.status, "Removed Track 2");
+    }
+
+    #[test]
+    fn sort_playlist_tracks_by_title_preserves_current_track() {
+        let mut state = WinampState {
+            playlist: vec![
+                test_track("Bravo"),
+                test_track("Alpha"),
+                test_track("Charlie"),
+            ],
+            current_index: Some(0),
+            selected_indices: vec![0, 2],
+            selection_anchor: Some(2),
+            ..WinampState::default()
+        };
+
+        assert!(sort_playlist_tracks_by_title(&mut state));
+
+        assert_eq!(
+            state.playlist,
+            vec![
+                test_track("Alpha"),
+                test_track("Bravo"),
+                test_track("Charlie")
+            ]
+        );
+        assert_eq!(state.current_index, Some(1));
+        assert_eq!(state.selected_indices, vec![1, 2]);
+        assert_eq!(state.selection_anchor, Some(2));
+        assert_eq!(state.status, "Playlist Sorted");
+    }
+
+    #[test]
+    fn remove_playlist_indices_remaps_current_and_selection() {
+        let mut state = WinampState {
+            playback: PlaybackState::Playing,
+            playlist: vec![
+                test_track("First"),
+                test_track("Second"),
+                test_track("Third"),
+                test_track("Fourth"),
+            ],
+            current_index: Some(2),
+            selected_indices: vec![1, 3],
+            selection_anchor: Some(3),
+            position: 0.5,
+            elapsed_seconds: 12.0,
+            duration_seconds: Some(120.0),
+            ..WinampState::default()
+        };
+
+        assert_eq!(remove_playlist_indices(&mut state, &[1, 3]), 2);
+
+        assert_eq!(
+            state.playlist,
+            vec![test_track("First"), test_track("Third")]
+        );
+        assert_eq!(state.current_index, Some(1));
+        assert_eq!(state.selected_indices, vec![1]);
+        assert_eq!(state.playback, PlaybackState::Playing);
+    }
+
+    #[test]
+    fn remove_playlist_indices_stops_when_current_is_removed() {
+        let mut state = WinampState {
+            playback: PlaybackState::Playing,
+            playlist: vec![test_track("First"), test_track("Second")],
+            current_index: Some(0),
+            selected_indices: vec![0],
+            position: 0.5,
+            elapsed_seconds: 12.0,
+            duration_seconds: Some(120.0),
+            ..WinampState::default()
+        };
+
+        assert_eq!(remove_playlist_indices(&mut state, &[0]), 1);
+
+        assert_eq!(state.playlist, vec![test_track("Second")]);
+        assert_eq!(state.current_index, Some(0));
+        assert_eq!(state.selected_indices, vec![0]);
+        assert_eq!(state.playback, PlaybackState::Stopped);
+        assert_eq!(state.position, 0.0);
+        assert_eq!(state.elapsed_seconds, 0.0);
+        assert_eq!(state.duration_seconds, None);
+    }
+
+    #[test]
+    fn duplicate_playlist_indices_uses_path_when_available() {
+        let playlist = vec![
+            test_track_with_path("First", "/tmp/one.mp3"),
+            test_track_with_path("Copy", "/tmp/one.mp3"),
+            test_track_with_path("Other", "/tmp/two.mp3"),
+        ];
+
+        assert_eq!(duplicate_playlist_indices(&playlist), vec![1]);
+    }
+
+    #[test]
+    fn select_search_query_uses_current_artist_prefix() {
+        let state = WinampState {
+            playlist: vec![
+                test_track("Celldweller - Eon"),
+                test_track("Celldweller - One Good Reason"),
+            ],
+            current_index: Some(1),
+            ..WinampState::default()
+        };
+
+        assert_eq!(
+            playlist_search_query(&state),
+            Some("Celldweller".to_string())
+        );
+    }
+
+    #[test]
+    fn playlist_search_filter_selects_matching_title_or_path() {
+        let mut state = WinampState {
+            playlist: vec![
+                test_track_with_path("Blue October - Somebody", "/music/blue.mp3"),
+                test_track_with_path("Celldweller - Eon", "/music/eon.flac"),
+                test_track_with_path("Other", "/music/celldweller-live.ogg"),
+            ],
+            ..WinampState::default()
+        };
+
+        apply_playlist_search_filter_in_state(&mut state, "celldweller");
+
+        assert_eq!(state.selected_indices, vec![1, 2]);
+        assert_eq!(state.selection_anchor, Some(2));
+    }
+
+    #[test]
+    fn parse_m3u_playlist_accepts_plain_paths_and_extinf() {
+        let input = "#EXTM3U\n#EXTINF:195,Broods - Heartlines\nrelative/song.mp3\n/home/s/Music/Other.flac\n";
+        let tracks = parse_m3u_playlist(input, Some(std::path::Path::new("/tmp/list")));
+
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].title, "Broods - Heartlines");
+        assert_eq!(tracks[0].duration_seconds, Some(195.0));
+        assert_eq!(
+            tracks[0].path.as_deref(),
+            Some("/tmp/list/relative/song.mp3")
+        );
+        assert_eq!(tracks[1].title, "Other");
+        assert_eq!(tracks[1].path.as_deref(), Some("/home/s/Music/Other.flac"));
+    }
+
+    #[test]
+    fn format_m3u_playlist_writes_extm3u_and_durations() {
+        let playlist = vec![Track {
+            title: "Broods - Heartlines".to_string(),
+            path: Some("/home/s/Music/Broods - Heartlines.mp3".to_string()),
+            duration_seconds: Some(199.0),
+        }];
+
+        let text = format_m3u_playlist(&playlist);
+
+        assert!(text.starts_with("#EXTM3U\n"));
+        assert!(text.contains("#EXTINF:199,Broods - Heartlines\n"));
+        assert!(text.contains("/home/s/Music/Broods - Heartlines.mp3\n"));
+    }
+
+    #[test]
+    fn scroll_playlist_by_rows_clamps_to_available_rows() {
+        let mut state = WinampState {
+            playlist: (0..20)
+                .map(|index| test_track(&format!("Track {index:02}")))
+                .collect(),
+            playlist_visible_rows: 5,
+            ..WinampState::default()
+        };
+
+        scroll_playlist_by_rows_in_state(&mut state, 3);
+        assert!((state.playlist_scroll - (3.0 / 15.0)).abs() < f32::EPSILON);
+
+        scroll_playlist_by_rows_in_state(&mut state, 99);
+        assert_eq!(state.playlist_scroll, 1.0);
+
+        scroll_playlist_by_rows_in_state(&mut state, -99);
+        assert_eq!(state.playlist_scroll, 0.0);
+    }
+
+    #[test]
     fn automatic_advance_stops_at_playlist_end_without_repeat() {
         let state = WinampState {
             playlist: vec![test_track("First"), test_track("Second")],
@@ -4040,6 +6020,15 @@ mod tests {
         Track {
             title: title.to_string(),
             path: Some(format!("/tmp/{title}.mp3")),
+            duration_seconds: None,
+        }
+    }
+
+    fn test_track_with_path(title: &str, path: &str) -> Track {
+        Track {
+            title: title.to_string(),
+            path: Some(path.to_string()),
+            duration_seconds: None,
         }
     }
 }
