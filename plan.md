@@ -66,3 +66,23 @@ Reference inputs:
 - [x] Render the currently playing playlist row as a scrolling marquee string.
 - [x] Add tests for playlist click selection and search filtering.
 - [x] Rebuild, run Cranamp, and capture the updated windows for a rendering sanity check.
+
+## Android Support
+
+- [x] Enable the native audio backend for Android builds so Rodio/CPAL playback is compiled into the APK.
+- [x] Add an Android-specific single-surface Winamp app where the main window, equalizer, and playlist are always stacked vertically.
+- [x] Make the Android content height collapse when the equalizer or playlist panels are hidden.
+- [x] Add an Android `NativeActivity` subclass that opens SAF file, folder, playlist import, and playlist export flows.
+- [x] Copy selected Android audio documents into app-private files so the existing path-based playback backend can play them.
+- [x] Wire Android picker results into Cranamp replace/append/import/export playlist behavior.
+- [x] Keep Android manifest freeform metadata aligned with the full stacked Winamp height.
+- [x] Track Cranpose blockers for true always-on-top overlay hosting and app-driven Android native window resizing, which are not exposed by Cranpose 0.0.61 (`samoylenkodmitry/Cranpose#232`, `samoylenkodmitry/Cranpose#238`).
+- [x] Make the Android stacked composition scale from the live floating-window constraints and set the default Android freeform width to the Winamp skin width so the rendered content matches the host area as closely as Cranpose allows.
+- [x] Stretch the Android playlist panel height from the remaining native-surface space so the stacked Winamp surface fills Samsung freeform windows that include decor/surface insets.
+- [x] Keep Android stacked layout on the full native surface so the Winamp skin fills Samsung freeform windows.
+- [x] Patch Cranpose Android pointer conversion to add the native-surface/content-rect inset, keeping finger hits aligned when Samsung inflates the surface for freeform shadows.
+- [x] Add Cranamp-side Android drag hit testing for non-interactive Winamp skin areas.
+- [ ] Blocked: app-driven Android `NativeActivity` freeform task moving is not exposed reliably. `View.startMovingTask`, `IWindowSession.startMovingTask`, hidden API exemptions, and UI-thread `Window.setAttributes()` were tested on Samsung DeX/freeform; task bounds did not move, and `Window.setAttributes()` caused native-surface resize churn.
+- [x] Add the freeform move attempt as a best-effort Android bridge and fail it once per gesture when the platform blocks movement.
+- [x] Subtract Android surface insets when starting a freeform move so the raw drag anchor stays under the finger.
+- [x] File the Cranpose input-coordinate blocker for Android freeform `surfaceInsets` (`samoylenkodmitry/Cranpose#240`) and add the freeform movement findings to the existing overlay blocker (`samoylenkodmitry/Cranpose#232`).

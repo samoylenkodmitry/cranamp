@@ -15,7 +15,7 @@ android {
 
     defaultConfig {
         applicationId = "com.cranamp.app"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = releaseVersionName()
@@ -78,6 +78,7 @@ tasks.register<Exec>("buildRustDebug") {
 
     commandLine("sh", "-c", """
         cargo ndk \
+            --platform 26 \
             -t x86_64 \
             -o target/android \
             build \
@@ -100,6 +101,7 @@ tasks.register<Exec>("buildRustRelease") {
 
     commandLine("sh", "-c", """
         cargo ndk \
+            --platform 26 \
             -t arm64-v8a \
             -t armeabi-v7a \
             -t x86 \

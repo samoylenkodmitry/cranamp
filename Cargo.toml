@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -24,7 +24,7 @@ default = ["renderer-wgpu", "desktop"]
 renderer-wgpu = ["cranpose/renderer-wgpu"]
 renderer-pixels = ["cranpose/renderer-pixels"]
 desktop = ["cranpose/desktop", "native-audio", "native-dialogs"]
-android = ["cranpose/android"]
+android = ["cranpose/android", "native-audio"]
 ios = ["cranpose/ios"]
 web = [
     "cranpose/web",
@@ -71,6 +71,10 @@ x11rb = "0.13.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6", features = ["native-activity"] }
+jni = "0.21"
+
+[patch.crates-io]
+cranpose = { path = "vendor/cranpose" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = { version = "0.1", optional = true }

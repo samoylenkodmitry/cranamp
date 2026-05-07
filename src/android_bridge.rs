@@ -1,0 +1,266 @@
+#![allow(unsafe_code)]
+
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+use android_activity::AndroidApp;
+use jni::objects::{JObject, JString, JValue};
+use jni::sys::jobject;
+use jni::JavaVM;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AndroidLoadMode {
+    Replace,
+    Append,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AndroidBridgeResult {
+    AudioPaths {
+        mode: AndroidLoadMode,
+        paths: Vec<PathBuf>,
+    },
+    PlaylistImport {
+        text: String,
+    },
+    PlaylistExport {
+        target: String,
+    },
+    Cancelled {
+        operation: &'static str,
+    },
+    Error(String),
+}
+
+struct AndroidBridge {
+    vm: JavaVM,
+    activity: jni::objects::GlobalRef,
+    bridge_dir: PathBuf,
+}
+
+static BRIDGE: OnceLock<AndroidBridge> = OnceLock::new();
+
+pub fn init(app: &AndroidApp) -> Result<(), String> {
+    if BRIDGE.get().is_some() {
+        return Ok(());
+    }
+
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }
+        .map_err(|error| format!("failed to attach Android JVM: {error}"))?;
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|error| format!("failed to attach Android thread: {error}"))?;
+    let activity_obj = unsafe { JObject::from_raw(app.activity_as_ptr() as jobject) };
+    let activity = env
+        .new_global_ref(&activity_obj)
+        .map_err(|error| format!("failed to retain Android activity: {error}"))?;
+    let bridge_dir_obj = env
+        .call_method(
+            activity.as_obj(),
+            "cranampBridgeDirectory",
+            "()Ljava/lang/String;",
+            &[],
+        )
+        .and_then(|value| value.l())
+        .map_err(|error| format!("failed to get Android bridge directory: {error}"))?;
+    let bridge_dir = JString::from(bridge_dir_obj);
+    let bridge_dir: String = env
+        .get_string(&bridge_dir)
+        .map_err(|error| format!("failed to read Android bridge directory: {error}"))?
+        .into();
+    drop(env);
+
+    let bridge = AndroidBridge {
+        vm,
+        activity,
+        bridge_dir: PathBuf::from(bridge_dir),
+    };
+    let _ = BRIDGE.set(bridge);
+    Ok(())
+}
+
+pub fn request_audio_files(mode: AndroidLoadMode) -> Result<(), String> {
+    call_android_picker(
+        "cranampPickAudioFiles",
+        "(I)V",
+        &[JValue::Int(mode_value(mode))],
+    )
+}
+
+pub fn request_audio_folder(mode: AndroidLoadMode) -> Result<(), String> {
+    call_android_picker(
+        "cranampPickAudioFolder",
+        "(I)V",
+        &[JValue::Int(mode_value(mode))],
+    )
+}
+
+pub fn request_playlist_import() -> Result<(), String> {
+    call_android_picker("cranampImportPlaylist", "()V", &[])
+}
+
+pub fn request_playlist_export(text: &str) -> Result<(), String> {
+    let Some(bridge) = BRIDGE.get() else {
+        return Err("Android activity bridge is not initialized".to_string());
+    };
+    let mut env = bridge
+        .vm
+        .attach_current_thread()
+        .map_err(|error| format!("failed to attach Android thread: {error}"))?;
+    let text = env
+        .new_string(text)
+        .map_err(|error| format!("failed to prepare playlist export text: {error}"))?;
+    env.call_method(
+        bridge.activity.as_obj(),
+        "cranampExportPlaylist",
+        "(Ljava/lang/String;)V",
+        &[(&text).into()],
+    )
+    .map_err(|error| format!("failed to launch Android playlist export: {error}"))?;
+    Ok(())
+}
+
+pub fn take_results() -> Vec<AndroidBridgeResult> {
+    let Some(bridge) = BRIDGE.get() else {
+        return Vec::new();
+    };
+
+    let mut results = Vec::new();
+    collect_audio_result(
+        &bridge.bridge_dir,
+        "audio_replace",
+        AndroidLoadMode::Replace,
+        &mut results,
+    );
+    collect_audio_result(
+        &bridge.bridge_dir,
+        "audio_append",
+        AndroidLoadMode::Append,
+        &mut results,
+    );
+    collect_playlist_import_result(&bridge.bridge_dir, &mut results);
+    collect_playlist_export_result(&bridge.bridge_dir, &mut results);
+    results
+}
+
+pub fn config_dir() -> Option<PathBuf> {
+    BRIDGE.get().map(|bridge| bridge.bridge_dir.join("config"))
+}
+
+pub fn start_window_move(local_x_dp: f32, local_y_dp: f32) -> bool {
+    let Some(bridge) = BRIDGE.get() else {
+        return false;
+    };
+    let Ok(mut env) = bridge.vm.attach_current_thread() else {
+        return false;
+    };
+    env.call_method(
+        bridge.activity.as_obj(),
+        "cranampStartWindowMove",
+        "(FF)Z",
+        &[JValue::Float(local_x_dp), JValue::Float(local_y_dp)],
+    )
+    .and_then(|value| value.z())
+    .unwrap_or(false)
+}
+
+fn mode_value(mode: AndroidLoadMode) -> i32 {
+    match mode {
+        AndroidLoadMode::Replace => 0,
+        AndroidLoadMode::Append => 1,
+    }
+}
+
+fn call_android_picker(
+    method: &str,
+    signature: &str,
+    args: &[JValue<'_, '_>],
+) -> Result<(), String> {
+    let Some(bridge) = BRIDGE.get() else {
+        return Err("Android activity bridge is not initialized".to_string());
+    };
+    let mut env = bridge
+        .vm
+        .attach_current_thread()
+        .map_err(|error| format!("failed to attach Android thread: {error}"))?;
+    env.call_method(bridge.activity.as_obj(), method, signature, args)
+        .map_err(|error| format!("failed to launch Android picker: {error}"))?;
+    Ok(())
+}
+
+fn collect_audio_result(
+    bridge_dir: &std::path::Path,
+    name: &'static str,
+    mode: AndroidLoadMode,
+    results: &mut Vec<AndroidBridgeResult>,
+) {
+    let paths_file = bridge_dir.join(format!("{name}.paths"));
+    if let Some(text) = take_file_to_string(&paths_file) {
+        let paths = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        if !paths.is_empty() {
+            results.push(AndroidBridgeResult::AudioPaths { mode, paths });
+        }
+    }
+    collect_cancel_error(bridge_dir, name, "Audio Picker", results);
+}
+
+fn collect_playlist_import_result(
+    bridge_dir: &std::path::Path,
+    results: &mut Vec<AndroidBridgeResult>,
+) {
+    let import_file = bridge_dir.join("playlist_import.m3u");
+    if let Some(text) = take_file_to_string(&import_file) {
+        results.push(AndroidBridgeResult::PlaylistImport { text });
+    }
+    collect_cancel_error(bridge_dir, "playlist_import", "Playlist Import", results);
+}
+
+fn collect_playlist_export_result(
+    bridge_dir: &std::path::Path,
+    results: &mut Vec<AndroidBridgeResult>,
+) {
+    let ok_file = bridge_dir.join("playlist_export.ok");
+    if let Some(target) = take_file_to_string(&ok_file) {
+        results.push(AndroidBridgeResult::PlaylistExport {
+            target: target.trim().to_string(),
+        });
+    }
+    collect_cancel_error(bridge_dir, "playlist_export", "Playlist Export", results);
+}
+
+fn collect_cancel_error(
+    bridge_dir: &std::path::Path,
+    name: &'static str,
+    operation: &'static str,
+    results: &mut Vec<AndroidBridgeResult>,
+) {
+    let cancel_file = bridge_dir.join(format!("{name}.cancel"));
+    if cancel_file.is_file() {
+        let _ = std::fs::remove_file(cancel_file);
+        results.push(AndroidBridgeResult::Cancelled { operation });
+    }
+
+    let error_file = bridge_dir.join(format!("{name}.error"));
+    if let Some(error) = take_file_to_string(&error_file) {
+        let error = error.trim();
+        results.push(AndroidBridgeResult::Error(if error.is_empty() {
+            format!("{operation} failed")
+        } else {
+            error.to_string()
+        }));
+    }
+}
+
+fn take_file_to_string(path: &std::path::Path) -> Option<String> {
+    if !path.is_file() {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    let _ = std::fs::remove_file(path);
+    Some(text)
+}

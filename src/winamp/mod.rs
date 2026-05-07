@@ -26,8 +26,12 @@ use cranpose_ui::{
     ColumnSpec, Modifier, Point, PointerEventKind, PointerInputScope, Size, SpanStyle, Text,
     TextStyle,
 };
+#[cfg(target_os = "android")]
+use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
+#[cfg(target_os = "android")]
+use crate::android_bridge::{self, AndroidBridgeResult, AndroidLoadMode};
 use crate::audio::{self, Track};
 use skin::{load_skin, WinampSkin};
 use sprites::*;
@@ -58,7 +62,7 @@ fn trace_winamp_state(action: &str, state: &WinampState) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn trace_tracks(action: &str, tracks: &[Track]) {
     if winamp_native_trace_enabled() {
         let paths = tracks
@@ -166,6 +170,8 @@ fn initial_winamp_state() -> WinampState {
 #[derive(Clone, Copy, PartialEq)]
 enum WinampDragTarget {
     Inline(MutableState<Point>),
+    #[cfg(target_os = "android")]
+    Fixed(Point),
     NativeGroup,
 }
 
@@ -359,9 +365,34 @@ fn remember_winamp_skin() -> Result<WinampSkin, String> {
 #[composable]
 fn WinampRuntimeEffects(state: MutableState<WinampState>, peer_windows: WinampPeerWindowStates) {
     PlaybackProgressEffect(state);
+    AndroidPickerEffect(state);
     PlayerStatePersistence(state);
     NativeWindowPersistence(peer_windows);
 }
+
+#[cfg(target_os = "android")]
+#[composable]
+fn AndroidPickerEffect(state: MutableState<WinampState>) {
+    cranpose_core::LaunchedEffectAsync!((), move |scope| {
+        Box::pin(async move {
+            let clock = scope.runtime().frame_clock();
+            loop {
+                if !scope.is_active() {
+                    break;
+                }
+                let _ = clock.next_frame().await;
+                if !scope.is_active() {
+                    break;
+                }
+                handle_android_bridge_results(state);
+            }
+        })
+    });
+}
+
+#[cfg(not(target_os = "android"))]
+#[composable]
+fn AndroidPickerEffect(_state: MutableState<WinampState>) {}
 
 #[composable]
 fn PlaybackProgressEffect(state: MutableState<WinampState>) {
@@ -447,6 +478,41 @@ pub fn WinampFullscreenApp() {
 #[composable]
 pub fn WinampWidgetApp() {
     WinampSurfaceApp();
+}
+
+#[cfg(target_os = "android")]
+#[composable]
+pub fn WinampAndroidApp() {
+    let tab_state = remember_winamp_tab_state();
+    WinampRuntimeEffects(tab_state.player, tab_state.peer_windows);
+    let skin = match remember_winamp_skin() {
+        Ok(skin) => skin,
+        Err(error) => {
+            WinampSkinError(error);
+            return;
+        }
+    };
+
+    Box(
+        Modifier::empty()
+            .fill_max_size()
+            .clip_to_bounds()
+            .background(Color(0.02, 0.02, 0.03, 1.0)),
+        BoxSpec::default(),
+        move || {
+            let skin_for_stack = skin.clone();
+            BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
+                let snapshot = tab_state.player.get();
+                let layout = android_stacked_layout(
+                    scope.max_width().0,
+                    scope.max_height().0,
+                    &snapshot,
+                    ui_scale(),
+                );
+                WinampStackedStage(skin_for_stack.clone(), tab_state.player, layout);
+            });
+        },
+    );
 }
 
 #[composable]
@@ -559,6 +625,362 @@ fn WinampInlineStage(
             }
         },
     );
+}
+
+#[cfg(target_os = "android")]
+#[composable]
+fn WinampStackedStage(
+    skin: WinampSkin,
+    state: MutableState<WinampState>,
+    layout: AndroidStackedLayout,
+) {
+    let snapshot = state.get();
+    let scale = layout.scale;
+    let mut y = 0.0;
+    let main_y = y;
+    y += MAIN_HEIGHT;
+    let equalizer_y = y;
+    if snapshot.eq_visible {
+        y += EQ_HEIGHT;
+    }
+    let playlist_y = y;
+    if snapshot.playlist_visible {
+        y += layout.playlist_height;
+    }
+
+    Box(
+        Modifier::empty()
+            .size_points(scaled(MAIN_WIDTH, scale), scaled(y, scale))
+            .clip_to_bounds()
+            .background(Color(0.02, 0.02, 0.03, 1.0)),
+        BoxSpec::default(),
+        move || {
+            MainWindow(
+                skin.clone(),
+                state,
+                WinampDragTarget::Fixed(Point::new(0.0, main_y)),
+                WinampCloseAction::SetStatus,
+                scale,
+            );
+
+            if snapshot.eq_visible {
+                EqualizerWindow(
+                    skin.clone(),
+                    state,
+                    WinampDragTarget::Fixed(Point::new(0.0, equalizer_y)),
+                    scale,
+                );
+            }
+
+            if snapshot.playlist_visible {
+                PlaylistWindow(
+                    skin.pledit.clone(),
+                    skin.text.clone(),
+                    state,
+                    WinampDragTarget::Fixed(Point::new(0.0, playlist_y)),
+                    WinampWindowSize::Fixed(Size::new(
+                        scaled(PLAYLIST_WIDTH, scale),
+                        scaled(layout.playlist_height, scale),
+                    )),
+                    scale,
+                );
+            }
+
+            AndroidWindowMoveTarget(MAIN_WIDTH, y, scale, snapshot.clone(), layout);
+        },
+    );
+}
+
+#[cfg(target_os = "android")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AndroidStackedLayout {
+    scale: f32,
+    playlist_height: f32,
+}
+
+#[cfg(target_os = "android")]
+fn android_stacked_layout(
+    available_width: f32,
+    available_height: f32,
+    snapshot: &WinampState,
+    fallback: f32,
+) -> AndroidStackedLayout {
+    let width_scale = bounded_scale(available_width, MAIN_WIDTH);
+    let height_scale = bounded_scale(available_height, android_stacked_height(snapshot));
+    let scale = (match (width_scale, height_scale) {
+        (Some(width), Some(_)) if snapshot.playlist_visible => width,
+        (Some(width), Some(height)) => width.min(height),
+        (Some(width), None) => width,
+        (None, Some(height)) => height,
+        (None, None) => fallback,
+    })
+    .clamp(0.5, 4.0);
+
+    let base_height = MAIN_HEIGHT + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
+    let playlist_height = if snapshot.playlist_visible {
+        let available_skin_height = if available_height.is_finite() && available_height > 0.0 {
+            available_height / scale.max(f32::EPSILON)
+        } else {
+            base_height + PLAYLIST_HEIGHT
+        };
+        (available_skin_height - base_height).max(playlist_min_height())
+    } else {
+        PLAYLIST_HEIGHT
+    };
+
+    AndroidStackedLayout {
+        scale,
+        playlist_height,
+    }
+}
+
+#[cfg(target_os = "android")]
+fn android_stacked_height(snapshot: &WinampState) -> f32 {
+    MAIN_HEIGHT
+        + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 }
+        + if snapshot.playlist_visible {
+            PLAYLIST_HEIGHT
+        } else {
+            0.0
+        }
+}
+
+#[cfg(target_os = "android")]
+#[composable]
+fn AndroidWindowMoveTarget(
+    width: f32,
+    height: f32,
+    scale: f32,
+    snapshot: WinampState,
+    layout: AndroidStackedLayout,
+) {
+    let drag_start = cranpose_core::useState(|| None::<Point>);
+    let drag_blocked = cranpose_core::useState(|| false);
+    let moving = cranpose_core::useState(|| false);
+    Box(
+        Modifier::empty()
+            .size_points(scaled(width, scale), scaled(height, scale))
+            .pointer_input((), move |scope: PointerInputScope| {
+                let snapshot = snapshot.clone();
+                async move {
+                    scope
+                        .await_pointer_event_scope(|await_scope| async move {
+                            loop {
+                                let event = await_scope.await_pointer_event().await;
+                                match event.kind {
+                                    PointerEventKind::Down => {
+                                        let interactive = android_stacked_interactive_area_contains(
+                                            event.position,
+                                            &snapshot,
+                                            layout,
+                                        );
+                                        drag_start.set((!interactive).then_some(event.position));
+                                        drag_blocked.set(interactive);
+                                        moving.set(false);
+                                    }
+                                    PointerEventKind::Move => {
+                                        if drag_blocked.get() {
+                                            continue;
+                                        }
+                                        if !event.buttons.contains(PointerButton::Primary) {
+                                            drag_start.set(None);
+                                            moving.set(false);
+                                            continue;
+                                        }
+                                        if moving.get() {
+                                            event.consume();
+                                            continue;
+                                        }
+                                        if let Some(start) = drag_start.get() {
+                                            let dx = event.position.x - start.x;
+                                            let dy = event.position.y - start.y;
+                                            let threshold = scaled(3.0, scale).max(3.0);
+                                            if dx * dx + dy * dy >= threshold * threshold {
+                                                let started = android_bridge::start_window_move(
+                                                    event.position.x,
+                                                    event.position.y,
+                                                );
+                                                if started {
+                                                    moving.set(true);
+                                                    event.consume();
+                                                } else {
+                                                    drag_start.set(None);
+                                                    drag_blocked.set(true);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    PointerEventKind::Up | PointerEventKind::Cancel => {
+                                        drag_start.set(None);
+                                        drag_blocked.set(false);
+                                        moving.set(false);
+                                    }
+                                    PointerEventKind::Scroll
+                                    | PointerEventKind::Enter
+                                    | PointerEventKind::Exit => {}
+                                }
+                            }
+                        })
+                        .await;
+                }
+            }),
+        BoxSpec::default(),
+        || {},
+    );
+}
+
+#[cfg(target_os = "android")]
+fn android_stacked_interactive_area_contains(
+    position: Point,
+    snapshot: &WinampState,
+    layout: AndroidStackedLayout,
+) -> bool {
+    let scale = layout.scale.max(f32::EPSILON);
+    let x = position.x / scale;
+    let mut y = position.y / scale;
+
+    if y < MAIN_HEIGHT {
+        return main_interactive_area_contains(x, y);
+    }
+    y -= MAIN_HEIGHT;
+
+    if snapshot.eq_visible {
+        if y < EQ_HEIGHT {
+            return equalizer_interactive_area_contains(x, y);
+        }
+        y -= EQ_HEIGHT;
+    }
+
+    if snapshot.playlist_visible {
+        return playlist_interactive_area_contains(x, y, PLAYLIST_WIDTH, layout.playlist_height);
+    }
+
+    false
+}
+
+#[cfg(target_os = "android")]
+fn main_interactive_area_contains(x: f32, y: f32) -> bool {
+    let rects = [
+        rect_at(POS_OPTIONS_BUTTON, MAIN_OPTIONS_BUTTON),
+        rect_at(POS_MINIMIZE_BUTTON, MAIN_MINIMIZE_BUTTON),
+        rect_at(POS_SHADE_BUTTON, MAIN_SHADE_BUTTON),
+        rect_at(POS_CLOSE_BUTTON, MAIN_CLOSE_BUTTON),
+        rect(POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3),
+        rect(
+            POS_VOLUME.0,
+            POS_VOLUME.1,
+            VOLUME_BG_WIDTH,
+            VOLUME_BG_HEIGHT,
+        ),
+        rect(
+            POS_BALANCE.0,
+            POS_BALANCE.1,
+            BALANCE_BG_WIDTH,
+            BALANCE_BG_HEIGHT,
+        ),
+        rect(POS_CBUTTONS.0, POS_CBUTTONS.1, 114.0, PREV_BUTTON.3),
+        rect_at(POS_EJECT, EJECT_BUTTON),
+        rect_at(POS_SHUFFLE, SHUFFLE_OFF),
+        rect_at(POS_REPEAT, REPEAT_OFF),
+        rect_at(POS_EQ_BUTTON, EQ_BUTTON_OFF),
+        rect_at(POS_PL_BUTTON, PL_BUTTON_OFF),
+    ];
+    rects.iter().any(|rect| rect_contains(*rect, x, y))
+}
+
+#[cfg(target_os = "android")]
+fn equalizer_interactive_area_contains(x: f32, y: f32) -> bool {
+    let button_rects = [
+        rect_at(POS_EQ_CLOSE_BUTTON, EQ_CLOSE_BUTTON),
+        rect_at(POS_EQ_ON_BUTTON, EQ_ON_BUTTON_OFF),
+        rect_at(POS_EQ_AUTO_BUTTON, EQ_AUTO_BUTTON_OFF),
+        rect_at(POS_EQ_PRESETS_BUTTON, EQ_PRESETS_BUTTON),
+    ];
+    button_rects.iter().any(|rect| rect_contains(*rect, x, y))
+        || EQ_SLIDER_XS.iter().copied().any(|slider_x| {
+            rect_contains(
+                rect(
+                    slider_x,
+                    EQ_SLIDER_BG_Y,
+                    EQ_SLIDER_BG.2,
+                    EQ_SLIDER_TRACK_HEIGHT,
+                ),
+                x,
+                y,
+            )
+        })
+}
+
+#[cfg(target_os = "android")]
+fn playlist_interactive_area_contains(x: f32, y: f32, width: f32, height: f32) -> bool {
+    let right_x = width - PLAYLIST_RIGHT_TILE.2;
+    let bottom_y = height - PLAYLIST_BOTTOM_LEFT_CORNER.3;
+    let list_width = (right_x - PLAYLIST_LIST_BG.0).max(1.0);
+    let list_height = (bottom_y - PLAYLIST_LIST_BG.1).max(1.0);
+    let scroll_track_x = width - 15.0;
+
+    rect_contains(
+        rect(
+            PLAYLIST_LIST_BG.0,
+            PLAYLIST_LIST_BG.1,
+            list_width,
+            list_height,
+        ),
+        x,
+        y,
+    ) || rect_contains(
+        rect(
+            scroll_track_x,
+            PLAYLIST_LIST_BG.1,
+            PLAYLIST_SCROLL_TRACK.2,
+            list_height,
+        ),
+        x,
+        y,
+    ) || [
+        offset_rect(PLAYLIST_ADD_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_REM_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_SEL_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_MISC_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_LIST_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_PREV_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_PLAY_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_PAUSE_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_STOP_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_NEXT_BUTTON_HIT_AREA, 0.0, bottom_y),
+        offset_rect(PLAYLIST_EJECT_BUTTON_HIT_AREA, 0.0, bottom_y),
+    ]
+    .iter()
+    .any(|rect| rect_contains(*rect, x, y))
+}
+
+#[cfg(target_os = "android")]
+fn rect_at(position: (f32, f32), sprite: SpriteRect) -> SpriteRect {
+    rect(position.0, position.1, sprite.2, sprite.3)
+}
+
+#[cfg(target_os = "android")]
+fn offset_rect(rect: SpriteRect, x: f32, y: f32) -> SpriteRect {
+    (rect.0 + x, rect.1 + y, rect.2, rect.3)
+}
+
+#[cfg(target_os = "android")]
+fn rect(x: f32, y: f32, width: f32, height: f32) -> SpriteRect {
+    (x, y, width, height)
+}
+
+#[cfg(target_os = "android")]
+fn rect_contains(rect: SpriteRect, x: f32, y: f32) -> bool {
+    x >= rect.0 && x <= rect.0 + rect.2 && y >= rect.1 && y <= rect.1 + rect.3
+}
+
+#[cfg(target_os = "android")]
+fn bounded_scale(available: f32, desired: f32) -> Option<f32> {
+    if available.is_finite() && available > 0.0 && desired > 0.0 {
+        Some(available / desired)
+    } else {
+        None
+    }
 }
 
 #[composable]
@@ -1346,7 +1768,7 @@ fn PlaylistWindow(
     let window_size = window_size.get();
     let skin_scale = scale.max(f32::EPSILON);
     let width = (window_size.width / skin_scale).max(PLAYLIST_WIDTH);
-    let height = (window_size.height / skin_scale).max(PLAYLIST_HEIGHT);
+    let height = (window_size.height / skin_scale).max(playlist_min_height());
     let right_x = width - PLAYLIST_RIGHT_TILE.2;
     let bottom_y = height - PLAYLIST_BOTTOM_LEFT_CORNER.3;
     let list_width = (right_x - PLAYLIST_LIST_BG.0).max(1.0);
@@ -1623,6 +2045,17 @@ fn PlaylistEntries(
                 },
             );
         }
+    }
+}
+
+fn playlist_min_height() -> f32 {
+    #[cfg(target_os = "android")]
+    {
+        145.0
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        PLAYLIST_HEIGHT
     }
 }
 
@@ -2896,6 +3329,10 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
         WinampDragTarget::NativeGroup => {
             Box(modifier.window_drag_area(), BoxSpec::default(), || {});
         }
+        #[cfg(target_os = "android")]
+        WinampDragTarget::Fixed(_) => {
+            Box(modifier, BoxSpec::default(), || {});
+        }
         WinampDragTarget::Inline(window_position) => {
             let drag_offset = cranpose_core::useState(|| None::<Point>);
 
@@ -3068,7 +3505,16 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "android")]
+fn open_audio_files(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Opening Android File Picker".to_string());
+    match android_bridge::request_audio_files(AndroidLoadMode::Replace) {
+        Ok(()) => {}
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn open_audio_files(state: MutableState<WinampState>) {
     state.update(|s| s.status = "Opening File".to_string());
     match audio::pick_audio_files() {
@@ -3120,7 +3566,16 @@ fn open_audio_files(state: MutableState<WinampState>) {
     state.update(|s| s.status = "Web picker is not enabled".to_string());
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "android")]
+fn add_audio_files(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Opening Android File Picker".to_string());
+    match android_bridge::request_audio_files(AndroidLoadMode::Append) {
+        Ok(()) => {}
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn add_audio_files(state: MutableState<WinampState>) {
     state.update(|s| s.status = "Adding File".to_string());
     match audio::pick_audio_files() {
@@ -3140,7 +3595,16 @@ fn add_audio_files(state: MutableState<WinampState>) {
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "android")]
+fn add_audio_folder(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Opening Android Folder Picker".to_string());
+    match android_bridge::request_audio_folder(AndroidLoadMode::Append) {
+        Ok(()) => {}
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn add_audio_folder(state: MutableState<WinampState>) {
     state.update(|s| s.status = "Adding Folder".to_string());
     match audio::pick_audio_folder() {
@@ -3160,7 +3624,16 @@ fn add_audio_folder(state: MutableState<WinampState>) {
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "android")]
+fn open_audio_folder(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Opening Android Folder Picker".to_string());
+    match android_bridge::request_audio_folder(AndroidLoadMode::Replace) {
+        Ok(()) => {}
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn open_audio_folder(state: MutableState<WinampState>) {
     state.update(|s| s.status = "Opening Folder".to_string());
     match audio::pick_audio_folder() {
@@ -3870,7 +4343,16 @@ fn new_playlist(state: MutableState<WinampState>) {
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "android")]
+fn import_playlist(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Importing Android Playlist".to_string());
+    match android_bridge::request_playlist_import() {
+        Ok(()) => {}
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn import_playlist(state: MutableState<WinampState>) {
     state.update(|s| s.status = "Importing Playlist".to_string());
     match pick_playlist_file().and_then(|path| {
@@ -3904,7 +4386,23 @@ fn import_playlist(state: MutableState<WinampState>) {
     state.update(|s| s.status = "Playlist import unavailable in the web widget".to_string());
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "android")]
+fn export_playlist(state: MutableState<WinampState>) {
+    let snapshot = state.get_non_reactive();
+    if snapshot.playlist.is_empty() {
+        state.update(|s| s.status = "Playlist Empty".to_string());
+        return;
+    }
+
+    state.update(|s| s.status = "Exporting Android Playlist".to_string());
+    let text = format_m3u_playlist(&snapshot.playlist);
+    match android_bridge::request_playlist_export(&text) {
+        Ok(()) => {}
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn export_playlist(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     if snapshot.playlist.is_empty() {
@@ -3948,13 +4446,11 @@ fn pick_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
         .pick_file())
 }
 
-#[cfg(not(all(
+#[cfg(all(
     not(target_arch = "wasm32"),
     not(target_os = "android"),
-    not(target_os = "ios"),
-    feature = "native-dialogs"
-)))]
-#[cfg(not(target_arch = "wasm32"))]
+    not(all(not(target_os = "ios"), feature = "native-dialogs"))
+))]
 fn pick_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
     Err("native playlist picker is not available on this target yet".to_string())
 }
@@ -3973,13 +4469,11 @@ fn save_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
         .save_file())
 }
 
-#[cfg(not(all(
+#[cfg(all(
     not(target_arch = "wasm32"),
     not(target_os = "android"),
-    not(target_os = "ios"),
-    feature = "native-dialogs"
-)))]
-#[cfg(not(target_arch = "wasm32"))]
+    not(all(not(target_os = "ios"), feature = "native-dialogs"))
+))]
 fn save_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
     Err("native playlist saver is not available on this target yet".to_string())
 }
@@ -4088,6 +4582,61 @@ fn format_m3u_playlist(playlist: &[Track]) -> String {
         );
     }
     lines.join("\n") + "\n"
+}
+
+#[cfg(target_os = "android")]
+fn handle_android_bridge_results(state: MutableState<WinampState>) {
+    for result in android_bridge::take_results() {
+        match result {
+            AndroidBridgeResult::AudioPaths { mode, paths } => {
+                let text = paths
+                    .iter()
+                    .map(|path| path.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let tracks = parse_m3u_playlist(&text, None);
+                if tracks.is_empty() {
+                    state.update(|s| s.status = "No Android Audio Tracks".to_string());
+                    continue;
+                }
+                match mode {
+                    AndroidLoadMode::Replace => {
+                        replace_playlist_and_play(state, tracks);
+                    }
+                    AndroidLoadMode::Append => {
+                        append_playlist_and_play(state, tracks);
+                    }
+                }
+            }
+            AndroidBridgeResult::PlaylistImport { text } => {
+                let tracks = parse_m3u_playlist(&text, None);
+                if tracks.is_empty() {
+                    state.update(|s| s.status = "No Playlist Tracks".to_string());
+                } else {
+                    let _ = audio::stop();
+                    state.update(|s| {
+                        replace_playlist_tracks(s, tracks);
+                        s.playback = PlaybackState::Stopped;
+                        s.status = format!("Imported {} Track(s)", s.playlist.len());
+                        trace_winamp_state("android-playlist-import", s);
+                    });
+                }
+            }
+            AndroidBridgeResult::PlaylistExport { target } => {
+                state.update(|s| {
+                    s.status = if target.is_empty() {
+                        "Exported Playlist".to_string()
+                    } else {
+                        format!("Exported {target}")
+                    };
+                });
+            }
+            AndroidBridgeResult::Cancelled { operation } => {
+                state.update(|s| s.status = format!("{operation} Cancelled"));
+            }
+            AndroidBridgeResult::Error(error) => state.update(|s| s.status = error),
+        }
+    }
 }
 
 fn scroll_playlist_by_rows(state: MutableState<WinampState>, rows: i32) {
@@ -5220,7 +5769,7 @@ fn window_config_path() -> std::path::PathBuf {
     config_home_dir().join("cranamp").join("windows.conf")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn config_home_dir() -> std::path::PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
@@ -5230,6 +5779,11 @@ fn config_home_dir() -> std::path::PathBuf {
                 .map(|home| home.join(".config"))
         })
         .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+#[cfg(target_os = "android")]
+fn config_home_dir() -> std::path::PathBuf {
+    android_bridge::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
 fn default_main_position() -> Point {
@@ -5320,6 +5874,10 @@ fn winamp_window_modifier(
         WinampDragTarget::Inline(position) => {
             let position = position.get();
             modifier.offset(snap_to_pixel(position.x), snap_to_pixel(position.y))
+        }
+        #[cfg(target_os = "android")]
+        WinampDragTarget::Fixed(position) => {
+            modifier.offset(scaled(position.x, scale), scaled(position.y, scale))
         }
         WinampDragTarget::NativeGroup => modifier,
     }

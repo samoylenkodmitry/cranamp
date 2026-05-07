@@ -57,7 +57,12 @@ impl Track {
         self.title.as_str()
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(target_os = "android"),
+        not(target_os = "ios"),
+        feature = "native-dialogs"
+    ))]
     fn from_path(path: std::path::PathBuf) -> Self {
         let title = path
             .file_stem()
@@ -178,6 +183,15 @@ pub fn supported_audio_extensions() -> &'static [&'static str] {
     ]
 }
 
+#[cfg(any(
+    target_arch = "wasm32",
+    all(
+        not(target_arch = "wasm32"),
+        not(target_os = "android"),
+        not(target_os = "ios"),
+        feature = "native-dialogs"
+    )
+))]
 fn dialog_audio_extensions() -> Vec<String> {
     let mut extensions = Vec::with_capacity(supported_audio_extensions().len() * 2);
     for extension in supported_audio_extensions() {
@@ -187,7 +201,12 @@ fn dialog_audio_extensions() -> Vec<String> {
     extensions
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+))]
 fn is_audio_path(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -200,12 +219,22 @@ fn is_audio_path(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+))]
 fn tracks_from_selected_paths(paths: impl IntoIterator<Item = std::path::PathBuf>) -> Vec<Track> {
     sort_tracks(paths.into_iter().map(Track::from_path).collect())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+))]
 fn sort_tracks(mut tracks: Vec<Track>) -> Vec<Track> {
     tracks.sort_by(|left, right| left.title.cmp(&right.title));
     tracks

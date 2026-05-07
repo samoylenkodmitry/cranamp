@@ -1,5 +1,7 @@
 #![deny(unsafe_code)]
 
+#[cfg(target_os = "android")]
+mod android_bridge;
 pub mod audio;
 mod fonts;
 pub mod winamp;
@@ -22,6 +24,14 @@ pub fn create_surface_app() -> AppLauncher {
         .with_fonts(fonts::APP_FONTS)
 }
 
+#[cfg(target_os = "android")]
+pub fn create_android_app() -> AppLauncher {
+    AppLauncher::new()
+        .with_title(TITLE)
+        .with_size(275, 493)
+        .with_fonts(fonts::APP_FONTS)
+}
+
 #[cfg(target_os = "ios")]
 #[allow(unsafe_code)]
 #[no_mangle]
@@ -33,7 +43,10 @@ pub extern "C" fn ios_main() {
 #[allow(unsafe_code)]
 #[no_mangle]
 pub fn android_main(app: android_activity::AndroidApp) {
-    create_surface_app().run(app, winamp::WinampFullscreenApp);
+    if let Err(error) = android_bridge::init(&app) {
+        log::error!("failed to initialize Cranamp Android bridge: {error}");
+    }
+    create_android_app().run(app, winamp::WinampAndroidApp);
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
