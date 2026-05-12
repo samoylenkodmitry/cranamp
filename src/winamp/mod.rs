@@ -21,22 +21,22 @@ use cranpose::{
 use cranpose_core::{self, MutableState};
 use cranpose_foundation::text::{TextFieldState, TextRange};
 use cranpose_foundation::PointerButton;
-use cranpose_ui::text::TextUnit;
+use cranpose_ui::text::{FontFamily, ParagraphStyle, TextOverflow, TextUnit};
 #[cfg(target_os = "android")]
 use cranpose_ui::BoxWithConstraints;
 #[cfg(target_os = "android")]
 use cranpose_ui::BoxWithConstraintsScope;
 use cranpose_ui::{
-    composable, current_density, BasicTextField, Box, BoxSpec, Button, Canvas, Color, Column,
-    ColumnSpec, Modifier, Point, PointerEventKind, PointerInputScope, Size, SpanStyle, Text,
-    TextStyle,
+    composable, current_density, BasicText, BasicTextField, Box, BoxSpec, Button, Canvas, Color,
+    Column, ColumnSpec, Modifier, Point, PointerEventKind, PointerInputScope, Size, SpanStyle,
+    Text, TextStyle,
 };
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
 #[cfg(target_os = "android")]
 use crate::android_bridge::{self, AndroidBridgeResult, AndroidLoadMode};
 use crate::audio::{self, Track};
-use skin::{load_skin, WinampSkin};
+use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use wasm_bindgen::{JsCast, JsValue};
@@ -248,11 +248,73 @@ const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 19;
 const DEFAULT_EQ_VALUES: [f32; 11] = [
     0.50, 0.58, 0.48, 0.43, 0.62, 0.50, 0.57, 0.50, 0.64, 0.66, 0.66,
 ];
-const WINAMP_DISPLAY_TEXT_COLOR: [u8; 4] = [153, 204, 236, 255];
-const PLAYLIST_TEXT_COLOR: [u8; 4] = [255, 200, 108, 255];
-const PLAYLIST_CURRENT_TEXT_COLOR: [u8; 4] = [255, 255, 255, 255];
-// PLEDIT.TXT selected background #42351e converted from sRGB to linear.
-const PLAYLIST_SELECTED_BG: Color = Color(0.05448, 0.03560, 0.01298, 1.0);
+const WINAMP_SYSTEM_FONT_SIZE: f32 = 8.25;
+const WINAMP_SYSTEM_LINE_HEIGHT: f32 = 10.0;
+const WINAMP_SYSTEM_TEXT_Y_ADJUST: f32 = -2.25;
+const WINAMP_SYSTEM_MEASURE_CHAR_WIDTH: f32 = 4.95;
+const WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH: f32 = 4.125;
+
+fn srgb_to_linear_u8(channel: u8) -> f32 {
+    let s = channel as f32 / 255.0;
+    if s <= 0.04045 {
+        s / 12.92
+    } else {
+        ((s + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn srgb_color(rgba: [u8; 4]) -> Color {
+    Color(
+        srgb_to_linear_u8(rgba[0]),
+        srgb_to_linear_u8(rgba[1]),
+        srgb_to_linear_u8(rgba[2]),
+        rgba[3] as f32 / 255.0,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct ControlRect {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    scale: f32,
+}
+
+impl ControlRect {
+    fn new(x: f32, y: f32, width: f32, height: f32, scale: f32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+            scale,
+        }
+    }
+
+    fn scaled_width(self) -> f32 {
+        scaled(self.width, self.scale)
+    }
+
+    fn scaled_height(self) -> f32 {
+        scaled(self.height, self.scale)
+    }
+
+    fn scaled_x(self) -> f32 {
+        scaled(self.x, self.scale)
+    }
+
+    fn scaled_y(self) -> f32 {
+        scaled(self.y, self.scale)
+    }
+
+    fn contains_scaled_point(self, point: Point) -> bool {
+        point.x >= 0.0
+            && point.x <= self.scaled_width()
+            && point.y >= 0.0
+            && point.y <= self.scaled_height()
+    }
+}
 
 type WinampSkinState = MutableState<Result<WinampSkin, String>>;
 
@@ -587,6 +649,8 @@ pub fn WinampAndroidApp() {
                 let layout = resizable_stacked_layout(
                     scope.max_width().0,
                     scope.max_height().0,
+                    android_bridge::content_top_inset_dp(),
+                    android_bridge::content_bottom_inset_dp(),
                     &snapshot,
                     ui_scale(),
                 );
@@ -734,7 +798,8 @@ fn WinampInlineStage(
             if state.get().playlist_visible {
                 PlaylistWindow(
                     skin.pledit.clone(),
-                    skin.text.clone(),
+                    skin.palette,
+                    skin.display_text_color,
                     state,
                     WinampDragTarget::Inline(windows.playlist),
                     WinampWindowSize::Fixed(Size::new(PLAYLIST_WIDTH, PLAYLIST_HEIGHT)),
@@ -771,7 +836,11 @@ fn WinampStackedStage(
         Modifier::empty()
             .size_points(scaled(MAIN_WIDTH, scale), scaled(y, scale))
             .clip_to_bounds()
-            .background(Color(0.02, 0.02, 0.03, 1.0)),
+            .background(Color(0.02, 0.02, 0.03, 1.0))
+            .offset(
+                snap_to_pixel(layout.content_left_inset),
+                snap_to_pixel(layout.content_top_inset),
+            ),
         BoxSpec::default(),
         move || {
             MainWindow(
@@ -795,7 +864,8 @@ fn WinampStackedStage(
             if snapshot.playlist_visible {
                 PlaylistWindow(
                     skin.pledit.clone(),
-                    skin.text.clone(),
+                    skin.palette,
+                    skin.display_text_color,
                     state,
                     WinampDragTarget::Fixed(Point::new(0.0, playlist_y)),
                     WinampWindowSize::Fixed(Size::new(
@@ -817,26 +887,66 @@ fn WinampStackedStage(
 struct AndroidStackedLayout {
     scale: f32,
     playlist_height: f32,
+    content_left_inset: f32,
+    content_top_inset: f32,
 }
 
 #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 fn resizable_stacked_layout(
     available_width: f32,
     available_height: f32,
+    content_top_inset: f32,
+    content_bottom_inset: f32,
     snapshot: &WinampState,
     fallback_scale: f32,
 ) -> AndroidStackedLayout {
-    let scale = if available_width.is_finite() && available_width > 0.0 {
+    let width_scale = if available_width.is_finite() && available_width > 0.0 {
         available_width / MAIN_WIDTH
     } else {
         fallback_scale
-    }
-    .clamp(0.5, 4.0);
+    };
 
     let base_height = MAIN_HEIGHT + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
+    let content_top_inset = if available_height.is_finite() && available_height > 0.0 {
+        content_top_inset.clamp(0.0, available_height)
+    } else {
+        content_top_inset.max(0.0)
+    };
+    let content_bottom_inset = if available_height.is_finite() && available_height > 0.0 {
+        content_bottom_inset.clamp(0.0, available_height)
+    } else {
+        content_bottom_inset.max(0.0)
+    };
+    let vertical_insets = if available_height.is_finite() && available_height > 0.0 {
+        (content_top_inset + content_bottom_inset).min(available_height)
+    } else {
+        content_top_inset + content_bottom_inset
+    };
+    let available_content_height = if available_height.is_finite() && available_height > 0.0 {
+        (available_height - vertical_insets).max(0.0)
+    } else {
+        base_height + PLAYLIST_HEIGHT
+    };
+    let minimum_skin_height = base_height
+        + if snapshot.playlist_visible {
+            playlist_min_height()
+        } else {
+            0.0
+        };
+    let height_scale = if available_content_height > 0.0 && minimum_skin_height > 0.0 {
+        available_content_height / minimum_skin_height
+    } else {
+        fallback_scale
+    };
+    let scale = width_scale.min(height_scale).clamp(0.5, 4.0);
+    let content_left_inset = if available_width.is_finite() && available_width > 0.0 {
+        ((available_width - MAIN_WIDTH * scale).max(0.0)) * 0.5
+    } else {
+        0.0
+    };
     let playlist_height = if snapshot.playlist_visible {
         let available_skin_height = if available_height.is_finite() && available_height > 0.0 {
-            available_height / scale.max(f32::EPSILON)
+            available_content_height / scale.max(f32::EPSILON)
         } else {
             base_height + PLAYLIST_HEIGHT
         };
@@ -848,6 +958,8 @@ fn resizable_stacked_layout(
     AndroidStackedLayout {
         scale,
         playlist_height,
+        content_left_inset,
+        content_top_inset,
     }
 }
 
@@ -856,7 +968,14 @@ fn web_stacked_layout(snapshot: &WinampState) -> AndroidStackedLayout {
     let fallback_height = stacked_skin_height(snapshot, PLAYLIST_HEIGHT);
     let available =
         web_current_surface_size().unwrap_or_else(|| Size::new(MAIN_WIDTH, fallback_height));
-    resizable_stacked_layout(available.width, available.height, snapshot, ui_scale())
+    resizable_stacked_layout(
+        available.width,
+        available.height,
+        0.0,
+        0.0,
+        snapshot,
+        ui_scale(),
+    )
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -950,8 +1069,8 @@ fn AndroidWindowMoveTarget(
                                             let threshold = scaled(3.0, scale).max(3.0);
                                             if dx * dx + dy * dy >= threshold * threshold {
                                                 let started = android_bridge::start_window_move(
-                                                    event.position.x,
-                                                    event.position.y,
+                                                    event.position.x + layout.content_left_inset,
+                                                    event.position.y + layout.content_top_inset,
                                                 );
                                                 if started {
                                                     moving.set(true);
@@ -1196,11 +1315,13 @@ fn WinampNativeWindows(
                 ),
                 {
                     let pledit = skin.pledit.clone();
-                    let text = skin.text.clone();
+                    let palette = skin.palette;
+                    let display_text_color = skin.display_text_color;
                     move || {
                         PlaylistWindow(
                             pledit.clone(),
-                            text.clone(),
+                            palette,
+                            display_text_color,
                             state,
                             WinampDragTarget::NativeGroup,
                             WinampWindowSize::State(peer_windows.playlist),
@@ -1297,11 +1418,13 @@ pub fn WinampStandaloneApp() {
                 .with_min_size(PLAYLIST_WIDTH, PLAYLIST_HEIGHT),
                 {
                     let pledit = skin.pledit.clone();
-                    let text = skin.text.clone();
+                    let palette = skin.palette;
+                    let display_text_color = skin.display_text_color;
                     move || {
                         PlaylistWindow(
                             pledit.clone(),
-                            text.clone(),
+                            palette,
+                            display_text_color,
                             state,
                             WinampDragTarget::NativeGroup,
                             WinampWindowSize::State(peer_windows.playlist),
@@ -1424,6 +1547,7 @@ fn MainWindow(
             Visualizer(
                 snapshot.playback == PlaybackState::Playing,
                 audio::visualizer_bands(),
+                skin.viscolor,
                 scale,
             );
 
@@ -1439,19 +1563,20 @@ fn MainWindow(
                 );
             }
 
-            BitmapWinampText(
-                skin.text.clone(),
-                marquee_bitmap_text(
+            SystemWinampText(
+                marquee_system_text(
                     main_display_title(&snapshot),
                     MAIN_TRACK_TEXT_WIDTH,
                     snapshot.title_marquee_phase,
                 ),
                 POS_MAIN_TRACK_TEXT.0,
                 POS_MAIN_TRACK_TEXT.1,
+                MAIN_TRACK_TEXT_WIDTH,
+                WINAMP_SYSTEM_LINE_HEIGHT,
                 scale,
-                WINAMP_DISPLAY_TEXT_COLOR,
+                skin.display_text_color,
             );
-            MainMetaReadouts(skin.text.clone(), snapshot.clone(), scale);
+            MainMetaReadouts(snapshot.clone(), scale, skin.display_text_color);
 
             Sprite(
                 skin.monoster.clone(),
@@ -1479,10 +1604,16 @@ fn MainWindow(
                 POS_POSBAR.1,
                 scale,
             );
+            let posbar_pressed = cranpose_core::useState(|| false);
             let position_thumb_x = slider_thumb_x(snapshot.position, POSBAR_BG.2, POSBAR_THUMB.2);
+            let posbar_thumb_sprite = if posbar_pressed.get() {
+                POSBAR_THUMB_ACTIVE
+            } else {
+                POSBAR_THUMB
+            };
             Sprite(
                 skin.posbar.clone(),
-                POSBAR_THUMB,
+                posbar_thumb_sprite,
                 POS_POSBAR.0 + position_thumb_x,
                 POS_POSBAR.1,
                 scale,
@@ -1490,11 +1621,7 @@ fn MainWindow(
             {
                 let state_drag = state;
                 DragSlider(
-                    POS_POSBAR.0,
-                    POS_POSBAR.1,
-                    POSBAR_BG.2,
-                    POSBAR_BG.3,
-                    scale,
+                    ControlRect::new(POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3, scale),
                     move |fraction| {
                         state_drag.update(|s| {
                             s.position = fraction;
@@ -1506,6 +1633,7 @@ fn MainWindow(
                             state_drag.update(|s| s.status = error);
                         }
                     },
+                    move |dragging| posbar_pressed.set(dragging),
                 );
             }
 
@@ -1524,10 +1652,16 @@ fn MainWindow(
                 POS_VOLUME.1,
                 scale,
             );
+            let volume_pressed = cranpose_core::useState(|| false);
             let volume_thumb_x = slider_thumb_x(snapshot.volume, VOLUME_BG_WIDTH, VOLUME_THUMB.2);
+            let volume_thumb_sprite = if volume_pressed.get() {
+                VOLUME_THUMB_ACTIVE
+            } else {
+                VOLUME_THUMB
+            };
             Sprite(
                 skin.volume.clone(),
-                VOLUME_THUMB,
+                volume_thumb_sprite,
                 POS_VOLUME.0 + volume_thumb_x,
                 POS_VOLUME.1 + 1.0,
                 scale,
@@ -1535,11 +1669,13 @@ fn MainWindow(
             {
                 let state_drag = state;
                 DragSlider(
-                    POS_VOLUME.0,
-                    POS_VOLUME.1,
-                    VOLUME_BG_WIDTH,
-                    VOLUME_BG_HEIGHT,
-                    scale,
+                    ControlRect::new(
+                        POS_VOLUME.0,
+                        POS_VOLUME.1,
+                        VOLUME_BG_WIDTH,
+                        VOLUME_BG_HEIGHT,
+                        scale,
+                    ),
                     move |fraction| {
                         state_drag.update(|s| {
                             s.volume = fraction;
@@ -1549,6 +1685,7 @@ fn MainWindow(
                             state_drag.update(|s| s.status = error);
                         }
                     },
+                    move |dragging| volume_pressed.set(dragging),
                 );
             }
 
@@ -1565,11 +1702,17 @@ fn MainWindow(
                 POS_BALANCE.1,
                 scale,
             );
+            let balance_pressed = cranpose_core::useState(|| false);
             let balance_thumb_x =
                 slider_thumb_x(snapshot.balance, BALANCE_BG_WIDTH, BALANCE_THUMB.2);
+            let balance_thumb_sprite = if balance_pressed.get() {
+                BALANCE_THUMB_ACTIVE
+            } else {
+                BALANCE_THUMB
+            };
             Sprite(
                 skin.balance.clone(),
-                BALANCE_THUMB,
+                balance_thumb_sprite,
                 POS_BALANCE.0 + balance_thumb_x,
                 POS_BALANCE.1 + 1.0,
                 scale,
@@ -1577,14 +1720,17 @@ fn MainWindow(
             {
                 let state_drag = state;
                 DragSlider(
-                    POS_BALANCE.0,
-                    POS_BALANCE.1,
-                    BALANCE_BG_WIDTH,
-                    BALANCE_BG_HEIGHT,
-                    scale,
+                    ControlRect::new(
+                        POS_BALANCE.0,
+                        POS_BALANCE.1,
+                        BALANCE_BG_WIDTH,
+                        BALANCE_BG_HEIGHT,
+                        scale,
+                    ),
                     move |fraction| {
                         state_drag.update(|s| s.balance = fraction);
                     },
+                    move |dragging| balance_pressed.set(dragging),
                 );
             }
 
@@ -1756,7 +1902,7 @@ fn EqualizerWindow(
                 scale,
             );
             if snapshot.eq_enabled {
-                EqCurve(snapshot.eq_values, scale);
+                EqCurve(snapshot.eq_values, skin.display_text_color, scale);
             }
 
             WindowDragHandle(drag_target, EQ_TITLE_DRAG_HIT_AREA, scale);
@@ -1867,6 +2013,12 @@ fn EqualizerWindow(
                 let value = snapshot.eq_values[index];
                 let thumb_y = EQ_SLIDER_BG_Y
                     + vertical_slider_thumb_y(value, EQ_SLIDER_TRACK_HEIGHT, EQ_SLIDER_THUMB.3);
+                let eq_pressed = cranpose_core::useState(|| false);
+                let eq_thumb_sprite = if eq_pressed.get() {
+                    EQ_SLIDER_THUMB_SELECTED
+                } else {
+                    EQ_SLIDER_THUMB
+                };
 
                 Sprite(
                     skin.eqmain.clone(),
@@ -1877,7 +2029,7 @@ fn EqualizerWindow(
                 );
                 Sprite(
                     skin.eqmain.clone(),
-                    EQ_SLIDER_THUMB,
+                    eq_thumb_sprite,
                     thumb_x,
                     thumb_y + EQ_SLIDER_THUMB_Y_OFFSET,
                     scale,
@@ -1885,17 +2037,20 @@ fn EqualizerWindow(
 
                 let state_drag = state;
                 VerticalDragSlider(
-                    slider_x,
-                    EQ_SLIDER_BG_Y,
-                    EQ_SLIDER_BG.2,
-                    EQ_SLIDER_TRACK_HEIGHT,
-                    scale,
+                    ControlRect::new(
+                        slider_x,
+                        EQ_SLIDER_BG_Y,
+                        EQ_SLIDER_BG.2,
+                        EQ_SLIDER_TRACK_HEIGHT,
+                        scale,
+                    ),
                     true,
                     move |fraction| {
                         state_drag.update(|s| {
                             s.eq_values[index] = fraction;
                         });
                     },
+                    move |dragging| eq_pressed.set(dragging),
                 );
             }
         },
@@ -1905,7 +2060,8 @@ fn EqualizerWindow(
 #[composable]
 fn PlaylistWindow(
     pledit: ImageBitmap,
-    text: ImageBitmap,
+    palette: SkinPalette,
+    display_text_color: [u8; 4],
     state: MutableState<WinampState>,
     drag_target: WinampDragTarget,
     window_size: WinampWindowSize,
@@ -2004,27 +2160,33 @@ fn PlaylistWindow(
                     list_height,
                     PLAYLIST_SCROLL_HANDLE.3,
                 );
+            let scroll_pressed = cranpose_core::useState(|| false);
+            let scroll_handle_sprite = if scroll_pressed.get() {
+                PLAYLIST_SCROLL_HANDLE_SELECTED
+            } else {
+                PLAYLIST_SCROLL_HANDLE
+            };
             Sprite(
                 pledit.clone(),
-                PLAYLIST_SCROLL_HANDLE,
+                scroll_handle_sprite,
                 scroll_track_x,
                 scroll_y,
                 scale,
             );
 
             PlaylistEntries(
-                text.clone(),
+                palette,
                 state,
                 snapshot.clone(),
                 list_width,
                 list_height,
                 scale,
             );
-            PlaylistFooterReadouts(text.clone(), snapshot.clone(), bottom_y, scale);
+            PlaylistFooterReadouts(snapshot.clone(), bottom_y, scale, display_text_color);
             PlaylistFooterControls(state, footer_menu, bottom_y, scale);
             if snapshot.playlist_search_visible {
                 PlaylistSearchOverlay(
-                    text.clone(),
+                    palette,
                     state,
                     snapshot.clone(),
                     search_field.clone(),
@@ -2036,27 +2198,32 @@ fn PlaylistWindow(
             {
                 let state_drag = state;
                 VerticalDragSlider(
-                    scroll_track_x,
-                    PLAYLIST_LIST_BG.1,
-                    PLAYLIST_SCROLL_TRACK.2,
-                    list_height,
-                    scale,
+                    ControlRect::new(
+                        scroll_track_x,
+                        PLAYLIST_LIST_BG.1,
+                        PLAYLIST_SCROLL_TRACK.2,
+                        list_height,
+                        scale,
+                    ),
                     false,
                     move |fraction| {
                         state_drag.update(|s| s.playlist_scroll = fraction);
                     },
+                    move |dragging| scroll_pressed.set(dragging),
                 );
             }
 
             if let Some(menu) = footer_menu.get() {
                 PlaylistMenu(
-                    text.clone(),
+                    palette,
                     state,
                     footer_menu,
                     menu,
-                    width,
-                    bottom_y,
-                    scale,
+                    PlaylistMenuLayout {
+                        window_width: width,
+                        bottom_y,
+                        scale,
+                    },
                 );
             }
 
@@ -2084,118 +2251,117 @@ fn PlaylistWindow(
 
 #[composable]
 fn PlaylistEntries(
-    text_bitmap: ImageBitmap,
+    palette: SkinPalette,
     state: MutableState<WinampState>,
     snapshot: WinampState,
     list_width: f32,
     list_height: f32,
     scale: f32,
 ) {
-    let row_height = 10.0;
-    let max_rows = ((list_height - 8.0) / row_height).floor().max(1.0) as usize;
-    let x = PLAYLIST_LIST_BG.0 + 4.0;
-    let y = PLAYLIST_LIST_BG.1 + 4.0;
-
-    cranpose_core::SideEffect(move || {
-        if state.get_non_reactive().playlist_visible_rows != max_rows {
-            state.update(|s| s.playlist_visible_rows = max_rows);
-        }
-    });
-
-    if snapshot.playlist.is_empty() {
-        BitmapWinampText(
-            text_bitmap,
-            snapshot.status.clone(),
-            x,
-            y + 2.0,
-            scale,
-            PLAYLIST_TEXT_COLOR,
-        );
-        return;
-    }
-
-    let max_start = snapshot.playlist.len().saturating_sub(max_rows);
-    let start = ((snapshot.playlist_scroll * max_start as f32).round() as usize).min(max_start);
-    for (row, track) in snapshot
-        .playlist
-        .iter()
-        .enumerate()
-        .skip(start)
-        .take(max_rows)
-    {
-        let current = snapshot.current_index == Some(row);
-        let selected = snapshot.selected_indices.contains(&row);
-        let row_y = y + ((row - start) as f32 * row_height);
-        let duration = playlist_duration_text(track.duration_seconds);
-        let duration_width = duration
-            .as_ref()
-            .map(|duration| bitmap_text_width(duration))
-            .unwrap_or(0.0);
-        let title_width = if duration.is_some() {
-            (list_width - duration_width - 12.0).max(1.0)
-        } else {
-            (list_width - 8.0).max(1.0)
-        };
-        let title = if current && snapshot.playback == PlaybackState::Playing {
-            marquee_bitmap_text(
-                track.display_title().to_string(),
-                title_width,
-                snapshot.title_marquee_phase,
+    Box(
+        Modifier::empty()
+            .size_points(scaled(list_width, scale), scaled(list_height, scale))
+            .absolute_offset(
+                scaled(PLAYLIST_LIST_BG.0, scale),
+                scaled(PLAYLIST_LIST_BG.1, scale),
             )
-        } else {
-            clip_bitmap_text(track.display_title().to_string(), title_width)
-        };
-        if selected {
-            FilledRect(
-                PLAYLIST_LIST_BG.0 + 2.0,
-                PLAYLIST_LIST_BG.1 + ((row - start) as f32 * row_height) + 1.0,
-                list_width - 4.0,
-                row_height,
-                scale,
-                PLAYLIST_SELECTED_BG,
-            );
-        }
-        BitmapWinampText(
-            text_bitmap.clone(),
-            title,
-            x,
-            row_y + 2.0,
-            scale,
-            if selected {
-                PLAYLIST_CURRENT_TEXT_COLOR
-            } else {
-                PLAYLIST_TEXT_COLOR
-            },
-        );
-        if let Some(duration) = duration {
-            BitmapWinampText(
-                text_bitmap.clone(),
-                duration,
-                PLAYLIST_LIST_BG.0 + list_width - 2.0 - duration_width,
-                row_y + 2.0,
-                scale,
-                if selected {
-                    PLAYLIST_CURRENT_TEXT_COLOR
-                } else {
-                    PLAYLIST_TEXT_COLOR
-                },
-            );
-        }
+            .clip_to_bounds(),
+        BoxSpec::default(),
+        move || {
+            let row_height = 10.0;
+            let max_rows = ((list_height - 8.0) / row_height).floor().max(1.0) as usize;
+            let x = 4.0;
+            let y = 1.0;
 
-        {
-            let state_click = state;
-            ClickTarget(
-                PLAYLIST_LIST_BG.0,
-                PLAYLIST_LIST_BG.1 + ((row - start) as f32 * row_height),
-                list_width,
-                row_height,
-                scale,
-                move || {
-                    handle_playlist_row_click(state_click, row);
-                },
-            );
-        }
-    }
+            cranpose_core::SideEffect(move || {
+                if state.get_non_reactive().playlist_visible_rows != max_rows {
+                    state.update(|s| s.playlist_visible_rows = max_rows);
+                }
+            });
+
+            if snapshot.playlist.is_empty() {
+                SystemWinampText(
+                    snapshot.status.clone(),
+                    x,
+                    y,
+                    (list_width - 8.0).max(1.0),
+                    row_height,
+                    scale,
+                    palette.normal,
+                );
+                return;
+            }
+
+            let max_start = snapshot.playlist.len().saturating_sub(max_rows);
+            let start =
+                ((snapshot.playlist_scroll * max_start as f32).round() as usize).min(max_start);
+            for (row, track) in snapshot
+                .playlist
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(max_rows)
+            {
+                let current = snapshot.current_index == Some(row);
+                let selected = snapshot.selected_indices.contains(&row);
+                let row_offset = (row - start) as f32 * row_height;
+                let row_y = y + row_offset;
+                let duration = playlist_duration_text(track.duration_seconds);
+                let duration_width = duration
+                    .as_ref()
+                    .map(|duration| system_text_width(duration))
+                    .unwrap_or(0.0);
+                let title_width = if duration.is_some() {
+                    (list_width - duration_width - 12.0).max(1.0)
+                } else {
+                    (list_width - 8.0).max(1.0)
+                };
+                let title = if current && snapshot.playback == PlaybackState::Playing {
+                    marquee_system_text(
+                        track.display_title().to_string(),
+                        title_width,
+                        snapshot.title_marquee_phase,
+                    )
+                } else {
+                    track.display_title().to_string()
+                };
+                if selected {
+                    FilledRect(
+                        2.0,
+                        row_offset + 1.0,
+                        list_width - 4.0,
+                        row_height,
+                        scale,
+                        srgb_color(palette.selected_bg),
+                    );
+                }
+                let row_color = if current {
+                    palette.current
+                } else {
+                    palette.normal
+                };
+                SystemWinampText(title, x, row_y, title_width, row_height, scale, row_color);
+                if let Some(duration) = duration {
+                    SystemWinampText(
+                        duration,
+                        list_width - 2.0 - duration_width,
+                        row_y,
+                        duration_width + 2.0,
+                        row_height,
+                        scale,
+                        row_color,
+                    );
+                }
+
+                {
+                    let state_click = state;
+                    ClickTarget(0.0, row_offset, list_width, row_height, scale, move || {
+                        handle_playlist_row_click(state_click, row);
+                    });
+                }
+            }
+        },
+    );
 }
 
 fn playlist_min_height() -> f32 {
@@ -2211,36 +2377,39 @@ fn playlist_min_height() -> f32 {
 
 #[composable]
 fn PlaylistFooterReadouts(
-    text_bitmap: ImageBitmap,
     snapshot: WinampState,
     bottom_y: f32,
     scale: f32,
+    display_text_color: [u8; 4],
 ) {
     let summary = playlist_footer_summary(&snapshot);
-    BitmapWinampText(
-        text_bitmap.clone(),
+    SystemWinampText(
         summary,
         132.0,
         bottom_y + 10.0,
+        72.0,
+        WINAMP_SYSTEM_LINE_HEIGHT,
         scale,
-        WINAMP_DISPLAY_TEXT_COLOR,
+        display_text_color,
     );
 
     let elapsed = format_duration_compact(snapshot.elapsed_seconds);
-    let elapsed_x = 221.0 - bitmap_text_width(&elapsed);
-    BitmapWinampText(
-        text_bitmap,
+    let elapsed_width = system_text_width(&elapsed);
+    let elapsed_x = 221.0 - elapsed_width;
+    SystemWinampText(
         elapsed,
         elapsed_x,
         bottom_y + 24.0,
+        elapsed_width + 2.0,
+        WINAMP_SYSTEM_LINE_HEIGHT,
         scale,
-        WINAMP_DISPLAY_TEXT_COLOR,
+        display_text_color,
     );
 }
 
 #[composable]
 fn PlaylistSearchOverlay(
-    text_bitmap: ImageBitmap,
+    palette: SkinPalette,
     state: MutableState<WinampState>,
     snapshot: WinampState,
     search_field: TextFieldState,
@@ -2287,21 +2456,23 @@ fn PlaylistSearchOverlay(
         scale,
         Color(0.12, 0.20, 0.24, 1.0),
     );
-    BitmapWinampText(
-        text_bitmap.clone(),
+    SystemWinampText(
         "SEARCH".to_string(),
         x + 6.0,
         y + 5.0,
+        44.0,
+        WINAMP_SYSTEM_LINE_HEIGHT,
         scale,
-        PLAYLIST_TEXT_COLOR,
+        palette.normal,
     );
-    BitmapWinampText(
-        text_bitmap,
+    SystemWinampText(
         "CLOSE".to_string(),
         x + width - 33.0,
         y + 5.0,
+        30.0,
+        WINAMP_SYSTEM_LINE_HEIGHT,
         scale,
-        PLAYLIST_TEXT_COLOR,
+        palette.normal,
     );
 
     FilledRect(
@@ -2442,7 +2613,79 @@ fn PlaylistFooterClickTarget(
     scale: f32,
     on_click: impl Fn() + 'static,
 ) {
-    ClickTarget(area.0, bottom_y + area.1, area.2, area.3, scale, on_click);
+    let is_pressed = cranpose_core::useState(|| false);
+    let area = ControlRect::new(area.0, bottom_y + area.1, area.2, area.3, scale);
+    if is_pressed.get() {
+        FilledRect(
+            area.x,
+            area.y,
+            area.width,
+            area.height,
+            area.scale,
+            Color(0.0, 0.0, 0.0, 0.4),
+        );
+    }
+    PressableClickArea(area, is_pressed, on_click);
+}
+
+#[composable]
+fn PressableClickArea(
+    area: ControlRect,
+    is_pressed: MutableState<bool>,
+    on_click: impl Fn() + 'static,
+) {
+    let on_click = Rc::new(on_click);
+    let w = area.scaled_width();
+    let h = area.scaled_height();
+
+    Box(
+        Modifier::empty()
+            .size_points(w, h)
+            .absolute_offset(area.scaled_x(), area.scaled_y())
+            .pointer_input((), {
+                move |scope: PointerInputScope| {
+                    let on_click = on_click.clone();
+                    async move {
+                        scope
+                            .await_pointer_event_scope(|await_scope| async move {
+                                loop {
+                                    let event = await_scope.await_pointer_event().await;
+                                    match event.kind {
+                                        PointerEventKind::Down => {
+                                            is_pressed.set(true);
+                                            event.consume();
+                                        }
+                                        PointerEventKind::Move
+                                            if is_pressed.get()
+                                                && !event
+                                                    .buttons
+                                                    .contains(PointerButton::Primary) =>
+                                        {
+                                            is_pressed.set(false);
+                                        }
+                                        PointerEventKind::Up => {
+                                            let was_pressed = is_pressed.get();
+                                            is_pressed.set(false);
+                                            let inside = area.contains_scaled_point(event.position);
+                                            if was_pressed && inside {
+                                                on_click();
+                                            }
+                                            event.consume();
+                                        }
+                                        PointerEventKind::Cancel => {
+                                            is_pressed.set(false);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            })
+                            .await;
+                    }
+                }
+            }),
+        BoxSpec::default(),
+        || {},
+    );
 }
 
 #[composable]
@@ -2521,35 +2764,32 @@ fn format_duration_compact(seconds: f32) -> String {
     }
 }
 
-fn bitmap_text_width(text: &str) -> f32 {
-    text.chars().count() as f32 * 5.0
+fn system_text_width(text: &str) -> f32 {
+    text.chars().count() as f32 * WINAMP_SYSTEM_MEASURE_CHAR_WIDTH
 }
 
-fn clip_bitmap_text(text: String, width: f32) -> String {
-    let max_chars = (width / 5.0).floor().max(1.0) as usize;
-    if text.chars().count() <= max_chars {
-        return text;
-    }
-
-    text.chars().take(max_chars).collect()
+#[derive(Clone, Copy, PartialEq)]
+struct PlaylistMenuLayout {
+    window_width: f32,
+    bottom_y: f32,
+    scale: f32,
 }
 
 #[composable]
 fn PlaylistMenu(
-    text_bitmap: ImageBitmap,
+    palette: SkinPalette,
     state: MutableState<WinampState>,
     menu_open: MutableState<Option<PlaylistFooterMenu>>,
     menu: PlaylistFooterMenu,
-    window_width: f32,
-    bottom_y: f32,
-    scale: f32,
+    layout: PlaylistMenuLayout,
 ) {
     let items = playlist_footer_menu_items(menu);
     let width = playlist_footer_menu_width(menu);
     let row_height = 14.0;
     let height = row_height * items.len() as f32;
-    let x = playlist_footer_menu_x(menu, window_width, width);
-    let y = (bottom_y - height - 3.0).max(PLAYLIST_TOP_LEFT_CORNER.3);
+    let x = playlist_footer_menu_x(menu, layout.window_width, width);
+    let y = (layout.bottom_y - height - 3.0).max(PLAYLIST_TOP_LEFT_CORNER.3);
+    let scale = layout.scale;
 
     FilledRect(x, y, width, height, scale, Color(0.01, 0.015, 0.012, 1.0));
     FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
@@ -2560,13 +2800,14 @@ fn PlaylistMenu(
             FilledRect(x, row_y, width, 1.0, scale, Color(0.12, 0.20, 0.24, 1.0));
         }
 
-        BitmapWinampText(
-            text_bitmap.clone(),
+        SystemWinampText(
             item.label.to_string(),
             x + 5.0,
             row_y + 4.0,
+            width - 10.0,
+            row_height - 4.0,
             scale,
-            PLAYLIST_TEXT_COLOR,
+            palette.normal,
         );
 
         let state_click = state;
@@ -2716,115 +2957,56 @@ fn FilledRect(x: f32, y: f32, width: f32, height: f32, scale: f32, color: Color)
 }
 
 #[composable]
-fn BitmapWinampText(
-    text_sheet: ImageBitmap,
+fn SystemWinampText(
     text: String,
     x: f32,
     y: f32,
+    width: f32,
+    height: f32,
     scale: f32,
     color: [u8; 4],
 ) {
-    let bitmap = render_winamp_text(&text_sheet, &text, color);
-    let width = bitmap.width() as f32;
-    let height = bitmap.height() as f32;
-
-    Canvas(
+    let text_y =
+        ((height - WINAMP_SYSTEM_LINE_HEIGHT).max(0.0) * 0.5) + WINAMP_SYSTEM_TEXT_Y_ADJUST;
+    Box(
         Modifier::empty()
             .size_points(scaled(width, scale), scaled(height, scale))
-            .absolute_offset(scaled(x, scale), scaled(y, scale)),
-        move |scope| {
-            let dst = Rect {
-                x: 0.0,
-                y: 0.0,
-                width: scaled(width, scale),
-                height: scaled(height, scale),
-            };
-            scope.draw_image_at(dst, bitmap.clone(), 1.0, None);
+            .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .clip_to_bounds(),
+        BoxSpec::default(),
+        move || {
+            BasicText(
+                text.clone(),
+                Modifier::empty()
+                    .size_points(
+                        scaled(width, scale),
+                        scaled(WINAMP_SYSTEM_LINE_HEIGHT, scale),
+                    )
+                    .absolute_offset(0.0, scaled(text_y, scale)),
+                TextStyle::new(
+                    SpanStyle {
+                        color: Some(Color::from_rgba_u8(color[0], color[1], color[2], color[3])),
+                        font_size: TextUnit::Sp(WINAMP_SYSTEM_FONT_SIZE * scale),
+                        font_family: Some(FontFamily::Monospace),
+                        letter_spacing: TextUnit::Sp(0.0),
+                        ..SpanStyle::default()
+                    },
+                    ParagraphStyle {
+                        line_height: TextUnit::Sp(WINAMP_SYSTEM_LINE_HEIGHT * scale),
+                        ..ParagraphStyle::default()
+                    },
+                ),
+                TextOverflow::Clip,
+                false,
+                1,
+                1,
+            );
         },
     );
 }
 
-fn render_winamp_text(text_sheet: &ImageBitmap, text: &str, color: [u8; 4]) -> ImageBitmap {
-    let glyph_width = 5usize;
-    let glyph_height = 6usize;
-    let output_width = (text.chars().count().max(1) * glyph_width) as u32;
-    let output_height = glyph_height as u32;
-    let mut pixels = vec![0u8; output_width as usize * output_height as usize * 4];
-
-    for (char_index, ch) in text.chars().enumerate() {
-        let Some((glyph_x, glyph_y)) = winamp_text_glyph(ch) else {
-            continue;
-        };
-        for y in 0..glyph_height {
-            for x in 0..glyph_width {
-                let source_x = glyph_x + x;
-                let source_y = glyph_y + y;
-                let source_index = ((source_y * text_sheet.width() as usize) + source_x) * 4;
-                let source = &text_sheet.pixels()[source_index..source_index + 4];
-                if source[3] == 0 || (source[0] == 0 && source[1] == 0 && source[2] == 0) {
-                    continue;
-                }
-
-                let target_x = char_index * glyph_width + x;
-                let target_index = ((y * output_width as usize) + target_x) * 4;
-                pixels[target_index..target_index + 4].copy_from_slice(&color);
-            }
-        }
-    }
-
-    ImageBitmap::from_rgba8(output_width, output_height, pixels)
-        .expect("rendered Winamp text bitmap should be valid")
-}
-
-fn winamp_text_glyph(ch: char) -> Option<(usize, usize)> {
-    let ch = ch.to_ascii_uppercase();
-    if ch.is_ascii_uppercase() {
-        return Some((((ch as u8 - b'A') as usize) * 5, 0));
-    }
-    if ch.is_ascii_digit() {
-        return Some((((ch as u8 - b'0') as usize) * 5, 6));
-    }
-
-    let index = match ch {
-        '.' => 10,
-        ':' => 12,
-        ')' => 13,
-        '(' => 14,
-        '-' => 15,
-        '"' => 16,
-        '!' => 17,
-        '_' => 18,
-        '+' => 19,
-        '\\' => 20,
-        '/' => 21,
-        '[' => 22,
-        ']' => 23,
-        '^' => 24,
-        '&' => 25,
-        '%' => 26,
-        ',' => 27,
-        '=' => 28,
-        '$' => 29,
-        '#' => 30,
-        _ => return None,
-    };
-    Some((index * 5, 6))
-}
-
-fn ellipsize_bitmap(text: String, width: f32) -> String {
-    let max_chars = (width / 5.0).floor().max(1.0) as usize;
-    if text.chars().count() <= max_chars {
-        return text;
-    }
-
-    let keep = max_chars.saturating_sub(1);
-    let mut result = text.chars().take(keep).collect::<String>();
-    result.push('~');
-    result
-}
-
-fn marquee_bitmap_text(text: String, width: f32, phase: f32) -> String {
-    let max_chars = (width / 5.0).floor().max(1.0) as usize;
+fn marquee_system_text(text: String, width: f32, phase: f32) -> String {
+    let max_chars = (width / WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH).ceil().max(1.0) as usize;
     let char_count = text.chars().count();
     if char_count <= max_chars {
         return text;
@@ -2832,7 +3014,7 @@ fn marquee_bitmap_text(text: String, width: f32, phase: f32) -> String {
 
     let max_offset = char_count - max_chars;
     let offset = ping_pong_offset(phase, max_offset);
-    text.chars().skip(offset).take(max_chars).collect()
+    text.chars().skip(offset).collect()
 }
 
 fn ping_pong_offset(position: f32, max_offset: usize) -> usize {
@@ -2859,38 +3041,41 @@ fn main_display_title(state: &WinampState) -> String {
 }
 
 #[composable]
-fn MainMetaReadouts(text_bitmap: ImageBitmap, state: WinampState, scale: f32) {
+fn MainMetaReadouts(state: WinampState, scale: f32, display_text_color: [u8; 4]) {
     if state
         .current_index
         .and_then(|index| state.playlist.get(index))
         .is_some()
     {
-        BitmapWinampText(
-            text_bitmap.clone(),
+        SystemWinampText(
             "320".to_string(),
             POS_MAIN_META_TEXT.0,
             POS_MAIN_META_TEXT.1,
+            20.0,
+            WINAMP_SYSTEM_LINE_HEIGHT,
             scale,
-            WINAMP_DISPLAY_TEXT_COLOR,
+            display_text_color,
         );
-        BitmapWinampText(
-            text_bitmap,
+        SystemWinampText(
             "44".to_string(),
             POS_MAIN_META_TEXT.0 + 45.0,
             POS_MAIN_META_TEXT.1,
+            16.0,
+            WINAMP_SYSTEM_LINE_HEIGHT,
             scale,
-            WINAMP_DISPLAY_TEXT_COLOR,
+            display_text_color,
         );
         return;
     }
 
-    BitmapWinampText(
-        text_bitmap,
-        ellipsize_bitmap(main_display_meta(&state), MAIN_META_TEXT_WIDTH),
+    SystemWinampText(
+        main_display_meta(&state),
         POS_MAIN_META_TEXT.0,
         POS_MAIN_META_TEXT.1,
+        MAIN_META_TEXT_WIDTH,
+        WINAMP_SYSTEM_LINE_HEIGHT,
         scale,
-        WINAMP_DISPLAY_TEXT_COLOR,
+        display_text_color,
     );
 }
 
@@ -2918,8 +3103,8 @@ fn main_display_meta(state: &WinampState) -> String {
 }
 
 #[composable]
-fn Visualizer(playing: bool, bands: audio::VisualizerBands, scale: f32) {
-    let bitmap = visualizer_bitmap(playing, bands);
+fn Visualizer(playing: bool, bands: audio::VisualizerBands, viscolor: VisColor, scale: f32) {
+    let bitmap = visualizer_bitmap(playing, bands, viscolor);
     let width = scaled(VISUALIZER_WIDTH, scale);
     let height = scaled(VISUALIZER_HEIGHT, scale);
     Canvas(
@@ -2946,8 +3131,8 @@ fn Visualizer(playing: bool, bands: audio::VisualizerBands, scale: f32) {
 }
 
 #[composable]
-fn EqCurve(values: [f32; 11], scale: f32) {
-    let bitmap = eq_curve_bitmap(values);
+fn EqCurve(values: [f32; 11], display_text_color: [u8; 4], scale: f32) {
+    let bitmap = eq_curve_bitmap(values, display_text_color);
     let width = scaled(EQ_GRAPH_BG.2, scale);
     let height = scaled(EQ_GRAPH_BG.3, scale);
 
@@ -2974,7 +3159,7 @@ fn EqCurve(values: [f32; 11], scale: f32) {
     );
 }
 
-fn eq_curve_bitmap(values: [f32; 11]) -> ImageBitmap {
+fn eq_curve_bitmap(values: [f32; 11], display_text_color: [u8; 4]) -> ImageBitmap {
     let width = EQ_GRAPH_BG.2 as u32;
     let height = EQ_GRAPH_BG.3 as u32;
     let mut pixels = vec![0u8; width as usize * height as usize * 4];
@@ -3001,7 +3186,7 @@ fn eq_curve_bitmap(values: [f32; 11]) -> ImageBitmap {
             height,
             (from.0, from.1 - 1),
             (to.0, to.1 - 1),
-            WINAMP_DISPLAY_TEXT_COLOR,
+            display_text_color,
         );
     }
 
@@ -3056,12 +3241,17 @@ fn set_bitmap_pixel(pixels: &mut [u8], width: u32, height: u32, x: i32, y: i32, 
     pixels[offset..offset + 4].copy_from_slice(&color);
 }
 
-fn visualizer_bitmap(playing: bool, bands: audio::VisualizerBands) -> ImageBitmap {
+fn visualizer_bitmap(
+    playing: bool,
+    bands: audio::VisualizerBands,
+    viscolor: VisColor,
+) -> ImageBitmap {
     let width = VISUALIZER_WIDTH as u32;
     let height = VISUALIZER_HEIGHT as u32;
+    let bg = viscolor.background();
     let mut pixels = vec![0u8; width as usize * height as usize * 4];
     for pixel in pixels.chunks_exact_mut(4) {
-        pixel.copy_from_slice(&[0, 0, 0, 255]);
+        pixel.copy_from_slice(&bg);
     }
 
     if !playing {
@@ -3079,7 +3269,8 @@ fn visualizer_bitmap(playing: bool, bands: audio::VisualizerBands) -> ImageBitma
         let x = (bar * bar_pitch) as u32;
         for segment in 0..max_segments {
             let threshold = ((segment + 1) as f32 / max_segments as f32) * VISUALIZER_HEIGHT;
-            let color = visualizer_segment_rgba(segment, max_segments, value >= threshold);
+            let color =
+                visualizer_segment_rgba(segment, max_segments, value >= threshold, &viscolor);
             let y = height as i32 - ((segment + 1) * segment_pitch) as i32 + 1;
             fill_visualizer_rect(
                 &mut pixels,
@@ -3116,19 +3307,21 @@ fn visualizer_band_height(bands: audio::VisualizerBands, bar: usize) -> f32 {
     level * 16.0
 }
 
-fn visualizer_segment_rgba(segment: usize, max_segments: usize, lit: bool) -> [u8; 4] {
-    let color = if segment + 2 >= max_segments {
-        [255, 70, 28, 255]
-    } else if segment + 3 >= max_segments {
-        [242, 204, 31, 255]
-    } else {
-        [51, 255, 82, 255]
-    };
-    if lit {
-        color
-    } else {
-        [0, 0, 0, 255]
+fn visualizer_segment_rgba(
+    segment: usize,
+    max_segments: usize,
+    lit: bool,
+    viscolor: &VisColor,
+) -> [u8; 4] {
+    if !lit {
+        return viscolor.background();
     }
+    let gradient = viscolor.analyzer_gradient();
+    let last = gradient.len() - 1;
+    let from_top = max_segments - 1 - segment;
+    let denom = (max_segments - 1).max(1);
+    let index = ((from_top * last) + denom / 2) / denom;
+    gradient[index.min(last)]
 }
 
 #[composable]
@@ -3362,22 +3555,21 @@ fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: im
 
 #[composable]
 fn DragSlider(
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    scale: f32,
+    area: ControlRect,
     on_change: impl Fn(f32) + 'static,
+    on_drag_state: impl Fn(bool) + 'static,
 ) {
     let on_change = Rc::new(on_change);
+    let on_drag_state = Rc::new(on_drag_state);
 
     Box(
         Modifier::empty()
-            .size_points(scaled(width, scale), scaled(height, scale))
-            .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .size_points(area.scaled_width(), area.scaled_height())
+            .absolute_offset(area.scaled_x(), area.scaled_y())
             .pointer_input((), {
                 move |scope: PointerInputScope| {
                     let on_change = on_change.clone();
+                    let on_drag_state = on_drag_state.clone();
                     async move {
                         scope
                             .await_pointer_event_scope(|await_scope| async move {
@@ -3387,37 +3579,41 @@ fn DragSlider(
                                     match event.kind {
                                         PointerEventKind::Down => {
                                             dragging = true;
-                                            let value = (event.position.x / scaled(width, scale))
+                                            on_drag_state(true);
+                                            let value = (event.position.x / area.scaled_width())
                                                 .clamp(0.0, 1.0);
                                             log_slider_pointer_event(
                                                 "horizontal",
                                                 "down",
                                                 event.position,
-                                                scaled(width, scale),
+                                                area.scaled_width(),
                                                 value,
-                                                scale,
-                                                (width, height),
+                                                area.scale,
+                                                (area.width, area.height),
                                             );
                                             on_change(value);
                                             event.consume();
                                         }
                                         PointerEventKind::Move if dragging => {
-                                            let value = (event.position.x / scaled(width, scale))
+                                            let value = (event.position.x / area.scaled_width())
                                                 .clamp(0.0, 1.0);
                                             log_slider_pointer_event(
                                                 "horizontal",
                                                 "move",
                                                 event.position,
-                                                scaled(width, scale),
+                                                area.scaled_width(),
                                                 value,
-                                                scale,
-                                                (width, height),
+                                                area.scale,
+                                                (area.width, area.height),
                                             );
                                             on_change(value);
                                             event.consume();
                                         }
-                                        PointerEventKind::Up | PointerEventKind::Cancel => {
+                                        PointerEventKind::Up | PointerEventKind::Cancel
+                                            if dragging =>
+                                        {
                                             dragging = false;
+                                            on_drag_state(false);
                                         }
                                         _ => {}
                                     }
@@ -3434,23 +3630,22 @@ fn DragSlider(
 
 #[composable]
 fn VerticalDragSlider(
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    scale: f32,
+    area: ControlRect,
     invert: bool,
     on_change: impl Fn(f32) + 'static,
+    on_drag_state: impl Fn(bool) + 'static,
 ) {
     let on_change = Rc::new(on_change);
+    let on_drag_state = Rc::new(on_drag_state);
 
     Box(
         Modifier::empty()
-            .size_points(scaled(width, scale), scaled(height, scale))
-            .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .size_points(area.scaled_width(), area.scaled_height())
+            .absolute_offset(area.scaled_x(), area.scaled_y())
             .pointer_input((), {
                 move |scope: PointerInputScope| {
                     let on_change = on_change.clone();
+                    let on_drag_state = on_drag_state.clone();
                     async move {
                         scope
                             .await_pointer_event_scope(|await_scope| async move {
@@ -3460,39 +3655,43 @@ fn VerticalDragSlider(
                                     match event.kind {
                                         PointerEventKind::Down => {
                                             dragging = true;
-                                            let raw = (event.position.y / scaled(height, scale))
+                                            on_drag_state(true);
+                                            let raw = (event.position.y / area.scaled_height())
                                                 .clamp(0.0, 1.0);
                                             let value = if invert { 1.0 - raw } else { raw };
                                             log_slider_pointer_event(
                                                 "vertical",
                                                 "down",
                                                 event.position,
-                                                scaled(height, scale),
+                                                area.scaled_height(),
                                                 value,
-                                                scale,
-                                                (width, height),
+                                                area.scale,
+                                                (area.width, area.height),
                                             );
                                             on_change(value);
                                             event.consume();
                                         }
                                         PointerEventKind::Move if dragging => {
-                                            let raw = (event.position.y / scaled(height, scale))
+                                            let raw = (event.position.y / area.scaled_height())
                                                 .clamp(0.0, 1.0);
                                             let value = if invert { 1.0 - raw } else { raw };
                                             log_slider_pointer_event(
                                                 "vertical",
                                                 "move",
                                                 event.position,
-                                                scaled(height, scale),
+                                                area.scaled_height(),
                                                 value,
-                                                scale,
-                                                (width, height),
+                                                area.scale,
+                                                (area.width, area.height),
                                             );
                                             on_change(value);
                                             event.consume();
                                         }
-                                        PointerEventKind::Up | PointerEventKind::Cancel => {
+                                        PointerEventKind::Up | PointerEventKind::Cancel
+                                            if dragging =>
+                                        {
                                             dragging = false;
+                                            on_drag_state(false);
                                         }
                                         _ => {}
                                     }
@@ -3970,6 +4169,7 @@ fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>
     }
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     state.playlist = tracks;
     state.current_index = Some(0);
@@ -3983,6 +4183,7 @@ fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     refresh_shuffle_order(state);
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn append_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) -> bool {
     let was_empty = state.playlist.is_empty();
     let added_count = tracks.len();
@@ -4758,6 +4959,7 @@ fn save_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
     Err("native playlist saver is not available on this target yet".to_string())
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn parse_m3u_playlist(input: &str, base_dir: Option<&std::path::Path>) -> Vec<Track> {
     let mut tracks = Vec::new();
     let mut pending_extinf = None::<(Option<f32>, String)>;
@@ -4797,6 +4999,7 @@ fn parse_m3u_playlist(input: &str, base_dir: Option<&std::path::Path>) -> Vec<Tr
     tracks
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn parse_extinf(input: &str) -> Option<(Option<f32>, String)> {
     let (duration, title) = input.split_once(',').unwrap_or((input, ""));
     let duration_seconds = duration
@@ -4807,6 +5010,7 @@ fn parse_extinf(input: &str) -> Option<(Option<f32>, String)> {
     Some((duration_seconds, title.trim().to_string()))
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn resolve_playlist_path(path: &str, base_dir: Option<&std::path::Path>) -> String {
     let path = path.trim();
     if path.starts_with("file://") {
@@ -4821,6 +5025,7 @@ fn resolve_playlist_path(path: &str, base_dir: Option<&std::path::Path>) -> Stri
         .unwrap_or_else(|| path.to_string())
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn is_supported_playlist_path(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()
@@ -4834,6 +5039,7 @@ fn is_supported_playlist_path(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn playlist_title_from_path(path: &str) -> String {
     std::path::Path::new(path)
         .file_stem()
@@ -4844,6 +5050,7 @@ fn playlist_title_from_path(path: &str) -> String {
         .to_string()
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn format_m3u_playlist(playlist: &[Track]) -> String {
     let mut lines = vec!["#EXTM3U".to_string()];
     for track in playlist {
@@ -6287,19 +6494,24 @@ mod tests {
     #[test]
     fn marquee_text_ping_pongs_long_titles() {
         let title = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string();
+        let width = WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH * 14.0;
 
-        assert_eq!(marquee_bitmap_text(title.clone(), 50.0, 0.0), "ABCDEFGHIJ");
-        assert_eq!(marquee_bitmap_text(title.clone(), 50.0, 2.0), "CDEFGHIJKL");
-        assert_eq!(marquee_bitmap_text(title, 50.0, 18.0), "OPQRSTUVWX");
+        assert!(marquee_system_text(title.clone(), width, 0.0).starts_with("ABCDEFGHIJKLMN"));
+        assert!(marquee_system_text(title.clone(), width, 2.0).starts_with("CDEFGHIJKLMNOP"));
+        assert!(marquee_system_text(title, width, 18.0).starts_with("GHIJKLMNOPQRST"));
         assert_eq!(
-            marquee_bitmap_text("SHORT".to_string(), 50.0, 60.0),
+            marquee_system_text("SHORT".to_string(), width, 60.0),
             "SHORT"
         );
     }
 
     #[test]
     fn visualizer_bitmap_contains_bright_bars() {
-        let bitmap = visualizer_bitmap(true, [0.8; audio::VISUALIZER_BAND_COUNT]);
+        let bitmap = visualizer_bitmap(
+            true,
+            [0.8; audio::VISUALIZER_BAND_COUNT],
+            VisColor::default(),
+        );
 
         assert_eq!(bitmap.width(), VISUALIZER_WIDTH as u32);
         assert_eq!(bitmap.height(), VISUALIZER_HEIGHT as u32);
@@ -6311,12 +6523,26 @@ mod tests {
 
     #[test]
     fn visualizer_bitmap_is_blank_when_stopped() {
-        let bitmap = visualizer_bitmap(false, [0.8; audio::VISUALIZER_BAND_COUNT]);
+        let bitmap = visualizer_bitmap(
+            false,
+            [0.8; audio::VISUALIZER_BAND_COUNT],
+            VisColor::default(),
+        );
 
         assert!(bitmap
             .pixels()
             .chunks_exact(4)
             .all(|pixel| pixel == [0, 0, 0, 255]));
+    }
+
+    #[test]
+    fn visualizer_uses_viscolor_palette_for_lit_bars() {
+        let palette = VisColor([[5; 4]; 24]);
+        let bitmap = visualizer_bitmap(true, [1.0; audio::VISUALIZER_BAND_COUNT], palette);
+        assert!(bitmap
+            .pixels()
+            .chunks_exact(4)
+            .all(|pixel| pixel == [5, 5, 5, 5]));
     }
 
     #[test]

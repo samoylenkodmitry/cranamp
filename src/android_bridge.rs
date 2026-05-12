@@ -172,6 +172,35 @@ pub fn start_window_move(local_x_dp: f32, local_y_dp: f32) -> bool {
     .unwrap_or(false)
 }
 
+pub fn content_top_inset_dp() -> f32 {
+    activity_float_method("cranampContentTopInsetDp")
+}
+
+pub fn content_bottom_inset_dp() -> f32 {
+    activity_float_method("cranampContentBottomInsetDp")
+}
+
+fn activity_float_method(method: &str) -> f32 {
+    let Some(bridge) = BRIDGE.get() else {
+        return 0.0;
+    };
+    let Ok(mut env) = bridge.vm.attach_current_thread() else {
+        return 0.0;
+    };
+    match env
+        .call_method(bridge.activity.as_obj(), method, "()F", &[])
+        .and_then(|value| value.f())
+    {
+        Ok(value) if value.is_finite() && value > 0.0 => value,
+        _ => {
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_clear();
+            }
+            0.0
+        }
+    }
+}
+
 fn mode_value(mode: AndroidLoadMode) -> i32 {
     match mode {
         AndroidLoadMode::Replace => 0,

@@ -51,8 +51,8 @@ fn get_display_density(app: &android_activity::AndroidApp) -> f32 {
 /// MotionEvent coordinates remain relative to the smaller content rect.
 fn content_surface_offset_px(
     app: &android_activity::AndroidApp,
-    surface_width: u32,
-    surface_height: u32,
+    _surface_width: u32,
+    _surface_height: u32,
 ) -> (f64, f64) {
     if let Some((x, y)) = window_surface_insets_px(app) {
         if x > 0.0 || y > 0.0 {
@@ -60,25 +60,10 @@ fn content_surface_offset_px(
         }
     }
 
-    let rect = app.content_rect();
-    let content_width = (rect.right - rect.left).max(0) as u32;
-    let content_height = (rect.bottom - rect.top).max(0) as u32;
-
-    let x = if rect.left > 0 {
-        rect.left as f64
-    } else if content_width > 0 && surface_width > content_width {
-        (surface_width - content_width) as f64 * 0.5
-    } else {
-        0.0
-    };
-    let y = if rect.top > 0 {
-        rect.top as f64
-    } else if content_height > 0 && surface_height > content_height {
-        (surface_height - content_height) as f64 * 0.5
-    } else {
-        0.0
-    };
-    (x.max(0.0), y.max(0.0))
+    // MotionEvent coordinates already match the native window surface on the
+    // Android emulator/fullscreen path. Guessing from content_rect() can fold
+    // system-decor/taskbar insets into input and shift hit testing downward.
+    (0.0, 0.0)
 }
 
 fn window_surface_insets_px(app: &android_activity::AndroidApp) -> Option<(f64, f64)> {

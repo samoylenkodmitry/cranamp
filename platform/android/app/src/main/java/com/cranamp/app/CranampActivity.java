@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.database.Cursor;
+import android.os.Build;
 import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Bundle;
@@ -12,6 +13,7 @@ import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowInsets;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -68,6 +70,18 @@ public class CranampActivity extends NativeActivity {
 
     public boolean cranampStartWindowMove(float localXDp, float localYDp) {
         return invokeStartWindowMove(localXDp, localYDp);
+    }
+
+    public float cranampContentTopInsetDp() {
+        int topPx = contentTopInsetPx();
+        float density = getResources().getDisplayMetrics().density;
+        return density > 0.0f ? topPx / density : topPx;
+    }
+
+    public float cranampContentBottomInsetDp() {
+        int bottomPx = contentBottomInsetPx();
+        float density = getResources().getDisplayMetrics().density;
+        return density > 0.0f ? bottomPx / density : bottomPx;
     }
 
     public void cranampPickAudioFiles(int mode) {
@@ -222,6 +236,80 @@ public class CranampActivity extends NativeActivity {
         } catch (Exception ignored) {
         }
         return new Rect();
+    }
+
+    private int contentTopInsetPx() {
+        View decor = getWindow().getDecorView();
+        if (decor == null) {
+            return 0;
+        }
+
+        int top = rootWindowTopInsetPx(decor);
+        Rect visibleFrame = new Rect();
+        decor.getWindowVisibleDisplayFrame(visibleFrame);
+        int[] location = new int[2];
+        decor.getLocationOnScreen(location);
+        top = Math.max(top, visibleFrame.top - location[1]);
+        top += Math.max(surfaceInsets().top, 0);
+        top = Math.max(top, androidSystemDimensionPx("status_bar_height", 24));
+        return Math.max(top, 0);
+    }
+
+    private int rootWindowTopInsetPx(View decor) {
+        WindowInsets insets = decor.getRootWindowInsets();
+        if (insets == null) {
+            return 0;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            int top = insets.getInsets(WindowInsets.Type.captionBar()).top;
+            top = Math.max(top, insets.getInsets(WindowInsets.Type.systemBars()).top);
+            top = Math.max(top, insets.getInsets(WindowInsets.Type.displayCutout()).top);
+            return top;
+        }
+        return insets.getSystemWindowInsetTop();
+    }
+
+    private int contentBottomInsetPx() {
+        View decor = getWindow().getDecorView();
+        if (decor == null) {
+            return 0;
+        }
+
+        int bottom = rootWindowBottomInsetPx(decor);
+        Rect visibleFrame = new Rect();
+        decor.getWindowVisibleDisplayFrame(visibleFrame);
+        int[] location = new int[2];
+        decor.getLocationOnScreen(location);
+        int decorBottom = location[1] + decor.getHeight();
+        bottom = Math.max(bottom, decorBottom - visibleFrame.bottom);
+        bottom += Math.max(surfaceInsets().bottom, 0);
+        bottom = Math.max(bottom, androidSystemDimensionPx("navigation_bar_height", 0));
+        return Math.max(bottom, 0);
+    }
+
+    private int rootWindowBottomInsetPx(View decor) {
+        WindowInsets insets = decor.getRootWindowInsets();
+        if (insets == null) {
+            return 0;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            int bottom = insets.getInsets(WindowInsets.Type.systemBars()).bottom;
+            bottom = Math.max(bottom, insets.getInsets(WindowInsets.Type.displayCutout()).bottom);
+            return bottom;
+        }
+        return insets.getSystemWindowInsetBottom();
+    }
+
+    private int androidSystemDimensionPx(String name, int fallbackDp) {
+        int id = getResources().getIdentifier(name, "dimen", "android");
+        if (id > 0) {
+            int value = getResources().getDimensionPixelSize(id);
+            if (value > 0) {
+                return value;
+            }
+        }
+        float density = getResources().getDisplayMetrics().density;
+        return Math.round(fallbackDp * density);
     }
 
     private boolean startMovingTask(View decor, float rawX, float rawY) throws Exception {
@@ -488,25 +576,31 @@ public class CranampActivity extends NativeActivity {
         return name.replaceAll("[^A-Za-z0-9._ -]", "_").trim();
     }
 
-    private File ensureBridgeDir() {
-        File dir = new File(getFilesDir(), "cranamp_bridge");
-        if (!dir.isDirectory() && !dir.mkdirs()) {
-            throw new IllegalStateException("failed to create " + dir);
-        }
-        return dir;
+    private synchronized File ensureBridgeDir() {
+        return ensureAppPrivateDir("cranamp_bridge");
     }
 
-    private File ensureMediaDir() {
-        File dir = new File(getFilesDir(), "cranamp_media");
-        if (!dir.isDirectory() && !dir.mkdirs()) {
-            throw new IllegalStateException("failed to create " + dir);
-        }
-        return dir;
+    private synchronized File ensureMediaDir() {
+        return ensureAppPrivateDir("cranamp_media");
     }
 
-    private File ensureSkinDir() {
-        File dir = new File(getFilesDir(), "cranamp_skins");
-        if (!dir.isDirectory() && !dir.mkdirs()) {
+    private synchronized File ensureSkinDir() {
+        return ensureAppPrivateDir("cranamp_skins");
+    }
+
+    private File ensureAppPrivateDir(String name) {
+        File baseDir = getFilesDir();
+        if (baseDir == null) {
+            throw new IllegalStateException("app files directory is unavailable");
+        }
+        File dir = new File(baseDir, name);
+        if (dir.isDirectory()) {
+            return dir;
+        }
+        if (dir.exists()) {
+            throw new IllegalStateException("expected directory but found file: " + dir);
+        }
+        if (!dir.mkdirs() && !dir.isDirectory()) {
             throw new IllegalStateException("failed to create " + dir);
         }
         return dir;
