@@ -166,7 +166,11 @@ pub const EQ_AUTO_BUTTON_ON_SELECTED: SpriteRect = (213.0, 119.0, 32.0, 12.0);
 pub const EQ_PRESETS_BUTTON: SpriteRect = (224.0, 164.0, 44.0, 12.0);
 pub const EQ_PRESETS_BUTTON_SELECTED: SpriteRect = (224.0, 176.0, 44.0, 12.0);
 
-pub const EQ_SLIDER_BG: SpriteRect = (13.0, 229.0, 14.0, 63.0);
+pub const EQ_SLIDER_BG: SpriteRect = (13.0, 164.0, 14.0, 63.0);
+pub const EQ_SLIDER_BG_FRAMES: u32 = 28;
+pub const EQ_SLIDER_BG_FRAMES_PER_ROW: u32 = 14;
+pub const EQ_SLIDER_BG_STRIDE: f32 = 15.0;
+pub const EQ_SLIDER_BG_ROW_Y: [f32; 2] = [164.0, 229.0];
 pub const EQ_SLIDER_THUMB: SpriteRect = (0.0, 164.0, 11.0, 11.0);
 pub const EQ_SLIDER_THUMB_SELECTED: SpriteRect = (0.0, 176.0, 11.0, 11.0);
 

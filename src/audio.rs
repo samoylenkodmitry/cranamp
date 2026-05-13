@@ -273,13 +273,32 @@ pub fn pick_audio_files() -> Result<Option<Vec<Track>>, String> {
     feature = "native-dialogs"
 ))]
 pub fn pick_audio_folder() -> Result<Option<Vec<Track>>, String> {
-    let Some(folder) = rfd::FileDialog::new()
-        .set_title("Open audio folder")
-        .pick_folder()
-    else {
+    let Some(folder) = pick_audio_folder_path()? else {
         return Ok(None);
     };
 
+    Ok(Some(tracks_from_audio_folder(folder)))
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+))]
+pub fn pick_audio_folder_path() -> Result<Option<std::path::PathBuf>, String> {
+    Ok(rfd::FileDialog::new()
+        .set_title("Open audio folder")
+        .pick_folder())
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+))]
+pub fn tracks_from_audio_folder(folder: std::path::PathBuf) -> Vec<Track> {
     let tracks = walkdir::WalkDir::new(folder)
         .follow_links(true)
         .into_iter()
@@ -290,7 +309,7 @@ pub fn pick_audio_folder() -> Result<Option<Vec<Track>>, String> {
         .map(Track::from_path)
         .collect::<Vec<_>>();
 
-    Ok(Some(sort_tracks(tracks)))
+    sort_tracks(tracks)
 }
 
 #[cfg(not(all(
@@ -301,6 +320,26 @@ pub fn pick_audio_folder() -> Result<Option<Vec<Track>>, String> {
 )))]
 pub fn pick_audio_folder() -> Result<Option<Vec<Track>>, String> {
     Err("native folder picker is not available on this target yet".to_string())
+}
+
+#[cfg(not(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+)))]
+pub fn pick_audio_folder_path() -> Result<Option<std::path::PathBuf>, String> {
+    Err("native folder picker is not available on this target yet".to_string())
+}
+
+#[cfg(not(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    feature = "native-dialogs"
+)))]
+pub fn tracks_from_audio_folder(_folder: std::path::PathBuf) -> Vec<Track> {
+    Vec::new()
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -408,6 +447,13 @@ mod native {
 
         fn total_duration(&self) -> Option<Duration> {
             self.inner.total_duration()
+        }
+
+        fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+            self.inner.try_seek(pos)?;
+            self.window.clear();
+            reset_visualizer_bands();
+            Ok(())
         }
     }
 
