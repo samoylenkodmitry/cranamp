@@ -43,6 +43,8 @@ pub(crate) enum AndroidOverlayWindowEvent {
         action: AndroidOverlayPointerAction,
         x: f32,
         y: f32,
+        raw_x: f32,
+        raw_y: f32,
     },
 }
 
@@ -148,6 +150,31 @@ pub(crate) fn drain_android_overlay_window_events() -> Vec<AndroidOverlayWindowE
         .lock()
         .expect("overlay event queue poisoned");
     events.drain(..).collect()
+}
+
+/// Returns the latest Android pointer position in screen logical pixels.
+pub fn current_android_pointer_screen_position() -> Option<Point> {
+    *current_pointer_screen_position()
+        .lock()
+        .expect("overlay pointer position state poisoned")
+}
+
+/// Returns the latest Android pointer-down position in screen logical pixels.
+pub fn current_android_pointer_down_screen_position() -> Option<Point> {
+    *current_pointer_down_screen_position()
+        .lock()
+        .expect("overlay pointer position state poisoned")
+}
+
+pub(crate) fn set_android_pointer_screen_position(position: Point, is_down: bool) {
+    *current_pointer_screen_position()
+        .lock()
+        .expect("overlay pointer position state poisoned") = Some(position);
+    if is_down {
+        *current_pointer_down_screen_position()
+            .lock()
+            .expect("overlay pointer position state poisoned") = Some(position);
+    }
 }
 
 fn find_overlay_class<'local>(
@@ -289,6 +316,16 @@ fn overlay_events() -> &'static Mutex<VecDeque<AndroidOverlayWindowEvent>> {
     EVENTS.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
+fn current_pointer_screen_position() -> &'static Mutex<Option<Point>> {
+    static POSITION: OnceLock<Mutex<Option<Point>>> = OnceLock::new();
+    POSITION.get_or_init(|| Mutex::new(None))
+}
+
+fn current_pointer_down_screen_position() -> &'static Mutex<Option<Point>> {
+    static POSITION: OnceLock<Mutex<Option<Point>>> = OnceLock::new();
+    POSITION.get_or_init(|| Mutex::new(None))
+}
+
 fn native_window_from_surface(
     env: &mut JNIEnv<'_>,
     surface: JObject<'_>,
@@ -356,6 +393,8 @@ pub extern "system" fn Java_dev_cranpose_android_CranposeOverlayWindow_nativeOve
     action: jint,
     x: jfloat,
     y: jfloat,
+    raw_x: jfloat,
+    raw_y: jfloat,
 ) {
     let action = match action {
         0 | 5 => AndroidOverlayPointerAction::Down,
@@ -364,7 +403,13 @@ pub extern "system" fn Java_dev_cranpose_android_CranposeOverlayWindow_nativeOve
         3 => AndroidOverlayPointerAction::Cancel,
         _ => return,
     };
-    push_overlay_event(AndroidOverlayWindowEvent::Pointer { action, x, y });
+    push_overlay_event(AndroidOverlayWindowEvent::Pointer {
+        action,
+        x,
+        y,
+        raw_x,
+        raw_y,
+    });
 }
 
 #[cfg(test)]

@@ -153,58 +153,41 @@ pub fn config_dir() -> Option<PathBuf> {
     BRIDGE.get().map(|bridge| bridge.bridge_dir.join("config"))
 }
 
-pub fn start_window_move(local_x_dp: f32, local_y_dp: f32) -> bool {
+pub fn can_draw_overlays() -> bool {
+    activity_bool_method("cranampCanDrawOverlays")
+}
+
+pub fn request_overlay_permission() -> bool {
+    activity_bool_method("cranampRequestOverlayPermission")
+}
+
+fn activity_bool_method(method: &str) -> bool {
     let Some(bridge) = BRIDGE.get() else {
         return false;
     };
     bridge
         .vm
         .attach_current_thread(|env| -> JniResult<bool> {
-            env.call_method(
-                bridge.activity.as_obj(),
-                jni_str!("cranampStartWindowMove"),
-                jni_sig!("(FF)Z"),
-                &[JValue::Float(local_x_dp), JValue::Float(local_y_dp)],
-            )
-            .and_then(|value| value.z())
-        })
-        .unwrap_or(false)
-}
-
-pub fn content_top_inset_dp() -> f32 {
-    activity_float_method("cranampContentTopInsetDp")
-}
-
-pub fn content_bottom_inset_dp() -> f32 {
-    activity_float_method("cranampContentBottomInsetDp")
-}
-
-fn activity_float_method(method: &str) -> f32 {
-    let Some(bridge) = BRIDGE.get() else {
-        return 0.0;
-    };
-    bridge
-        .vm
-        .attach_current_thread(|env| -> JniResult<f32> {
-            match env
+            let result = env
                 .call_method(
                     bridge.activity.as_obj(),
                     JNIString::new(method).as_ref(),
-                    jni_sig!("()F"),
+                    jni_sig!("()Z"),
                     &[],
                 )
-                .and_then(|value| value.f())
-            {
-                Ok(value) if value.is_finite() && value > 0.0 => Ok(value),
-                _ => {
+                .and_then(|value| value.z());
+            match result {
+                Ok(value) => Ok(value),
+                Err(error) => {
                     if env.exception_check() {
                         let _ = env.exception_clear();
                     }
-                    Ok(0.0)
+                    log::warn!("Android activity method {method} failed: {error}");
+                    Ok(false)
                 }
             }
         })
-        .unwrap_or(0.0)
+        .unwrap_or(false)
 }
 
 fn mode_value(mode: AndroidLoadMode) -> i32 {

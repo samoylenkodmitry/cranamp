@@ -93,7 +93,13 @@ public final class CranposeOverlayWindow {
                 }
             });
             view.setOnTouchListener((View touched, MotionEvent event) -> {
-                nativeOverlayPointer(event.getActionMasked(), event.getX(), event.getY());
+                nativeOverlayPointer(
+                        event.getActionMasked(),
+                        event.getX(),
+                        event.getY(),
+                        event.getRawX(),
+                        event.getRawY()
+                );
                 return true;
             });
 
@@ -204,5 +210,11 @@ public final class CranposeOverlayWindow {
 
     private static native void nativeOverlaySurfaceDestroyed();
 
-    private static native void nativeOverlayPointer(int action, float x, float y);
+    private static native void nativeOverlayPointer(
+            int action,
+            float x,
+            float y,
+            float rawX,
+            float rawY
+    );
 }

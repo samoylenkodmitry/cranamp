@@ -40,6 +40,9 @@ android {
     }
 
     sourceSets {
+        getByName("main") {
+            java.directories.add("../../../vendor/cranpose/android/java")
+        }
         getByName("debug") {
             jniLibs.directories.add("../target/android")
         }

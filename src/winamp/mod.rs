@@ -11,9 +11,16 @@ mod sprites;
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::rc::Rc;
+#[cfg(target_os = "android")]
+use std::sync::{Mutex, OnceLock};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(target_os = "android")]
+use cranpose::{
+    current_android_pointer_down_screen_position, current_android_pointer_screen_position,
+    rememberAndroidHostWindowState, AndroidHostWindowState,
+};
 use cranpose::{
     rememberWindowState, WindowAttachPolicy, WindowConfig, WindowGroup, WindowId,
     WindowModifierExt, WindowMoveMode, WindowNode, WindowResizeDirection, WindowState,
@@ -40,6 +47,56 @@ use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use wasm_bindgen::{JsCast, JsValue};
+
+#[cfg(target_os = "android")]
+pub(crate) const ANDROID_OVERLAY_WIDTH: u32 = 275;
+#[cfg(target_os = "android")]
+pub(crate) const ANDROID_OVERLAY_HEIGHT: u32 = 493;
+#[cfg(target_os = "android")]
+pub(crate) const ANDROID_OVERLAY_INITIAL_X: i32 = 26;
+#[cfg(target_os = "android")]
+pub(crate) const ANDROID_OVERLAY_INITIAL_Y: i32 = 22;
+#[cfg(target_os = "android")]
+static ANDROID_FLOATING_OVERLAY_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "android")]
+pub fn set_android_floating_overlay_enabled(enabled: bool) {
+    ANDROID_FLOATING_OVERLAY_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    if !enabled {
+        set_android_winamp_surface_origin(Point::new(0.0, 0.0));
+    }
+}
+
+#[cfg(target_os = "android")]
+fn android_floating_overlay_enabled() -> bool {
+    ANDROID_FLOATING_OVERLAY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(target_os = "android")]
+fn set_android_winamp_surface_origin(origin: Point) {
+    *android_winamp_surface_origin_state()
+        .lock()
+        .expect("Android Winamp surface origin state poisoned") = origin;
+}
+
+#[cfg(target_os = "android")]
+fn android_winamp_surface_origin() -> Point {
+    *android_winamp_surface_origin_state()
+        .lock()
+        .expect("Android Winamp surface origin state poisoned")
+}
+
+#[cfg(target_os = "android")]
+fn android_winamp_surface_origin_state() -> &'static Mutex<Point> {
+    static ORIGIN: OnceLock<Mutex<Point>> = OnceLock::new();
+    ORIGIN.get_or_init(|| {
+        Mutex::new(Point::new(
+            ANDROID_OVERLAY_INITIAL_X as f32,
+            ANDROID_OVERLAY_INITIAL_Y as f32,
+        ))
+    })
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run_native_io<T>(work: impl FnOnce() -> T + Send + 'static, on_ui: impl FnOnce(T) + 'static)
@@ -213,6 +270,12 @@ enum WinampDragTarget {
     Inline(MutableState<Point>),
     #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
     Fixed(Point),
+    #[cfg(target_os = "android")]
+    AndroidHost {
+        position: Point,
+        host_window: AndroidHostWindowState,
+        overlay_position: MutableState<Point>,
+    },
     NativeGroup,
 }
 
@@ -795,8 +858,8 @@ pub fn WinampAndroidApp() {
                 let layout = resizable_stacked_layout(
                     scope.max_width().0,
                     scope.max_height().0,
-                    android_bridge::content_top_inset_dp(),
-                    android_bridge::content_bottom_inset_dp(),
+                    0.0,
+                    0.0,
                     &snapshot,
                     ui_scale(),
                 );
@@ -979,6 +1042,67 @@ fn WinampStackedStage(
         y += layout.playlist_height;
     }
 
+    #[cfg(target_os = "android")]
+    let overlay_enabled = android_floating_overlay_enabled();
+    #[cfg(target_os = "android")]
+    let overlay_position = cranpose_core::useState(|| {
+        Point::new(
+            ANDROID_OVERLAY_INITIAL_X as f32,
+            ANDROID_OVERLAY_INITIAL_Y as f32,
+        )
+    });
+    #[cfg(target_os = "android")]
+    let host_window_size = Size::new(scaled(MAIN_WIDTH, scale), scaled(y, scale));
+    #[cfg(target_os = "android")]
+    let host_window =
+        rememberAndroidHostWindowState(host_window_size.width, host_window_size.height);
+    #[cfg(target_os = "android")]
+    {
+        let surface_origin = if overlay_enabled {
+            let position = overlay_position.get();
+            Point::new(
+                position.x + layout.content_left_inset,
+                position.y + layout.content_top_inset,
+            )
+        } else {
+            Point::new(layout.content_left_inset, layout.content_top_inset)
+        };
+        cranpose_core::SideEffect(move || {
+            set_android_winamp_surface_origin(surface_origin);
+            if overlay_enabled && host_window.requested_size_non_reactive() != host_window_size {
+                let _ = host_window.set_size(host_window_size);
+            }
+        });
+    }
+
+    #[cfg(target_os = "android")]
+    let main_drag_target = android_stacked_drag_target(
+        Point::new(0.0, main_y),
+        overlay_enabled,
+        host_window,
+        overlay_position,
+    );
+    #[cfg(target_os = "android")]
+    let equalizer_drag_target = android_stacked_drag_target(
+        Point::new(0.0, equalizer_y),
+        overlay_enabled,
+        host_window,
+        overlay_position,
+    );
+    #[cfg(target_os = "android")]
+    let playlist_drag_target = android_stacked_drag_target(
+        Point::new(0.0, playlist_y),
+        overlay_enabled,
+        host_window,
+        overlay_position,
+    );
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    let main_drag_target = WinampDragTarget::Fixed(Point::new(0.0, main_y));
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    let equalizer_drag_target = WinampDragTarget::Fixed(Point::new(0.0, equalizer_y));
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    let playlist_drag_target = WinampDragTarget::Fixed(Point::new(0.0, playlist_y));
+
     Box(
         Modifier::empty()
             .size_points(scaled(MAIN_WIDTH, scale), scaled(y, scale))
@@ -994,18 +1118,13 @@ fn WinampStackedStage(
                 skin.clone(),
                 state,
                 skin_state,
-                WinampDragTarget::Fixed(Point::new(0.0, main_y)),
+                main_drag_target,
                 WinampCloseAction::SetStatus,
                 scale,
             );
 
             if snapshot.eq_visible {
-                EqualizerWindow(
-                    skin.clone(),
-                    state,
-                    WinampDragTarget::Fixed(Point::new(0.0, equalizer_y)),
-                    scale,
-                );
+                EqualizerWindow(skin.clone(), state, equalizer_drag_target, scale);
             }
 
             if snapshot.playlist_visible {
@@ -1014,7 +1133,7 @@ fn WinampStackedStage(
                     skin.palette,
                     skin.display_text_color,
                     state,
-                    WinampDragTarget::Fixed(Point::new(0.0, playlist_y)),
+                    playlist_drag_target,
                     WinampWindowSize::Fixed(Size::new(
                         scaled(PLAYLIST_WIDTH, scale),
                         scaled(layout.playlist_height, scale),
@@ -1022,9 +1141,6 @@ fn WinampStackedStage(
                     scale,
                 );
             }
-
-            #[cfg(target_os = "android")]
-            AndroidWindowMoveTarget(MAIN_WIDTH, y, scale, snapshot.clone(), layout);
         },
     );
 }
@@ -1036,6 +1152,24 @@ struct AndroidStackedLayout {
     playlist_height: f32,
     content_left_inset: f32,
     content_top_inset: f32,
+}
+
+#[cfg(target_os = "android")]
+fn android_stacked_drag_target(
+    position: Point,
+    overlay_enabled: bool,
+    host_window: AndroidHostWindowState,
+    overlay_position: MutableState<Point>,
+) -> WinampDragTarget {
+    if overlay_enabled {
+        WinampDragTarget::AndroidHost {
+            position,
+            host_window,
+            overlay_position,
+        }
+    } else {
+        WinampDragTarget::Fixed(position)
+    }
 }
 
 #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
@@ -1165,233 +1299,13 @@ fn stacked_surface_height(snapshot: &WinampState, layout: AndroidStackedLayout) 
 }
 
 #[cfg(target_os = "android")]
-#[composable]
-fn AndroidWindowMoveTarget(
-    width: f32,
-    height: f32,
-    scale: f32,
-    snapshot: WinampState,
-    layout: AndroidStackedLayout,
-) {
-    let drag_start = cranpose_core::useState(|| None::<Point>);
-    let drag_blocked = cranpose_core::useState(|| false);
-    let moving = cranpose_core::useState(|| false);
-    Box(
-        Modifier::empty()
-            .size_points(scaled(width, scale), scaled(height, scale))
-            .pointer_input((), move |scope: PointerInputScope| {
-                let snapshot = snapshot.clone();
-                async move {
-                    scope
-                        .await_pointer_event_scope(|await_scope| async move {
-                            loop {
-                                let event = await_scope.await_pointer_event().await;
-                                match event.kind {
-                                    PointerEventKind::Down => {
-                                        let interactive = android_stacked_interactive_area_contains(
-                                            event.position,
-                                            &snapshot,
-                                            layout,
-                                        );
-                                        drag_start.set((!interactive).then_some(event.position));
-                                        drag_blocked.set(interactive);
-                                        moving.set(false);
-                                    }
-                                    PointerEventKind::Move => {
-                                        if drag_blocked.get() {
-                                            continue;
-                                        }
-                                        if !event.buttons.contains(PointerButton::Primary) {
-                                            drag_start.set(None);
-                                            moving.set(false);
-                                            continue;
-                                        }
-                                        if moving.get() {
-                                            event.consume();
-                                            continue;
-                                        }
-                                        if let Some(start) = drag_start.get() {
-                                            let dx = event.position.x - start.x;
-                                            let dy = event.position.y - start.y;
-                                            let threshold = scaled(3.0, scale).max(3.0);
-                                            if dx * dx + dy * dy >= threshold * threshold {
-                                                let started = android_bridge::start_window_move(
-                                                    event.position.x + layout.content_left_inset,
-                                                    event.position.y + layout.content_top_inset,
-                                                );
-                                                if started {
-                                                    moving.set(true);
-                                                    event.consume();
-                                                } else {
-                                                    drag_start.set(None);
-                                                    drag_blocked.set(true);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    PointerEventKind::Up | PointerEventKind::Cancel => {
-                                        drag_start.set(None);
-                                        drag_blocked.set(false);
-                                        moving.set(false);
-                                    }
-                                    PointerEventKind::Scroll
-                                    | PointerEventKind::Enter
-                                    | PointerEventKind::Exit => {}
-                                }
-                            }
-                        })
-                        .await;
-                }
-            }),
-        BoxSpec::default(),
-        || {},
-    );
+fn current_android_pointer_screen_position_or(fallback: Point) -> Point {
+    current_android_pointer_screen_position().unwrap_or(fallback)
 }
 
 #[cfg(target_os = "android")]
-fn android_stacked_interactive_area_contains(
-    position: Point,
-    snapshot: &WinampState,
-    layout: AndroidStackedLayout,
-) -> bool {
-    let scale = layout.scale.max(f32::EPSILON);
-    let x = position.x / scale;
-    let mut y = position.y / scale;
-
-    if y < MAIN_HEIGHT {
-        return main_interactive_area_contains(x, y);
-    }
-    y -= MAIN_HEIGHT;
-
-    if snapshot.eq_visible {
-        if y < EQ_HEIGHT {
-            return equalizer_interactive_area_contains(x, y);
-        }
-        y -= EQ_HEIGHT;
-    }
-
-    if snapshot.playlist_visible {
-        return playlist_interactive_area_contains(x, y, PLAYLIST_WIDTH, layout.playlist_height);
-    }
-
-    false
-}
-
-#[cfg(target_os = "android")]
-fn main_interactive_area_contains(x: f32, y: f32) -> bool {
-    let rects = [
-        rect_at(POS_OPTIONS_BUTTON, MAIN_OPTIONS_BUTTON),
-        rect_at(POS_MINIMIZE_BUTTON, MAIN_MINIMIZE_BUTTON),
-        rect_at(POS_SHADE_BUTTON, MAIN_SHADE_BUTTON),
-        rect_at(POS_CLOSE_BUTTON, MAIN_CLOSE_BUTTON),
-        rect(POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3),
-        rect(
-            POS_VOLUME.0,
-            POS_VOLUME.1,
-            VOLUME_BG_WIDTH,
-            VOLUME_BG_HEIGHT,
-        ),
-        rect(
-            POS_BALANCE.0,
-            POS_BALANCE.1,
-            BALANCE_BG_WIDTH,
-            BALANCE_BG_HEIGHT,
-        ),
-        rect(POS_CBUTTONS.0, POS_CBUTTONS.1, 114.0, PREV_BUTTON.3),
-        rect_at(POS_EJECT, EJECT_BUTTON),
-        rect_at(POS_SHUFFLE, SHUFFLE_OFF),
-        rect_at(POS_REPEAT, REPEAT_OFF),
-        rect_at(POS_EQ_BUTTON, EQ_BUTTON_OFF),
-        rect_at(POS_PL_BUTTON, PL_BUTTON_OFF),
-        MAIN_SKIN_CHOOSER_HIT_AREA,
-    ];
-    rects.iter().any(|rect| rect_contains(*rect, x, y))
-}
-
-#[cfg(target_os = "android")]
-fn equalizer_interactive_area_contains(x: f32, y: f32) -> bool {
-    let button_rects = [
-        rect_at(POS_EQ_CLOSE_BUTTON, EQ_CLOSE_BUTTON),
-        rect_at(POS_EQ_ON_BUTTON, EQ_ON_BUTTON_OFF),
-        rect_at(POS_EQ_AUTO_BUTTON, EQ_AUTO_BUTTON_OFF),
-        rect_at(POS_EQ_PRESETS_BUTTON, EQ_PRESETS_BUTTON),
-    ];
-    button_rects.iter().any(|rect| rect_contains(*rect, x, y))
-        || EQ_SLIDER_XS.iter().copied().any(|slider_x| {
-            rect_contains(
-                rect(
-                    slider_x,
-                    EQ_SLIDER_BG_Y,
-                    EQ_SLIDER_BG.2,
-                    EQ_SLIDER_TRACK_HEIGHT,
-                ),
-                x,
-                y,
-            )
-        })
-}
-
-#[cfg(target_os = "android")]
-fn playlist_interactive_area_contains(x: f32, y: f32, width: f32, height: f32) -> bool {
-    let right_x = width - PLAYLIST_RIGHT_TILE.2;
-    let bottom_y = height - PLAYLIST_BOTTOM_LEFT_CORNER.3;
-    let list_width = (right_x - PLAYLIST_LIST_BG.0).max(1.0);
-    let list_height = (bottom_y - PLAYLIST_LIST_BG.1).max(1.0);
-    let scroll_track_x = width - 15.0;
-
-    rect_contains(
-        rect(
-            PLAYLIST_LIST_BG.0,
-            PLAYLIST_LIST_BG.1,
-            list_width,
-            list_height,
-        ),
-        x,
-        y,
-    ) || rect_contains(
-        rect(
-            scroll_track_x,
-            PLAYLIST_LIST_BG.1,
-            PLAYLIST_SCROLL_TRACK.2,
-            list_height,
-        ),
-        x,
-        y,
-    ) || [
-        offset_rect(PLAYLIST_ADD_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_REM_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_SEL_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_MISC_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_LIST_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_PREV_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_PLAY_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_PAUSE_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_STOP_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_NEXT_BUTTON_HIT_AREA, 0.0, bottom_y),
-        offset_rect(PLAYLIST_EJECT_BUTTON_HIT_AREA, 0.0, bottom_y),
-    ]
-    .iter()
-    .any(|rect| rect_contains(*rect, x, y))
-}
-
-#[cfg(target_os = "android")]
-fn rect_at(position: (f32, f32), sprite: SpriteRect) -> SpriteRect {
-    rect(position.0, position.1, sprite.2, sprite.3)
-}
-
-#[cfg(target_os = "android")]
-fn offset_rect(rect: SpriteRect, x: f32, y: f32) -> SpriteRect {
-    (rect.0 + x, rect.1 + y, rect.2, rect.3)
-}
-
-#[cfg(target_os = "android")]
-fn rect(x: f32, y: f32, width: f32, height: f32) -> SpriteRect {
-    (x, y, width, height)
-}
-
-#[cfg(target_os = "android")]
-fn rect_contains(rect: SpriteRect, x: f32, y: f32) -> bool {
-    x >= rect.0 && x <= rect.0 + rect.2 && y >= rect.1 && y <= rect.1 + rect.3
+fn current_android_pointer_down_screen_position_or(fallback: Point) -> Point {
+    current_android_pointer_down_screen_position().unwrap_or(fallback)
 }
 
 #[composable]
@@ -1772,6 +1686,7 @@ fn MainWindow(
                 let snapshot_duration = snapshot.duration_seconds;
                 DragSlider(
                     ControlRect::new(POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3, scale),
+                    POSBAR_THUMB.2,
                     move |fraction| {
                         position_drag_change.set(Some(fraction));
                     },
@@ -1838,6 +1753,7 @@ fn MainWindow(
                         VOLUME_BG_HEIGHT,
                         scale,
                     ),
+                    VOLUME_THUMB.2,
                     move |fraction| {
                         volume_drag_change.set(Some(fraction));
                         if let Err(error) = audio::set_volume(fraction) {
@@ -1900,6 +1816,7 @@ fn MainWindow(
                         BALANCE_BG_HEIGHT,
                         scale,
                     ),
+                    BALANCE_THUMB.2,
                     move |fraction| {
                         balance_drag_change.set(Some(fraction));
                     },
@@ -4054,6 +3971,7 @@ fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: im
 #[composable]
 fn DragSlider(
     area: ControlRect,
+    thumb_width: f32,
     on_change: impl Fn(f32) + 'static,
     on_drag_state: impl Fn(bool) + 'static,
 ) {
@@ -4078,14 +3996,20 @@ fn DragSlider(
                                         PointerEventKind::Down => {
                                             dragging = true;
                                             on_drag_state(true);
-                                            let value = (event.position.x / area.scaled_width())
-                                                .clamp(0.0, 1.0);
+                                            let value = horizontal_slider_fraction(
+                                                horizontal_slider_pointer_x(event.position.x, area),
+                                                area,
+                                                thumb_width,
+                                            );
                                             on_change(value);
                                             event.consume();
                                         }
                                         PointerEventKind::Move if dragging => {
-                                            let value = (event.position.x / area.scaled_width())
-                                                .clamp(0.0, 1.0);
+                                            let value = horizontal_slider_fraction(
+                                                horizontal_slider_pointer_x(event.position.x, area),
+                                                area,
+                                                thumb_width,
+                                            );
                                             on_change(value);
                                             event.consume();
                                         }
@@ -4177,6 +4101,82 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
     match drag_target {
         WinampDragTarget::NativeGroup => {
             Box(modifier.window_drag_area(), BoxSpec::default(), || {});
+        }
+        #[cfg(target_os = "android")]
+        WinampDragTarget::AndroidHost {
+            host_window,
+            overlay_position,
+            ..
+        } => {
+            let drag_origin = cranpose_core::useState(|| None::<(Point, Point)>);
+            let drag_active = cranpose_core::useState(|| false);
+
+            Box(
+                modifier.pointer_input((), {
+                    move |scope: PointerInputScope| async move {
+                        scope
+                            .await_pointer_event_scope(|await_scope| async move {
+                                loop {
+                                    let event = await_scope.await_pointer_event().await;
+                                    let pointer_screen = current_android_pointer_screen_position_or(
+                                        event.global_position,
+                                    );
+                                    match event.kind {
+                                        PointerEventKind::Down => {
+                                            let pointer_down_screen =
+                                                current_android_pointer_down_screen_position_or(
+                                                    pointer_screen,
+                                                );
+                                            drag_origin.set(Some((
+                                                pointer_down_screen,
+                                                overlay_position.get_non_reactive(),
+                                            )));
+                                            drag_active.set(false);
+                                            event.consume();
+                                        }
+                                        PointerEventKind::Move => {
+                                            if !event.buttons.contains(PointerButton::Primary) {
+                                                drag_origin.set(None);
+                                                drag_active.set(false);
+                                                continue;
+                                            }
+                                            if let Some((pointer_start, window_start)) =
+                                                drag_origin.get()
+                                            {
+                                                let dx = pointer_screen.x - pointer_start.x;
+                                                let dy = pointer_screen.y - pointer_start.y;
+                                                let threshold = scaled(3.0, scale).max(3.0);
+                                                if drag_active.get()
+                                                    || dx * dx + dy * dy >= threshold * threshold
+                                                {
+                                                    let next = Point::new(
+                                                        snap_to_pixel(window_start.x + dx),
+                                                        snap_to_pixel(window_start.y + dy),
+                                                    );
+                                                    overlay_position.set(next);
+                                                    set_android_winamp_surface_origin(next);
+                                                    let _ = host_window.set_position(next);
+                                                    drag_active.set(true);
+                                                    event.consume();
+                                                }
+                                            }
+                                        }
+                                        PointerEventKind::Up | PointerEventKind::Cancel => {
+                                            drag_origin.set(None);
+                                            drag_active.set(false);
+                                        }
+                                        PointerEventKind::Scroll
+                                        | PointerEventKind::Enter
+                                        | PointerEventKind::Exit => {}
+                                    }
+                                }
+                            })
+                            .await;
+                    }
+                }),
+                BoxSpec::default(),
+                || {},
+            );
         }
         #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
         WinampDragTarget::Fixed(_) => {
@@ -6944,6 +6944,10 @@ fn winamp_window_modifier(
         WinampDragTarget::Fixed(position) => {
             modifier.offset(scaled(position.x, scale), scaled(position.y, scale))
         }
+        #[cfg(target_os = "android")]
+        WinampDragTarget::AndroidHost { position, .. } => {
+            modifier.offset(scaled(position.x, scale), scaled(position.y, scale))
+        }
         WinampDragTarget::NativeGroup => modifier,
     }
 }
@@ -6974,6 +6978,32 @@ fn clamp01(value: f32) -> f32 {
 
 fn slider_thumb_x(value: f32, bar_width: f32, knob_width: f32) -> f32 {
     clamp01(value) * (bar_width - knob_width)
+}
+
+fn horizontal_slider_fraction(pointer_x: f32, area: ControlRect, knob_width: f32) -> f32 {
+    let scaled_knob_width = scaled(knob_width.max(0.0), area.scale);
+    let travel_width = (area.scaled_width() - scaled_knob_width).max(1.0);
+    ((pointer_x - scaled_knob_width * 0.5) / travel_width).clamp(0.0, 1.0)
+}
+
+fn horizontal_slider_pointer_x(local_x: f32, area: ControlRect) -> f32 {
+    #[cfg(target_os = "android")]
+    {
+        if let Some(screen_position) = current_android_pointer_screen_position() {
+            let surface_origin = android_winamp_surface_origin();
+            return horizontal_slider_surface_pointer_x(screen_position.x - surface_origin.x, area);
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = area;
+    }
+    local_x
+}
+
+#[cfg(any(target_os = "android", test))]
+fn horizontal_slider_surface_pointer_x(surface_x: f32, area: ControlRect) -> f32 {
+    scaled(surface_x, area.scale) - area.scaled_x()
 }
 
 fn slider_frame(value: f32, frames: u32) -> u32 {
@@ -7037,6 +7067,31 @@ mod tests {
         assert_eq!(slider_frame(2.0, 28), 27);
         assert_eq!(slider_thumb_x(-1.0, 248.0, 29.0), 0.0);
         assert_eq!(slider_thumb_x(2.0, 248.0, 29.0), 219.0);
+    }
+
+    #[test]
+    fn horizontal_slider_fraction_tracks_thumb_center() {
+        let area = ControlRect::new(0.0, 0.0, 248.0, 10.0, 1.0);
+
+        assert_eq!(horizontal_slider_fraction(0.0, area, 29.0), 0.0);
+        assert_eq!(horizontal_slider_fraction(14.5, area, 29.0), 0.0);
+        assert_eq!(horizontal_slider_fraction(233.5, area, 29.0), 1.0);
+        assert_eq!(horizontal_slider_fraction(248.0, area, 29.0), 1.0);
+
+        let middle = horizontal_slider_fraction(124.0, area, 29.0);
+        assert!((middle - 0.5).abs() < 0.0001);
+        assert!((slider_thumb_x(middle, 248.0, 29.0) + 14.5 - 124.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn horizontal_slider_surface_pointer_scales_with_layout() {
+        let area = ControlRect::new(17.0, 72.0, 248.0, 10.0, 1.5);
+
+        assert_eq!(horizontal_slider_surface_pointer_x(17.0, area), 0.0);
+        assert_eq!(
+            horizontal_slider_surface_pointer_x(265.0, area),
+            area.scaled_width()
+        );
     }
 
     #[test]

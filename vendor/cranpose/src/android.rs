@@ -80,14 +80,7 @@ fn update_android_platform_geometry(
 ) -> f32 {
     let density = get_display_density(app);
     android_platform.set_scale_factor(density as f64);
-
-    let content_rect = app.content_rect();
-    if content_rect.right > content_rect.left && content_rect.bottom > content_rect.top {
-        android_platform
-            .set_input_surface_offset_px(content_rect.left as f64, content_rect.top as f64);
-    } else {
-        android_platform.set_input_surface_offset_px(0.0, 0.0);
-    }
+    android_platform.set_input_surface_offset_px(0.0, 0.0);
 
     cranpose_ui::set_density(density);
     density
@@ -876,10 +869,20 @@ pub fn run(
                                         let pointer = motion_event.pointer_at_index(0);
                                         let x_px = pointer.x() as f64;
                                         let y_px = pointer.y() as f64;
+                                        let scale_factor =
+                                            android_platform.scale_factor().max(f32::EPSILON);
                                         let logical = android_platform.pointer_position(x_px, y_px);
+                                        let pointer_screen = Point::new(
+                                            pointer.raw_x() / scale_factor,
+                                            pointer.raw_y() / scale_factor,
+                                        );
 
                                         match motion_event.action() {
                                             MotionAction::Down | MotionAction::PointerDown => {
+                                                android_overlay_window::set_android_pointer_screen_position(
+                                                    pointer_screen,
+                                                    true,
+                                                );
                                                 println!(
                                                     "[TOUCH] Down at ({:.1}, {:.1})",
                                                     logical.x, logical.y
@@ -890,6 +893,10 @@ pub fn run(
                                                 ));
                                             }
                                             MotionAction::Up | MotionAction::PointerUp => {
+                                                android_overlay_window::set_android_pointer_screen_position(
+                                                    pointer_screen,
+                                                    false,
+                                                );
                                                 println!(
                                                     "[TOUCH] Up at ({:.1}, {:.1})",
                                                     logical.x, logical.y
@@ -900,6 +907,10 @@ pub fn run(
                                                 ));
                                             }
                                             MotionAction::Move => {
+                                                android_overlay_window::set_android_pointer_screen_position(
+                                                    pointer_screen,
+                                                    false,
+                                                );
                                                 println!(
                                                     "[TOUCH] Move at ({:.1}, {:.1})",
                                                     logical.x, logical.y
@@ -1011,8 +1022,22 @@ pub fn run(
                         gpu_resources = None;
                     }
                 }
-                android_overlay_window::AndroidOverlayWindowEvent::Pointer { action, x, y } => {
+                android_overlay_window::AndroidOverlayWindowEvent::Pointer {
+                    action,
+                    x,
+                    y,
+                    raw_x,
+                    raw_y,
+                } => {
+                    let scale_factor = android_platform.scale_factor().max(f32::EPSILON);
                     let logical = android_platform.pointer_position(x as f64, y as f64);
+                    android_overlay_window::set_android_pointer_screen_position(
+                        Point::new(raw_x / scale_factor, raw_y / scale_factor),
+                        matches!(
+                            action,
+                            android_overlay_window::AndroidOverlayPointerAction::Down
+                        ),
+                    );
                     match action {
                         android_overlay_window::AndroidOverlayPointerAction::Down => {
                             pending_inputs.push(PendingInput::PointerDown(

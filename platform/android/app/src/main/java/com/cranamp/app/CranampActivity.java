@@ -5,15 +5,13 @@ import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.database.Cursor;
-import android.os.Build;
-import android.graphics.Rect;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.util.Log;
-import android.view.View;
-import android.view.WindowInsets;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -21,8 +19,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -31,6 +27,10 @@ import java.util.Set;
 
 public class CranampActivity extends NativeActivity {
     private static final String TAG = "CranampActivity";
+
+    static {
+        System.loadLibrary("cranamp");
+    }
 
     private static final int MODE_REPLACE = 0;
     private static final int MODE_APPEND = 1;
@@ -41,8 +41,6 @@ public class CranampActivity extends NativeActivity {
     private static final int REQ_IMPORT_PLAYLIST = 1005;
     private static final int REQ_EXPORT_PLAYLIST = 1006;
     private static final int REQ_IMPORT_SKIN = 1007;
-
-    private static boolean moveUnavailableLogged = false;
 
     private String pendingExportText = "";
 
@@ -68,20 +66,31 @@ public class CranampActivity extends NativeActivity {
         return ensureBridgeDir().getAbsolutePath();
     }
 
-    public boolean cranampStartWindowMove(float localXDp, float localYDp) {
-        return invokeStartWindowMove(localXDp, localYDp);
+    public boolean cranampCanDrawOverlays() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return true;
+        }
+        return Settings.canDrawOverlays(this);
     }
 
-    public float cranampContentTopInsetDp() {
-        int topPx = contentTopInsetPx();
-        float density = getResources().getDisplayMetrics().density;
-        return density > 0.0f ? topPx / density : topPx;
-    }
-
-    public float cranampContentBottomInsetDp() {
-        int bottomPx = contentBottomInsetPx();
-        float density = getResources().getDisplayMetrics().density;
-        return density > 0.0f ? bottomPx / density : bottomPx;
+    public boolean cranampRequestOverlayPermission() {
+        if (cranampCanDrawOverlays()) {
+            return true;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return true;
+        }
+        try {
+            Intent intent = new Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName())
+            );
+            startActivity(intent);
+            return true;
+        } catch (ActivityNotFoundException error) {
+            Log.w(TAG, "Unable to open Android overlay permission settings", error);
+            return false;
+        }
     }
 
     public void cranampPickAudioFiles(int mode) {
@@ -201,162 +210,6 @@ public class CranampActivity extends NativeActivity {
         } catch (ActivityNotFoundException error) {
             writeError(resultName, "No Android document picker is available");
         }
-    }
-
-    private boolean invokeStartWindowMove(float localXDp, float localYDp) {
-        try {
-            View decor = getWindow().getDecorView();
-            int[] location = new int[2];
-            decor.getLocationOnScreen(location);
-            float density = getResources().getDisplayMetrics().density;
-            Rect insets = surfaceInsets();
-            float rawX = location[0] + localXDp * density - insets.left;
-            float rawY = location[1] + localYDp * density - insets.top;
-            return startMovingTask(decor, rawX, rawY);
-        } catch (Exception error) {
-            if (!moveUnavailableLogged) {
-                moveUnavailableLogged = true;
-                Log.w(
-                        TAG,
-                        "Android freeform task moving is unavailable; overlay surface support is required: "
-                                + error
-                );
-            }
-            return false;
-        }
-    }
-
-    private Rect surfaceInsets() {
-        try {
-            Field field = getWindow().getAttributes().getClass().getField("surfaceInsets");
-            Object value = field.get(getWindow().getAttributes());
-            if (value instanceof Rect) {
-                return (Rect) value;
-            }
-        } catch (Exception ignored) {
-        }
-        return new Rect();
-    }
-
-    private int contentTopInsetPx() {
-        View decor = getWindow().getDecorView();
-        if (decor == null) {
-            return 0;
-        }
-
-        int top = rootWindowTopInsetPx(decor);
-        Rect visibleFrame = new Rect();
-        decor.getWindowVisibleDisplayFrame(visibleFrame);
-        int[] location = new int[2];
-        decor.getLocationOnScreen(location);
-        top = Math.max(top, visibleFrame.top - location[1]);
-        top += Math.max(surfaceInsets().top, 0);
-        top = Math.max(top, androidSystemDimensionPx("status_bar_height", 24));
-        return Math.max(top, 0);
-    }
-
-    private int rootWindowTopInsetPx(View decor) {
-        WindowInsets insets = decor.getRootWindowInsets();
-        if (insets == null) {
-            return 0;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            int top = insets.getInsets(WindowInsets.Type.captionBar()).top;
-            top = Math.max(top, insets.getInsets(WindowInsets.Type.systemBars()).top);
-            top = Math.max(top, insets.getInsets(WindowInsets.Type.displayCutout()).top);
-            return top;
-        }
-        return insets.getSystemWindowInsetTop();
-    }
-
-    private int contentBottomInsetPx() {
-        View decor = getWindow().getDecorView();
-        if (decor == null) {
-            return 0;
-        }
-
-        int bottom = rootWindowBottomInsetPx(decor);
-        Rect visibleFrame = new Rect();
-        decor.getWindowVisibleDisplayFrame(visibleFrame);
-        int[] location = new int[2];
-        decor.getLocationOnScreen(location);
-        int decorBottom = location[1] + decor.getHeight();
-        bottom = Math.max(bottom, decorBottom - visibleFrame.bottom);
-        bottom += Math.max(surfaceInsets().bottom, 0);
-        bottom = Math.max(bottom, androidSystemDimensionPx("navigation_bar_height", 0));
-        return Math.max(bottom, 0);
-    }
-
-    private int rootWindowBottomInsetPx(View decor) {
-        WindowInsets insets = decor.getRootWindowInsets();
-        if (insets == null) {
-            return 0;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            int bottom = insets.getInsets(WindowInsets.Type.systemBars()).bottom;
-            bottom = Math.max(bottom, insets.getInsets(WindowInsets.Type.displayCutout()).bottom);
-            return bottom;
-        }
-        return insets.getSystemWindowInsetBottom();
-    }
-
-    private int androidSystemDimensionPx(String name, int fallbackDp) {
-        int id = getResources().getIdentifier(name, "dimen", "android");
-        if (id > 0) {
-            int value = getResources().getDimensionPixelSize(id);
-            if (value > 0) {
-                return value;
-            }
-        }
-        float density = getResources().getDisplayMetrics().density;
-        return Math.round(fallbackDp * density);
-    }
-
-    private boolean startMovingTask(View decor, float rawX, float rawY) throws Exception {
-        try {
-            Method method = View.class.getMethod("startMovingTask", float.class, float.class);
-            Object result = method.invoke(decor, rawX, rawY);
-            return result instanceof Boolean && (Boolean) result;
-        } catch (NoSuchMethodException publicLookupFailed) {
-            try {
-                Method method = View.class.getDeclaredMethod("startMovingTask", float.class, float.class);
-                method.setAccessible(true);
-                Object result = method.invoke(decor, rawX, rawY);
-                return result instanceof Boolean && (Boolean) result;
-            } catch (NoSuchMethodException declaredLookupFailed) {
-                return startMovingTaskViaWindowSession(decor, rawX, rawY);
-            }
-        }
-    }
-
-    private boolean startMovingTaskViaWindowSession(View decor, float rawX, float rawY) throws Exception {
-        Field attachInfoField = View.class.getDeclaredField("mAttachInfo");
-        attachInfoField.setAccessible(true);
-        Object attachInfo = attachInfoField.get(decor);
-        if (attachInfo == null) {
-            return false;
-        }
-
-        Field sessionField = attachInfo.getClass().getDeclaredField("mSession");
-        sessionField.setAccessible(true);
-        Object session = sessionField.get(attachInfo);
-
-        Field windowField = attachInfo.getClass().getDeclaredField("mWindow");
-        windowField.setAccessible(true);
-        Object window = windowField.get(attachInfo);
-
-        if (session == null || window == null) {
-            return false;
-        }
-
-        Method method = session.getClass().getMethod(
-                "startMovingTask",
-                Class.forName("android.view.IWindow"),
-                float.class,
-                float.class
-        );
-        Object result = method.invoke(session, window, rawX, rawY);
-        return result instanceof Boolean && (Boolean) result;
     }
 
     private ArrayList<Uri> collectAudioUris(Intent data) {
