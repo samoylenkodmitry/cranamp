@@ -15,11 +15,22 @@ compile_error!(
 #[cfg(not(any(feature = "renderer-pixels", feature = "renderer-wgpu")))]
 compile_error!("cranpose requires either `renderer-pixels` or `renderer-wgpu` feature.");
 
+#[cfg_attr(not(all(feature = "android", target_os = "android")), allow(dead_code))]
+mod android_host_window;
+#[cfg(all(feature = "android", target_os = "android"))]
+mod android_jni;
+#[cfg(all(feature = "android", feature = "renderer-wgpu", target_os = "android"))]
+mod android_overlay_window;
 mod launcher;
 mod native_window;
+#[cfg(all(feature = "android", feature = "renderer-wgpu", target_os = "android"))]
+pub use android_host_window::{
+    rememberAndroidHostWindowState, AndroidHostWindowPositionError, AndroidHostWindowSizeError,
+    AndroidHostWindowSizeStatus, AndroidHostWindowState,
+};
 #[cfg(all(feature = "desktop", feature = "renderer-wgpu"))]
 pub use launcher::LaunchError;
-pub use launcher::{AppLauncher, AppSettings};
+pub use launcher::{AndroidOverlayWindowOptions, AppLauncher, AppSettings};
 pub use native_window::{
     current_native_window_surface_origin, rememberWindowState, Window, WindowAttachPolicy,
     WindowConfig, WindowGroup, WindowId, WindowModifierExt, WindowMoveMode, WindowNode,
@@ -48,10 +59,15 @@ pub type RobotAppHook = dyn FnMut(String, String) -> Result<Option<String>, Stri
 
 /// Convenience imports for Cranpose applications.
 pub mod prelude {
+    #[cfg(all(feature = "android", feature = "renderer-wgpu", target_os = "android"))]
     pub use crate::{
-        rememberWindowState, AppLauncher, AppSettings, Window, WindowAttachPolicy, WindowConfig,
-        WindowGroup, WindowId, WindowModifierExt, WindowMoveMode, WindowNode,
-        WindowResizeDirection, WindowState,
+        rememberAndroidHostWindowState, AndroidHostWindowPositionError, AndroidHostWindowSizeError,
+        AndroidHostWindowSizeStatus, AndroidHostWindowState,
+    };
+    pub use crate::{
+        rememberWindowState, AndroidOverlayWindowOptions, AppLauncher, AppSettings, Window,
+        WindowAttachPolicy, WindowConfig, WindowGroup, WindowId, WindowModifierExt, WindowMoveMode,
+        WindowNode, WindowResizeDirection, WindowState,
     };
     pub use cranpose_core::{mutableStateOf, remember, rememberUpdatedState, useState};
     pub use cranpose_services::*;

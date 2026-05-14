@@ -27,9 +27,9 @@ use cranpose_ui::BoxWithConstraints;
 #[cfg(target_os = "android")]
 use cranpose_ui::BoxWithConstraintsScope;
 use cranpose_ui::{
-    composable, current_density, BasicText, BasicTextField, Box, BoxSpec, Button, Canvas, Color,
-    Column, ColumnSpec, Modifier, Point, PointerEventKind, PointerInputScope, Size, SpanStyle,
-    Text, TextStyle,
+    composable, current_density, BasicText, BasicTextField, Box, BoxSpec, Button, ButtonSpec,
+    Canvas, Color, Column, ColumnSpec, Modifier, Point, PointerEventKind, PointerInputScope, Size,
+    SpanStyle, Text, TextStyle,
 };
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
@@ -296,6 +296,7 @@ const WINAMP_DEFAULT_SCREEN_POSITION: Point = Point { x: 140.0, y: 120.0 };
 const TITLE_MARQUEE_CHARS_PER_SECOND: f32 = 2.0;
 const PLAYLIST_DOUBLE_CLICK_MS: u64 = 500;
 const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 19;
+#[cfg(not(target_arch = "wasm32"))]
 const PLAYLIST_THUMB_SCROLL_FRAME_MS: u64 = 16;
 const PLAYLIST_SCROLL_HIT_PAD_X: f32 = 8.0;
 const DEFAULT_EQ_VALUES: [f32; 11] = [0.5; 11];
@@ -526,15 +527,15 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
     );
 }
 
-fn remember_winamp_skin(state: MutableState<WinampState>) -> WinampSkinState {
+fn remember_winamp_skin(_state: MutableState<WinampState>) -> WinampSkinState {
     let skin_state = cranpose_core::useState(bundled_skin);
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let skin_path = state.get_non_reactive().skin_path;
+        let skin_path = _state.get_non_reactive().skin_path;
         cranpose_core::remember(move || {
             if let Some(path) = skin_path {
                 load_skin_file_background(
-                    state,
+                    _state,
                     skin_state,
                     std::path::PathBuf::from(path),
                     false,
@@ -893,6 +894,7 @@ fn DockToggleButton(detached_state: MutableState<bool>, detached: bool) {
             .background(Color(0.18, 0.34, 0.58, 1.0))
             .rounded_corners(8.0)
             .padding(8.0),
+        ButtonSpec::default(),
         move || {
             detached_state.set(!detached_state.get_non_reactive());
         },
