@@ -4,9 +4,14 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use android_activity::AndroidApp;
-use jni::objects::{JObject, JString, JValue};
+use jni::errors::Result as JniResult;
+use jni::objects::{JObject, JString};
+use jni::refs::Global;
+use jni::signature::RuntimeMethodSignature;
+use jni::strings::JNIString;
 use jni::sys::jobject;
-use jni::JavaVM;
+use jni::vm::JavaVM;
+use jni::{jni_sig, jni_str, JValue};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AndroidLoadMode {
@@ -37,7 +42,7 @@ pub enum AndroidBridgeResult {
 
 struct AndroidBridge {
     vm: JavaVM,
-    activity: jni::objects::GlobalRef,
+    activity: Global<JObject<'static>>,
     bridge_dir: PathBuf,
 }
 
@@ -48,30 +53,23 @@ pub fn init(app: &AndroidApp) -> Result<(), String> {
         return Ok(());
     }
 
-    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }
-        .map_err(|error| format!("failed to attach Android JVM: {error}"))?;
-    let mut env = vm
-        .attach_current_thread()
-        .map_err(|error| format!("failed to attach Android thread: {error}"))?;
-    let activity_obj = unsafe { JObject::from_raw(app.activity_as_ptr() as jobject) };
-    let activity = env
-        .new_global_ref(&activity_obj)
-        .map_err(|error| format!("failed to retain Android activity: {error}"))?;
-    let bridge_dir_obj = env
-        .call_method(
-            activity.as_obj(),
-            "cranampBridgeDirectory",
-            "()Ljava/lang/String;",
-            &[],
-        )
-        .and_then(|value| value.l())
-        .map_err(|error| format!("failed to get Android bridge directory: {error}"))?;
-    let bridge_dir = JString::from(bridge_dir_obj);
-    let bridge_dir: String = env
-        .get_string(&bridge_dir)
-        .map_err(|error| format!("failed to read Android bridge directory: {error}"))?
-        .into();
-    drop(env);
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
+    let (activity, bridge_dir) = vm
+        .attach_current_thread(|env| -> JniResult<(Global<JObject<'static>>, String)> {
+            let activity_obj = unsafe { JObject::from_raw(env, app.activity_as_ptr() as jobject) };
+            let activity = env.new_global_ref(&activity_obj)?;
+            let bridge_dir_obj = env
+                .call_method(
+                    activity.as_obj(),
+                    jni_str!("cranampBridgeDirectory"),
+                    jni_sig!("()Ljava/lang/String;"),
+                    &[],
+                )
+                .and_then(|value| value.l())?;
+            let bridge_dir = JString::cast_local(env, bridge_dir_obj)?.try_to_string(env)?;
+            Ok((activity, bridge_dir))
+        })
+        .map_err(|error| format!("failed to initialize Android bridge: {error}"))?;
 
     let bridge = AndroidBridge {
         vm,
@@ -110,20 +108,20 @@ pub fn request_playlist_export(text: &str) -> Result<(), String> {
     let Some(bridge) = BRIDGE.get() else {
         return Err("Android activity bridge is not initialized".to_string());
     };
-    let mut env = bridge
+    bridge
         .vm
-        .attach_current_thread()
-        .map_err(|error| format!("failed to attach Android thread: {error}"))?;
-    let text = env
-        .new_string(text)
-        .map_err(|error| format!("failed to prepare playlist export text: {error}"))?;
-    env.call_method(
-        bridge.activity.as_obj(),
-        "cranampExportPlaylist",
-        "(Ljava/lang/String;)V",
-        &[(&text).into()],
-    )
-    .map_err(|error| format!("failed to launch Android playlist export: {error}"))?;
+        .attach_current_thread(|env| -> JniResult<()> {
+            let text = env.new_string(text)?;
+            let text_obj: &JObject<'_> = text.as_ref();
+            env.call_method(
+                bridge.activity.as_obj(),
+                jni_str!("cranampExportPlaylist"),
+                jni_sig!("(Ljava/lang/String;)V"),
+                &[JValue::Object(text_obj)],
+            )?;
+            Ok(())
+        })
+        .map_err(|error| format!("failed to launch Android playlist export: {error}"))?;
     Ok(())
 }
 
@@ -155,50 +153,41 @@ pub fn config_dir() -> Option<PathBuf> {
     BRIDGE.get().map(|bridge| bridge.bridge_dir.join("config"))
 }
 
-pub fn start_window_move(local_x_dp: f32, local_y_dp: f32) -> bool {
+pub fn can_draw_overlays() -> bool {
+    activity_bool_method("cranampCanDrawOverlays")
+}
+
+pub fn request_overlay_permission() -> bool {
+    activity_bool_method("cranampRequestOverlayPermission")
+}
+
+fn activity_bool_method(method: &str) -> bool {
     let Some(bridge) = BRIDGE.get() else {
         return false;
     };
-    let Ok(mut env) = bridge.vm.attach_current_thread() else {
-        return false;
-    };
-    env.call_method(
-        bridge.activity.as_obj(),
-        "cranampStartWindowMove",
-        "(FF)Z",
-        &[JValue::Float(local_x_dp), JValue::Float(local_y_dp)],
-    )
-    .and_then(|value| value.z())
-    .unwrap_or(false)
-}
-
-pub fn content_top_inset_dp() -> f32 {
-    activity_float_method("cranampContentTopInsetDp")
-}
-
-pub fn content_bottom_inset_dp() -> f32 {
-    activity_float_method("cranampContentBottomInsetDp")
-}
-
-fn activity_float_method(method: &str) -> f32 {
-    let Some(bridge) = BRIDGE.get() else {
-        return 0.0;
-    };
-    let Ok(mut env) = bridge.vm.attach_current_thread() else {
-        return 0.0;
-    };
-    match env
-        .call_method(bridge.activity.as_obj(), method, "()F", &[])
-        .and_then(|value| value.f())
-    {
-        Ok(value) if value.is_finite() && value > 0.0 => value,
-        _ => {
-            if env.exception_check().unwrap_or(false) {
-                let _ = env.exception_clear();
+    bridge
+        .vm
+        .attach_current_thread(|env| -> JniResult<bool> {
+            let result = env
+                .call_method(
+                    bridge.activity.as_obj(),
+                    JNIString::new(method).as_ref(),
+                    jni_sig!("()Z"),
+                    &[],
+                )
+                .and_then(|value| value.z());
+            match result {
+                Ok(value) => Ok(value),
+                Err(error) => {
+                    if env.exception_check() {
+                        let _ = env.exception_clear();
+                    }
+                    log::warn!("Android activity method {method} failed: {error}");
+                    Ok(false)
+                }
             }
-            0.0
-        }
-    }
+        })
+        .unwrap_or(false)
 }
 
 fn mode_value(mode: AndroidLoadMode) -> i32 {
@@ -208,19 +197,24 @@ fn mode_value(mode: AndroidLoadMode) -> i32 {
     }
 }
 
-fn call_android_picker(
-    method: &str,
-    signature: &str,
-    args: &[JValue<'_, '_>],
-) -> Result<(), String> {
+fn call_android_picker(method: &str, signature: &str, args: &[JValue<'_>]) -> Result<(), String> {
     let Some(bridge) = BRIDGE.get() else {
         return Err("Android activity bridge is not initialized".to_string());
     };
-    let mut env = bridge
+    let method = JNIString::new(method);
+    let signature = RuntimeMethodSignature::from_str(signature)
+        .map_err(|error| format!("invalid Android picker signature: {error}"))?;
+    bridge
         .vm
-        .attach_current_thread()
-        .map_err(|error| format!("failed to attach Android thread: {error}"))?;
-    env.call_method(bridge.activity.as_obj(), method, signature, args)
+        .attach_current_thread(|env| -> JniResult<()> {
+            env.call_method(
+                bridge.activity.as_obj(),
+                method.as_ref(),
+                signature.method_signature(),
+                args,
+            )?;
+            Ok(())
+        })
         .map_err(|error| format!("failed to launch Android picker: {error}"))?;
     Ok(())
 }

@@ -1,5 +1,3 @@
-import java.io.ByteArrayOutputStream
-
 plugins {
     id("com.android.application")
 }
@@ -42,22 +40,23 @@ android {
     }
 
     sourceSets {
+        getByName("main") {
+            java.directories.add("../../../vendor/cranpose/android/java")
+        }
         getByName("debug") {
-            jniLibs.srcDirs("../target/android")
+            jniLibs.directories.add("../target/android")
         }
         getByName("release") {
-            jniLibs.srcDirs("../target/android")
+            jniLibs.directories.add("../target/android")
         }
     }
 }
 
 fun checkCargoNdk() {
-    val result = exec {
+    val result = providers.exec {
         commandLine("cargo", "ndk", "--version")
         isIgnoreExitValue = true
-        standardOutput = ByteArrayOutputStream()
-        errorOutput = ByteArrayOutputStream()
-    }
+    }.result.get()
 
     if (result.exitValue != 0) {
         throw GradleException(

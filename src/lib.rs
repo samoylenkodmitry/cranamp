@@ -6,6 +6,8 @@ pub mod audio;
 mod fonts;
 pub mod winamp;
 
+#[cfg(target_os = "android")]
+use cranpose::AndroidOverlayWindowOptions;
 use cranpose::AppLauncher;
 
 const TITLE: &str = "Cranamp";
@@ -33,11 +35,32 @@ pub fn create_web_app() -> AppLauncher {
 }
 
 #[cfg(target_os = "android")]
-pub fn create_android_app() -> AppLauncher {
-    AppLauncher::new()
+pub fn create_android_app(can_draw_overlays: bool) -> AppLauncher {
+    winamp::set_android_floating_overlay_enabled(can_draw_overlays);
+
+    let launcher = AppLauncher::new()
         .with_title(TITLE)
-        .with_size(275, 493)
-        .with_fonts(fonts::APP_FONTS)
+        .with_fonts(fonts::APP_FONTS);
+
+    if can_draw_overlays {
+        launcher
+            .with_size(
+                winamp::ANDROID_OVERLAY_WIDTH,
+                winamp::ANDROID_OVERLAY_HEIGHT,
+            )
+            .with_android_overlay_window(
+                AndroidOverlayWindowOptions::new(
+                    winamp::ANDROID_OVERLAY_WIDTH,
+                    winamp::ANDROID_OVERLAY_HEIGHT,
+                )
+                .with_position(
+                    winamp::ANDROID_OVERLAY_INITIAL_X,
+                    winamp::ANDROID_OVERLAY_INITIAL_Y,
+                ),
+            )
+    } else {
+        launcher
+    }
 }
 
 #[cfg(target_os = "ios")]
@@ -54,7 +77,11 @@ pub fn android_main(app: android_activity::AndroidApp) {
     if let Err(error) = android_bridge::init(&app) {
         log::error!("failed to initialize Cranamp Android bridge: {error}");
     }
-    create_android_app().run(app, winamp::WinampAndroidApp);
+    let can_draw_overlays = android_bridge::can_draw_overlays();
+    if !can_draw_overlays {
+        let _ = android_bridge::request_overlay_permission();
+    }
+    create_android_app(can_draw_overlays).run(app, winamp::WinampAndroidApp);
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

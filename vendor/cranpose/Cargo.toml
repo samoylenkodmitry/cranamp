@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "cranpose"
-version = "0.0.61"
+version = "0.1.1"
 authors = ["Dmitry Samoylenko"]
 build = false
 autolib = false
@@ -63,7 +63,6 @@ renderer-wgpu = [
 robot = ["cranpose-app-shell/test-support"]
 web = [
     "cranpose-platform-web",
-    "dep:js-sys",
     "dep:wasm-bindgen",
     "dep:web-sys",
 ]
@@ -73,40 +72,36 @@ name = "cranpose"
 path = "src/lib.rs"
 
 [dependencies.cranpose-app-shell]
-version = "0.0.61"
+version = "0.1.1"
 
 [dependencies.cranpose-core]
-version = "0.0.61"
+version = "0.1.1"
 
 [dependencies.cranpose-platform-android]
-version = "0.0.61"
+version = "0.1.1"
 optional = true
 
 [dependencies.cranpose-platform-desktop-winit]
-version = "0.0.61"
+version = "0.1.1"
 optional = true
 
 [dependencies.cranpose-platform-web]
-version = "0.0.61"
+version = "0.1.1"
 optional = true
 
 [dependencies.cranpose-render-pixels]
-version = "0.0.61"
+version = "0.1.1"
 optional = true
 
 [dependencies.cranpose-render-wgpu]
-version = "0.0.61"
+version = "0.1.1"
 optional = true
 
 [dependencies.cranpose-services]
-version = "0.0.61"
+version = "0.1.1"
 
 [dependencies.cranpose-ui]
-version = "0.0.61"
-
-[dependencies.js-sys]
-version = "0.3"
-optional = true
+version = "0.1.1"
 
 [dependencies.log]
 version = "0.4"
@@ -174,7 +169,10 @@ features = ["native-activity"]
 version = "0.15"
 
 [target.'cfg(target_os = "android")'.dependencies.jni]
-version = "0.21"
+version = "0.21.1"
+
+[target.'cfg(target_os = "android")'.dependencies.ndk]
+version = "0.9.0"
 
 [target.'cfg(target_os = "android")'.dependencies.raw-window-handle]
 version = "0.6"

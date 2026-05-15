@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -29,6 +29,7 @@ ios = ["cranpose/ios"]
 web = [
     "cranpose/web",
     "dep:console_error_panic_hook",
+    "dep:getrandom_03",
     "dep:js-sys",
     "dep:rfd",
     "dep:wasm-bindgen",
@@ -49,15 +50,15 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.0.61", default-features = false }
-cranpose-core = "0.0.61"
-cranpose-foundation = "0.0.61"
-cranpose-ui = "0.0.61"
-cranpose-ui-graphics = "0.0.61"
-getrandom = { version = "0.3", features = ["wasm_js"] }
-image = { version = "0.25.9", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
+cranpose = { version = "0.1.1", default-features = false }
+cranpose-core = "0.1.1"
+cranpose-foundation = "0.1.1"
+cranpose-ui = "0.1.1"
+cranpose-ui-graphics = "0.1.1"
+getrandom = { version = "0.4", features = ["wasm_js"] }
+image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 log = "0.4"
-zip = { version = "8.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3", "flac", "vorbis", "wav", "mp4", "symphonia-all"], optional = true }
@@ -71,13 +72,14 @@ x11rb = "0.13.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6", features = ["native-activity"] }
-jni = "0.21"
+jni = "0.22"
 
 [patch.crates-io]
 cranpose = { path = "vendor/cranpose" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = { version = "0.1", optional = true }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"], optional = true }
 js-sys = { version = "0.3", optional = true }
 rfd = { version = "0.17.2", default-features = false, optional = true }
 wasm-bindgen = { version = "0.2", optional = true }

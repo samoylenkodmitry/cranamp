@@ -22,15 +22,6 @@ enum WebBackendPreference {
     Gl,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct WebPointerCapture {
-    pointer_id: i32,
-    client_x: i32,
-    client_y: i32,
-    x: f64,
-    y: f64,
-}
-
 /// Runs a web Compose application with wgpu rendering.
 ///
 /// Called by `AppLauncher::run_web()`. This is the framework-level
@@ -203,79 +194,54 @@ pub async fn run(
 
     let surface = Rc::new(surface);
     let surface_config = Rc::new(RefCell::new(surface_config));
-    let pointer_events_supported = supports_pointer_events(&window);
-    let pointer_debug_enabled = web_pointer_debug_enabled(&window);
-    let pointer_capture = Rc::new(RefCell::new(None::<WebPointerCapture>));
 
-    // Set up mouse event handlers as a fallback for browsers without PointerEvent.
-    if !pointer_events_supported {
-        {
-            let app = app.clone();
-            let platform = platform.clone();
-            let pointer_canvas = canvas.clone();
-            let closure = Closure::wrap(Box::new(move |event: MouseEvent| {
-                if pointer_debug_enabled {
-                    log_mouse_event("mouse-move", &pointer_canvas, &event);
-                }
-                let logical = platform
-                    .borrow()
-                    .pointer_position(event.offset_x() as f64, event.offset_y() as f64);
-                // Use try_borrow_mut to avoid panic if render loop is active
-                if let Ok(mut app_mut) = app.try_borrow_mut() {
-                    app_mut.set_cursor(logical.x, logical.y);
-                }
-            }) as Box<dyn FnMut(_)>);
-            canvas.add_event_listener_with_callback(
-                "mousemove",
-                closure.as_ref().unchecked_ref(),
-            )?;
-            closure.forget();
-        }
+    // Set up mouse event handlers
+    {
+        let app = app.clone();
+        let platform = platform.clone();
+        let closure = Closure::wrap(Box::new(move |event: MouseEvent| {
+            let x = event.offset_x() as f64;
+            let y = event.offset_y() as f64;
+            let logical = platform.borrow().pointer_position(x, y);
+            // Use try_borrow_mut to avoid panic if render loop is active
+            if let Ok(mut app_mut) = app.try_borrow_mut() {
+                app_mut.set_cursor(logical.x, logical.y);
+            }
+        }) as Box<dyn FnMut(_)>);
+        canvas.add_event_listener_with_callback("mousemove", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
 
-        {
-            let app = app.clone();
-            let platform = platform.clone();
-            let pointer_canvas = canvas.clone();
-            let closure = Closure::wrap(Box::new(move |event: MouseEvent| {
-                event.prevent_default();
-                if pointer_debug_enabled {
-                    log_mouse_event("mouse-down", &pointer_canvas, &event);
-                }
-                let logical = platform
-                    .borrow()
-                    .pointer_position(event.offset_x() as f64, event.offset_y() as f64);
-                if let Ok(mut app_mut) = app.try_borrow_mut() {
-                    app_mut.set_cursor(logical.x, logical.y);
-                    app_mut.pointer_pressed();
-                }
-            }) as Box<dyn FnMut(_)>);
-            canvas.add_event_listener_with_callback(
-                "mousedown",
-                closure.as_ref().unchecked_ref(),
-            )?;
-            closure.forget();
-        }
+    {
+        let app = app.clone();
+        let platform = platform.clone();
+        let closure = Closure::wrap(Box::new(move |event: MouseEvent| {
+            let x = event.offset_x() as f64;
+            let y = event.offset_y() as f64;
+            let logical = platform.borrow().pointer_position(x, y);
+            if let Ok(mut app_mut) = app.try_borrow_mut() {
+                app_mut.set_cursor(logical.x, logical.y);
+                app_mut.pointer_pressed();
+            }
+        }) as Box<dyn FnMut(_)>);
+        canvas.add_event_listener_with_callback("mousedown", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
 
-        {
-            let app = app.clone();
-            let platform = platform.clone();
-            let pointer_canvas = canvas.clone();
-            let closure = Closure::wrap(Box::new(move |event: MouseEvent| {
-                event.prevent_default();
-                if pointer_debug_enabled {
-                    log_mouse_event("mouse-up", &pointer_canvas, &event);
-                }
-                let logical = platform
-                    .borrow()
-                    .pointer_position(event.offset_x() as f64, event.offset_y() as f64);
-                if let Ok(mut app_mut) = app.try_borrow_mut() {
-                    app_mut.set_cursor(logical.x, logical.y);
-                    app_mut.pointer_released();
-                }
-            }) as Box<dyn FnMut(_)>);
-            canvas.add_event_listener_with_callback("mouseup", closure.as_ref().unchecked_ref())?;
-            closure.forget();
-        }
+    {
+        let app = app.clone();
+        let platform = platform.clone();
+        let closure = Closure::wrap(Box::new(move |event: MouseEvent| {
+            let x = event.offset_x() as f64;
+            let y = event.offset_y() as f64;
+            let logical = platform.borrow().pointer_position(x, y);
+            if let Ok(mut app_mut) = app.try_borrow_mut() {
+                app_mut.set_cursor(logical.x, logical.y);
+                app_mut.pointer_released();
+            }
+        }) as Box<dyn FnMut(_)>);
+        canvas.add_event_listener_with_callback("mouseup", closure.as_ref().unchecked_ref())?;
+        closure.forget();
     }
 
     {
@@ -283,12 +249,9 @@ pub async fn run(
         let platform = platform.clone();
         let wheel_canvas = canvas.clone();
         let closure = Closure::wrap(Box::new(move |event: WheelEvent| {
-            if pointer_debug_enabled {
-                log_mouse_event("wheel", &wheel_canvas, event.unchecked_ref());
-            }
-            let logical = platform
-                .borrow()
-                .pointer_position(event.offset_x() as f64, event.offset_y() as f64);
+            let x = event.offset_x() as f64;
+            let y = event.offset_y() as f64;
+            let logical = platform.borrow().pointer_position(x, y);
 
             let mut delta_x = event.delta_x() as f32;
             let mut delta_y = event.delta_y() as f32;
@@ -325,105 +288,68 @@ pub async fn run(
         closure.forget();
     }
 
-    // Set up pointer event handlers for modern mouse/touch/pen input.
-    if pointer_events_supported {
-        {
-            let app = app.clone();
-            let platform = platform.clone();
-            let pointer_capture = pointer_capture.clone();
-            let pointer_canvas = canvas.clone();
-            let closure = Closure::wrap(Box::new(move |event: PointerEvent| {
-                event.prevent_default();
-                let (x, y) = captured_pointer_position(&event, &pointer_capture);
-                if pointer_debug_enabled {
-                    log_pointer_event("pointer-move", &pointer_canvas, &event, x, y);
-                }
-                let logical = platform.borrow().pointer_position(x, y);
-                if let Ok(mut app_mut) = app.try_borrow_mut() {
-                    app_mut.set_cursor(logical.x, logical.y);
-                }
-            }) as Box<dyn FnMut(_)>);
-            canvas.add_event_listener_with_callback(
-                "pointermove",
-                closure.as_ref().unchecked_ref(),
-            )?;
-            closure.forget();
-        }
+    // Set up pointer event handlers for touch support
+    {
+        let app = app.clone();
+        let platform = platform.clone();
+        let closure = Closure::wrap(Box::new(move |event: PointerEvent| {
+            event.prevent_default();
+            let x = event.offset_x() as f64;
+            let y = event.offset_y() as f64;
+            let logical = platform.borrow().pointer_position(x, y);
+            if let Ok(mut app_mut) = app.try_borrow_mut() {
+                app_mut.set_cursor(logical.x, logical.y);
+            }
+        }) as Box<dyn FnMut(_)>);
+        canvas.add_event_listener_with_callback("pointermove", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
 
-        {
-            let app = app.clone();
-            let platform = platform.clone();
-            let pointer_canvas = canvas.clone();
-            let pointer_capture = pointer_capture.clone();
-            let closure = Closure::wrap(Box::new(move |event: PointerEvent| {
-                event.prevent_default();
-                let _ = pointer_canvas.set_pointer_capture(event.pointer_id());
-                let (x, y) = begin_pointer_capture(&event, &pointer_capture);
-                if pointer_debug_enabled {
-                    log_pointer_event("pointer-down", &pointer_canvas, &event, x, y);
-                }
-                let logical = platform.borrow().pointer_position(x, y);
-                if let Ok(mut app_mut) = app.try_borrow_mut() {
-                    app_mut.set_cursor(logical.x, logical.y);
-                    app_mut.pointer_pressed();
-                }
-            }) as Box<dyn FnMut(_)>);
-            canvas.add_event_listener_with_callback(
-                "pointerdown",
-                closure.as_ref().unchecked_ref(),
-            )?;
-            closure.forget();
-        }
+    {
+        let app = app.clone();
+        let platform = platform.clone();
+        let closure = Closure::wrap(Box::new(move |event: PointerEvent| {
+            event.prevent_default();
+            let x = event.offset_x() as f64;
+            let y = event.offset_y() as f64;
+            let logical = platform.borrow().pointer_position(x, y);
+            if let Ok(mut app_mut) = app.try_borrow_mut() {
+                app_mut.set_cursor(logical.x, logical.y);
+                app_mut.pointer_pressed();
+            }
+        }) as Box<dyn FnMut(_)>);
+        canvas.add_event_listener_with_callback("pointerdown", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
 
-        {
-            let app = app.clone();
-            let platform = platform.clone();
-            let pointer_canvas = canvas.clone();
-            let pointer_capture = pointer_capture.clone();
-            let closure = Closure::wrap(Box::new(move |event: PointerEvent| {
-                event.prevent_default();
-                let _ = pointer_canvas.release_pointer_capture(event.pointer_id());
-                let (x, y) = end_pointer_capture(&event, &pointer_capture);
-                if pointer_debug_enabled {
-                    log_pointer_event("pointer-up", &pointer_canvas, &event, x, y);
-                }
-                let logical = platform.borrow().pointer_position(x, y);
-                if let Ok(mut app_mut) = app.try_borrow_mut() {
-                    app_mut.set_cursor(logical.x, logical.y);
-                    app_mut.pointer_released();
-                }
-            }) as Box<dyn FnMut(_)>);
-            canvas.add_event_listener_with_callback("pointerup", closure.as_ref().unchecked_ref())?;
-            closure.forget();
-        }
+    {
+        let app = app.clone();
+        let platform = platform.clone();
+        let closure = Closure::wrap(Box::new(move |event: PointerEvent| {
+            event.prevent_default();
+            let x = event.offset_x() as f64;
+            let y = event.offset_y() as f64;
+            let logical = platform.borrow().pointer_position(x, y);
+            if let Ok(mut app_mut) = app.try_borrow_mut() {
+                app_mut.set_cursor(logical.x, logical.y);
+                app_mut.pointer_released();
+            }
+        }) as Box<dyn FnMut(_)>);
+        canvas.add_event_listener_with_callback("pointerup", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
 
-        {
-            let app = app.clone();
-            let pointer_canvas = canvas.clone();
-            let pointer_capture = pointer_capture.clone();
-            let closure = Closure::wrap(Box::new(move |event: PointerEvent| {
-                event.prevent_default();
-                let _ = pointer_canvas.release_pointer_capture(event.pointer_id());
-                clear_pointer_capture(&event, &pointer_capture);
-                if pointer_debug_enabled {
-                    log_pointer_event(
-                        "pointer-cancel",
-                        &pointer_canvas,
-                        &event,
-                        event.offset_x() as f64,
-                        event.offset_y() as f64,
-                    );
-                }
-                if let Ok(mut app_mut) = app.try_borrow_mut() {
-                    app_mut.cancel_gesture();
-                }
-            }) as Box<dyn FnMut(_)>);
-            canvas.add_event_listener_with_callback(
-                "pointercancel",
-                closure.as_ref().unchecked_ref(),
-            )?;
-            closure.forget();
-        }
+    {
+        let app = app.clone();
+        let closure = Closure::wrap(Box::new(move |event: PointerEvent| {
+            event.prevent_default();
+            if let Ok(mut app_mut) = app.try_borrow_mut() {
+                app_mut.cancel_gesture();
+            }
+        }) as Box<dyn FnMut(_)>);
+        canvas
+            .add_event_listener_with_callback("pointercancel", closure.as_ref().unchecked_ref())?;
+        closure.forget();
     }
 
     // Set up keyboard event handlers
@@ -679,8 +605,6 @@ pub async fn run(
     let render_loop_clone = render_loop.clone();
 
     *render_loop.borrow_mut() = Some(Closure::wrap(Box::new(move || {
-        resize_web_surface(&canvas, &platform, &app, &surface, &surface_config);
-
         app.borrow_mut().update();
 
         let config = surface_config.borrow();
@@ -736,161 +660,6 @@ fn request_animation_frame(f: &Closure<dyn FnMut()>) {
         .unwrap()
         .request_animation_frame(f.as_ref().unchecked_ref())
         .expect("should register `requestAnimationFrame` OK");
-}
-
-fn supports_pointer_events(window: &web_sys::Window) -> bool {
-    js_sys::Reflect::has(window.as_ref(), &JsValue::from_str("PointerEvent")).unwrap_or(false)
-}
-
-fn web_pointer_debug_enabled(window: &web_sys::Window) -> bool {
-    window.location().search().ok().is_some_and(|query| {
-        query.contains("cranamp-pointer-debug=1") || query.contains("cranampPointerDebug=1")
-    })
-}
-
-fn log_mouse_event(label: &str, canvas: &HtmlCanvasElement, event: &MouseEvent) {
-    log::info!(
-        "CRANAMP_POINTER {} offset=({:.3},{:.3}) client=({},{}) canvas_client={}x{} canvas_attr={}x{} dpr={:.3}",
-        label,
-        event.offset_x() as f64,
-        event.offset_y() as f64,
-        event.client_x(),
-        event.client_y(),
-        canvas.client_width(),
-        canvas.client_height(),
-        canvas.width(),
-        canvas.height(),
-        canvas_device_pixel_ratio(canvas),
-    );
-}
-
-fn log_pointer_event(
-    label: &str,
-    canvas: &HtmlCanvasElement,
-    event: &PointerEvent,
-    app_x: f64,
-    app_y: f64,
-) {
-    log::info!(
-        "CRANAMP_POINTER {} id={} offset=({:.3},{:.3}) client=({},{}) app=({:.3},{:.3}) canvas_client={}x{} canvas_attr={}x{} dpr={:.3}",
-        label,
-        event.pointer_id(),
-        event.offset_x() as f64,
-        event.offset_y() as f64,
-        event.client_x(),
-        event.client_y(),
-        app_x,
-        app_y,
-        canvas.client_width(),
-        canvas.client_height(),
-        canvas.width(),
-        canvas.height(),
-        canvas_device_pixel_ratio(canvas),
-    );
-}
-
-fn pointer_event_offset(event: &PointerEvent) -> (f64, f64) {
-    (event.offset_x() as f64, event.offset_y() as f64)
-}
-
-fn begin_pointer_capture(
-    event: &PointerEvent,
-    capture: &Rc<RefCell<Option<WebPointerCapture>>>,
-) -> (f64, f64) {
-    let (x, y) = pointer_event_offset(event);
-    *capture.borrow_mut() = Some(WebPointerCapture {
-        pointer_id: event.pointer_id(),
-        client_x: event.client_x(),
-        client_y: event.client_y(),
-        x,
-        y,
-    });
-    (x, y)
-}
-
-fn captured_pointer_position(
-    event: &PointerEvent,
-    capture: &Rc<RefCell<Option<WebPointerCapture>>>,
-) -> (f64, f64) {
-    let mut capture = capture.borrow_mut();
-    let Some(state) = capture.as_mut() else {
-        return pointer_event_offset(event);
-    };
-    if state.pointer_id != event.pointer_id() {
-        return pointer_event_offset(event);
-    }
-
-    let dx = event.client_x() - state.client_x;
-    let dy = event.client_y() - state.client_y;
-    state.client_x = event.client_x();
-    state.client_y = event.client_y();
-    state.x += dx as f64;
-    state.y += dy as f64;
-    (state.x, state.y)
-}
-
-fn end_pointer_capture(
-    event: &PointerEvent,
-    capture: &Rc<RefCell<Option<WebPointerCapture>>>,
-) -> (f64, f64) {
-    let position = captured_pointer_position(event, capture);
-    clear_pointer_capture(event, capture);
-    position
-}
-
-fn clear_pointer_capture(event: &PointerEvent, capture: &Rc<RefCell<Option<WebPointerCapture>>>) {
-    let mut capture = capture.borrow_mut();
-    if capture
-        .as_ref()
-        .is_some_and(|state| state.pointer_id == event.pointer_id())
-    {
-        *capture = None;
-    }
-}
-
-fn resize_web_surface(
-    canvas: &HtmlCanvasElement,
-    platform: &Rc<RefCell<WebPlatform>>,
-    app: &Rc<RefCell<AppShell<WgpuRenderer>>>,
-    surface: &wgpu::Surface<'static>,
-    surface_config: &Rc<RefCell<wgpu::SurfaceConfiguration>>,
-) {
-    let css_width = canvas.client_width().max(1) as u32;
-    let css_height = canvas.client_height().max(1) as u32;
-    let scale_factor = canvas_device_pixel_ratio(canvas);
-    let physical_width = ((css_width as f64) * scale_factor).round().max(1.0) as u32;
-    let physical_height = ((css_height as f64) * scale_factor).round().max(1.0) as u32;
-
-    let mut config = surface_config.borrow_mut();
-    if config.width == physical_width && config.height == physical_height {
-        return;
-    }
-
-    let Ok(mut app_mut) = app.try_borrow_mut() else {
-        return;
-    };
-
-    canvas.set_width(physical_width);
-    canvas.set_height(physical_height);
-    config.width = physical_width;
-    config.height = physical_height;
-    surface.configure(app_mut.renderer().device(), &config);
-
-    app_mut.renderer().set_root_scale(scale_factor as f32);
-    cranpose_ui::set_density(scale_factor as f32);
-    platform.borrow_mut().set_scale_factor(scale_factor);
-    app_mut.set_buffer_size(physical_width, physical_height);
-    app_mut.set_viewport(css_width as f32, css_height as f32);
-}
-
-fn canvas_device_pixel_ratio(canvas: &HtmlCanvasElement) -> f64 {
-    canvas
-        .owner_document()
-        .and_then(|document| document.default_view())
-        .or_else(web_sys::window)
-        .map(|window| window.device_pixel_ratio())
-        .filter(|scale| scale.is_finite() && *scale > 0.0)
-        .unwrap_or(1.0)
 }
 
 fn requested_web_backend(window: &web_sys::Window) -> WebBackendPreference {
