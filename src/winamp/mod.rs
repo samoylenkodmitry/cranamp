@@ -855,14 +855,23 @@ pub fn WinampAndroidApp() {
             let skin_for_stack = skin.clone();
             BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
                 let snapshot = tab_state.player.get();
-                let layout = resizable_stacked_layout(
-                    scope.max_width().0,
-                    scope.max_height().0,
-                    0.0,
-                    0.0,
-                    &snapshot,
-                    ui_scale(),
-                );
+                let layout = if android_floating_overlay_enabled() {
+                    resizable_stacked_layout(
+                        scope.max_width().0,
+                        scope.max_height().0,
+                        0.0,
+                        0.0,
+                        &snapshot,
+                        ui_scale(),
+                    )
+                } else {
+                    fullscreen_stacked_layout(
+                        scope.max_width().0,
+                        scope.max_height().0,
+                        &snapshot,
+                        ui_scale(),
+                    )
+                };
                 WinampStackedStage(skin_for_stack.clone(), tab_state.player, skin_state, layout);
             });
         },
@@ -1241,6 +1250,48 @@ fn resizable_stacked_layout(
         playlist_height,
         content_left_inset,
         content_top_inset,
+    }
+}
+
+#[cfg(target_os = "android")]
+fn fullscreen_stacked_layout(
+    available_width: f32,
+    available_height: f32,
+    snapshot: &WinampState,
+    fallback_scale: f32,
+) -> AndroidStackedLayout {
+    let base_height = MAIN_HEIGHT + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
+    let width_scale = if available_width.is_finite() && available_width > 0.0 {
+        available_width / MAIN_WIDTH
+    } else {
+        fallback_scale
+    };
+    let height_scale =
+        if available_height.is_finite() && available_height > 0.0 && base_height > 0.0 {
+            available_height / base_height
+        } else {
+            fallback_scale
+        };
+    let scale = if snapshot.playlist_visible {
+        width_scale.max(0.5)
+    } else {
+        width_scale.max(height_scale).max(0.5)
+    };
+    let playlist_height = if snapshot.playlist_visible {
+        if available_height.is_finite() && available_height > 0.0 && scale > 0.0 {
+            (available_height / scale - base_height).max(playlist_min_height())
+        } else {
+            PLAYLIST_HEIGHT
+        }
+    } else {
+        PLAYLIST_HEIGHT
+    };
+
+    AndroidStackedLayout {
+        scale,
+        playlist_height,
+        content_left_inset: 0.0,
+        content_top_inset: 0.0,
     }
 }
 
@@ -4060,14 +4111,18 @@ fn VerticalDragSlider(
                                         PointerEventKind::Down => {
                                             dragging = true;
                                             on_drag_state(true);
-                                            let raw = (event.position.y / area.scaled_height())
+                                            let raw =
+                                                (vertical_slider_pointer_y(event.position.y, area)
+                                                    / area.scaled_height())
                                                 .clamp(0.0, 1.0);
                                             let value = if invert { 1.0 - raw } else { raw };
                                             on_change(value);
                                             event.consume();
                                         }
                                         PointerEventKind::Move if dragging => {
-                                            let raw = (event.position.y / area.scaled_height())
+                                            let raw =
+                                                (vertical_slider_pointer_y(event.position.y, area)
+                                                    / area.scaled_height())
                                                 .clamp(0.0, 1.0);
                                             let value = if invert { 1.0 - raw } else { raw };
                                             on_change(value);
@@ -7006,6 +7061,23 @@ fn horizontal_slider_surface_pointer_x(surface_x: f32, area: ControlRect) -> f32
     scaled(surface_x, area.scale) - area.scaled_x()
 }
 
+fn vertical_slider_pointer_y(local_y: f32, area: ControlRect) -> f32 {
+    #[cfg(target_os = "android")]
+    {
+        scaled(local_y, area.scale)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = area;
+        local_y
+    }
+}
+
+#[cfg(test)]
+fn vertical_slider_android_pointer_y(local_y: f32, area: ControlRect) -> f32 {
+    scaled(local_y, area.scale)
+}
+
 fn slider_frame(value: f32, frames: u32) -> u32 {
     if frames <= 1 {
         return 0;
@@ -7155,6 +7227,17 @@ mod tests {
         assert_eq!(vertical_slider_thumb_y(2.0, 63.0, 11.0), 0.0);
         assert_eq!(vertical_slider_thumb_y_down(-1.0, 145.0, 18.0), 0.0);
         assert_eq!(vertical_slider_thumb_y_down(2.0, 145.0, 18.0), 127.0);
+    }
+
+    #[test]
+    fn vertical_slider_android_pointer_scales_with_layout() {
+        let area = ControlRect::new(0.0, 0.0, 14.0, 63.0, 1.5);
+
+        assert_eq!(vertical_slider_android_pointer_y(0.0, area), 0.0);
+        assert_eq!(
+            vertical_slider_android_pointer_y(63.0, area),
+            area.scaled_height()
+        );
     }
 
     #[test]
