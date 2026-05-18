@@ -6,7 +6,7 @@ use crate::launcher::AppSettings;
 use cranpose_app_shell::{default_root_key, AppShell};
 use cranpose_platform_web::WebPlatform;
 use cranpose_render_wgpu::WgpuRenderer;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -14,6 +14,11 @@ use wasm_bindgen::JsCast;
 use web_sys::{HtmlCanvasElement, MouseEvent, PointerEvent, WheelEvent};
 
 const WEB_WHEEL_LINE_DELTA_PIXELS: f32 = 40.0;
+
+thread_local! {
+    static WEB_RENDER_LOOP: RefCell<Option<Closure<dyn FnMut()>>> = RefCell::new(None);
+    static WEB_FRAME_PENDING: Cell<bool> = Cell::new(false);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WebBackendPreference {
@@ -600,14 +605,13 @@ pub async fn run(
         closure.forget();
     }
 
-    // Render loop
-    let render_loop = Rc::new(RefCell::new(None));
-    let render_loop_clone = render_loop.clone();
-
-    *render_loop.borrow_mut() = Some(Closure::wrap(Box::new(move || {
-        app.borrow_mut().update();
+    let render_app = app.clone();
+    let render_loop = Closure::wrap(Box::new(move || {
+        WEB_FRAME_PENDING.with(|pending| pending.set(false));
+        render_app.borrow_mut().update();
 
         let config = surface_config.borrow();
+        let mut request_next_frame = false;
         match surface.get_current_texture() {
             Ok(output) => {
                 let view = output
@@ -617,7 +621,7 @@ pub async fn run(
                 let render_height = output.texture.height();
 
                 {
-                    let mut app_mut = app.borrow_mut();
+                    let mut app_mut = render_app.borrow_mut();
                     if let Err(err) = app_mut
                         .renderer()
                         .render(&view, render_width, render_height)
@@ -630,9 +634,10 @@ pub async fn run(
             }
             Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
                 // Reconfigure surface
-                let mut app_mut = app.borrow_mut();
+                let mut app_mut = render_app.borrow_mut();
                 let device = app_mut.renderer().device();
                 surface.configure(device, &*config);
+                request_next_frame = true;
             }
             Err(wgpu::SurfaceError::OutOfMemory) => {
                 log::error!("Out of memory");
@@ -645,14 +650,33 @@ pub async fn run(
             }
         }
 
-        // Request next frame
-        request_animation_frame(render_loop_clone.borrow().as_ref().unwrap());
-    }) as Box<dyn FnMut()>));
+        let needs_next_frame = {
+            let app = render_app.borrow();
+            app.needs_redraw() || app.has_active_animations()
+        };
+        if request_next_frame || needs_next_frame {
+            schedule_web_frame();
+        }
+    }) as Box<dyn FnMut()>);
 
-    // Start the render loop
-    request_animation_frame(render_loop.borrow().as_ref().unwrap());
+    WEB_RENDER_LOOP.with(|slot| {
+        *slot.borrow_mut() = Some(render_loop);
+    });
+    app.borrow_mut().set_frame_waker(schedule_web_frame);
+    schedule_web_frame();
 
     Ok(())
+}
+
+fn schedule_web_frame() {
+    if WEB_FRAME_PENDING.with(|pending| pending.replace(true)) {
+        return;
+    }
+    WEB_RENDER_LOOP.with(|slot| {
+        if let Some(callback) = slot.borrow().as_ref() {
+            request_animation_frame(callback);
+        }
+    });
 }
 
 fn request_animation_frame(f: &Closure<dyn FnMut()>) {

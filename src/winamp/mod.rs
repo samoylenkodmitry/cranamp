@@ -118,7 +118,7 @@ where
     });
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 enum PlaybackState {
     Stopped,
     Playing,
@@ -156,6 +156,7 @@ struct WinampState {
     playlist_search_visible: bool,
     playlist_search_query: String,
     playlist_search_revision: u64,
+    android_bridge_pending: bool,
 }
 
 impl PartialEq for WinampState {
@@ -189,6 +190,7 @@ impl PartialEq for WinampState {
             && self.playlist_search_visible == other.playlist_search_visible
             && self.playlist_search_query == other.playlist_search_query
             && self.playlist_search_revision == other.playlist_search_revision
+            && self.android_bridge_pending == other.android_bridge_pending
     }
 }
 
@@ -224,6 +226,7 @@ impl Default for WinampState {
             playlist_search_visible: false,
             playlist_search_query: String::new(),
             playlist_search_revision: 0,
+            android_bridge_pending: false,
         }
     }
 }
@@ -674,8 +677,12 @@ fn WinampRuntimeEffects(
 #[cfg(target_os = "android")]
 #[composable]
 fn AndroidPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinState) {
-    cranpose_core::LaunchedEffectAsync!((), move |scope| {
+    let bridge_pending = state.get().android_bridge_pending;
+    cranpose_core::LaunchedEffectAsync!(bridge_pending, move |scope| {
         Box::pin(async move {
+            if !bridge_pending {
+                return;
+            }
             let clock = scope.runtime().frame_clock();
             loop {
                 if !scope.is_active() {
@@ -686,6 +693,9 @@ fn AndroidPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinS
                     break;
                 }
                 handle_android_bridge_results(state, skin_state);
+                if !state.get_non_reactive().android_bridge_pending {
+                    break;
+                }
             }
         })
     });
@@ -731,8 +741,12 @@ fn publish_web_surface_size(width: f32, height: f32) {
 
 #[composable]
 fn PlaybackProgressEffect(state: MutableState<WinampState>) {
-    cranpose_core::LaunchedEffectAsync!((), move |scope| {
+    let playback = state.get().playback;
+    cranpose_core::LaunchedEffectAsync!(playback, move |scope| {
         Box::pin(async move {
+            if playback != PlaybackState::Playing {
+                return;
+            }
             let clock = scope.runtime().frame_clock();
             loop {
                 if !scope.is_active() {
@@ -743,6 +757,9 @@ fn PlaybackProgressEffect(state: MutableState<WinampState>) {
                     break;
                 }
                 sync_playback_progress(state);
+                if state.get_non_reactive().playback != PlaybackState::Playing {
+                    break;
+                }
             }
         })
     });
@@ -4437,11 +4454,9 @@ fn apply_loaded_skin(
 
 #[cfg(target_os = "android")]
 fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
-    state.update(|s| s.status = "Opening Android Skin Picker".to_string());
-    match android_bridge::request_skin_import() {
-        Ok(()) => {}
-        Err(error) => state.update(|s| s.status = error),
-    }
+    request_android_bridge_operation(state, "Opening Android Skin Picker", || {
+        android_bridge::request_skin_import()
+    });
 }
 
 #[cfg(all(
@@ -4510,11 +4525,9 @@ fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState
 
 #[cfg(target_os = "android")]
 fn open_audio_files(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Opening Android File Picker".to_string());
-    match android_bridge::request_audio_files(AndroidLoadMode::Replace) {
-        Ok(()) => {}
-        Err(error) => state.update(|s| s.status = error),
-    }
+    request_android_bridge_operation(state, "Opening Android File Picker", || {
+        android_bridge::request_audio_files(AndroidLoadMode::Replace)
+    });
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -4569,11 +4582,9 @@ fn open_audio_files(state: MutableState<WinampState>) {
 
 #[cfg(target_os = "android")]
 fn add_audio_files(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Opening Android File Picker".to_string());
-    match android_bridge::request_audio_files(AndroidLoadMode::Append) {
-        Ok(()) => {}
-        Err(error) => state.update(|s| s.status = error),
-    }
+    request_android_bridge_operation(state, "Opening Android File Picker", || {
+        android_bridge::request_audio_files(AndroidLoadMode::Append)
+    });
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -4597,11 +4608,9 @@ fn add_audio_files(state: MutableState<WinampState>) {
 
 #[cfg(target_os = "android")]
 fn add_audio_folder(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Opening Android Folder Picker".to_string());
-    match android_bridge::request_audio_folder(AndroidLoadMode::Append) {
-        Ok(()) => {}
-        Err(error) => state.update(|s| s.status = error),
-    }
+    request_android_bridge_operation(state, "Opening Android Folder Picker", || {
+        android_bridge::request_audio_folder(AndroidLoadMode::Append)
+    });
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -5306,11 +5315,9 @@ fn new_playlist(state: MutableState<WinampState>) {
 
 #[cfg(target_os = "android")]
 fn import_playlist(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Importing Android Playlist".to_string());
-    match android_bridge::request_playlist_import() {
-        Ok(()) => {}
-        Err(error) => state.update(|s| s.status = error),
-    }
+    request_android_bridge_operation(state, "Importing Android Playlist", || {
+        android_bridge::request_playlist_import()
+    });
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -5361,12 +5368,10 @@ fn export_playlist(state: MutableState<WinampState>) {
         return;
     }
 
-    state.update(|s| s.status = "Exporting Android Playlist".to_string());
     let text = format_m3u_playlist(snapshot.playlist.as_slice());
-    match android_bridge::request_playlist_export(&text) {
-        Ok(()) => {}
-        Err(error) => state.update(|s| s.status = error),
-    }
+    request_android_bridge_operation(state, "Exporting Android Playlist", || {
+        android_bridge::request_playlist_export(&text)
+    });
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -5569,7 +5574,13 @@ fn format_m3u_playlist(playlist: &[Track]) -> String {
 
 #[cfg(target_os = "android")]
 fn handle_android_bridge_results(state: MutableState<WinampState>, skin_state: WinampSkinState) {
-    for result in android_bridge::take_results() {
+    let results = android_bridge::take_results();
+    if results.is_empty() {
+        return;
+    }
+    state.update(|s| s.android_bridge_pending = false);
+
+    for result in results {
         match result {
             AndroidBridgeResult::AudioPaths { mode, paths } => {
                 let text = paths
@@ -5633,6 +5644,24 @@ fn handle_android_bridge_results(state: MutableState<WinampState>, skin_state: W
             }
             AndroidBridgeResult::Error(error) => state.update(|s| s.status = error),
         }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn request_android_bridge_operation(
+    state: MutableState<WinampState>,
+    status: &'static str,
+    request: impl FnOnce() -> Result<(), String>,
+) {
+    state.update(|s| {
+        s.status = status.to_string();
+        s.android_bridge_pending = true;
+    });
+    if let Err(error) = request() {
+        state.update(|s| {
+            s.status = error;
+            s.android_bridge_pending = false;
+        });
     }
 }
 

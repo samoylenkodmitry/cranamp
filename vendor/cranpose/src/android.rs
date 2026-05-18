@@ -14,7 +14,7 @@ use cranpose_platform_android::AndroidPlatform;
 use cranpose_render_wgpu::WgpuRenderer;
 use cranpose_ui::{Point, Size};
 use ndk::native_window::NativeWindow;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{
     cell::RefCell,
     ffi::c_void,
@@ -151,6 +151,7 @@ fn initialize_android_rendering<F>(
     content: &Rc<RefCell<F>>,
     settings: &AppSettings,
     need_frame: &Arc<AtomicBool>,
+    app_waker: &android_activity::AndroidAppWaker,
     native_window_ptr: NonNull<c_void>,
     native_window_owner: Option<NativeWindow>,
     width: u32,
@@ -188,8 +189,10 @@ where
 
         if let Some(shell) = app_shell {
             let need_frame = need_frame.clone();
+            let app_waker = app_waker.clone();
             shell.set_frame_waker(move || {
                 need_frame.store(true, Ordering::Relaxed);
+                app_waker.wake();
             });
         }
 
@@ -500,6 +503,15 @@ fn confirm_android_host_window_request(
     }
 }
 
+fn pending_host_window_confirmation_timeout(
+    pending_confirmation: &Option<PendingHostWindowSizeRequest>,
+) -> Option<Duration> {
+    pending_confirmation.as_ref().map(|pending| {
+        android_host_window::HOST_WINDOW_CONFIRMATION_TIMEOUT
+            .saturating_sub(pending.requested_at.elapsed())
+    })
+}
+
 fn set_android_window_layout_px(
     app: &android_activity::AndroidApp,
     width_px: i32,
@@ -587,6 +599,8 @@ pub fn run(
 
     // Frame wake flag for event-driven rendering
     let need_frame = Arc::new(AtomicBool::new(false));
+    let app_waker = app.create_waker();
+    android_overlay_window::set_android_overlay_event_waker(app_waker.clone());
 
     // Exit flag for Destroy event (can't break from inside poll_events closure)
     let should_exit = Arc::new(AtomicBool::new(false));
@@ -625,22 +639,19 @@ pub fn run(
 
     // Main event loop
     loop {
-        // Dynamic poll duration:
-        // - ZERO when dirty, animating, OR pending inputs (immediate processing)
-        // - Short timeout (16ms ~= 60fps) otherwise to ensure responsive input handling
-        //   (Never use None/infinite wait as it can cause ANR if events arrive between checks)
+        // Dynamic poll duration: block while idle and wake via AndroidAppWaker
+        // whenever the runtime schedules UI work.
+        let frame_requested = need_frame.load(Ordering::Relaxed);
         let poll_duration = if !pending_inputs.is_empty() {
             Some(std::time::Duration::ZERO) // Process pending inputs immediately
-        } else if gpu_resources.is_none() {
-            Some(std::time::Duration::from_millis(100)) // No window, poll occasionally
         } else if let Some(shell) = &app_shell {
-            if shell.needs_redraw() {
-                Some(std::time::Duration::ZERO) // Dirty or animating, tight loop
+            if frame_requested || shell.needs_redraw() {
+                Some(Duration::ZERO) // Dirty or animating, tight loop
             } else {
-                Some(std::time::Duration::from_millis(16)) // Idle, poll at ~60fps for responsive input
+                pending_host_window_confirmation_timeout(&pending_host_window_confirmation)
             }
         } else {
-            Some(std::time::Duration::from_millis(100))
+            pending_host_window_confirmation_timeout(&pending_host_window_confirmation)
         };
 
         app.poll_events(poll_duration, |event| {
@@ -699,6 +710,7 @@ pub fn run(
                                     &content,
                                     &settings,
                                     &need_frame,
+                                    &app_waker,
                                     native_window.ptr().cast(),
                                     None,
                                     width,
@@ -967,6 +979,7 @@ pub fn run(
                                 &content,
                                 &settings,
                                 &need_frame,
+                                &app_waker,
                                 native_window.ptr().cast(),
                                 None,
                                 width,
@@ -999,6 +1012,7 @@ pub fn run(
                             &content,
                             &settings,
                             &need_frame,
+                            &app_waker,
                             native_window_ptr,
                             Some(native_window),
                             width,
