@@ -152,6 +152,12 @@ pub(crate) fn drain_android_overlay_window_events() -> Vec<AndroidOverlayWindowE
     events.drain(..).collect()
 }
 
+pub(crate) fn set_android_overlay_event_waker(waker: android_activity::AndroidAppWaker) {
+    *overlay_event_waker()
+        .lock()
+        .expect("overlay event waker poisoned") = Some(waker);
+}
+
 /// Returns the latest Android pointer position in screen logical pixels.
 pub fn current_android_pointer_screen_position() -> Option<Point> {
     *current_pointer_screen_position()
@@ -309,11 +315,23 @@ fn push_overlay_event(event: AndroidOverlayWindowEvent) {
         .lock()
         .expect("overlay event queue poisoned")
         .push_back(event);
+    if let Some(waker) = overlay_event_waker()
+        .lock()
+        .expect("overlay event waker poisoned")
+        .as_ref()
+    {
+        waker.wake();
+    }
 }
 
 fn overlay_events() -> &'static Mutex<VecDeque<AndroidOverlayWindowEvent>> {
     static EVENTS: OnceLock<Mutex<VecDeque<AndroidOverlayWindowEvent>>> = OnceLock::new();
     EVENTS.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+fn overlay_event_waker() -> &'static Mutex<Option<android_activity::AndroidAppWaker>> {
+    static WAKER: OnceLock<Mutex<Option<android_activity::AndroidAppWaker>>> = OnceLock::new();
+    WAKER.get_or_init(|| Mutex::new(None))
 }
 
 fn current_pointer_screen_position() -> &'static Mutex<Option<Point>> {
