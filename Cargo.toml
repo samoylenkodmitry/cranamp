@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -50,11 +50,11 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.3", default-features = false }
-cranpose-core = "0.1.3"
-cranpose-foundation = "0.1.3"
-cranpose-ui = "0.1.3"
-cranpose-ui-graphics = "0.1.3"
+cranpose = { version = "0.1.4", default-features = false }
+cranpose-core = "0.1.4"
+cranpose-foundation = "0.1.4"
+cranpose-ui = "0.1.4"
+cranpose-ui-graphics = "0.1.4"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 log = "0.4"
@@ -62,7 +62,7 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3", "flac", "vorbis", "wav", "mp4", "symphonia-all"], optional = true }
-symphonia = { version = "0.5.5", default-features = false, features = ["all-codecs", "all-formats"], optional = true }
+symphonia = { version = "0.6.0", default-features = false, features = ["all-codecs", "all-formats"], optional = true }
 
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))'.dependencies]
 env_logger = { version = "0.11", optional = true }
