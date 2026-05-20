@@ -17,10 +17,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "android")]
-use cranpose::{
-    current_android_pointer_down_screen_position, current_android_pointer_screen_position,
-    rememberAndroidHostWindowState, AndroidHostWindowState,
-};
+use cranpose::{rememberAndroidHostWindowState, AndroidHostWindowState};
 use cranpose::{
     rememberWindowState, WindowAttachPolicy, WindowConfig, WindowGroup, WindowId,
     WindowModifierExt, WindowMoveMode, WindowNode, WindowResizeDirection, WindowState,
@@ -1367,13 +1364,9 @@ fn stacked_surface_height(snapshot: &WinampState, layout: AndroidStackedLayout) 
 }
 
 #[cfg(target_os = "android")]
-fn current_android_pointer_screen_position_or(fallback: Point) -> Point {
-    current_android_pointer_screen_position().unwrap_or(fallback)
-}
-
-#[cfg(target_os = "android")]
-fn current_android_pointer_down_screen_position_or(fallback: Point) -> Point {
-    current_android_pointer_down_screen_position().unwrap_or(fallback)
+fn android_pointer_screen_position(global_position: Point) -> Point {
+    let origin = android_winamp_surface_origin();
+    Point::new(origin.x + global_position.x, origin.y + global_position.y)
 }
 
 #[composable]
@@ -4065,7 +4058,11 @@ fn DragSlider(
                                             dragging = true;
                                             on_drag_state(true);
                                             let value = horizontal_slider_fraction(
-                                                horizontal_slider_pointer_x(event.position.x, area),
+                                                horizontal_slider_pointer_x(
+                                                    event.position.x,
+                                                    event.global_position.x,
+                                                    area,
+                                                ),
                                                 area,
                                                 thumb_width,
                                             );
@@ -4074,7 +4071,11 @@ fn DragSlider(
                                         }
                                         PointerEventKind::Move if dragging => {
                                             let value = horizontal_slider_fraction(
-                                                horizontal_slider_pointer_x(event.position.x, area),
+                                                horizontal_slider_pointer_x(
+                                                    event.position.x,
+                                                    event.global_position.x,
+                                                    area,
+                                                ),
                                                 area,
                                                 thumb_width,
                                             );
@@ -4190,17 +4191,12 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
                             .await_pointer_event_scope(|await_scope| async move {
                                 loop {
                                     let event = await_scope.await_pointer_event().await;
-                                    let pointer_screen = current_android_pointer_screen_position_or(
-                                        event.global_position,
-                                    );
+                                    let pointer_screen =
+                                        android_pointer_screen_position(event.global_position);
                                     match event.kind {
                                         PointerEventKind::Down => {
-                                            let pointer_down_screen =
-                                                current_android_pointer_down_screen_position_or(
-                                                    pointer_screen,
-                                                );
                                             drag_origin.set(Some((
-                                                pointer_down_screen,
+                                                pointer_screen,
                                                 overlay_position.get_non_reactive(),
                                             )));
                                             drag_active.set(false);
@@ -7070,19 +7066,17 @@ fn horizontal_slider_fraction(pointer_x: f32, area: ControlRect, knob_width: f32
     ((pointer_x - scaled_knob_width * 0.5) / travel_width).clamp(0.0, 1.0)
 }
 
-fn horizontal_slider_pointer_x(local_x: f32, area: ControlRect) -> f32 {
+fn horizontal_slider_pointer_x(local_x: f32, global_x: f32, area: ControlRect) -> f32 {
     #[cfg(target_os = "android")]
     {
-        if let Some(screen_position) = current_android_pointer_screen_position() {
-            let surface_origin = android_winamp_surface_origin();
-            return horizontal_slider_surface_pointer_x(screen_position.x - surface_origin.x, area);
-        }
+        let _ = local_x;
+        horizontal_slider_surface_pointer_x(global_x, area)
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = area;
+        let _ = (global_x, area);
+        local_x
     }
-    local_x
 }
 
 #[cfg(any(target_os = "android", test))]

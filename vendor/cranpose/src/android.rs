@@ -8,13 +8,14 @@ use crate::{
     android_jni::{clear_pending_android_jni_exception, with_android_activity_env},
     android_overlay_window,
     launcher::{AndroidOverlayWindowOptions, AppSettings},
+    wgpu_surface::{current_surface_texture, SurfaceFrame},
 };
 use cranpose_app_shell::{default_root_key, AppShell};
 use cranpose_platform_android::AndroidPlatform;
 use cranpose_render_wgpu::WgpuRenderer;
 use cranpose_ui::{Point, Size};
 use ndk::native_window::NativeWindow;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::{
     cell::RefCell,
     ffi::c_void,
@@ -80,7 +81,14 @@ fn update_android_platform_geometry(
 ) -> f32 {
     let density = get_display_density(app);
     android_platform.set_scale_factor(density as f64);
-    android_platform.set_input_surface_offset_px(0.0, 0.0);
+
+    let content_rect = app.content_rect();
+    if content_rect.right > content_rect.left && content_rect.bottom > content_rect.top {
+        android_platform
+            .set_input_surface_offset_px(content_rect.left as f64, content_rect.top as f64);
+    } else {
+        android_platform.set_input_surface_offset_px(0.0, 0.0);
+    }
 
     cranpose_ui::set_density(density);
     density
@@ -104,8 +112,8 @@ fn update_android_shell_geometry(shell: &mut AppShell<WgpuRenderer>, density: f3
 
 /// Renders a single frame. Returns true if out of memory (should exit).
 fn render_once(resources: &mut GpuResources, shell: &mut AppShell<WgpuRenderer>) -> bool {
-    match resources.surface.get_current_texture() {
-        Ok(frame) => {
+    match current_surface_texture(&resources.surface, "android") {
+        SurfaceFrame::Ready(frame) => {
             let view = frame
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
@@ -118,8 +126,7 @@ fn render_once(resources: &mut GpuResources, shell: &mut AppShell<WgpuRenderer>)
             frame.present();
             false
         }
-        Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
-            // Reconfigure surface using current size and config
+        SurfaceFrame::Reconfigure => {
             let (width, height) = shell.buffer_size();
             resources.config.width = width;
             resources.config.height = height;
@@ -128,14 +135,7 @@ fn render_once(resources: &mut GpuResources, shell: &mut AppShell<WgpuRenderer>)
                 .configure(&resources.device, &resources.config);
             false
         }
-        Err(wgpu::SurfaceError::OutOfMemory) => {
-            log::error!("Out of memory; exiting");
-            true
-        }
-        Err(e) => {
-            log::debug!("Surface error: {:?}", e);
-            false
-        }
+        SurfaceFrame::Skip => false,
     }
 }
 
@@ -151,7 +151,6 @@ fn initialize_android_rendering<F>(
     content: &Rc<RefCell<F>>,
     settings: &AppSettings,
     need_frame: &Arc<AtomicBool>,
-    app_waker: &android_activity::AndroidAppWaker,
     native_window_ptr: NonNull<c_void>,
     native_window_owner: Option<NativeWindow>,
     width: u32,
@@ -189,10 +188,8 @@ where
 
         if let Some(shell) = app_shell {
             let need_frame = need_frame.clone();
-            let app_waker = app_waker.clone();
             shell.set_frame_waker(move || {
                 need_frame.store(true, Ordering::Relaxed);
-                app_waker.wake();
             });
         }
 
@@ -372,7 +369,7 @@ fn create_android_wgpu_surface(
         let raw_display_handle = RawDisplayHandle::Android(display_handle);
 
         let target = wgpu::SurfaceTargetUnsafe::RawHandle {
-            raw_display_handle,
+            raw_display_handle: Some(raw_display_handle),
             raw_window_handle,
         };
 
@@ -503,25 +500,21 @@ fn confirm_android_host_window_request(
     }
 }
 
-fn pending_host_window_confirmation_timeout(
-    pending_confirmation: &Option<PendingHostWindowSizeRequest>,
-) -> Option<Duration> {
-    pending_confirmation.as_ref().map(|pending| {
-        android_host_window::HOST_WINDOW_CONFIRMATION_TIMEOUT
-            .saturating_sub(pending.requested_at.elapsed())
-    })
-}
-
 fn set_android_window_layout_px(
     app: &android_activity::AndroidApp,
     width_px: i32,
     height_px: i32,
 ) -> Result<(), String> {
-    use jni::objects::JValue;
+    use jni::{jni_sig, jni_str, objects::JValue};
 
     with_android_activity_env(app, |env, activity| {
         let window = env
-            .call_method(&activity, "getWindow", "()Landroid/view/Window;", &[])
+            .call_method(
+                &activity,
+                jni_str!("getWindow"),
+                jni_sig!("()Landroid/view/Window;"),
+                &[],
+            )
             .and_then(|value| value.l())
             .map_err(|error| {
                 clear_pending_android_jni_exception(env);
@@ -529,8 +522,8 @@ fn set_android_window_layout_px(
             })?;
         env.call_method(
             &window,
-            "setLayout",
-            "(II)V",
+            jni_str!("setLayout"),
+            jni_sig!("(II)V"),
             &[JValue::Int(width_px), JValue::Int(height_px)],
         )
         .map_err(|error| {
@@ -599,8 +592,6 @@ pub fn run(
 
     // Frame wake flag for event-driven rendering
     let need_frame = Arc::new(AtomicBool::new(false));
-    let app_waker = app.create_waker();
-    android_overlay_window::set_android_overlay_event_waker(app_waker.clone());
 
     // Exit flag for Destroy event (can't break from inside poll_events closure)
     let should_exit = Arc::new(AtomicBool::new(false));
@@ -610,11 +601,11 @@ pub fn run(
     // (vk_common_SetDebugUtilsObjectNameEXT crashes on null labels)
     let backends = wgpu::Backends::GL | wgpu::Backends::VULKAN;
 
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        backends,
-        flags: wgpu::InstanceFlags::empty(), // No debug/validation - prevents label crash
-        ..Default::default()
-    });
+    let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    instance_descriptor.backends = backends;
+    // No debug/validation: emulator Vulkan debug utils can crash on null labels.
+    instance_descriptor.flags = wgpu::InstanceFlags::empty();
+    let instance = wgpu::Instance::new(instance_descriptor);
 
     // Platform abstraction for density/pointer conversion
     let mut android_platform = AndroidPlatform::new();
@@ -639,19 +630,22 @@ pub fn run(
 
     // Main event loop
     loop {
-        // Dynamic poll duration: block while idle and wake via AndroidAppWaker
-        // whenever the runtime schedules UI work.
-        let frame_requested = need_frame.load(Ordering::Relaxed);
+        // Dynamic poll duration:
+        // - ZERO when dirty, animating, OR pending inputs (immediate processing)
+        // - Short timeout (16ms ~= 60fps) otherwise to ensure responsive input handling
+        //   (Never use None/infinite wait as it can cause ANR if events arrive between checks)
         let poll_duration = if !pending_inputs.is_empty() {
             Some(std::time::Duration::ZERO) // Process pending inputs immediately
+        } else if gpu_resources.is_none() {
+            Some(std::time::Duration::from_millis(100)) // No window, poll occasionally
         } else if let Some(shell) = &app_shell {
-            if frame_requested || shell.needs_redraw() {
-                Some(Duration::ZERO) // Dirty or animating, tight loop
+            if shell.needs_redraw() {
+                Some(std::time::Duration::ZERO) // Dirty or animating, tight loop
             } else {
-                pending_host_window_confirmation_timeout(&pending_host_window_confirmation)
+                Some(std::time::Duration::from_millis(16)) // Idle, poll at ~60fps for responsive input
             }
         } else {
-            pending_host_window_confirmation_timeout(&pending_host_window_confirmation)
+            Some(std::time::Duration::from_millis(100))
         };
 
         app.poll_events(poll_duration, |event| {
@@ -710,7 +704,6 @@ pub fn run(
                                     &content,
                                     &settings,
                                     &need_frame,
-                                    &app_waker,
                                     native_window.ptr().cast(),
                                     None,
                                     width,
@@ -881,20 +874,10 @@ pub fn run(
                                         let pointer = motion_event.pointer_at_index(0);
                                         let x_px = pointer.x() as f64;
                                         let y_px = pointer.y() as f64;
-                                        let scale_factor =
-                                            android_platform.scale_factor().max(f32::EPSILON);
                                         let logical = android_platform.pointer_position(x_px, y_px);
-                                        let pointer_screen = Point::new(
-                                            pointer.raw_x() / scale_factor,
-                                            pointer.raw_y() / scale_factor,
-                                        );
 
                                         match motion_event.action() {
                                             MotionAction::Down | MotionAction::PointerDown => {
-                                                android_overlay_window::set_android_pointer_screen_position(
-                                                    pointer_screen,
-                                                    true,
-                                                );
                                                 println!(
                                                     "[TOUCH] Down at ({:.1}, {:.1})",
                                                     logical.x, logical.y
@@ -905,10 +888,6 @@ pub fn run(
                                                 ));
                                             }
                                             MotionAction::Up | MotionAction::PointerUp => {
-                                                android_overlay_window::set_android_pointer_screen_position(
-                                                    pointer_screen,
-                                                    false,
-                                                );
                                                 println!(
                                                     "[TOUCH] Up at ({:.1}, {:.1})",
                                                     logical.x, logical.y
@@ -919,10 +898,6 @@ pub fn run(
                                                 ));
                                             }
                                             MotionAction::Move => {
-                                                android_overlay_window::set_android_pointer_screen_position(
-                                                    pointer_screen,
-                                                    false,
-                                                );
                                                 println!(
                                                     "[TOUCH] Move at ({:.1}, {:.1})",
                                                     logical.x, logical.y
@@ -979,7 +954,6 @@ pub fn run(
                                 &content,
                                 &settings,
                                 &need_frame,
-                                &app_waker,
                                 native_window.ptr().cast(),
                                 None,
                                 width,
@@ -1012,7 +986,6 @@ pub fn run(
                             &content,
                             &settings,
                             &need_frame,
-                            &app_waker,
                             native_window_ptr,
                             Some(native_window),
                             width,
@@ -1036,22 +1009,8 @@ pub fn run(
                         gpu_resources = None;
                     }
                 }
-                android_overlay_window::AndroidOverlayWindowEvent::Pointer {
-                    action,
-                    x,
-                    y,
-                    raw_x,
-                    raw_y,
-                } => {
-                    let scale_factor = android_platform.scale_factor().max(f32::EPSILON);
+                android_overlay_window::AndroidOverlayWindowEvent::Pointer { action, x, y } => {
                     let logical = android_platform.pointer_position(x as f64, y as f64);
-                    android_overlay_window::set_android_pointer_screen_position(
-                        Point::new(raw_x / scale_factor, raw_y / scale_factor),
-                        matches!(
-                            action,
-                            android_overlay_window::AndroidOverlayPointerAction::Down
-                        ),
-                    );
                     match action {
                         android_overlay_window::AndroidOverlayPointerAction::Down => {
                             pending_inputs.push(PendingInput::PointerDown(
