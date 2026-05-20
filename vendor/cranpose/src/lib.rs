@@ -28,10 +28,6 @@ pub use android_host_window::{
     rememberAndroidHostWindowState, AndroidHostWindowPositionError, AndroidHostWindowSizeError,
     AndroidHostWindowSizeStatus, AndroidHostWindowState,
 };
-#[cfg(all(feature = "android", feature = "renderer-wgpu", target_os = "android"))]
-pub use android_overlay_window::{
-    current_android_pointer_down_screen_position, current_android_pointer_screen_position,
-};
 #[cfg(all(feature = "desktop", feature = "renderer-wgpu"))]
 pub use launcher::LaunchError;
 pub use launcher::{AndroidOverlayWindowOptions, AppLauncher, AppSettings};
@@ -42,6 +38,8 @@ pub use native_window::{
 };
 #[cfg(feature = "renderer-wgpu")]
 mod present_mode;
+#[cfg(feature = "renderer-wgpu")]
+mod wgpu_surface;
 
 /// Re-export framework services (HTTP, URI, etc.) from the dedicated services crate.
 pub use cranpose_services::*;

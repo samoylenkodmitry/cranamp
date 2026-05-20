@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -17,7 +17,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "cranamp"
 path = "src/main.rs"
-required-features = ["desktop"]
+required-features = ["desktop", "renderer-wgpu"]
 
 [features]
 default = ["renderer-wgpu", "desktop"]
@@ -50,11 +50,11 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.4", default-features = false }
-cranpose-core = "0.1.4"
-cranpose-foundation = "0.1.4"
-cranpose-ui = "0.1.4"
-cranpose-ui-graphics = "0.1.4"
+cranpose = { version = "0.1.5", default-features = false }
+cranpose-core = "0.1.5"
+cranpose-foundation = "0.1.5"
+cranpose-ui = "0.1.5"
+cranpose-ui-graphics = "0.1.5"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 log = "0.4"
@@ -76,6 +76,7 @@ jni = "0.22"
 
 [patch.crates-io]
 cranpose = { path = "vendor/cranpose" }
+cranpose-render-pixels = { path = "vendor/cranpose-render-pixels" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = { version = "0.1", optional = true }

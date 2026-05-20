@@ -2,11 +2,14 @@
 //!
 //! This module provides the web event loop implementation using wasm-bindgen and WebGPU.
 
-use crate::launcher::AppSettings;
+use crate::{
+    launcher::AppSettings,
+    wgpu_surface::{current_surface_texture, SurfaceFrame},
+};
 use cranpose_app_shell::{default_root_key, AppShell};
 use cranpose_platform_web::WebPlatform;
 use cranpose_render_wgpu::WgpuRenderer;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -14,11 +17,6 @@ use wasm_bindgen::JsCast;
 use web_sys::{HtmlCanvasElement, MouseEvent, PointerEvent, WheelEvent};
 
 const WEB_WHEEL_LINE_DELTA_PIXELS: f32 = 40.0;
-
-thread_local! {
-    static WEB_RENDER_LOOP: RefCell<Option<Closure<dyn FnMut()>>> = RefCell::new(None);
-    static WEB_FRAME_PENDING: Cell<bool> = Cell::new(false);
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WebBackendPreference {
@@ -72,16 +70,14 @@ pub async fn run(
     }
 
     let backend_preference = requested_web_backend(&window);
-    let instance_desc = wgpu::InstanceDescriptor {
-        backends: instance_backends(backend_preference),
-        ..Default::default()
-    };
+    let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
+    instance_desc.backends = instance_backends(backend_preference);
     let instance = match backend_preference {
         WebBackendPreference::Auto => {
-            wgpu::util::new_instance_with_webgpu_detection(&instance_desc).await
+            wgpu::util::new_instance_with_webgpu_detection(instance_desc).await
         }
         WebBackendPreference::WebGpu | WebBackendPreference::Gl => {
-            wgpu::Instance::new(&instance_desc)
+            wgpu::Instance::new(instance_desc)
         }
     };
 
@@ -151,9 +147,17 @@ pub async fn run(
             // WebGL backends can cap the swapchain below the requested size.
             // Probe the actual surface once so layout and root scale match the
             // real render target instead of the requested CSS size.
-            let probe = surface
-                .get_current_texture()
-                .map_err(|e| format!("failed to probe surface texture: {e:?}"))?;
+            let probe = match current_surface_texture(&surface, "web probe") {
+                SurfaceFrame::Ready(probe) => probe,
+                SurfaceFrame::Reconfigure => {
+                    return Err(
+                        "failed to probe surface texture: surface needs reconfiguration".into(),
+                    );
+                }
+                SurfaceFrame::Skip => {
+                    return Err("failed to probe surface texture: surface unavailable".into());
+                }
+            };
             let actual_width = probe.texture.width();
             let actual_height = probe.texture.height();
             probe.present();
@@ -605,15 +609,16 @@ pub async fn run(
         closure.forget();
     }
 
-    let render_app = app.clone();
-    let render_loop = Closure::wrap(Box::new(move || {
-        WEB_FRAME_PENDING.with(|pending| pending.set(false));
-        render_app.borrow_mut().update();
+    // Render loop
+    let render_loop = Rc::new(RefCell::new(None));
+    let render_loop_clone = render_loop.clone();
+
+    *render_loop.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+        app.borrow_mut().update();
 
         let config = surface_config.borrow();
-        let mut request_next_frame = false;
-        match surface.get_current_texture() {
-            Ok(output) => {
+        match current_surface_texture(&surface, "web") {
+            SurfaceFrame::Ready(output) => {
                 let view = output
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
@@ -621,7 +626,7 @@ pub async fn run(
                 let render_height = output.texture.height();
 
                 {
-                    let mut app_mut = render_app.borrow_mut();
+                    let mut app_mut = app.borrow_mut();
                     if let Err(err) = app_mut
                         .renderer()
                         .render(&view, render_width, render_height)
@@ -632,51 +637,22 @@ pub async fn run(
 
                 output.present();
             }
-            Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
-                // Reconfigure surface
-                let mut app_mut = render_app.borrow_mut();
+            SurfaceFrame::Reconfigure => {
+                let mut app_mut = app.borrow_mut();
                 let device = app_mut.renderer().device();
                 surface.configure(device, &*config);
-                request_next_frame = true;
             }
-            Err(wgpu::SurfaceError::OutOfMemory) => {
-                log::error!("Out of memory");
-            }
-            Err(wgpu::SurfaceError::Timeout) => {
-                log::debug!("Surface timeout, skipping frame");
-            }
-            Err(wgpu::SurfaceError::Other) => {
-                log::error!("Surface other error, skipping frame");
-            }
+            SurfaceFrame::Skip => {}
         }
 
-        let needs_next_frame = {
-            let app = render_app.borrow();
-            app.needs_redraw() || app.has_active_animations()
-        };
-        if request_next_frame || needs_next_frame {
-            schedule_web_frame();
-        }
-    }) as Box<dyn FnMut()>);
+        // Request next frame
+        request_animation_frame(render_loop_clone.borrow().as_ref().unwrap());
+    }) as Box<dyn FnMut()>));
 
-    WEB_RENDER_LOOP.with(|slot| {
-        *slot.borrow_mut() = Some(render_loop);
-    });
-    app.borrow_mut().set_frame_waker(schedule_web_frame);
-    schedule_web_frame();
+    // Start the render loop
+    request_animation_frame(render_loop.borrow().as_ref().unwrap());
 
     Ok(())
-}
-
-fn schedule_web_frame() {
-    if WEB_FRAME_PENDING.with(|pending| pending.replace(true)) {
-        return;
-    }
-    WEB_RENDER_LOOP.with(|slot| {
-        if let Some(callback) = slot.borrow().as_ref() {
-            request_animation_frame(callback);
-        }
-    });
 }
 
 fn request_animation_frame(f: &Closure<dyn FnMut()>) {
