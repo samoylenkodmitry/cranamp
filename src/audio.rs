@@ -378,14 +378,16 @@ mod native {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
-    use symphonia::core::audio::{AudioBufferRef, SampleBuffer, SignalSpec};
-    use symphonia::core::codecs::{Decoder as SymphoniaDecoder, DecoderOptions, CODEC_TYPE_NULL};
+    use symphonia::core::audio::{AudioSpec, GenericAudioBufferRef};
+    use symphonia::core::codecs::audio::{
+        AudioDecoder as SymphoniaDecoder, AudioDecoderOptions, CODEC_ID_NULL_AUDIO,
+    };
     use symphonia::core::errors::Error as SymphoniaError;
+    use symphonia::core::formats::probe::Hint;
     use symphonia::core::formats::{FormatOptions, FormatReader};
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
-    use symphonia::core::probe::Hint;
-    use symphonia::core::units;
+    use symphonia::core::units::{Time, Timestamp};
 
     struct NativeAudio {
         sink: MixerDeviceSink,
@@ -463,7 +465,7 @@ mod native {
         track_id: u32,
         samples: Vec<Sample>,
         sample_offset: usize,
-        spec: SignalSpec,
+        spec: AudioSpec,
         total_duration: Option<Duration>,
         exhausted: bool,
     }
@@ -476,23 +478,22 @@ mod native {
             }
 
             let stream = MediaSourceStream::new(Box::new(file), Default::default());
-            let mut probed = symphonia::default::get_probe()
-                .format(
+            let mut format = symphonia::default::get_probe()
+                .probe(
                     &hint,
                     stream,
-                    &FormatOptions::default(),
-                    &MetadataOptions::default(),
+                    FormatOptions::default(),
+                    MetadataOptions::default(),
                 )
                 .map_err(format_symphonia_error)?;
 
-            let (track_id, mut decoder, total_duration) = select_audio_track(&*probed.format)?;
-            let (spec, samples) =
-                read_next_audio_buffer(&mut *probed.format, &mut *decoder, track_id)?
-                    .ok_or_else(|| "no decodable audio packets found".to_string())?;
+            let (track_id, mut decoder, total_duration) = select_audio_track(&*format)?;
+            let (spec, samples) = read_next_audio_buffer(&mut *format, &mut *decoder, track_id)?
+                .ok_or_else(|| "no decodable audio packets found".to_string())?;
 
             Ok(Self {
                 decoder,
-                format: probed.format,
+                format,
                 track_id,
                 samples,
                 sample_offset: 0,
@@ -544,7 +545,7 @@ mod native {
         fn channels(&self) -> ChannelCount {
             ChannelCount::new(
                 self.spec
-                    .channels
+                    .channels()
                     .count()
                     .try_into()
                     .expect("audio channel count exceeds u16::MAX"),
@@ -553,7 +554,7 @@ mod native {
         }
 
         fn sample_rate(&self) -> SampleRate {
-            SampleRate::new(self.spec.rate).expect("audio should have a non-zero sample rate")
+            SampleRate::new(self.spec.rate()).expect("audio should have a non-zero sample rate")
         }
 
         fn total_duration(&self) -> Option<Duration> {
@@ -563,21 +564,40 @@ mod native {
 
     fn select_audio_track(format: &dyn FormatReader) -> Result<SelectedAudioTrack, String> {
         for track in format.tracks() {
-            let params = &track.codec_params;
-            if params.codec == CODEC_TYPE_NULL {
+            let Some(params) = track
+                .codec_params
+                .as_ref()
+                .and_then(|params| params.audio())
+            else {
+                continue;
+            };
+            if params.codec == CODEC_ID_NULL_AUDIO {
                 continue;
             }
 
-            let Ok(decoder) =
-                symphonia::default::get_codecs().make(params, &DecoderOptions::default())
+            let Ok(decoder) = symphonia::default::get_codecs()
+                .make_audio_decoder(params, &AudioDecoderOptions::default())
             else {
                 continue;
             };
 
             let total_duration = params
-                .time_base
-                .zip(params.n_frames)
-                .map(|(base, frames)| base.calc_time(frames).into())
+                .sample_rate
+                .zip(track.num_frames)
+                .map(|(sample_rate, frames)| {
+                    Duration::from_secs_f64(frames as f64 / sample_rate as f64)
+                })
+                .or_else(|| {
+                    track
+                        .time_base
+                        .zip(track.duration)
+                        .and_then(|(base, duration)| {
+                            Timestamp::try_from(duration.get())
+                                .ok()
+                                .and_then(|duration| base.calc_time(duration))
+                                .and_then(time_to_std_duration)
+                        })
+                })
                 .filter(|duration: &Duration| !duration.is_zero());
 
             return Ok((track.id, decoder, total_duration));
@@ -590,15 +610,16 @@ mod native {
         format: &mut dyn FormatReader,
         decoder: &mut dyn SymphoniaDecoder,
         track_id: u32,
-    ) -> Result<Option<(SignalSpec, Vec<Sample>)>, String> {
+    ) -> Result<Option<(AudioSpec, Vec<Sample>)>, String> {
         loop {
             let packet = match format.next_packet() {
-                Ok(packet) => packet,
+                Ok(Some(packet)) => packet,
+                Ok(None) => return Ok(None),
                 Err(SymphoniaError::IoError(_)) => return Ok(None),
                 Err(error) => return Err(format_symphonia_error(error)),
             };
 
-            if packet.track_id() != track_id {
+            if packet.track_id != track_id {
                 continue;
             }
 
@@ -610,12 +631,16 @@ mod native {
         }
     }
 
-    fn copy_audio_buffer(decoded: AudioBufferRef<'_>) -> (SignalSpec, Vec<Sample>) {
-        let spec = *decoded.spec();
-        let mut samples =
-            SampleBuffer::<Sample>::new(units::Duration::from(decoded.capacity() as u64), spec);
-        samples.copy_interleaved_ref(decoded);
-        (spec, samples.samples().to_vec())
+    fn copy_audio_buffer(decoded: GenericAudioBufferRef<'_>) -> (AudioSpec, Vec<Sample>) {
+        let spec = decoded.spec().clone();
+        let mut samples = Vec::<Sample>::with_capacity(decoded.samples_interleaved());
+        decoded.copy_to_vec_interleaved(&mut samples);
+        (spec, samples)
+    }
+
+    fn time_to_std_duration(time: Time) -> Option<Duration> {
+        let (seconds, nanos) = time.parts();
+        Some(Duration::new(seconds.try_into().ok()?, nanos))
     }
 
     fn analyzer_band_storage() -> &'static [AtomicU32; VISUALIZER_BAND_COUNT] {
