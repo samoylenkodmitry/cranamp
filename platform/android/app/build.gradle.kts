@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurper
+
 plugins {
     id("com.android.application")
 }
@@ -5,6 +7,36 @@ plugins {
 fun releaseVersionName(): String {
     val tag = System.getenv("GITHUB_REF_NAME")?.removePrefix("v")
     return tag?.takeIf { it.isNotBlank() } ?: "0.1.0"
+}
+
+fun cargoPackageDir(packageName: String): File {
+    val output = providers.exec {
+        commandLine(
+            "cargo",
+            "metadata",
+            "--format-version",
+            "1",
+            "--locked",
+            "--manifest-path",
+            rootProject.file("../../Cargo.toml").absolutePath
+        )
+        isIgnoreExitValue = true
+    }
+    val result = output.result.get()
+
+    if (result.exitValue != 0) {
+        throw GradleException("failed to resolve Cargo metadata for $packageName")
+    }
+
+    val metadata = JsonSlurper().parseText(output.standardOutput.asText.get()) as Map<*, *>
+    val packages = metadata["packages"] as List<*>
+    val manifestPath = packages
+        .filterIsInstance<Map<*, *>>()
+        .firstOrNull { it["name"] == packageName }
+        ?.get("manifest_path") as? String
+        ?: throw GradleException("Cargo metadata did not include package $packageName")
+
+    return file(manifestPath).parentFile
 }
 
 android {
@@ -41,7 +73,7 @@ android {
 
     sourceSets {
         getByName("main") {
-            java.directories.add("../../../vendor/cranpose/android/java")
+            java.directories.add(cargoPackageDir("cranpose").resolve("android/java").absolutePath)
         }
         getByName("debug") {
             jniLibs.directories.add("../target/android")
