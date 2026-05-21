@@ -397,7 +397,7 @@ mod native {
 
     static AUDIO: OnceLock<Mutex<Option<NativeAudio>>> = OnceLock::new();
     static VISUALIZER_BANDS: OnceLock<[AtomicU32; VISUALIZER_BAND_COUNT]> = OnceLock::new();
-    const ANALYZER_WINDOW_SAMPLES: usize = 1024;
+    const ANALYZER_WINDOW_SAMPLES: usize = 2048;
     type BoxedSource = Box<dyn Source + Send>;
     type SelectedAudioTrack = (u32, Box<dyn SymphoniaDecoder>, Option<Duration>);
 
@@ -681,27 +681,21 @@ mod native {
         std::array::from_fn(|band| {
             let position = band as f32 / (VISUALIZER_BAND_COUNT - 1) as f32;
             let frequency = min_frequency * frequency_ratio.powf(position);
-            let phase_step = 2.0 * PI * frequency / sample_rate as f32;
-            let mut real = 0.0;
-            let mut imaginary = 0.0;
-            for (sample_index, sample) in samples.iter().copied().enumerate() {
-                let window = hann_window(sample_index, samples.len());
-                let phase = phase_step * sample_index as f32;
-                let sample = sample * window;
-                real += sample * phase.cos();
-                imaginary -= sample * phase.sin();
+            let omega = 2.0 * PI * frequency / sample_rate as f32;
+            let coeff = 2.0 * omega.cos();
+            let mut previous = 0.0;
+            let mut previous_2 = 0.0;
+            for sample in samples.iter().copied() {
+                let current = sample + coeff * previous - previous_2;
+                previous_2 = previous;
+                previous = current;
             }
 
-            let magnitude = (real.mul_add(real, imaginary * imaginary)).sqrt() / sample_count;
+            let power =
+                previous.mul_add(previous, previous_2 * previous_2) - coeff * previous * previous_2;
+            let magnitude = power.max(0.0).sqrt() / sample_count;
             analyzer_magnitude_to_level(magnitude, band)
         })
-    }
-
-    fn hann_window(sample_index: usize, sample_count: usize) -> f32 {
-        if sample_count <= 1 {
-            return 1.0;
-        }
-        0.5 - (0.5 * ((2.0 * PI * sample_index as f32) / (sample_count - 1) as f32).cos())
     }
 
     fn analyzer_magnitude_to_level(magnitude: f32, band: usize) -> f32 {
