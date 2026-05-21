@@ -11,10 +11,16 @@ mod sprites;
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::rc::Rc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 #[cfg(target_os = "android")]
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "android")]
 use cranpose::{rememberAndroidHostWindowState, AndroidHostWindowState};
@@ -43,7 +49,7 @@ use crate::audio::{self, Track};
 use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 
 #[cfg(target_os = "android")]
 pub(crate) const ANDROID_OVERLAY_WIDTH: u32 = 275;
@@ -357,6 +363,8 @@ const CRANAMP_WINAMP_EQUALIZER_TITLE: &str = "Cranamp Winamp Equalizer";
 const CRANAMP_WINAMP_PLAYLIST_TITLE: &str = "Cranamp Winamp Playlist";
 const WINAMP_DEFAULT_SCREEN_POSITION: Point = Point { x: 140.0, y: 120.0 };
 const TITLE_MARQUEE_CHARS_PER_SECOND: f32 = 2.0;
+const PLAYBACK_PROGRESS_UPDATE_MS: u64 = 1_000;
+const VISUALIZER_REFRESH_MS: u64 = 66;
 const PLAYLIST_DOUBLE_CLICK_MS: u64 = 500;
 const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 19;
 #[cfg(not(target_arch = "wasm32"))]
@@ -739,27 +747,87 @@ fn publish_web_surface_size(width: f32, height: f32) {
 #[composable]
 fn PlaybackProgressEffect(state: MutableState<WinampState>) {
     let playback = state.get().playback;
-    cranpose_core::LaunchedEffectAsync!(playback, move |scope| {
-        Box::pin(async move {
-            if playback != PlaybackState::Playing {
-                return;
-            }
-            let clock = scope.runtime().frame_clock();
-            loop {
-                if !scope.is_active() {
-                    break;
-                }
-                let _ = clock.next_frame().await;
-                if !scope.is_active() {
-                    break;
-                }
-                sync_playback_progress(state);
-                if state.get_non_reactive().playback != PlaybackState::Playing {
-                    break;
-                }
-            }
-        })
+    #[cfg(not(target_arch = "wasm32"))]
+    let dispatcher =
+        cranpose_core::with_current_composer(|composer| composer.runtime_handle().dispatcher());
+    cranpose_core::DisposableEffect!(playback, move |_| {
+        if playback != PlaybackState::Playing {
+            return cranpose_core::DisposableEffectResult::default();
+        }
+
+        sync_playback_progress(state);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            start_native_interval(
+                dispatcher,
+                Duration::from_millis(PLAYBACK_PROGRESS_UPDATE_MS),
+                move || {
+                    sync_playback_progress(state);
+                },
+            )
+        }
+
+        #[cfg(all(feature = "web", target_arch = "wasm32"))]
+        {
+            start_web_interval(
+                Duration::from_millis(PLAYBACK_PROGRESS_UPDATE_MS),
+                move || {
+                    sync_playback_progress(state);
+                },
+            )
+        }
+
+        #[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
+        {
+            cranpose_core::DisposableEffectResult::default()
+        }
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn start_native_interval(
+    dispatcher: cranpose_core::runtime::UiDispatcher,
+    interval: Duration,
+    tick: impl Fn() + Copy + Send + 'static,
+) -> cranpose_core::DisposableEffectResult {
+    let active = Arc::new(AtomicBool::new(true));
+    let thread_active = Arc::clone(&active);
+    std::thread::spawn(move || {
+        while thread_active.load(Ordering::SeqCst) {
+            std::thread::sleep(interval);
+            if !thread_active.load(Ordering::SeqCst) {
+                break;
+            }
+            dispatcher.post(tick);
+        }
+    });
+
+    cranpose_core::DisposableEffectResult::new(move || {
+        active.store(false, Ordering::SeqCst);
+    })
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn start_web_interval(
+    interval: Duration,
+    tick: impl FnMut() + 'static,
+) -> cranpose_core::DisposableEffectResult {
+    let Some(window) = web_sys::window() else {
+        return cranpose_core::DisposableEffectResult::default();
+    };
+    let callback = Closure::<dyn FnMut()>::wrap(Box::new(tick));
+    let Ok(interval_id) = window.set_interval_with_callback_and_timeout_and_arguments_0(
+        callback.as_ref().unchecked_ref(),
+        interval.as_millis().min(i32::MAX as u128) as i32,
+    ) else {
+        return cranpose_core::DisposableEffectResult::default();
+    };
+
+    cranpose_core::DisposableEffectResult::new(move || {
+        window.clear_interval_with_handle(interval_id);
+        drop(callback);
+    })
 }
 
 #[composable]
@@ -1667,7 +1735,6 @@ fn MainWindow(
 
             Visualizer(
                 snapshot.playback == PlaybackState::Playing,
-                audio::visualizer_bands(),
                 skin.viscolor,
                 scale,
             );
@@ -3621,8 +3688,41 @@ fn main_display_meta(state: &WinampState) -> String {
 }
 
 #[composable]
-fn Visualizer(playing: bool, bands: audio::VisualizerBands, viscolor: VisColor, scale: f32) {
-    let bitmap = visualizer_bitmap(playing, bands, viscolor);
+fn Visualizer(playing: bool, viscolor: VisColor, scale: f32) {
+    let refresh_tick = cranpose_core::useState(|| 0_u64);
+    #[cfg(not(target_arch = "wasm32"))]
+    let dispatcher =
+        cranpose_core::with_current_composer(|composer| composer.runtime_handle().dispatcher());
+    cranpose_core::DisposableEffect!(playing, move |_| {
+        if !playing {
+            return cranpose_core::DisposableEffectResult::default();
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            start_native_interval(
+                dispatcher,
+                Duration::from_millis(VISUALIZER_REFRESH_MS),
+                move || {
+                    refresh_tick.update(|tick| *tick = tick.wrapping_add(1));
+                },
+            )
+        }
+
+        #[cfg(all(feature = "web", target_arch = "wasm32"))]
+        {
+            start_web_interval(Duration::from_millis(VISUALIZER_REFRESH_MS), move || {
+                refresh_tick.update(|tick| *tick = tick.wrapping_add(1));
+            })
+        }
+
+        #[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
+        {
+            cranpose_core::DisposableEffectResult::default()
+        }
+    });
+
+    let tick = if playing { refresh_tick.value() } else { 0 };
     let width = scaled(VISUALIZER_WIDTH, scale);
     let height = scaled(VISUALIZER_HEIGHT, scale);
     Canvas(
@@ -3633,19 +3733,61 @@ fn Visualizer(playing: bool, bands: audio::VisualizerBands, viscolor: VisColor, 
                 scaled(POS_VISUALIZER.1, scale),
             ),
         move |scope| {
-            scope.draw_image_at(
-                Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width,
-                    height,
-                },
-                bitmap.clone(),
-                1.0,
-                None,
-            );
+            let bands = if playing {
+                let _ = tick;
+                audio::visualizer_bands()
+            } else {
+                [0.0; audio::VISUALIZER_BAND_COUNT]
+            };
+            draw_visualizer(scope, playing, bands, viscolor, scale);
         },
     );
+}
+
+fn draw_visualizer(
+    scope: &mut dyn cranpose_ui_graphics::DrawScope,
+    playing: bool,
+    bands: audio::VisualizerBands,
+    viscolor: VisColor,
+    scale: f32,
+) {
+    let bg = color_from_rgba_u8(viscolor.background());
+    scope.draw_rect(Brush::solid(bg));
+
+    if !playing {
+        return;
+    }
+
+    let max_segments = 5;
+    let bar_width = scaled(3.0, scale);
+    let bar_pitch = scaled(4.0, scale);
+    let segment_height = scaled(2.0, scale);
+    let segment_pitch = scaled(3.0, scale);
+    let height = scaled(VISUALIZER_HEIGHT, scale);
+
+    for bar in 0..VISUALIZER_BARS {
+        let value = visualizer_band_height(bands, bar);
+        let x = bar as f32 * bar_pitch;
+        for segment in 0..max_segments {
+            let threshold = ((segment + 1) as f32 / max_segments as f32) * VISUALIZER_HEIGHT;
+            let color =
+                visualizer_segment_rgba(segment, max_segments, value >= threshold, &viscolor);
+            let y = (height - (segment + 1) as f32 * segment_pitch + scale).max(0.0);
+            scope.draw_rect_at(
+                Rect {
+                    x,
+                    y,
+                    width: bar_width,
+                    height: segment_height,
+                },
+                Brush::solid(color_from_rgba_u8(color)),
+            );
+        }
+    }
+}
+
+fn color_from_rgba_u8(color: [u8; 4]) -> Color {
+    Color::from_rgba_u8(color[0], color[1], color[2], color[3])
 }
 
 #[composable]
@@ -3759,6 +3901,7 @@ fn set_bitmap_pixel(pixels: &mut [u8], width: u32, height: u32, x: i32, y: i32, 
     pixels[offset..offset + 4].copy_from_slice(&color);
 }
 
+#[cfg(test)]
 fn visualizer_bitmap(
     playing: bool,
     bands: audio::VisualizerBands,
@@ -3804,6 +3947,7 @@ fn visualizer_bitmap(
         .expect("rendered visualizer bitmap should be valid")
 }
 
+#[cfg(test)]
 fn fill_visualizer_rect(
     pixels: &mut [u8],
     width: u32,
