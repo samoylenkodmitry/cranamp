@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -50,11 +50,11 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.7", default-features = false }
-cranpose-core = "0.1.7"
-cranpose-foundation = "0.1.7"
-cranpose-ui = "0.1.7"
-cranpose-ui-graphics = "0.1.7"
+cranpose = { version = "0.1.9", default-features = false }
+cranpose-core = "0.1.9"
+cranpose-foundation = "0.1.9"
+cranpose-ui = "0.1.9"
+cranpose-ui-graphics = "0.1.9"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 log = "0.4"
