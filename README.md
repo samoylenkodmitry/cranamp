@@ -10,7 +10,8 @@ Web widget: https://samoylenkodmitry.github.io/cranamp/
 - Android: Cranpose surface entry point packaged as a resizable activity. The
   app uses one stacked Winamp surface, Android document pickers for
   file/folder/playlist import and export, and Rodio playback through copied
-  app-private media files. Freeform Activity mode is optional desktop/tablet
+  app-private media files. The release APK does not request
+  `SYSTEM_ALERT_WINDOW`; freeform Activity mode is optional desktop/tablet
   windowing, not the true always-on-top overlay path.
 - iOS: release output is paused while Cranpose does not provide a UIKit/CAMetalLayer backend.
 - WebAssembly: embeddable canvas widget built with `wasm-pack`; GitHub Pages
@@ -46,8 +47,9 @@ https://samoylenkodmitry.github.io/cranamp/
 
 Freeform Activity mode is a fallback and debug-friendly desktop/tablet UX. It
 does not provide a chat-head style always-on-top mini-player. The true Android
-floating-player path needs a `TYPE_APPLICATION_OVERLAY` service surface after
-overlay permission is granted; Cranpose support for rendering into that kind of
+floating-player path would need a `TYPE_APPLICATION_OVERLAY` service surface,
+but Cranamp intentionally omits that permission from release builds until the
+surface implementation exists. Cranpose support for rendering into that kind of
 service-owned Android surface is tracked upstream in
 `samoylenkodmitry/Cranpose#232`.
 

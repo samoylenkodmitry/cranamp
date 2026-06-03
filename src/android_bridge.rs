@@ -153,43 +153,6 @@ pub fn config_dir() -> Option<PathBuf> {
     BRIDGE.get().map(|bridge| bridge.bridge_dir.join("config"))
 }
 
-pub fn can_draw_overlays() -> bool {
-    activity_bool_method("cranampCanDrawOverlays")
-}
-
-pub fn request_overlay_permission() -> bool {
-    activity_bool_method("cranampRequestOverlayPermission")
-}
-
-fn activity_bool_method(method: &str) -> bool {
-    let Some(bridge) = BRIDGE.get() else {
-        return false;
-    };
-    bridge
-        .vm
-        .attach_current_thread(|env| -> JniResult<bool> {
-            let result = env
-                .call_method(
-                    bridge.activity.as_obj(),
-                    JNIString::new(method).as_ref(),
-                    jni_sig!("()Z"),
-                    &[],
-                )
-                .and_then(|value| value.z());
-            match result {
-                Ok(value) => Ok(value),
-                Err(error) => {
-                    if env.exception_check() {
-                        let _ = env.exception_clear();
-                    }
-                    log::warn!("Android activity method {method} failed: {error}");
-                    Ok(false)
-                }
-            }
-        })
-        .unwrap_or(false)
-}
-
 fn mode_value(mode: AndroidLoadMode) -> i32 {
     match mode {
         AndroidLoadMode::Replace => 0,

@@ -31,7 +31,7 @@ use cranpose::{
 use cranpose_core::{self, MutableState};
 use cranpose_foundation::text::{TextFieldState, TextRange};
 use cranpose_foundation::PointerButton;
-use cranpose_ui::text::{AnnotatedString, FontFamily, ParagraphStyle, TextOverflow, TextUnit};
+use cranpose_ui::text::{FontFamily, ParagraphStyle, TextOverflow, TextUnit};
 #[cfg(target_os = "android")]
 use cranpose_ui::BoxWithConstraints;
 #[cfg(target_os = "android")]
@@ -51,10 +51,6 @@ use sprites::*;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 
-#[cfg(target_os = "android")]
-pub(crate) const ANDROID_OVERLAY_WIDTH: u32 = 275;
-#[cfg(target_os = "android")]
-pub(crate) const ANDROID_OVERLAY_HEIGHT: u32 = 493;
 #[cfg(target_os = "android")]
 pub(crate) const ANDROID_OVERLAY_INITIAL_X: i32 = 26;
 #[cfg(target_os = "android")]
@@ -138,6 +134,7 @@ struct WinampState {
     playlist_visible: bool,
     eq_enabled: bool,
     eq_auto: bool,
+    eq_preset_menu_open: bool,
     eq_values: [f32; 11],
     skin_path: Option<String>,
     shuffle_order: Vec<usize>,
@@ -172,6 +169,7 @@ impl PartialEq for WinampState {
             && self.playlist_visible == other.playlist_visible
             && self.eq_enabled == other.eq_enabled
             && self.eq_auto == other.eq_auto
+            && self.eq_preset_menu_open == other.eq_preset_menu_open
             && self.eq_values == other.eq_values
             && self.skin_path == other.skin_path
             && self.shuffle_order == other.shuffle_order
@@ -208,6 +206,7 @@ impl Default for WinampState {
             playlist_visible: true,
             eq_enabled: true,
             eq_auto: false,
+            eq_preset_menu_open: false,
             eq_values: DEFAULT_EQ_VALUES,
             skin_path: None,
             shuffle_order: Vec::new(),
@@ -248,6 +247,7 @@ fn initial_winamp_state() -> WinampState {
         }
     }
     refresh_shuffle_order(&mut state);
+    let _ = audio::set_equalizer(state.eq_enabled, state.eq_values);
     state
 }
 
@@ -313,34 +313,23 @@ struct PlaylistScrollHandles {
     dragging: MutableState<bool>,
 }
 
-struct PlaylistVisibleTextCache {
-    playlist: Option<Rc<Vec<Track>>>,
-    width_bits: u32,
-    start: usize,
-    rows: usize,
-    current_index: Option<usize>,
-    text: Rc<AnnotatedString>,
-    line_count: usize,
-}
-
-impl Default for PlaylistVisibleTextCache {
-    fn default() -> Self {
-        Self {
-            playlist: None,
-            width_bits: 0,
-            start: usize::MAX,
-            rows: 0,
-            current_index: None,
-            text: Rc::new(AnnotatedString::default()),
-            line_count: 1,
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 struct PlaylistMenuItem {
     label: &'static str,
     action: fn(MutableState<WinampState>),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct PressableSpriteLayout {
+    sprite_x: f32,
+    sprite_y: f32,
+    hit_area: SpriteRect,
+}
+
+#[derive(Clone, Copy)]
+struct EqPreset {
+    label: &'static str,
+    values: [f32; 11],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -371,6 +360,68 @@ const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 19;
 const PLAYLIST_THUMB_SCROLL_FRAME_MS: u64 = 16;
 const PLAYLIST_SCROLL_HIT_PAD_X: f32 = 8.0;
 const DEFAULT_EQ_VALUES: [f32; 11] = [0.5; 11];
+const EQ_ON_BUTTON_HIT_AREA: SpriteRect = (14.0, 18.0, 25.0, 12.0);
+const EQ_AUTO_BUTTON_HIT_AREA: SpriteRect = (40.0, 18.0, 32.0, 12.0);
+const EQ_PRESETS_BUTTON_HIT_AREA: SpriteRect = (217.0, 18.0, 44.0, 12.0);
+const EQ_PRESETS: &[EqPreset] = &[
+    EqPreset {
+        label: "FLAT",
+        values: DEFAULT_EQ_VALUES,
+    },
+    EqPreset {
+        label: "ROCK",
+        values: [
+            0.5, 0.62, 0.58, 0.44, 0.40, 0.50, 0.60, 0.68, 0.72, 0.70, 0.66,
+        ],
+    },
+    EqPreset {
+        label: "POP",
+        values: [
+            0.5, 0.45, 0.56, 0.62, 0.64, 0.55, 0.45, 0.44, 0.50, 0.55, 0.58,
+        ],
+    },
+    EqPreset {
+        label: "DANCE",
+        values: [
+            0.5, 0.72, 0.68, 0.54, 0.46, 0.46, 0.54, 0.62, 0.68, 0.66, 0.60,
+        ],
+    },
+    EqPreset {
+        label: "BASS",
+        values: [
+            0.5, 0.74, 0.70, 0.64, 0.58, 0.52, 0.48, 0.46, 0.44, 0.43, 0.42,
+        ],
+    },
+    EqPreset {
+        label: "TREBLE",
+        values: [
+            0.5, 0.42, 0.43, 0.44, 0.46, 0.50, 0.56, 0.62, 0.68, 0.70, 0.72,
+        ],
+    },
+    EqPreset {
+        label: "VOCAL",
+        values: [
+            0.5, 0.42, 0.44, 0.50, 0.58, 0.65, 0.64, 0.56, 0.48, 0.45, 0.43,
+        ],
+    },
+    EqPreset {
+        label: "CLASSIC",
+        values: [
+            0.5, 0.56, 0.54, 0.52, 0.50, 0.50, 0.52, 0.56, 0.60, 0.58, 0.56,
+        ],
+    },
+    EqPreset {
+        label: "FULL BASS",
+        values: [
+            0.5, 0.78, 0.76, 0.70, 0.62, 0.56, 0.50, 0.47, 0.45, 0.44, 0.43,
+        ],
+    },
+];
+const EQ_PRESET_MENU_X: f32 = 145.0;
+const EQ_PRESET_MENU_Y: f32 = 31.0;
+const EQ_PRESET_MENU_COLUMN_WIDTH: f32 = 58.0;
+const EQ_PRESET_MENU_COLUMNS: usize = 2;
+const EQ_PRESET_MENU_ROW_HEIGHT: f32 = 12.0;
 const WINAMP_SYSTEM_FONT_SIZE: f32 = 8.25;
 const WINAMP_SYSTEM_LINE_HEIGHT: f32 = 10.0;
 const WINAMP_SYSTEM_TEXT_Y_ADJUST: f32 = -2.25;
@@ -456,13 +507,6 @@ impl ControlRect {
 
     fn scaled_y(self) -> f32 {
         scaled(self.y, self.scale)
-    }
-
-    fn contains_scaled_point(self, point: Point) -> bool {
-        point.x >= 0.0
-            && point.x <= self.scaled_width()
-            && point.y >= 0.0
-            && point.y <= self.scaled_height()
     }
 }
 
@@ -673,11 +717,24 @@ fn WinampRuntimeEffects(
     skin_state: WinampSkinState,
 ) {
     PlaybackProgressEffect(state);
+    PlaylistDurationHydrationEffect(state);
     AndroidPickerEffect(state, skin_state);
     WebSurfaceSizeEffect(state);
     PlayerStatePersistence(state);
     NativeWindowPersistence(peer_windows);
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[composable]
+fn PlaylistDurationHydrationEffect(state: MutableState<WinampState>) {
+    cranpose_core::remember(move || {
+        hydrate_playlist_durations_background(state);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+#[composable]
+fn PlaylistDurationHydrationEffect(_state: MutableState<WinampState>) {}
 
 #[cfg(target_os = "android")]
 #[composable]
@@ -868,6 +925,17 @@ fn sync_playback_progress(state: MutableState<WinampState>) {
                 let elapsed = normalized_elapsed_seconds(progress.elapsed_seconds, duration);
                 s.elapsed_seconds = elapsed;
                 s.duration_seconds = duration;
+                if let (Some(index), Some(duration)) = (s.current_index, duration) {
+                    if let Some(track) = s
+                        .playlist
+                        .get(index)
+                        .filter(|track| track.duration_seconds.is_none())
+                    {
+                        let mut track = track.clone();
+                        track.duration_seconds = Some(duration);
+                        playlist_tracks_mut(s)[index] = track;
+                    }
+                }
                 s.position = progress_fraction(elapsed, duration);
                 s.title_marquee_phase = elapsed * TITLE_MARQUEE_CHARS_PER_SECOND;
             });
@@ -2052,6 +2120,9 @@ fn MainWindow(
                     move || {
                         state_click.update(|s| {
                             s.eq_visible = !s.eq_visible;
+                            if !s.eq_visible {
+                                s.eq_preset_menu_open = false;
+                            }
                             s.status = if s.eq_visible {
                                 "Equalizer Shown".to_string()
                             } else {
@@ -2159,6 +2230,7 @@ fn EqualizerWindow(
                     move || {
                         state_click.update(|s| {
                             s.eq_visible = false;
+                            s.eq_preset_menu_open = false;
                             s.status = "Equalizer Hidden".to_string();
                         });
                     },
@@ -2177,16 +2249,23 @@ fn EqualizerWindow(
             };
             {
                 let state_click = state;
-                PressableSprite(
+                PressableSpriteHitArea(
                     skin.eqmain.clone(),
                     eq_on_normal,
                     eq_on_pressed,
-                    POS_EQ_ON_BUTTON.0,
-                    POS_EQ_ON_BUTTON.1,
+                    PressableSpriteLayout {
+                        sprite_x: POS_EQ_ON_BUTTON.0,
+                        sprite_y: POS_EQ_ON_BUTTON.1,
+                        hit_area: EQ_ON_BUTTON_HIT_AREA,
+                    },
                     scale,
                     move || {
                         state_click.update(|s| {
                             s.eq_enabled = !s.eq_enabled;
+                            if let Err(error) = audio::set_equalizer(s.eq_enabled, s.eq_values) {
+                                s.status = error;
+                                return;
+                            }
                             s.status = if s.eq_enabled {
                                 "EQ On".to_string()
                             } else {
@@ -2209,12 +2288,15 @@ fn EqualizerWindow(
             };
             {
                 let state_click = state;
-                PressableSprite(
+                PressableSpriteHitArea(
                     skin.eqmain.clone(),
                     eq_auto_normal,
                     eq_auto_pressed,
-                    POS_EQ_AUTO_BUTTON.0,
-                    POS_EQ_AUTO_BUTTON.1,
+                    PressableSpriteLayout {
+                        sprite_x: POS_EQ_AUTO_BUTTON.0,
+                        sprite_y: POS_EQ_AUTO_BUTTON.1,
+                        hit_area: EQ_AUTO_BUTTON_HIT_AREA,
+                    },
                     scale,
                     move || {
                         state_click.update(|s| {
@@ -2231,17 +2313,24 @@ fn EqualizerWindow(
 
             {
                 let state_click = state;
-                PressableSprite(
+                PressableSpriteHitArea(
                     skin.eqmain.clone(),
                     EQ_PRESETS_BUTTON,
                     EQ_PRESETS_BUTTON_SELECTED,
-                    POS_EQ_PRESETS_BUTTON.0,
-                    POS_EQ_PRESETS_BUTTON.1,
+                    PressableSpriteLayout {
+                        sprite_x: POS_EQ_PRESETS_BUTTON.0,
+                        sprite_y: POS_EQ_PRESETS_BUTTON.1,
+                        hit_area: EQ_PRESETS_BUTTON_HIT_AREA,
+                    },
                     scale,
                     move || {
                         state_click.update(|s| {
-                            s.eq_values = DEFAULT_EQ_VALUES;
-                            s.status = "EQ Reset".to_string();
+                            s.eq_preset_menu_open = !s.eq_preset_menu_open;
+                            s.status = if s.eq_preset_menu_open {
+                                "EQ Presets".to_string()
+                            } else {
+                                "EQ Presets Closed".to_string()
+                            };
                         });
                     },
                 );
@@ -2277,6 +2366,8 @@ fn EqualizerWindow(
 
                 let eq_drag_change = eq_drag;
                 let eq_drag_commit = eq_drag;
+                let state_drag = state;
+                let state_commit = state;
                 VerticalDragSlider(
                     ControlRect::new(
                         slider_x,
@@ -2288,6 +2379,12 @@ fn EqualizerWindow(
                     true,
                     move |fraction| {
                         eq_drag_change.set(Some(fraction));
+                        let snapshot = state_drag.get_non_reactive();
+                        let mut values = snapshot.eq_values;
+                        values[index] = fraction;
+                        if let Err(error) = audio::set_equalizer(snapshot.eq_enabled, values) {
+                            state_drag.update(|s| s.status = error);
+                        }
                     },
                     move |dragging| {
                         eq_pressed.set(dragging);
@@ -2296,15 +2393,100 @@ fn EqualizerWindow(
                                 return;
                             };
                             eq_drag_commit.set(None);
-                            state.update(|s| {
+                            state_commit.update(|s| {
                                 s.eq_values[index] = fraction;
+                                if let Err(error) = audio::set_equalizer(s.eq_enabled, s.eq_values)
+                                {
+                                    s.status = error;
+                                }
                             });
                         }
                     },
                 );
             }
+
+            if snapshot.eq_preset_menu_open {
+                EqPresetMenu(state, skin.display_text_color, scale);
+            }
         },
     );
+}
+
+#[composable]
+fn EqPresetMenu(state: MutableState<WinampState>, display_text_color: [u8; 4], scale: f32) {
+    let rows = eq_preset_menu_rows();
+    let width = EQ_PRESET_MENU_COLUMN_WIDTH * EQ_PRESET_MENU_COLUMNS as f32;
+    let row_height = EQ_PRESET_MENU_ROW_HEIGHT;
+    let height = row_height * rows as f32;
+    let x = EQ_PRESET_MENU_X;
+    let y = EQ_PRESET_MENU_Y;
+
+    FilledRect(x, y, width, height, scale, Color(0.01, 0.015, 0.012, 1.0));
+    FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
+    FilledRect(
+        x + EQ_PRESET_MENU_COLUMN_WIDTH,
+        y,
+        1.0,
+        height,
+        scale,
+        Color(0.12, 0.20, 0.24, 1.0),
+    );
+
+    for (index, preset) in EQ_PRESETS.iter().copied().enumerate() {
+        let column = index / rows;
+        let row = index % rows;
+        let row_x = x + EQ_PRESET_MENU_COLUMN_WIDTH * column as f32;
+        let row_y = y + row_height * row as f32;
+        if row > 0 {
+            FilledRect(
+                row_x,
+                row_y,
+                EQ_PRESET_MENU_COLUMN_WIDTH,
+                1.0,
+                scale,
+                Color(0.12, 0.20, 0.24, 1.0),
+            );
+        }
+
+        SystemWinampText(
+            preset.label.to_string(),
+            row_x + 5.0,
+            row_y + 3.0,
+            EQ_PRESET_MENU_COLUMN_WIDTH - 8.0,
+            row_height,
+            scale,
+            display_text_color,
+        );
+
+        let state_click = state;
+        ClickTarget(
+            row_x,
+            row_y,
+            EQ_PRESET_MENU_COLUMN_WIDTH,
+            row_height,
+            scale,
+            move || {
+                apply_eq_preset(state_click, preset);
+            },
+        );
+    }
+}
+
+fn apply_eq_preset(state: MutableState<WinampState>, preset: EqPreset) {
+    state.update(|s| {
+        s.eq_enabled = true;
+        s.eq_preset_menu_open = false;
+        s.eq_values = preset.values;
+        if let Err(error) = audio::set_equalizer(s.eq_enabled, s.eq_values) {
+            s.status = error;
+            return;
+        }
+        s.status = format!("EQ Preset {}", preset.label);
+    });
+}
+
+fn eq_preset_menu_rows() -> usize {
+    EQ_PRESETS.len().div_ceil(EQ_PRESET_MENU_COLUMNS)
 }
 
 #[composable]
@@ -2654,37 +2836,8 @@ fn PlaylistEntries(
             let max_start = snapshot.playlist.len().saturating_sub(max_rows);
             let start = ((playlist_scroll * max_start as f32).round() as usize).min(max_start);
             let line_width = (list_width - 8.0).max(1.0);
-            let visible_text_cache = cranpose_core::remember(PlaylistVisibleTextCache::default);
-            let (visible_text, visible_line_count) = visible_text_cache.update(|cache| {
-                let width_bits = line_width.to_bits();
-                let stale_playlist = cache
-                    .playlist
-                    .as_ref()
-                    .is_none_or(|playlist| !Rc::ptr_eq(playlist, &snapshot.playlist));
-                if stale_playlist
-                    || cache.width_bits != width_bits
-                    || cache.start != start
-                    || cache.rows != max_rows
-                    || cache.current_index != snapshot.current_index
-                {
-                    let text = build_playlist_visible_text(
-                        snapshot.playlist.as_slice(),
-                        start,
-                        max_rows,
-                        snapshot.current_index,
-                        line_width,
-                    );
-                    cache.playlist = Some(Rc::clone(&snapshot.playlist));
-                    cache.width_bits = width_bits;
-                    cache.start = start;
-                    cache.rows = max_rows;
-                    cache.current_index = snapshot.current_index;
-                    cache.line_count =
-                        visible_playlist_line_count(snapshot.playlist.len(), start, max_rows);
-                    cache.text = Rc::new(AnnotatedString::from(text));
-                }
-                (Rc::clone(&cache.text), cache.line_count)
-            });
+            let visible_line_count =
+                visible_playlist_line_count(snapshot.playlist.len(), start, max_rows);
 
             let selection_height = WINAMP_PLAYLIST_SELECTION_HEIGHT.min(row_height).max(1.0);
             for row in start..start + visible_line_count {
@@ -2705,18 +2858,6 @@ fn PlaylistEntries(
                 }
             }
 
-            PlaylistWinampTextBlock(
-                visible_text,
-                SystemTextBox {
-                    x,
-                    y,
-                    width: line_width,
-                    height: row_height * visible_line_count as f32,
-                    scale,
-                },
-                palette.normal,
-                visible_line_count,
-            );
             for (row, track) in snapshot
                 .playlist
                 .iter()
@@ -2727,26 +2868,36 @@ fn PlaylistEntries(
                 let current = snapshot.current_index == Some(row);
                 let row_offset = (row - start) as f32 * row_height;
                 let row_y = y + row_offset;
-                if current {
-                    let duration = playlist_duration_text(track.duration_seconds);
-                    let title = if snapshot.playback == PlaybackState::Playing {
-                        marquee_system_text(
-                            track.display_title().to_string(),
-                            line_width,
-                            snapshot.title_marquee_phase,
-                        )
-                    } else {
-                        track.display_title().to_string()
-                    };
-                    let line = playlist_row_line_text(title, duration.as_deref(), line_width);
+                let color = if current {
+                    palette.current
+                } else {
+                    palette.normal
+                };
+                let duration = playlist_duration_text(track.duration_seconds);
+                let duration_width = duration
+                    .as_deref()
+                    .map(playlist_duration_column_width)
+                    .unwrap_or(0.0);
+                let title_width = playlist_title_column_width(line_width, duration_width);
+                let title = if current && snapshot.playback == PlaybackState::Playing {
+                    marquee_system_text(
+                        track.display_title().to_string(),
+                        title_width,
+                        snapshot.title_marquee_phase,
+                    )
+                } else {
+                    track.display_title().to_string()
+                };
+                PlaylistWinampText(title, x, row_y, title_width, row_height, scale, color);
+                if let Some(duration) = duration {
                     PlaylistWinampText(
-                        line,
-                        x,
+                        duration,
+                        x + line_width - duration_width,
                         row_y,
-                        line_width,
+                        duration_width,
                         row_height,
                         scale,
-                        palette.current,
+                        color,
                     );
                 }
 
@@ -3029,6 +3180,7 @@ fn PressableClickArea(
     is_pressed: MutableState<bool>,
     on_click: impl Fn() + 'static,
 ) {
+    let _ = is_pressed;
     let on_click = Rc::new(on_click);
     let w = area.scaled_width();
     let h = area.scaled_height();
@@ -3037,47 +3189,7 @@ fn PressableClickArea(
         Modifier::empty()
             .size_points(w, h)
             .absolute_offset(area.scaled_x(), area.scaled_y())
-            .pointer_input((), {
-                move |scope: PointerInputScope| {
-                    let on_click = on_click.clone();
-                    async move {
-                        scope
-                            .await_pointer_event_scope(|await_scope| async move {
-                                loop {
-                                    let event = await_scope.await_pointer_event().await;
-                                    match event.kind {
-                                        PointerEventKind::Down => {
-                                            is_pressed.set(true);
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Move
-                                            if is_pressed.get()
-                                                && !event
-                                                    .buttons
-                                                    .contains(PointerButton::Primary) =>
-                                        {
-                                            is_pressed.set(false);
-                                        }
-                                        PointerEventKind::Up => {
-                                            let was_pressed = is_pressed.get();
-                                            is_pressed.set(false);
-                                            let inside = area.contains_scaled_point(event.position);
-                                            if was_pressed && inside {
-                                                on_click();
-                                            }
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Cancel => {
-                                            is_pressed.set(false);
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            })
-                            .await;
-                    }
-                }
-            }),
+            .clickable(move |_| on_click()),
         BoxSpec::default(),
         || {},
     );
@@ -3157,60 +3269,18 @@ fn playlist_visible_row_capacity(list_height: f32) -> usize {
         .max(1.0) as usize
 }
 
-fn build_playlist_visible_text(
-    playlist: &[Track],
-    start: usize,
-    max_rows: usize,
-    current_index: Option<usize>,
-    width: f32,
-) -> String {
-    let mut text = String::new();
-    for (line, (row, track)) in playlist
-        .iter()
-        .enumerate()
-        .skip(start)
-        .take(max_rows)
-        .enumerate()
-    {
-        if line > 0 {
-            text.push('\n');
-        }
-        if current_index == Some(row) {
-            continue;
-        }
-        let duration = playlist_duration_text(track.duration_seconds);
-        text.push_str(&playlist_row_line_text(
-            track.display_title().to_string(),
-            duration.as_deref(),
-            width,
-        ));
-    }
-    text
+fn playlist_duration_column_width(duration: &str) -> f32 {
+    (duration.chars().count() as f32 * WINAMP_PLAYLIST_ROW_CHAR_WIDTH)
+        .ceil()
+        .max(1.0)
 }
 
-fn playlist_row_line_text(title: String, duration: Option<&str>, width: f32) -> String {
-    let max_chars = (width / WINAMP_PLAYLIST_ROW_CHAR_WIDTH).floor().max(1.0) as usize;
-    let Some(duration) = duration else {
-        return truncate_chars(&title, max_chars);
-    };
-    let duration_chars = duration.chars().count();
-    if max_chars <= duration_chars + 1 {
-        return truncate_chars(&title, max_chars);
+fn playlist_title_column_width(line_width: f32, duration_width: f32) -> f32 {
+    if duration_width <= 0.0 {
+        return line_width.max(1.0);
     }
-
-    let title_chars = max_chars - duration_chars - 1;
-    let title = truncate_chars(&title, title_chars);
-    let title_len = title.chars().count();
-    let padding = title_chars.saturating_sub(title_len) + 1;
-    format!("{title}{}{duration}", " ".repeat(padding))
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        text.to_string()
-    } else {
-        text.chars().take(max_chars).collect()
-    }
+    (line_width - duration_width - WINAMP_PLAYLIST_ROW_CHAR_WIDTH)
+        .max(WINAMP_PLAYLIST_ROW_CHAR_WIDTH)
 }
 
 fn format_duration_compact(seconds: f32) -> String {
@@ -3510,79 +3580,6 @@ fn StyledSystemWinampText(
                 TextOverflow::Clip,
                 false,
                 1,
-                1,
-            );
-        },
-    );
-}
-
-#[composable]
-fn SystemWinampTextBlock(
-    text: Rc<AnnotatedString>,
-    layout: SystemTextBox,
-    color: [u8; 4],
-    max_lines: usize,
-) {
-    StyledSystemWinampTextBlock(text, layout, color, max_lines, WINAMP_SYSTEM_TEXT_METRICS);
-}
-
-#[composable]
-fn PlaylistWinampTextBlock(
-    text: Rc<AnnotatedString>,
-    layout: SystemTextBox,
-    color: [u8; 4],
-    max_lines: usize,
-) {
-    StyledSystemWinampTextBlock(text, layout, color, max_lines, WINAMP_PLAYLIST_TEXT_METRICS);
-}
-
-#[composable]
-fn StyledSystemWinampTextBlock(
-    text: Rc<AnnotatedString>,
-    layout: SystemTextBox,
-    color: [u8; 4],
-    max_lines: usize,
-    metrics: SystemTextMetrics,
-) {
-    let text_height = metrics.line_height * max_lines.max(1) as f32;
-    let text_y = ((layout.height - text_height).max(0.0) * 0.5) + metrics.y_adjust;
-    Box(
-        Modifier::empty()
-            .size_points(
-                scaled(layout.width, layout.scale),
-                scaled(layout.height, layout.scale),
-            )
-            .absolute_offset(
-                scaled(layout.x, layout.scale),
-                scaled(layout.y, layout.scale),
-            )
-            .clip_to_bounds(),
-        BoxSpec::default(),
-        move || {
-            BasicText(
-                text.clone(),
-                Modifier::empty()
-                    .size_points(
-                        scaled(layout.width, layout.scale),
-                        scaled(text_height, layout.scale),
-                    )
-                    .absolute_offset(0.0, scaled(text_y, layout.scale)),
-                TextStyle::new(
-                    SpanStyle {
-                        color: Some(Color::from_rgba_u8(color[0], color[1], color[2], color[3])),
-                        font_size: TextUnit::Sp(metrics.font_size * layout.scale),
-                        font_family: Some(FontFamily::Monospace),
-                        letter_spacing: TextUnit::Sp(0.0),
-                        ..SpanStyle::default()
-                    },
-                    ParagraphStyle {
-                        line_height: TextUnit::Sp(metrics.line_height * layout.scale),
-                        ..ParagraphStyle::default()
-                    },
-                ),
-                TextOverflow::Clip,
-                false,
-                max_lines,
                 1,
             );
         },
@@ -4044,77 +4041,71 @@ fn PressableSprite(
     scale: f32,
     on_click: impl Fn() + 'static,
 ) {
-    let is_pressed = cranpose_core::useState(|| false);
+    PressableSpriteHitArea(
+        image,
+        normal,
+        pressed,
+        PressableSpriteLayout {
+            sprite_x: x,
+            sprite_y: y,
+            hit_area: (x, y, normal.2, normal.3),
+        },
+        scale,
+        on_click,
+    );
+}
+
+#[composable]
+fn PressableSpriteHitArea(
+    image: ImageBitmap,
+    normal: SpriteRect,
+    pressed: SpriteRect,
+    layout: PressableSpriteLayout,
+    scale: f32,
+    on_click: impl Fn() + 'static,
+) {
+    let _ = pressed;
     let on_click = Rc::new(on_click);
 
-    let current = if is_pressed.get() { pressed } else { normal };
-    let w = scaled(normal.2, scale);
-    let h = scaled(normal.3, scale);
+    let current = normal;
+    let sprite_w = scaled(current.2, scale);
+    let sprite_h = scaled(current.3, scale);
+    let hit_w = scaled(layout.hit_area.2, scale);
+    let hit_h = scaled(layout.hit_area.3, scale);
 
     Canvas(
         Modifier::empty()
-            .size_points(w, h)
-            .absolute_offset(scaled(x, scale), scaled(y, scale))
-            .pointer_input((), {
-                move |scope: PointerInputScope| {
-                    let on_click = on_click.clone();
-                    async move {
-                        scope
-                            .await_pointer_event_scope(|await_scope| async move {
-                                loop {
-                                    let event = await_scope.await_pointer_event().await;
-                                    match event.kind {
-                                        PointerEventKind::Down => {
-                                            is_pressed.set(true);
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Move => {
-                                            if is_pressed.get()
-                                                && !event.buttons.contains(PointerButton::Primary)
-                                            {
-                                                is_pressed.set(false);
-                                            }
-                                        }
-                                        PointerEventKind::Up => {
-                                            let was_pressed = is_pressed.get();
-                                            is_pressed.set(false);
-                                            let inside = event.position.x >= 0.0
-                                                && event.position.x <= w
-                                                && event.position.y >= 0.0
-                                                && event.position.y <= h;
-                                            if was_pressed && inside {
-                                                on_click();
-                                            }
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Cancel => {
-                                            is_pressed.set(false);
-                                        }
-                                        PointerEventKind::Scroll
-                                        | PointerEventKind::Enter
-                                        | PointerEventKind::Exit => {}
-                                    }
-                                }
-                            })
-                            .await;
-                    }
-                }
-            }),
+            .size_points(sprite_w, sprite_h)
+            .absolute_offset(
+                scaled(layout.sprite_x, scale),
+                scaled(layout.sprite_y, scale),
+            ),
         move |scope| {
             let dst = Rect {
                 x: 0.0,
                 y: 0.0,
-                width: scaled(current.2, scale),
-                height: scaled(current.3, scale),
+                width: sprite_w,
+                height: sprite_h,
             };
             scope.draw_image_src(image.clone(), to_rect(current), dst, 1.0, None);
         },
+    );
+
+    Box(
+        Modifier::empty()
+            .size_points(hit_w, hit_h)
+            .absolute_offset(
+                scaled(layout.hit_area.0, scale),
+                scaled(layout.hit_area.1, scale),
+            )
+            .clickable(move |_| on_click()),
+        BoxSpec::default(),
+        || {},
     );
 }
 
 #[composable]
 fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: impl Fn() + 'static) {
-    let is_pressed = cranpose_core::useState(|| false);
     let on_click = Rc::new(on_click);
     let w = scaled(width, scale);
     let h = scaled(height, scale);
@@ -4123,51 +4114,7 @@ fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: im
         Modifier::empty()
             .size_points(w, h)
             .absolute_offset(scaled(x, scale), scaled(y, scale))
-            .pointer_input((), {
-                move |scope: PointerInputScope| {
-                    let on_click = on_click.clone();
-                    async move {
-                        scope
-                            .await_pointer_event_scope(|await_scope| async move {
-                                loop {
-                                    let event = await_scope.await_pointer_event().await;
-                                    match event.kind {
-                                        PointerEventKind::Down => {
-                                            is_pressed.set(true);
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Move => {
-                                            if is_pressed.get()
-                                                && !event.buttons.contains(PointerButton::Primary)
-                                            {
-                                                is_pressed.set(false);
-                                            }
-                                        }
-                                        PointerEventKind::Up => {
-                                            let was_pressed = is_pressed.get();
-                                            is_pressed.set(false);
-                                            let inside = event.position.x >= 0.0
-                                                && event.position.x <= w
-                                                && event.position.y >= 0.0
-                                                && event.position.y <= h;
-                                            if was_pressed && inside {
-                                                on_click();
-                                            }
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Cancel => {
-                                            is_pressed.set(false);
-                                        }
-                                        PointerEventKind::Scroll
-                                        | PointerEventKind::Enter
-                                        | PointerEventKind::Exit => {}
-                                    }
-                                }
-                            })
-                            .await;
-                    }
-                }
-            }),
+            .clickable(move |_| on_click()),
         BoxSpec::default(),
         || {},
     );
@@ -4789,6 +4736,7 @@ fn replace_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track
     state.update(|s| {
         replace_playlist_tracks(s, tracks);
     });
+    hydrate_playlist_durations_background(state);
     start_track(state, 0);
 }
 
@@ -4805,10 +4753,58 @@ fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>
     state.update(|s| {
         append_playlist_tracks(s, tracks);
     });
+    hydrate_playlist_durations_background(state);
     if should_start {
         start_track(state, 0);
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
+    let jobs = state
+        .get_non_reactive()
+        .playlist
+        .iter()
+        .enumerate()
+        .filter(|(_, track)| track.duration_seconds.is_none())
+        .filter_map(|(index, track)| track.path.clone().map(|path| (index, path)))
+        .collect::<Vec<_>>();
+    if jobs.is_empty() {
+        return;
+    }
+
+    run_native_io(
+        move || {
+            jobs.into_iter()
+                .filter_map(|(index, path)| {
+                    let duration = audio::probe_track_duration_seconds(std::path::Path::new(&path))
+                        .ok()
+                        .flatten()?;
+                    Some((index, path, duration))
+                })
+                .collect::<Vec<_>>()
+        },
+        move |durations| {
+            if durations.is_empty() {
+                return;
+            }
+            state.update(|s| {
+                let tracks = playlist_tracks_mut(s);
+                for (index, path, duration) in durations {
+                    let Some(track) = tracks.get_mut(index) else {
+                        continue;
+                    };
+                    if track.duration_seconds.is_none() && track.path.as_deref() == Some(&path) {
+                        track.duration_seconds = Some(duration);
+                    }
+                }
+            });
+        },
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn hydrate_playlist_durations_background(_state: MutableState<WinampState>) {}
 
 #[cfg(any(not(target_arch = "wasm32"), test))]
 fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
@@ -5486,6 +5482,7 @@ fn import_playlist(state: MutableState<WinampState>) {
                         s.playback = PlaybackState::Stopped;
                         s.status = format!("Imported {} Track(s)", s.playlist.len());
                     });
+                    hydrate_playlist_durations_background(state);
                 }
                 Err(error) => state.update(|s| s.status = error),
             },
@@ -5753,6 +5750,7 @@ fn handle_android_bridge_results(state: MutableState<WinampState>, skin_state: W
                         s.playback = PlaybackState::Stopped;
                         s.status = format!("Imported {} Track(s)", s.playlist.len());
                     });
+                    hydrate_playlist_durations_background(state);
                 }
             }
             AndroidBridgeResult::PlaylistExport { target } => {
@@ -6191,9 +6189,14 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let volume = snapshot.volume;
+        let eq_enabled = snapshot.eq_enabled;
+        let eq_values = snapshot.eq_values;
         let track_for_play = track.clone();
         run_native_io(
-            move || audio::play_track(&track_for_play, volume, false),
+            move || {
+                audio::set_equalizer(eq_enabled, eq_values)?;
+                audio::play_track(&track_for_play, volume, false)
+            },
             move |result| match result {
                 Ok(()) => {
                     state.update(|s| {
@@ -6428,6 +6431,7 @@ fn current_track_status(state: &WinampState, prefix: &str) -> String {
 struct SavedTrack {
     title: String,
     path: String,
+    duration_seconds: Option<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -6506,6 +6510,7 @@ impl SavedPlayerState {
             tracks.push(SavedTrack {
                 title: track.title.clone(),
                 path: path.clone(),
+                duration_seconds: track.duration_seconds,
             });
         }
 
@@ -6580,7 +6585,11 @@ fn restore_saved_track(track: SavedTrack) -> Option<Track> {
     } else {
         track.title
     };
-    Some(audio::track_from_title_path(title, track.path))
+    let mut restored = audio::track_from_title_path(title, track.path);
+    if track.duration_seconds.is_some() {
+        restored.duration_seconds = track.duration_seconds;
+    }
+    Some(restored)
 }
 
 fn valid_saved_skin_path(path: Option<String>) -> Option<String> {
@@ -6636,10 +6645,16 @@ fn serialize_player_state(config: &SavedPlayerState) -> String {
     ];
 
     for track in &config.tracks {
+        let duration = track
+            .duration_seconds
+            .filter(|duration| *duration > 0.0)
+            .map(|duration| format!("{duration:.3}"))
+            .unwrap_or_default();
         lines.push(format!(
-            "track={}\t{}",
+            "track={}\t{}\t{}",
             hex_encode(&track.title),
-            hex_encode(&track.path)
+            hex_encode(&track.path),
+            duration
         ));
     }
 
@@ -6741,9 +6756,14 @@ fn parse_eq_values(value: &str) -> Option<[f32; 11]> {
 
 fn parse_saved_track(value: &str) -> Option<SavedTrack> {
     let (title, path) = value.split_once('\t')?;
+    let (path, duration) = path.split_once('\t').unwrap_or((path, ""));
     Some(SavedTrack {
         title: hex_decode(title)?,
         path: hex_decode(path)?,
+        duration_seconds: duration
+            .parse::<f32>()
+            .ok()
+            .filter(|duration| *duration > 0.0),
     })
 }
 
@@ -7349,30 +7369,38 @@ mod tests {
     }
 
     #[test]
-    fn playlist_row_line_text_fits_title_and_duration() {
-        let ten_chars = WINAMP_PLAYLIST_ROW_CHAR_WIDTH * 10.0;
+    fn eq_presets_are_named_and_clamped() {
+        assert_eq!(EQ_PRESETS.first().map(|preset| preset.label), Some("FLAT"));
+        assert_eq!(EQ_PRESETS[0].values, DEFAULT_EQ_VALUES);
+        assert!(EQ_PRESETS
+            .iter()
+            .any(|preset| preset.label == "ROCK" && preset.values != DEFAULT_EQ_VALUES));
+        assert!(EQ_PRESETS
+            .iter()
+            .flat_map(|preset| preset.values)
+            .all(|value| (0.0..=1.0).contains(&value)));
+    }
+
+    #[test]
+    fn playlist_duration_column_width_matches_duration_text() {
         assert_eq!(
-            playlist_row_line_text("TrackTitle".to_string(), Some("1:23"), ten_chars),
-            "Track 1:23"
+            playlist_duration_column_width("1:23"),
+            (WINAMP_PLAYLIST_ROW_CHAR_WIDTH * 4.0).ceil()
         );
         assert_eq!(
-            playlist_row_line_text("LongTrackName".to_string(), None, ten_chars * 0.5),
-            "LongT"
+            playlist_duration_column_width("12:34"),
+            (WINAMP_PLAYLIST_ROW_CHAR_WIDTH * 5.0).ceil()
         );
     }
 
     #[test]
-    fn playlist_visible_text_blanks_current_overlay_row() {
-        let tracks = vec![test_track("One"), test_track("Two"), test_track("Three")];
-        let text = build_playlist_visible_text(
-            &tracks,
-            0,
-            3,
-            Some(1),
-            WINAMP_PLAYLIST_ROW_CHAR_WIDTH * 12.0,
-        );
+    fn playlist_title_column_leaves_right_duration_gap() {
+        let line_width = WINAMP_PLAYLIST_ROW_CHAR_WIDTH * 12.0;
+        let duration_width = playlist_duration_column_width("1:23");
+        let expected = line_width - duration_width - WINAMP_PLAYLIST_ROW_CHAR_WIDTH;
 
-        assert_eq!(text.lines().collect::<Vec<_>>(), vec!["One", "", "Three"]);
+        assert!((playlist_title_column_width(line_width, duration_width) - expected).abs() < 0.001);
+        assert_eq!(playlist_title_column_width(line_width, 0.0), line_width);
     }
 
     #[test]
@@ -7528,10 +7556,12 @@ mod tests {
                 SavedTrack {
                     title: "Missing".to_string(),
                     path: "/tmp/cranamp-definitely-missing.mp3".to_string(),
+                    duration_seconds: None,
                 },
                 SavedTrack {
                     title: "Present".to_string(),
                     path: fixture_path.to_string_lossy().to_string(),
+                    duration_seconds: Some(1.0),
                 },
             ],
             ..SavedPlayerState::default()
@@ -7541,6 +7571,7 @@ mod tests {
 
         assert_eq!(state.playlist.len(), 1);
         assert_eq!(state.playlist[0].title, "Present");
+        assert_eq!(state.playlist[0].duration_seconds, Some(1.0));
         assert_eq!(state.current_index, Some(0));
         assert_eq!(state.volume, 0.25);
         assert_eq!(state.skin_path, None);
