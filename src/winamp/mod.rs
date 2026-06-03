@@ -7293,6 +7293,10 @@ mod tests {
         Rc::new(tracks)
     }
 
+    fn with_test_app_context<R>(block: impl FnOnce() -> R) -> R {
+        cranpose_ui::AppContext::new().enter(block)
+    }
+
     #[test]
     fn time_digits_are_mapped_correctly() {
         assert_eq!(time_digits(0.0), [0, 0, 0, 0]);
@@ -7310,27 +7314,31 @@ mod tests {
 
     #[test]
     fn horizontal_slider_fraction_tracks_thumb_center() {
-        let area = ControlRect::new(0.0, 0.0, 248.0, 10.0, 1.0);
+        with_test_app_context(|| {
+            let area = ControlRect::new(0.0, 0.0, 248.0, 10.0, 1.0);
 
-        assert_eq!(horizontal_slider_fraction(0.0, area, 29.0), 0.0);
-        assert_eq!(horizontal_slider_fraction(14.5, area, 29.0), 0.0);
-        assert_eq!(horizontal_slider_fraction(233.5, area, 29.0), 1.0);
-        assert_eq!(horizontal_slider_fraction(248.0, area, 29.0), 1.0);
+            assert_eq!(horizontal_slider_fraction(0.0, area, 29.0), 0.0);
+            assert_eq!(horizontal_slider_fraction(14.5, area, 29.0), 0.0);
+            assert_eq!(horizontal_slider_fraction(233.5, area, 29.0), 1.0);
+            assert_eq!(horizontal_slider_fraction(248.0, area, 29.0), 1.0);
 
-        let middle = horizontal_slider_fraction(124.0, area, 29.0);
-        assert!((middle - 0.5).abs() < 0.0001);
-        assert!((slider_thumb_x(middle, 248.0, 29.0) + 14.5 - 124.0).abs() < 0.0001);
+            let middle = horizontal_slider_fraction(124.0, area, 29.0);
+            assert!((middle - 0.5).abs() < 0.0001);
+            assert!((slider_thumb_x(middle, 248.0, 29.0) + 14.5 - 124.0).abs() < 0.0001);
+        });
     }
 
     #[test]
     fn horizontal_slider_surface_pointer_scales_with_layout() {
-        let area = ControlRect::new(17.0, 72.0, 248.0, 10.0, 1.5);
+        with_test_app_context(|| {
+            let area = ControlRect::new(17.0, 72.0, 248.0, 10.0, 1.5);
 
-        assert_eq!(horizontal_slider_surface_pointer_x(17.0, area), 0.0);
-        assert_eq!(
-            horizontal_slider_surface_pointer_x(265.0, area),
-            area.scaled_width()
-        );
+            assert_eq!(horizontal_slider_surface_pointer_x(17.0, area), 0.0);
+            assert_eq!(
+                horizontal_slider_surface_pointer_x(265.0, area),
+                area.scaled_width()
+            );
+        });
     }
 
     #[test]
@@ -7398,13 +7406,15 @@ mod tests {
 
     #[test]
     fn vertical_slider_android_pointer_scales_with_layout() {
-        let area = ControlRect::new(0.0, 0.0, 14.0, 63.0, 1.5);
+        with_test_app_context(|| {
+            let area = ControlRect::new(0.0, 0.0, 14.0, 63.0, 1.5);
 
-        assert_eq!(vertical_slider_android_pointer_y(0.0, area), 0.0);
-        assert_eq!(
-            vertical_slider_android_pointer_y(63.0, area),
-            area.scaled_height()
-        );
+            assert_eq!(vertical_slider_android_pointer_y(0.0, area), 0.0);
+            assert_eq!(
+                vertical_slider_android_pointer_y(63.0, area),
+                area.scaled_height()
+            );
+        });
     }
 
     #[test]

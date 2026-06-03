@@ -41,12 +41,12 @@ fun cargoPackageDir(packageName: String): File {
 
 android {
     namespace = "com.cranamp.app"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.cranamp.app"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = releaseVersionName()
     }
