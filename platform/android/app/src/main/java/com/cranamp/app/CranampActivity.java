@@ -6,11 +6,9 @@ import android.content.ContentResolver;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
-import android.provider.Settings;
 import android.util.Log;
 
 import java.io.File;
@@ -64,33 +62,6 @@ public class CranampActivity extends NativeActivity {
 
     public String cranampBridgeDirectory() {
         return ensureBridgeDir().getAbsolutePath();
-    }
-
-    public boolean cranampCanDrawOverlays() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            return true;
-        }
-        return Settings.canDrawOverlays(this);
-    }
-
-    public boolean cranampRequestOverlayPermission() {
-        if (cranampCanDrawOverlays()) {
-            return true;
-        }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            return true;
-        }
-        try {
-            Intent intent = new Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + getPackageName())
-            );
-            startActivity(intent);
-            return true;
-        } catch (ActivityNotFoundException error) {
-            Log.w(TAG, "Unable to open Android overlay permission settings", error);
-            return false;
-        }
     }
 
     public void cranampPickAudioFiles(int mode) {

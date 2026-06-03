@@ -72,7 +72,17 @@ impl Track {
             .unwrap_or("Untitled")
             .to_string();
 
-        track_from_title_path(title, path.to_string_lossy())
+        let path = path.to_string_lossy().to_string();
+        let duration_seconds = known_demo_duration_seconds(&path).or_else(|| {
+            probe_track_duration_seconds(std::path::Path::new(&path))
+                .ok()
+                .flatten()
+        });
+        Track {
+            title,
+            path: Some(path),
+            duration_seconds,
+        }
     }
 }
 
@@ -375,7 +385,7 @@ mod native {
     use std::f32::consts::PI;
     use std::fs::File;
     use std::path::Path;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
     use symphonia::core::audio::{AudioSpec, GenericAudioBufferRef};
@@ -397,9 +407,193 @@ mod native {
 
     static AUDIO: OnceLock<Mutex<Option<NativeAudio>>> = OnceLock::new();
     static VISUALIZER_BANDS: OnceLock<[AtomicU32; VISUALIZER_BAND_COUNT]> = OnceLock::new();
+    static EQUALIZER: OnceLock<EqualizerShared> = OnceLock::new();
     const ANALYZER_WINDOW_SAMPLES: usize = 2048;
+    const EQUALIZER_VALUE_COUNT: usize = 11;
+    const EQUALIZER_BAND_COUNT: usize = EQUALIZER_VALUE_COUNT - 1;
+    const EQUALIZER_MAX_GAIN_DB: f32 = 12.0;
+    const EQUALIZER_BAND_Q: f32 = 1.15;
+    const EQUALIZER_CENTER_FREQUENCIES: [f32; EQUALIZER_BAND_COUNT] = [
+        60.0, 170.0, 310.0, 600.0, 1_000.0, 3_000.0, 6_000.0, 12_000.0, 14_000.0, 16_000.0,
+    ];
     type BoxedSource = Box<dyn Source + Send>;
     type SelectedAudioTrack = (u32, Box<dyn SymphoniaDecoder>, Option<Duration>);
+
+    struct EqualizerShared {
+        enabled: AtomicBool,
+        values: [AtomicU32; EQUALIZER_VALUE_COUNT],
+        revision: AtomicU32,
+    }
+
+    #[derive(Clone, Copy)]
+    struct EqualizerSnapshot {
+        enabled: bool,
+        values: [f32; EQUALIZER_VALUE_COUNT],
+        revision: u32,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct Biquad {
+        b0: f32,
+        b1: f32,
+        b2: f32,
+        a1: f32,
+        a2: f32,
+        z1: f32,
+        z2: f32,
+    }
+
+    impl Biquad {
+        fn bypass() -> Self {
+            Self {
+                b0: 1.0,
+                b1: 0.0,
+                b2: 0.0,
+                a1: 0.0,
+                a2: 0.0,
+                z1: 0.0,
+                z2: 0.0,
+            }
+        }
+
+        fn peaking(sample_rate: u32, frequency: f32, gain_db: f32) -> Self {
+            if gain_db.abs() < 0.01 || sample_rate == 0 {
+                return Self::bypass();
+            }
+
+            let sample_rate = sample_rate as f32;
+            let nyquist = sample_rate * 0.5;
+            let frequency = frequency.clamp(20.0, (nyquist * 0.92).max(20.0));
+            let omega = 2.0 * PI * frequency / sample_rate;
+            let sin_omega = omega.sin();
+            let cos_omega = omega.cos();
+            let alpha = sin_omega / (2.0 * EQUALIZER_BAND_Q);
+            let gain = 10.0_f32.powf(gain_db / 40.0);
+
+            let b0 = 1.0 + alpha * gain;
+            let b1 = -2.0 * cos_omega;
+            let b2 = 1.0 - alpha * gain;
+            let a0 = 1.0 + alpha / gain;
+            let a1 = -2.0 * cos_omega;
+            let a2 = 1.0 - alpha / gain;
+
+            Self {
+                b0: b0 / a0,
+                b1: b1 / a0,
+                b2: b2 / a0,
+                a1: a1 / a0,
+                a2: a2 / a0,
+                z1: 0.0,
+                z2: 0.0,
+            }
+        }
+
+        fn process(&mut self, sample: f32) -> f32 {
+            let output = self.b0.mul_add(sample, self.z1);
+            self.z1 = self.b1.mul_add(sample, self.z2 - self.a1 * output);
+            self.z2 = self.b2 * sample - self.a2 * output;
+            output
+        }
+    }
+
+    struct EqualizerSource {
+        inner: BoxedSource,
+        snapshot: EqualizerSnapshot,
+        sample_rate: u32,
+        channel_count: usize,
+        next_channel: usize,
+        preamp_gain: f32,
+        filters: Vec<[Biquad; EQUALIZER_BAND_COUNT]>,
+    }
+
+    impl EqualizerSource {
+        fn new(inner: BoxedSource) -> Self {
+            let snapshot = equalizer_snapshot();
+            let sample_rate = inner.sample_rate().get();
+            let channel_count = usize::from(inner.channels().get()).max(1);
+            let preamp_gain = equalizer_preamp_gain(snapshot.values[0]);
+            let filters = equalizer_filters(channel_count, sample_rate, snapshot.values);
+            Self {
+                inner,
+                snapshot,
+                sample_rate,
+                channel_count,
+                next_channel: 0,
+                preamp_gain,
+                filters,
+            }
+        }
+
+        fn refresh_if_stale(&mut self) {
+            let sample_rate = self.inner.sample_rate().get();
+            let channel_count = usize::from(self.inner.channels().get()).max(1);
+            let revision = equalizer_storage().revision.load(Ordering::Relaxed);
+            if revision == self.snapshot.revision
+                && sample_rate == self.sample_rate
+                && channel_count == self.channel_count
+            {
+                return;
+            }
+
+            self.snapshot = equalizer_snapshot();
+            self.sample_rate = sample_rate;
+            self.channel_count = channel_count;
+            self.next_channel = 0;
+            self.preamp_gain = equalizer_preamp_gain(self.snapshot.values[0]);
+            self.filters = equalizer_filters(channel_count, sample_rate, self.snapshot.values);
+        }
+
+        fn process_sample(&mut self, sample: Sample) -> Sample {
+            self.refresh_if_stale();
+            let channel = self.next_channel.min(self.filters.len().saturating_sub(1));
+            self.next_channel = (self.next_channel + 1) % self.channel_count;
+
+            if !self.snapshot.enabled {
+                return sample;
+            }
+
+            let mut output = sample * self.preamp_gain;
+            for filter in &mut self.filters[channel] {
+                output = filter.process(output);
+            }
+            output.clamp(-1.0, 1.0)
+        }
+    }
+
+    impl Iterator for EqualizerSource {
+        type Item = Sample;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let sample = self.inner.next()?;
+            Some(self.process_sample(sample))
+        }
+    }
+
+    impl Source for EqualizerSource {
+        fn current_span_len(&self) -> Option<usize> {
+            self.inner.current_span_len()
+        }
+
+        fn channels(&self) -> ChannelCount {
+            self.inner.channels()
+        }
+
+        fn sample_rate(&self) -> SampleRate {
+            self.inner.sample_rate()
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            self.inner.total_duration()
+        }
+
+        fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+            self.inner.try_seek(pos)?;
+            self.next_channel = 0;
+            self.filters =
+                equalizer_filters(self.channel_count, self.sample_rate, self.snapshot.values);
+            Ok(())
+        }
+    }
 
     struct AnalyzerSource {
         inner: BoxedSource,
@@ -643,6 +837,67 @@ mod native {
         Some(Duration::new(seconds.try_into().ok()?, nanos))
     }
 
+    fn equalizer_storage() -> &'static EqualizerShared {
+        EQUALIZER.get_or_init(|| EqualizerShared {
+            enabled: AtomicBool::new(true),
+            values: std::array::from_fn(|_| AtomicU32::new(0.5_f32.to_bits())),
+            revision: AtomicU32::new(1),
+        })
+    }
+
+    fn equalizer_snapshot() -> EqualizerSnapshot {
+        let storage = equalizer_storage();
+        EqualizerSnapshot {
+            enabled: storage.enabled.load(Ordering::Relaxed),
+            values: std::array::from_fn(|index| {
+                f32::from_bits(storage.values[index].load(Ordering::Relaxed)).clamp(0.0, 1.0)
+            }),
+            revision: storage.revision.load(Ordering::Relaxed),
+        }
+    }
+
+    fn equalizer_value_gain_db(value: f32) -> f32 {
+        (value.clamp(0.0, 1.0) - 0.5) * 2.0 * EQUALIZER_MAX_GAIN_DB
+    }
+
+    fn equalizer_preamp_gain(value: f32) -> f32 {
+        10.0_f32.powf(equalizer_value_gain_db(value) / 20.0)
+    }
+
+    fn equalizer_filters(
+        channel_count: usize,
+        sample_rate: u32,
+        values: [f32; EQUALIZER_VALUE_COUNT],
+    ) -> Vec<[Biquad; EQUALIZER_BAND_COUNT]> {
+        let band_gains: [f32; EQUALIZER_BAND_COUNT] =
+            std::array::from_fn(|index| equalizer_value_gain_db(values[index + 1]));
+        (0..channel_count.max(1))
+            .map(|_| {
+                std::array::from_fn(|index| {
+                    Biquad::peaking(
+                        sample_rate,
+                        EQUALIZER_CENTER_FREQUENCIES[index],
+                        band_gains[index],
+                    )
+                })
+            })
+            .collect()
+    }
+
+    pub fn set_equalizer(enabled: bool, values: [f32; EQUALIZER_VALUE_COUNT]) {
+        let storage = equalizer_storage();
+        storage.enabled.store(enabled, Ordering::Relaxed);
+        for (cell, value) in storage.values.iter().zip(values) {
+            cell.store(value.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        }
+        storage.revision.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn probe_track_duration_seconds(path: &Path) -> Result<Option<f32>, String> {
+        let (_, duration) = decode_track_source(path, false)?;
+        Ok(duration.map(|duration| duration.as_secs_f32()))
+    }
+
     fn analyzer_band_storage() -> &'static [AtomicU32; VISUALIZER_BAND_COUNT] {
         VISUALIZER_BANDS.get_or_init(|| std::array::from_fn(|_| AtomicU32::new(0)))
     }
@@ -799,7 +1054,7 @@ mod native {
             reset_visualizer_bands();
             let player = Player::connect_new(audio.sink.mixer());
             player.set_volume(volume.clamp(0.0, 1.0));
-            player.append(AnalyzerSource::new(source));
+            player.append(AnalyzerSource::new(Box::new(EqualizerSource::new(source))));
             player.play();
             audio.player = Some(player);
             audio.duration = duration;
@@ -1104,6 +1359,19 @@ pub fn set_volume(volume: f32) -> Result<(), String> {
     }
 }
 
+pub fn set_equalizer(enabled: bool, values: [f32; 11]) -> Result<(), String> {
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
+    {
+        native::set_equalizer(enabled, values);
+        Ok(())
+    }
+    #[cfg(not(all(not(target_arch = "wasm32"), feature = "native-audio")))]
+    {
+        let _ = (enabled, values);
+        Ok(())
+    }
+}
+
 pub fn seek_fraction(fraction: f32) -> Result<(), String> {
     #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
     {
@@ -1137,6 +1405,18 @@ pub fn playback_progress() -> Result<Option<PlaybackProgress>, String> {
         all(feature = "web", target_arch = "wasm32")
     )))]
     {
+        Ok(None)
+    }
+}
+
+pub fn probe_track_duration_seconds(path: &std::path::Path) -> Result<Option<f32>, String> {
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
+    {
+        native::probe_track_duration_seconds(path)
+    }
+    #[cfg(not(all(not(target_arch = "wasm32"), feature = "native-audio")))]
+    {
+        let _ = path;
         Ok(None)
     }
 }

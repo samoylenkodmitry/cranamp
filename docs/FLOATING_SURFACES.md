@@ -29,6 +29,9 @@ Cranpose root into a service-owned `Surface`, `SurfaceView`, `TextureView`, or
 other `ANativeWindow` created by `WindowManager`. That upstream requirement is
 tracked in `samoylenkodmitry/Cranpose#232`.
 
+Because that surface path is not implemented, Cranamp release APKs should not
+declare `SYSTEM_ALERT_WINDOW` or prompt for overlay permission at startup.
+
 Until that exists, Cranamp should not pretend Android freeform mode is the real
 overlay implementation. Any Cranamp-side Android overlay work should be limited
 to permission/service scaffolding or a temporary native Android placeholder, not
