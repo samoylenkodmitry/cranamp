@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "cranamp"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "android-activity",
  "anyhow",

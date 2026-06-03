@@ -63,13 +63,6 @@ pub fn create_android_app(can_draw_overlays: bool) -> AppLauncher {
     }
 }
 
-#[cfg(target_os = "ios")]
-#[allow(unsafe_code)]
-#[no_mangle]
-pub extern "C" fn ios_main() {
-    create_surface_app().run(winamp::WinampFullscreenApp);
-}
-
 #[cfg(target_os = "android")]
 #[allow(unsafe_code)]
 #[no_mangle]
