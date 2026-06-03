@@ -99,34 +99,6 @@ jobs:
           name: cranamp-android
           path: assets/cranamp-*
 
-  ios:
-    name: iOS Libraries
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
-      - uses: Swatinem/rust-cache@v2
-      - name: Build iOS device library
-        run: cargo build --release --target aarch64-apple-ios --lib --no-default-features --features ios,renderer-wgpu
-      - name: Build iOS simulator library
-        run: cargo build --release --target aarch64-apple-ios-sim --lib --no-default-features --features ios,renderer-wgpu
-      - name: Package iOS libraries
-        shell: bash
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          package_dir="release/cranamp-${version}-ios-libs"
-          mkdir -p "$package_dir/device-arm64" "$package_dir/simulator-arm64" assets
-          cp target/aarch64-apple-ios/release/libcranamp.a "$package_dir/device-arm64/"
-          cp target/aarch64-apple-ios-sim/release/libcranamp.a "$package_dir/simulator-arm64/"
-          cp README.md LICENSE "$package_dir/"
-          tar -czf "assets/cranamp-${version}-ios-libs.tar.gz" -C release "cranamp-${version}-ios-libs"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: cranamp-ios
-          path: assets/cranamp-*
-
   web:
     name: Web
     runs-on: ubuntu-latest
@@ -151,7 +123,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [desktop, android, ios, web]
+    needs: [desktop, android, web]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -162,7 +134,7 @@ jobs:
         with:
           draft: false
           body: |
-            Cranamp release assets for desktop, Android, iOS library embedding, and the WebAssembly widget.
+            Cranamp release assets for desktop, Android, and the WebAssembly widget.
 
             Web widget: https://samoylenkodmitry.github.io/cranamp/
           files: artifacts/**/*

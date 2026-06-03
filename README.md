@@ -12,7 +12,7 @@ Web widget: https://samoylenkodmitry.github.io/cranamp/
   file/folder/playlist import and export, and Rodio playback through copied
   app-private media files. Freeform Activity mode is optional desktop/tablet
   windowing, not the true always-on-top overlay path.
-- iOS: fullscreen Cranpose surface entry point is wired through the library crate.
+- iOS: release output is paused while Cranpose does not provide a UIKit/CAMetalLayer backend.
 - WebAssembly: embeddable canvas widget built with `wasm-pack`; GitHub Pages
   deploys the widget from `dist/`. Chromium browsers can open an experimental
   Document Picture-in-Picture window containing the live Cranamp canvas.
@@ -69,8 +69,8 @@ browser Document Picture-in-Picture split.
 
 ## Releases
 
-Tags matching `v*` publish GitHub Release assets for Linux, macOS, Windows, Android, iOS libraries, and the WebAssembly widget bundle. Desktop and web archives include demo MP3 files as separate assets rather than embedding them in the executable or WASM binary. The Android APK is debug-signed for sideload testing; iOS release output is a static library package until signed Xcode archive/export packaging is added.
+Tags matching `v*` publish GitHub Release assets for Linux, macOS, Windows, Android, and the WebAssembly widget bundle. Desktop and web archives include demo MP3 files as separate assets rather than embedding them in the executable or WASM binary. The Android APK is debug-signed for sideload testing.
 
 ## Unsafe Policy
 
-Application code denies `unsafe` with crate-level and Cargo lints and contains no unsafe blocks. The Android/iOS loader entry symbols narrowly allow Rust's `unsafe_code` lint around `#[no_mangle]`, because those platforms require stable exported entry-point names. Third-party dependencies may use unsafe internally where their platform integrations require it.
+Application code denies `unsafe` with crate-level and Cargo lints and contains no unsafe blocks. The Android loader entry symbol narrowly allows Rust's `unsafe_code` lint around `#[no_mangle]`, because Android requires a stable exported entry-point name. Third-party dependencies may use unsafe internally where their platform integrations require it.
