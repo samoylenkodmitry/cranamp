@@ -85,9 +85,27 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
           echo "$ANDROID_HOME/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
           cargo install cargo-ndk --locked
+      - name: Materialize release keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.CRANAMP_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "CRANAMP_RELEASE_KEYSTORE_BASE64 secret is missing"; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/cranamp-release.jks"
+          echo "CRANAMP_RELEASE_KEYSTORE=$RUNNER_TEMP/cranamp-release.jks" >> "$GITHUB_ENV"
       - name: Build APK
         working-directory: platform/android
+        env:
+          CRANAMP_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.CRANAMP_RELEASE_KEYSTORE_PASSWORD }}
+          CRANAMP_RELEASE_KEY_ALIAS: ${{ secrets.CRANAMP_RELEASE_KEY_ALIAS }}
+          CRANAMP_RELEASE_KEY_PASSWORD: ${{ secrets.CRANAMP_RELEASE_KEY_PASSWORD }}
         run: ./gradlew --no-daemon :app:assembleRelease
+      - name: Verify APK is release-signed
+        shell: bash
+        run: |
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs \
+            platform/android/app/build/outputs/apk/release/app-release.apk | tee certs.txt
+          grep -q "CN=Cranamp" certs.txt || { echo "APK is not signed with the Cranamp release key"; exit 1; }
       - name: Stage APK
         shell: bash
         run: |

@@ -9,6 +9,24 @@ fun releaseVersionName(): String {
     return tag?.takeIf { it.isNotBlank() } ?: "0.1.0"
 }
 
+fun releaseVersionCode(): Int {
+    val version = releaseVersionName()
+    val parts = version.split(".").mapNotNull { it.toIntOrNull() }
+    if (parts.size != 3) {
+        throw GradleException("version name '$version' is not MAJOR.MINOR.PATCH")
+    }
+    val (major, minor, patch) = parts
+    return major * 1_000_000 + minor * 10_000 + patch
+}
+
+// Set by CI (decoded from the CRANAMP_RELEASE_KEYSTORE_BASE64 secret). Local
+// builds without it sign with the debug keystore for emulator work.
+val releaseKeystorePath: String? = System.getenv("CRANAMP_RELEASE_KEYSTORE")
+
+fun requiredSigningEnv(name: String): String =
+    System.getenv(name)
+        ?: throw GradleException("$name must be set when CRANAMP_RELEASE_KEYSTORE is configured")
+
 fun cargoPackageDir(packageName: String): File {
     val output = providers.exec {
         commandLine(
@@ -47,8 +65,19 @@ android {
         applicationId = "com.cranamp.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = releaseVersionCode()
         versionName = releaseVersionName()
+    }
+
+    signingConfigs {
+        if (releaseKeystorePath != null) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = requiredSigningEnv("CRANAMP_RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = requiredSigningEnv("CRANAMP_RELEASE_KEY_ALIAS")
+                keyPassword = requiredSigningEnv("CRANAMP_RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -63,7 +92,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseKeystorePath != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
 
             ndk {
                 abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
