@@ -3180,7 +3180,6 @@ fn PressableClickArea(
     is_pressed: MutableState<bool>,
     on_click: impl Fn() + 'static,
 ) {
-    let _ = is_pressed;
     let on_click = Rc::new(on_click);
     let w = area.scaled_width();
     let h = area.scaled_height();
@@ -3189,6 +3188,7 @@ fn PressableClickArea(
         Modifier::empty()
             .size_points(w, h)
             .absolute_offset(area.scaled_x(), area.scaled_y())
+            .pointer_input((), pressed_state_pointer_input(is_pressed))
             .clickable(move |_| on_click()),
         BoxSpec::default(),
         || {},
@@ -4064,10 +4064,10 @@ fn PressableSpriteHitArea(
     scale: f32,
     on_click: impl Fn() + 'static,
 ) {
-    let _ = pressed;
+    let is_pressed = cranpose_core::useState(|| false);
     let on_click = Rc::new(on_click);
 
-    let current = normal;
+    let current = if is_pressed.get() { pressed } else { normal };
     let sprite_w = scaled(current.2, scale);
     let sprite_h = scaled(current.3, scale);
     let hit_w = scaled(layout.hit_area.2, scale);
@@ -4098,10 +4098,45 @@ fn PressableSpriteHitArea(
                 scaled(layout.hit_area.0, scale),
                 scaled(layout.hit_area.1, scale),
             )
+            .pointer_input((), pressed_state_pointer_input(is_pressed))
             .clickable(move |_| on_click()),
         BoxSpec::default(),
         || {},
     );
+}
+
+/// Pointer-input handler that tracks the visual pressed state of a control
+/// without consuming events, so a sibling `clickable` still receives the click.
+fn pressed_state_pointer_input(
+    is_pressed: MutableState<bool>,
+) -> impl Fn(PointerInputScope) -> std::pin::Pin<std::boxed::Box<dyn std::future::Future<Output = ()>>>
+{
+    move |scope: PointerInputScope| {
+        std::boxed::Box::pin(async move {
+            scope
+                .await_pointer_event_scope(|await_scope| async move {
+                    loop {
+                        let event = await_scope.await_pointer_event().await;
+                        match event.kind {
+                            PointerEventKind::Down => {
+                                is_pressed.set(true);
+                            }
+                            PointerEventKind::Move
+                                if is_pressed.get()
+                                    && !event.buttons.contains(PointerButton::Primary) =>
+                            {
+                                is_pressed.set(false);
+                            }
+                            PointerEventKind::Up | PointerEventKind::Cancel => {
+                                is_pressed.set(false);
+                            }
+                            _ => {}
+                        }
+                    }
+                })
+                .await;
+        })
+    }
 }
 
 #[composable]
