@@ -49,7 +49,20 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           package_dir="release/cranamp-${version}-${{ matrix.platform }}"
           mkdir -p "$package_dir/demo-music" assets
-          cp "${{ matrix.binary }}" "$package_dir/"
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            # Ship a sealed .app bundle. macOS Finder runs a bare Unix binary
+            # inside a Terminal window, and an unsealed bundle is reported as
+            # "damaged" once downloaded (quarantined). Assemble and ad-hoc sign
+            # so the seal is valid.
+            app="$package_dir/Cranamp.app"
+            mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+            cp "${{ matrix.binary }}" "$app/Contents/MacOS/Cranamp"
+            cp platform/macos/Info.plist "$app/Contents/Info.plist"
+            codesign --force --deep --sign - "$app"
+            codesign --verify --strict --verbose=2 "$app"
+          else
+            cp "${{ matrix.binary }}" "$package_dir/"
+          fi
           cp README.md LICENSE "$package_dir/"
           cp assets/demo-music/generated/*.mp3 "$package_dir/demo-music/"
           cp assets/demo-music/generated/cranamp-demo-playlist.m3u "$package_dir/demo-music/"

@@ -1062,7 +1062,7 @@ pub fn WinampWebStackedApp() {
 }
 
 #[composable]
-fn WinampSurfaceApp() {
+pub fn WinampSurfaceApp() {
     let tab_state = remember_winamp_tab_state();
     let skin_state = remember_winamp_skin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);

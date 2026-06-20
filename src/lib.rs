@@ -40,6 +40,33 @@ pub fn create_android_app() -> AppLauncher {
         .with_fonts(fonts::APP_FONTS)
 }
 
+/// iOS entry point. winit starts `UIApplicationMain`, so this is called
+/// directly from the `cranamp-ios` binary's `main`. The player renders into a
+/// single fullscreen surface, inset by the system safe area.
+#[cfg(all(feature = "ios", feature = "renderer-wgpu", target_os = "ios"))]
+pub fn ios_entry_point() {
+    AppLauncher::new()
+        .with_title(TITLE)
+        .with_fonts(fonts::APP_FONTS)
+        .run(ios_root);
+}
+
+#[cfg(all(feature = "ios", feature = "renderer-wgpu", target_os = "ios"))]
+#[cranpose::composable]
+fn ios_root() {
+    let insets = cranpose::local_safe_area_insets().current();
+    cranpose::Box(
+        cranpose::Modifier::empty().fill_max_size().padding_each(
+            insets.left,
+            insets.top,
+            insets.right,
+            insets.bottom,
+        ),
+        cranpose::BoxSpec::default(),
+        winamp::WinampSurfaceApp,
+    );
+}
+
 #[cfg(target_os = "android")]
 #[allow(unsafe_code)]
 #[no_mangle]
