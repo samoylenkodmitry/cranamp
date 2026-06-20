@@ -19,12 +19,18 @@ name = "cranamp"
 path = "src/main.rs"
 required-features = ["desktop", "renderer-wgpu"]
 
+[[bin]]
+name = "cranamp-ios"
+path = "src/ios_main.rs"
+required-features = ["ios"]
+
 [features]
 default = ["renderer-wgpu", "desktop"]
 renderer-wgpu = ["cranpose/renderer-wgpu"]
 renderer-pixels = ["cranpose/renderer-pixels"]
 desktop = ["cranpose/desktop", "native-audio", "native-dialogs"]
 android = ["cranpose/android", "native-audio"]
+ios = ["cranpose/ios", "renderer-wgpu", "native-audio"]
 web = [
     "cranpose/web",
     "dep:console_error_panic_hook",
@@ -49,11 +55,11 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.15", default-features = false }
-cranpose-core = "0.1.15"
-cranpose-foundation = "0.1.15"
-cranpose-ui = "0.1.15"
-cranpose-ui-graphics = "0.1.15"
+cranpose = { version = "0.1.16", default-features = false }
+cranpose-core = "0.1.16"
+cranpose-foundation = "0.1.16"
+cranpose-ui = "0.1.16"
+cranpose-ui-graphics = "0.1.16"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 log = "0.4"
