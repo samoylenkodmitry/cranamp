@@ -40,6 +40,7 @@ web = [
     "cranpose/web",
     "cranpose-services/file-picker-web",
     "dep:console_error_panic_hook",
+    "dep:futures-channel",
     "dep:getrandom_03",
     "dep:js-sys",
     "dep:rfd",
@@ -61,12 +62,12 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.17", default-features = false }
-cranpose-core = "0.1.17"
-cranpose-foundation = "0.1.17"
-cranpose-services = { version = "0.1.17", default-features = false }
-cranpose-ui = "0.1.17"
-cranpose-ui-graphics = "0.1.17"
+cranpose = { version = "0.1.18", default-features = false }
+cranpose-core = "0.1.18"
+cranpose-foundation = "0.1.18"
+cranpose-services = { version = "0.1.18", default-features = false }
+cranpose-ui = "0.1.18"
+cranpose-ui-graphics = "0.1.18"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 log = "0.4"
@@ -88,6 +89,7 @@ jni = "0.22"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = { version = "0.1", optional = true }
+futures-channel = { version = "0.3", optional = true }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"], optional = true }
 js-sys = { version = "0.3", optional = true }
 rfd = { version = "0.17.2", default-features = false, optional = true }
@@ -96,9 +98,15 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 wasm-logger = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true, features = [
     "Blob",
+    "Document",
+    "Element",
+    "EventTarget",
+    "File",
+    "FileList",
     "HtmlAudioElement",
     "HtmlCanvasElement",
     "HtmlElement",
+    "HtmlInputElement",
     "HtmlMediaElement",
     "Storage",
     "Url",

@@ -179,13 +179,6 @@ fn demo_music_directory_has_tracks(directory: &std::path::Path) -> bool {
         .any(|track| directory.join(track.file_name).is_file())
 }
 
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PickedWebTrack {
-    pub track: Track,
-    pub bytes: Vec<u8>,
-}
-
 /// Builds playable tracks from an entry chosen through the Cranpose native file
 /// picker. The entry may be a single file or a folder served by any system
 /// document provider (cloud, WebDAV, …). Audio files that are not already
@@ -446,28 +439,110 @@ pub fn tracks_from_audio_folder(_folder: std::path::PathBuf) -> Vec<Track> {
     Vec::new()
 }
 
+/// Picks audio files (or every audio file inside a folder) through the browser
+/// and returns playable tracks. Each track's path is a blob object URL backed
+/// by the picked `File`, so the browser keeps the data alive and `play_track`
+/// can play any entry without re-reading it — exactly like an HTTP-backed track.
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-pub async fn pick_web_audio_file() -> Result<Option<PickedWebTrack>, String> {
-    let extensions = dialog_audio_extensions();
-    let Some(handle) = rfd::AsyncFileDialog::new()
-        .set_title("Open audio file")
-        .add_filter("Audio", &extensions)
-        .pick_file()
-        .await
-    else {
-        return Ok(None);
-    };
+pub async fn pick_web_audio_tracks(folder: bool) -> Result<Vec<Track>, String> {
+    use wasm_bindgen::JsCast;
 
-    let title = handle.file_name();
-    let bytes = handle.read().await;
-    Ok(Some(PickedWebTrack {
-        track: Track {
-            title,
-            path: None,
-            duration_seconds: None,
-        },
-        bytes,
-    }))
+    let files = pick_web_files(folder).await?;
+    let mut tracks = Vec::new();
+    for file in files {
+        let name = file.name();
+        if !is_audio_name(&name) {
+            continue;
+        }
+        let blob: &web_sys::Blob = file.unchecked_ref();
+        let url = web_sys::Url::create_object_url_with_blob(blob).map_err(web_js_error)?;
+        tracks.push(Track {
+            title: web_track_title(&name),
+            path: Some(url),
+            duration_seconds: known_demo_duration_seconds(&name),
+        });
+    }
+    tracks.sort_by(|a, b| a.title.cmp(&b.title));
+    Ok(tracks)
+}
+
+/// Drives a hidden `<input type="file">` so the picker works in every browser:
+/// `webkitdirectory` selects a folder where supported and otherwise degrades to
+/// a multi-file selection. Resolves with the chosen files, or empty on cancel.
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+async fn pick_web_files(folder: bool) -> Result<Vec<web_sys::File>, String> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+
+    let window = web_sys::window().ok_or("no browser window")?;
+    let document = window.document().ok_or("no document")?;
+    let input: web_sys::HtmlInputElement = document
+        .create_element("input")
+        .map_err(web_js_error)?
+        .dyn_into()
+        .map_err(|_| "failed to create file input".to_string())?;
+    input.set_type("file");
+    input.set_multiple(true);
+    let accept = dialog_audio_extensions()
+        .iter()
+        .map(|extension| format!(".{extension}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    input.set_accept(&accept);
+    if folder {
+        let _ = input.set_attribute("webkitdirectory", "");
+    }
+
+    let (tx, rx) = futures_channel::oneshot::channel::<Vec<web_sys::File>>();
+    let tx = Rc::new(RefCell::new(Some(tx)));
+
+    let input_for_change = input.clone();
+    let tx_change = Rc::clone(&tx);
+    let on_change = Closure::<dyn FnMut()>::new(move || {
+        let files = input_for_change
+            .files()
+            .map(|list| (0..list.length()).filter_map(|i| list.get(i)).collect())
+            .unwrap_or_default();
+        if let Some(tx) = tx_change.borrow_mut().take() {
+            let _ = tx.send(files);
+        }
+    });
+    let tx_cancel = Rc::clone(&tx);
+    let on_cancel = Closure::<dyn FnMut()>::new(move || {
+        if let Some(tx) = tx_cancel.borrow_mut().take() {
+            let _ = tx.send(Vec::new());
+        }
+    });
+    input.set_onchange(Some(on_change.as_ref().unchecked_ref()));
+    input
+        .add_event_listener_with_callback("cancel", on_cancel.as_ref().unchecked_ref())
+        .map_err(web_js_error)?;
+
+    input.click();
+
+    // The closures must outlive the dialog, so keep them alive until it resolves.
+    let files = rx.await.unwrap_or_default();
+    drop(on_change);
+    drop(on_cancel);
+    Ok(files)
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn web_track_title(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or(name)
+        .to_string()
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn web_js_error(value: wasm_bindgen::JsValue) -> String {
+    value
+        .as_string()
+        .unwrap_or_else(|| "browser file picker failed".to_string())
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
@@ -1231,7 +1306,6 @@ mod web_audio {
 
     struct WebAudio {
         element: web_sys::HtmlAudioElement,
-        object_url: Option<String>,
     }
 
     thread_local! {
@@ -1244,27 +1318,17 @@ mod web_audio {
             .unwrap_or_else(|| "browser audio operation failed".to_string())
     }
 
-    pub fn play_bytes(bytes: Vec<u8>, volume: f32, repeat: bool) -> Result<(), String> {
-        let parts = js_sys::Array::new();
-        parts.push(&js_sys::Uint8Array::from(bytes.as_slice()));
-        let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).map_err(js_error)?;
-        let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js_error)?;
-        let element = web_sys::HtmlAudioElement::new_with_src(&url).map_err(js_error)?;
-        play_element(element, Some(url), volume, repeat)
-    }
-
     pub fn play_track(track: &Track, volume: f32, repeat: bool) -> Result<(), String> {
         let url = track
             .path
             .as_deref()
             .ok_or_else(|| "selected track has no URL".to_string())?;
         let element = web_sys::HtmlAudioElement::new_with_src(url).map_err(js_error)?;
-        play_element(element, None, volume, repeat)
+        play_element(element, volume, repeat)
     }
 
     fn play_element(
         element: web_sys::HtmlAudioElement,
-        object_url: Option<String>,
         volume: f32,
         repeat: bool,
     ) -> Result<(), String> {
@@ -1275,14 +1339,8 @@ mod web_audio {
         AUDIO.with(|audio| {
             if let Some(previous) = audio.borrow_mut().take() {
                 previous.element.pause().ok();
-                if let Some(object_url) = previous.object_url {
-                    let _ = web_sys::Url::revoke_object_url(&object_url);
-                }
             }
-            *audio.borrow_mut() = Some(WebAudio {
-                element,
-                object_url,
-            });
+            *audio.borrow_mut() = Some(WebAudio { element });
         });
 
         Ok(())
@@ -1355,11 +1413,6 @@ mod web_audio {
             }))
         })
     }
-}
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-pub fn play_web_bytes(bytes: Vec<u8>, volume: f32, repeat: bool) -> Result<(), String> {
-    web_audio::play_bytes(bytes, volume, repeat)
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
