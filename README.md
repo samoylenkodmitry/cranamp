@@ -71,7 +71,9 @@ browser Document Picture-in-Picture split.
 
 ## Releases
 
-Tags matching `v*` publish GitHub Release assets for Linux, macOS, Windows, Android, and the WebAssembly widget bundle. Desktop and web archives include demo MP3 files as separate assets rather than embedding them in the executable or WASM binary. The Android APK is debug-signed for sideload testing.
+Tags matching `v*` publish GitHub Release assets for Linux, macOS, Windows, Android, iOS, and the WebAssembly widget bundle. Desktop and web archives include demo MP3 files as separate assets rather than embedding them in the executable or WASM binary. The Android APK is debug-signed for sideload testing.
+
+The macOS `.app` is ad-hoc signed but not notarized, so Gatekeeper blocks it on first launch after a download (double-clicking appears to do nothing — that is the block, not a crash). Approve it once with right-click `Cranamp.app` → **Open** → **Open**, or `xattr -dr com.apple.quarantine Cranamp.app`. The iOS `.ipa` is a device build for sideloading; the separate `…-ios-simulator.app.zip` installs on a Simulator via `xcrun simctl install booted Cranamp.app`.
 
 ## Unsafe Policy
 
