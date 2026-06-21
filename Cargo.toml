@@ -62,12 +62,12 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.17", default-features = false }
-cranpose-core = "0.1.17"
-cranpose-foundation = "0.1.17"
-cranpose-services = { version = "0.1.17", default-features = false }
-cranpose-ui = "0.1.17"
-cranpose-ui-graphics = "0.1.17"
+cranpose = { version = "0.1.18", default-features = false }
+cranpose-core = "0.1.18"
+cranpose-foundation = "0.1.18"
+cranpose-services = { version = "0.1.18", default-features = false }
+cranpose-ui = "0.1.18"
+cranpose-ui-graphics = "0.1.18"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 log = "0.4"
