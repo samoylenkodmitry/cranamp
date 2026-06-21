@@ -152,9 +152,37 @@ jobs:
           name: cranamp-web
           path: cranamp-*-web.tar.gz
 
+  ios:
+    name: iOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - name: Build device .app bundle
+        run: PROFILE=release platform/ios/build-app.sh aarch64-apple-ios
+      - name: Package sideloadable .ipa
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          app="target/aarch64-apple-ios/release/Cranamp.app"
+          payload="$RUNNER_TEMP/Payload"
+          rm -rf "$payload"
+          mkdir -p "$payload"
+          cp -R "$app" "$payload/"
+          mkdir -p assets
+          (cd "$RUNNER_TEMP" && zip -qry "ipa.zip" Payload)
+          mv "$RUNNER_TEMP/ipa.zip" "assets/cranamp-${version}-ios.ipa"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cranamp-ios
+          path: assets/cranamp-*
+
   publish:
     name: Publish GitHub Release
-    needs: [desktop, android, web]
+    needs: [desktop, android, web, ios]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -165,7 +193,9 @@ jobs:
         with:
           draft: false
           body: |
-            Cranamp release assets for desktop, Android, and the WebAssembly widget.
+            Cranamp release assets for desktop, Android, iOS, and the WebAssembly widget.
+
+            The iOS `.ipa` is ad-hoc signed for sideloading (e.g. AltStore / Sideloadly).
 
             Web widget: https://samoylenkodmitry.github.io/cranamp/
           files: artifacts/**/*

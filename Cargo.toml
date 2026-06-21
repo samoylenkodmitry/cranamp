@@ -40,6 +40,7 @@ web = [
     "cranpose/web",
     "cranpose-services/file-picker-web",
     "dep:console_error_panic_hook",
+    "dep:futures-channel",
     "dep:getrandom_03",
     "dep:js-sys",
     "dep:rfd",
@@ -88,6 +89,7 @@ jni = "0.22"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = { version = "0.1", optional = true }
+futures-channel = { version = "0.3", optional = true }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"], optional = true }
 js-sys = { version = "0.3", optional = true }
 rfd = { version = "0.17.2", default-features = false, optional = true }
@@ -96,9 +98,15 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 wasm-logger = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true, features = [
     "Blob",
+    "Document",
+    "Element",
+    "EventTarget",
+    "File",
+    "FileList",
     "HtmlAudioElement",
     "HtmlCanvasElement",
     "HtmlElement",
+    "HtmlInputElement",
     "HtmlMediaElement",
     "Storage",
     "Url",

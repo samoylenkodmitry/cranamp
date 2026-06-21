@@ -4750,35 +4750,7 @@ fn request_pick(state: MutableState<WinampState>, folder: bool, append: bool) {
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn open_audio_files(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Opening File".to_string());
-    wasm_bindgen_futures::spawn_local(async move {
-        match audio::pick_web_audio_file().await {
-            Ok(Some(picked)) => {
-                let track = picked.track.clone();
-                let snapshot = state.get_non_reactive();
-                match audio::play_web_bytes(picked.bytes, snapshot.volume, false) {
-                    Ok(()) => {
-                        state.update(|s| {
-                            set_playlist_tracks(s, vec![track.clone()]);
-                            s.current_index = Some(0);
-                            set_playlist_selection(s, [0]);
-                            scroll_playlist_to_track(s, 0);
-                            s.position = 0.0;
-                            s.elapsed_seconds = 0.0;
-                            s.duration_seconds = None;
-                            s.title_marquee_phase = 0.0;
-                            s.playback = PlaybackState::Playing;
-                            s.status = format!("Playing {}", track.display_title());
-                            refresh_shuffle_order(s);
-                        });
-                    }
-                    Err(error) => state.update(|s| s.status = error),
-                }
-            }
-            Ok(None) => state.update(|s| s.status = "Open Cancelled".to_string()),
-            Err(error) => state.update(|s| s.status = error),
-        }
-    });
+    pick_web_into_playlist(state, false, false);
 }
 
 #[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
@@ -4791,11 +4763,14 @@ fn add_audio_files(state: MutableState<WinampState>) {
     request_pick(state, false, true);
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn add_audio_files(state: MutableState<WinampState>) {
-    state.update(|s| {
-        s.status = "Playlist add unavailable in the web widget".to_string();
-    });
+    pick_web_into_playlist(state, false, true);
+}
+
+#[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
+fn add_audio_files(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Web picker is not enabled".to_string());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -4803,11 +4778,61 @@ fn add_audio_folder(state: MutableState<WinampState>) {
     request_pick(state, true, true);
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn add_audio_folder(state: MutableState<WinampState>) {
+    pick_web_into_playlist(state, true, true);
+}
+
+#[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
+fn add_audio_folder(state: MutableState<WinampState>) {
+    state.update(|s| s.status = "Web picker is not enabled".to_string());
+}
+
+/// Runs the browser file/folder picker and loads the chosen audio into the
+/// playlist — replacing it (Open) or appending (Add). Each track plays from its
+/// own blob URL, so the web widget supports real multi-track playlists.
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn pick_web_into_playlist(state: MutableState<WinampState>, folder: bool, append: bool) {
     state.update(|s| {
-        s.status = "Folder picker unavailable in the web widget".to_string();
+        s.status = if folder {
+            "Opening folder picker"
+        } else {
+            "Opening file picker"
+        }
+        .to_string();
     });
+    wasm_bindgen_futures::spawn_local(async move {
+        match audio::pick_web_audio_tracks(folder).await {
+            Ok(tracks) if tracks.is_empty() => {
+                state.update(|s| s.status = "No audio files selected".to_string());
+            }
+            Ok(tracks) if append => append_web_playlist_and_play(state, tracks),
+            Ok(tracks) => replace_web_playlist_and_play(state, tracks),
+            Err(error) => state.update(|s| s.status = error),
+        }
+    });
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn replace_web_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
+    state.update(|s| {
+        set_playlist_tracks(s, tracks);
+        s.current_index = None;
+        refresh_shuffle_order(s);
+    });
+    start_track(state, 0);
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn append_web_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
+    let was_empty = state.get_non_reactive().playlist.is_empty();
+    let start_index = state.get_non_reactive().playlist.len();
+    state.update(|s| {
+        append_playlist_tracks(s, tracks);
+    });
+    if was_empty {
+        start_track(state, start_index);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -4889,9 +4914,6 @@ fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
     );
 }
 
-#[cfg(target_arch = "wasm32")]
-fn hydrate_playlist_durations_background(_state: MutableState<WinampState>) {}
-
 #[cfg(any(not(target_arch = "wasm32"), test))]
 fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     set_playlist_tracks(state, tracks);
@@ -4906,7 +4928,11 @@ fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     refresh_shuffle_order(state);
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
+#[cfg(any(
+    not(target_arch = "wasm32"),
+    all(feature = "web", target_arch = "wasm32"),
+    test
+))]
 fn append_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) -> bool {
     let was_empty = state.playlist.is_empty();
     let added_count = tracks.len();
