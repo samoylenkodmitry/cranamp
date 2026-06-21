@@ -202,6 +202,8 @@ jobs:
           body: |
             Cranamp release assets for desktop, Android, iOS, and the WebAssembly widget.
 
+            macOS: the `.app` is ad-hoc signed (not notarized), so Gatekeeper blocks it on first launch after download. Right-click `Cranamp.app` → **Open** → **Open**, or run `xattr -dr com.apple.quarantine Cranamp.app`, then launch normally. If you double-click and nothing happens, that is the Gatekeeper block, not a crash.
+
             iOS:
             - `…-ios.ipa` — device build, ad-hoc signed for sideloading (AltStore / Sideloadly).
             - `…-ios-simulator.app.zip` — Simulator build. Unzip, then with a Simulator booted run `xcrun simctl install booted Cranamp.app` (or drag `Cranamp.app` onto the Simulator window). A device `.ipa` cannot run on a Simulator.
