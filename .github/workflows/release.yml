@@ -159,22 +159,29 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
       - name: Build device .app bundle
         run: PROFILE=release platform/ios/build-app.sh aarch64-apple-ios
-      - name: Package sideloadable .ipa
+      - name: Build simulator .app bundle
+        run: PROFILE=release platform/ios/build-app.sh aarch64-apple-ios-sim
+      - name: Package sideloadable .ipa (device) and simulator .app
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          app="target/aarch64-apple-ios/release/Cranamp.app"
+          mkdir -p assets
+
+          # Device build → .ipa (Payload/Cranamp.app) for sideloading.
           payload="$RUNNER_TEMP/Payload"
           rm -rf "$payload"
           mkdir -p "$payload"
-          cp -R "$app" "$payload/"
-          mkdir -p assets
+          cp -R "target/aarch64-apple-ios/release/Cranamp.app" "$payload/"
           (cd "$RUNNER_TEMP" && zip -qry "ipa.zip" Payload)
           mv "$RUNNER_TEMP/ipa.zip" "assets/cranamp-${version}-ios.ipa"
+
+          # Simulator build → zipped .app for `xcrun simctl install`.
+          (cd "target/aarch64-apple-ios-sim/release" && zip -qry "$RUNNER_TEMP/sim.zip" Cranamp.app)
+          mv "$RUNNER_TEMP/sim.zip" "assets/cranamp-${version}-ios-simulator.app.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: cranamp-ios
@@ -195,7 +202,9 @@ jobs:
           body: |
             Cranamp release assets for desktop, Android, iOS, and the WebAssembly widget.
 
-            The iOS `.ipa` is ad-hoc signed for sideloading (e.g. AltStore / Sideloadly).
+            iOS:
+            - `…-ios.ipa` — device build, ad-hoc signed for sideloading (AltStore / Sideloadly).
+            - `…-ios-simulator.app.zip` — Simulator build. Unzip, then with a Simulator booted run `xcrun simctl install booted Cranamp.app` (or drag `Cranamp.app` onto the Simulator window). A device `.ipa` cannot run on a Simulator.
 
             Web widget: https://samoylenkodmitry.github.io/cranamp/
           files: artifacts/**/*

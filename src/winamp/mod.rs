@@ -801,12 +801,16 @@ fn AndroidPickerEffect(_state: MutableState<WinampState>, _skin_state: WinampSki
 #[composable]
 fn CranposePickerEffect(state: MutableState<WinampState>) {
     let pending = state.get().pending_pick;
+    // Resolve the picker from the composition local now, while a composer is
+    // active. Reading `.current()` inside the async closure would run after the
+    // effect is detached from composition and panic ("no active composer").
+    let picker = cranpose::local_file_picker().current();
     cranpose_core::LaunchedEffectAsync!(pending, move |_scope| {
+        let picker = picker.clone();
         Box::pin(async move {
             let Some(request) = pending else {
                 return;
             };
-            let picker = cranpose::local_file_picker().current();
             let options = cranpose::FilePickerOptions::default().with_title(if request.folder {
                 "Open folder"
             } else {
