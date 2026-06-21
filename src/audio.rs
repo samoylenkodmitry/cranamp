@@ -181,23 +181,18 @@ fn demo_music_directory_has_tracks(directory: &std::path::Path) -> bool {
 
 /// Builds playable tracks from an entry chosen through the Cranpose native file
 /// picker. The entry may be a single file or a folder served by any system
-/// document provider (cloud, WebDAV, …). Audio files that are not already
-/// readable through a filesystem path (iOS security-scoped URLs, web handles)
-/// are materialized into a temporary cache so the audio engine can play them.
+/// document provider (cloud, WebDAV, …).
+///
+/// Nothing is copied for the common cases: a desktop selection is already a
+/// filesystem path, and an Android selection is a `content://` URI the audio
+/// engine streams straight from the provider. Only sources with no stable,
+/// re-openable location (iOS security-scoped URLs) are materialized into a
+/// temporary cache so the audio engine can re-open them on playback.
 pub async fn tracks_from_picked_entry(entry: cranpose_services::PickedEntryRef) -> Vec<Track> {
     let cache = picker_cache_dir();
-    let mut paths = collect_picked_audio_paths(entry, cache).await;
-    paths.sort();
-    paths
-        .into_iter()
-        .map(|path| {
-            let title = path
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            track_from_title_path(title, path.to_string_lossy())
-        })
-        .collect()
+    let mut tracks = collect_picked_audio_tracks(entry, cache).await;
+    tracks.sort_by(|a, b| a.display_title().cmp(b.display_title()));
+    tracks
 }
 
 fn picker_cache_dir() -> std::path::PathBuf {
@@ -206,46 +201,57 @@ fn picker_cache_dir() -> std::path::PathBuf {
     dir
 }
 
-fn collect_picked_audio_paths(
+fn collect_picked_audio_tracks(
     entry: cranpose_services::PickedEntryRef,
     cache: std::path::PathBuf,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<std::path::PathBuf>>>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<Track>>>> {
     Box::pin(async move {
-        let mut paths = Vec::new();
+        let mut tracks = Vec::new();
         match entry.kind() {
             cranpose_services::PickedKind::Folder => {
                 if let Ok(children) = entry.list().await {
                     for child in children {
-                        paths.extend(collect_picked_audio_paths(child, cache.clone()).await);
+                        tracks.extend(collect_picked_audio_tracks(child, cache.clone()).await);
                     }
                 }
             }
             cranpose_services::PickedKind::File => {
                 if is_audio_name(&entry.name()) {
-                    if let Some(path) = materialize_picked_file(&entry, &cache).await {
-                        paths.push(path);
+                    if let Some(track) = picked_audio_track(&entry, &cache).await {
+                        tracks.push(track);
                     }
                 }
             }
         }
-        paths
+        tracks
     })
 }
 
-async fn materialize_picked_file(
+async fn picked_audio_track(
     entry: &cranpose_services::PickedEntryRef,
     cache: &std::path::Path,
-) -> Option<std::path::PathBuf> {
-    // Desktop and Android already expose a readable filesystem path.
-    let direct = std::path::PathBuf::from(entry.display_path());
-    if direct.is_file() {
-        return Some(direct);
-    }
-    // iOS (security-scoped) and web read through the provider; cache the bytes.
-    let bytes = entry.read_bytes().await.ok()?;
-    let destination = cache.join(picker_safe_file_name(&entry.name()));
-    std::fs::write(&destination, &bytes).ok()?;
-    Some(destination)
+) -> Option<Track> {
+    let name = entry.name();
+    let title = name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or(&name)
+        .to_string();
+    let display = entry.display_path();
+    // `content://` (Android) streams from the provider; a real filesystem path
+    // (desktop) is used as-is. Neither is copied.
+    let location = if display.starts_with("content://") || std::path::Path::new(&display).is_file()
+    {
+        display
+    } else {
+        // iOS security-scoped URLs are not re-openable later; cache the bytes.
+        let bytes = entry.read_bytes().await.ok()?;
+        let destination = cache.join(picker_safe_file_name(&name));
+        std::fs::write(&destination, &bytes).ok()?;
+        destination.to_string_lossy().into_owned()
+    };
+    Some(track_from_title_path(title, location))
 }
 
 fn is_audio_name(name: &str) -> bool {
@@ -1063,6 +1069,11 @@ mod native {
     }
 
     pub fn probe_track_duration_seconds(path: &Path) -> Result<Option<f32>, String> {
+        // Don't open a descriptor per `content://` track just to read its
+        // duration during background hydration; it resolves on playback.
+        if path.to_str().is_some_and(is_content_uri) {
+            return Ok(None);
+        }
         let (_, duration) = decode_track_source(path, false)?;
         Ok(duration.map(|duration| duration.as_secs_f32()))
     }
@@ -1131,12 +1142,18 @@ mod native {
         path: &Path,
         repeat: bool,
     ) -> Result<(BoxedSource, Option<Duration>), String> {
-        let file = File::open(path)
+        let location = path.to_str().unwrap_or_default();
+        let file = open_audio_file(location)
             .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-        let extension_hint = path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .map(str::to_ascii_lowercase);
+        // A `content://` document carries no usable filesystem extension, so let
+        // the decoder probe the format; a real path keeps its extension hint.
+        let extension_hint = if is_content_uri(location) {
+            None
+        } else {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .map(str::to_ascii_lowercase)
+        };
 
         if extension_hint
             .as_deref()
@@ -1152,14 +1169,13 @@ mod native {
             };
         }
 
-        let byte_len = file
-            .metadata()
-            .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?
-            .len();
+        let byte_len = file.metadata().map(|metadata| metadata.len()).ok();
         let mut builder = rodio::Decoder::builder()
             .with_data(file)
-            .with_byte_len(byte_len)
             .with_seekable(true);
+        if let Some(byte_len) = byte_len {
+            builder = builder.with_byte_len(byte_len);
+        }
         if let Some(extension_hint) = extension_hint.as_deref() {
             builder = builder.with_hint(extension_hint);
         }
@@ -1171,6 +1187,23 @@ mod native {
         } else {
             Ok((Box::new(source), duration))
         }
+    }
+
+    /// Whether a track location is an Android `content://` document URI rather
+    /// than a filesystem path.
+    fn is_content_uri(location: &str) -> bool {
+        location.starts_with("content://")
+    }
+
+    /// Opens a track for decoding. On Android a picked document is a
+    /// `content://` URI streamed straight from the provider (no copy); every
+    /// other location is an ordinary filesystem path.
+    fn open_audio_file(location: &str) -> std::io::Result<File> {
+        #[cfg(target_os = "android")]
+        if is_content_uri(location) {
+            return cranpose::open_content_uri(location);
+        }
+        File::open(location)
     }
 
     fn is_iso_mp4_extension(extension: &str) -> bool {
