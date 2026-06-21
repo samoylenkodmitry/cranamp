@@ -80,22 +80,6 @@ pub fn init(app: &AndroidApp) -> Result<(), String> {
     Ok(())
 }
 
-pub fn request_audio_files(mode: AndroidLoadMode) -> Result<(), String> {
-    call_android_picker(
-        "cranampPickAudioFiles",
-        "(I)V",
-        &[JValue::Int(mode_value(mode))],
-    )
-}
-
-pub fn request_audio_folder(mode: AndroidLoadMode) -> Result<(), String> {
-    call_android_picker(
-        "cranampPickAudioFolder",
-        "(I)V",
-        &[JValue::Int(mode_value(mode))],
-    )
-}
-
 pub fn request_playlist_import() -> Result<(), String> {
     call_android_picker("cranampImportPlaylist", "()V", &[])
 }
@@ -151,13 +135,6 @@ pub fn take_results() -> Vec<AndroidBridgeResult> {
 
 pub fn config_dir() -> Option<PathBuf> {
     BRIDGE.get().map(|bridge| bridge.bridge_dir.join("config"))
-}
-
-fn mode_value(mode: AndroidLoadMode) -> i32 {
-    match mode {
-        AndroidLoadMode::Replace => 0,
-        AndroidLoadMode::Append => 1,
-    }
 }
 
 fn call_android_picker(method: &str, signature: &str, args: &[JValue<'_>]) -> Result<(), String> {

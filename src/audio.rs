@@ -186,6 +186,100 @@ pub struct PickedWebTrack {
     pub bytes: Vec<u8>,
 }
 
+/// Builds playable tracks from an entry chosen through the Cranpose native file
+/// picker. The entry may be a single file or a folder served by any system
+/// document provider (cloud, WebDAV, …). Audio files that are not already
+/// readable through a filesystem path (iOS security-scoped URLs, web handles)
+/// are materialized into a temporary cache so the audio engine can play them.
+pub async fn tracks_from_picked_entry(entry: cranpose_services::PickedEntryRef) -> Vec<Track> {
+    let cache = picker_cache_dir();
+    let mut paths = collect_picked_audio_paths(entry, cache).await;
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|path| {
+            let title = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            track_from_title_path(title, path.to_string_lossy())
+        })
+        .collect()
+}
+
+fn picker_cache_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join("cranamp-picker");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn collect_picked_audio_paths(
+    entry: cranpose_services::PickedEntryRef,
+    cache: std::path::PathBuf,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<std::path::PathBuf>>>> {
+    Box::pin(async move {
+        let mut paths = Vec::new();
+        match entry.kind() {
+            cranpose_services::PickedKind::Folder => {
+                if let Ok(children) = entry.list().await {
+                    for child in children {
+                        paths.extend(collect_picked_audio_paths(child, cache.clone()).await);
+                    }
+                }
+            }
+            cranpose_services::PickedKind::File => {
+                if is_audio_name(&entry.name()) {
+                    if let Some(path) = materialize_picked_file(&entry, &cache).await {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+        paths
+    })
+}
+
+async fn materialize_picked_file(
+    entry: &cranpose_services::PickedEntryRef,
+    cache: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    // Desktop and Android already expose a readable filesystem path.
+    let direct = std::path::PathBuf::from(entry.display_path());
+    if direct.is_file() {
+        return Some(direct);
+    }
+    // iOS (security-scoped) and web read through the provider; cache the bytes.
+    let bytes = entry.read_bytes().await.ok()?;
+    let destination = cache.join(picker_safe_file_name(&entry.name()));
+    std::fs::write(&destination, &bytes).ok()?;
+    Some(destination)
+}
+
+fn is_audio_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    supported_audio_extensions()
+        .iter()
+        .any(|extension| lower.ends_with(&format!(".{extension}")))
+}
+
+fn picker_safe_file_name(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if safe.is_empty() {
+        "track".to_string()
+    } else {
+        safe
+    }
+}
+
 pub fn supported_audio_extensions() -> &'static [&'static str] {
     &[
         "aac", "aiff", "alac", "caf", "flac", "m4a", "m4b", "m4v", "mov", "mp1", "mp2", "mp3",

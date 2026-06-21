@@ -124,6 +124,14 @@ enum PlaybackState {
     Paused,
 }
 
+/// A pending native file/folder selection driven by `CranposePickerEffect`.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct PendingPick {
+    folder: bool,
+    append: bool,
+}
+
 #[derive(Clone, Debug)]
 struct WinampState {
     closed: bool,
@@ -157,6 +165,8 @@ struct WinampState {
     playlist_search_query: String,
     playlist_search_revision: u64,
     android_bridge_pending: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_pick: Option<PendingPick>,
 }
 
 impl PartialEq for WinampState {
@@ -192,6 +202,19 @@ impl PartialEq for WinampState {
             && self.playlist_search_query == other.playlist_search_query
             && self.playlist_search_revision == other.playlist_search_revision
             && self.android_bridge_pending == other.android_bridge_pending
+            && self.pending_pick_eq(other)
+    }
+}
+
+impl WinampState {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn pending_pick_eq(&self, other: &Self) -> bool {
+        self.pending_pick == other.pending_pick
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn pending_pick_eq(&self, _other: &Self) -> bool {
+        true
     }
 }
 
@@ -229,6 +252,8 @@ impl Default for WinampState {
             playlist_search_query: String::new(),
             playlist_search_revision: 0,
             android_bridge_pending: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            pending_pick: None,
         }
     }
 }
@@ -719,6 +744,7 @@ fn WinampRuntimeEffects(
     PlaybackProgressEffect(state);
     PlaylistDurationHydrationEffect(state);
     AndroidPickerEffect(state, skin_state);
+    CranposePickerEffect(state);
     WebSurfaceSizeEffect(state);
     PlayerStatePersistence(state);
     NativeWindowPersistence(peer_windows);
@@ -766,6 +792,62 @@ fn AndroidPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinS
 #[cfg(not(target_os = "android"))]
 #[composable]
 fn AndroidPickerEffect(_state: MutableState<WinampState>, _skin_state: WinampSkinState) {}
+
+/// Drives the Cranpose native file/folder picker when a selection is requested
+/// (see `request_pick`), then loads the chosen audio into the playlist. Works
+/// on desktop, Android (SAF) and iOS (UIDocumentPicker), so folders served by
+/// system providers such as a mounted WebDAV share can be opened anywhere.
+#[cfg(not(target_arch = "wasm32"))]
+#[composable]
+fn CranposePickerEffect(state: MutableState<WinampState>) {
+    let pending = state.get().pending_pick;
+    cranpose_core::LaunchedEffectAsync!(pending, move |_scope| {
+        Box::pin(async move {
+            let Some(request) = pending else {
+                return;
+            };
+            let picker = cranpose::local_file_picker().current();
+            let options = cranpose::FilePickerOptions::default().with_title(if request.folder {
+                "Open folder"
+            } else {
+                "Open audio file"
+            });
+            let result = if request.folder {
+                picker.pick_folder(options).await
+            } else {
+                picker.pick_file(options).await
+            };
+            match result {
+                Ok(Some(entry)) => {
+                    state.update(|s| {
+                        s.pending_pick = None;
+                        s.status = "Loading selection".to_string();
+                    });
+                    let tracks = audio::tracks_from_picked_entry(entry).await;
+                    if tracks.is_empty() {
+                        state.update(|s| s.status = "No audio files found".to_string());
+                    } else if request.append {
+                        append_playlist_and_play(state, tracks);
+                    } else {
+                        replace_playlist_and_play(state, tracks);
+                    }
+                }
+                Ok(None) => state.update(|s| {
+                    s.pending_pick = None;
+                    s.status = "Open Cancelled".to_string();
+                }),
+                Err(error) => state.update(|s| {
+                    s.pending_pick = None;
+                    s.status = error.to_string();
+                }),
+            }
+        })
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+#[composable]
+fn CranposePickerEffect(_state: MutableState<WinampState>) {}
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 #[composable]
@@ -4645,23 +4727,25 @@ fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState
     state.update(|s| s.status = "Web skin picker is not enabled".to_string());
 }
 
-#[cfg(target_os = "android")]
+// Native platforms (desktop, Android, iOS) pick through the Cranpose file
+// picker; `CranposePickerEffect` runs it and loads the selection. The folder
+// picker uses the system document provider, so cloud/WebDAV folders work too.
+#[cfg(not(target_arch = "wasm32"))]
 fn open_audio_files(state: MutableState<WinampState>) {
-    request_android_bridge_operation(state, "Opening Android File Picker", || {
-        android_bridge::request_audio_files(AndroidLoadMode::Replace)
-    });
+    request_pick(state, false, false);
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn open_audio_files(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Opening File".to_string());
-    match audio::pick_audio_files() {
-        Ok(Some(tracks)) => {
-            replace_playlist_and_play(state, tracks);
+#[cfg(not(target_arch = "wasm32"))]
+fn request_pick(state: MutableState<WinampState>, folder: bool, append: bool) {
+    state.update(|s| {
+        s.pending_pick = Some(PendingPick { folder, append });
+        s.status = if folder {
+            "Opening folder picker"
+        } else {
+            "Opening file picker"
         }
-        Ok(None) => state.update(|s| s.status = "Open Cancelled".to_string()),
-        Err(error) => state.update(|s| s.status = error),
-    }
+        .to_string();
+    });
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -4702,23 +4786,9 @@ fn open_audio_files(state: MutableState<WinampState>) {
     state.update(|s| s.status = "Web picker is not enabled".to_string());
 }
 
-#[cfg(target_os = "android")]
+#[cfg(not(target_arch = "wasm32"))]
 fn add_audio_files(state: MutableState<WinampState>) {
-    request_android_bridge_operation(state, "Opening Android File Picker", || {
-        android_bridge::request_audio_files(AndroidLoadMode::Append)
-    });
-}
-
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn add_audio_files(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Adding File".to_string());
-    match audio::pick_audio_files() {
-        Ok(Some(tracks)) => {
-            append_playlist_and_play(state, tracks);
-        }
-        Ok(None) => state.update(|s| s.status = "Add Cancelled".to_string()),
-        Err(error) => state.update(|s| s.status = error),
-    }
+    request_pick(state, false, true);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -4728,28 +4798,9 @@ fn add_audio_files(state: MutableState<WinampState>) {
     });
 }
 
-#[cfg(target_os = "android")]
+#[cfg(not(target_arch = "wasm32"))]
 fn add_audio_folder(state: MutableState<WinampState>) {
-    request_android_bridge_operation(state, "Opening Android Folder Picker", || {
-        android_bridge::request_audio_folder(AndroidLoadMode::Append)
-    });
-}
-
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn add_audio_folder(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Adding Folder".to_string());
-    match audio::pick_audio_folder_path() {
-        Ok(Some(folder)) => {
-            run_native_io(
-                move || audio::tracks_from_audio_folder(folder),
-                move |tracks| {
-                    append_playlist_and_play(state, tracks);
-                },
-            );
-        }
-        Ok(None) => state.update(|s| s.status = "Add Cancelled".to_string()),
-        Err(error) => state.update(|s| s.status = error),
-    }
+    request_pick(state, true, true);
 }
 
 #[cfg(target_arch = "wasm32")]
