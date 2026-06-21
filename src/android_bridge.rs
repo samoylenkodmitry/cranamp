@@ -13,30 +13,11 @@ use jni::sys::jobject;
 use jni::vm::JavaVM;
 use jni::{jni_sig, jni_str, JValue};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AndroidLoadMode {
-    Replace,
-    Append,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AndroidBridgeResult {
-    AudioPaths {
-        mode: AndroidLoadMode,
-        paths: Vec<PathBuf>,
-    },
-    PlaylistImport {
-        text: String,
-    },
-    PlaylistExport {
-        target: String,
-    },
-    SkinImport {
-        path: PathBuf,
-    },
-    Cancelled {
-        operation: &'static str,
-    },
+    PlaylistImport { text: String },
+    PlaylistExport { target: String },
+    Cancelled { operation: &'static str },
     Error(String),
 }
 
@@ -84,10 +65,6 @@ pub fn request_playlist_import() -> Result<(), String> {
     call_android_picker("cranampImportPlaylist", "()V", &[])
 }
 
-pub fn request_skin_import() -> Result<(), String> {
-    call_android_picker("cranampPickSkinFile", "()V", &[])
-}
-
 pub fn request_playlist_export(text: &str) -> Result<(), String> {
     let Some(bridge) = BRIDGE.get() else {
         return Err("Android activity bridge is not initialized".to_string());
@@ -115,21 +92,8 @@ pub fn take_results() -> Vec<AndroidBridgeResult> {
     };
 
     let mut results = Vec::new();
-    collect_audio_result(
-        &bridge.bridge_dir,
-        "audio_replace",
-        AndroidLoadMode::Replace,
-        &mut results,
-    );
-    collect_audio_result(
-        &bridge.bridge_dir,
-        "audio_append",
-        AndroidLoadMode::Append,
-        &mut results,
-    );
     collect_playlist_import_result(&bridge.bridge_dir, &mut results);
     collect_playlist_export_result(&bridge.bridge_dir, &mut results);
-    collect_skin_import_result(&bridge.bridge_dir, &mut results);
     results
 }
 
@@ -159,27 +123,6 @@ fn call_android_picker(method: &str, signature: &str, args: &[JValue<'_>]) -> Re
     Ok(())
 }
 
-fn collect_audio_result(
-    bridge_dir: &std::path::Path,
-    name: &'static str,
-    mode: AndroidLoadMode,
-    results: &mut Vec<AndroidBridgeResult>,
-) {
-    let paths_file = bridge_dir.join(format!("{name}.paths"));
-    if let Some(text) = take_file_to_string(&paths_file) {
-        let paths = text
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(PathBuf::from)
-            .collect::<Vec<_>>();
-        if !paths.is_empty() {
-            results.push(AndroidBridgeResult::AudioPaths { mode, paths });
-        }
-    }
-    collect_cancel_error(bridge_dir, name, "Audio Picker", results);
-}
-
 fn collect_playlist_import_result(
     bridge_dir: &std::path::Path,
     results: &mut Vec<AndroidBridgeResult>,
@@ -202,22 +145,6 @@ fn collect_playlist_export_result(
         });
     }
     collect_cancel_error(bridge_dir, "playlist_export", "Playlist Export", results);
-}
-
-fn collect_skin_import_result(
-    bridge_dir: &std::path::Path,
-    results: &mut Vec<AndroidBridgeResult>,
-) {
-    let path_file = bridge_dir.join("skin_import.path");
-    if let Some(path) = take_file_to_string(&path_file) {
-        let path = path.trim();
-        if !path.is_empty() {
-            results.push(AndroidBridgeResult::SkinImport {
-                path: PathBuf::from(path),
-            });
-        }
-    }
-    collect_cancel_error(bridge_dir, "skin_import", "Skin Import", results);
 }
 
 fn collect_cancel_error(

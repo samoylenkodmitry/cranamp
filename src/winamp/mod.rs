@@ -44,7 +44,7 @@ use cranpose_ui::{
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
 #[cfg(target_os = "android")]
-use crate::android_bridge::{self, AndroidBridgeResult, AndroidLoadMode};
+use crate::android_bridge::{self, AndroidBridgeResult};
 use crate::audio::{self, Track};
 use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
@@ -167,6 +167,8 @@ struct WinampState {
     android_bridge_pending: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pending_pick: Option<PendingPick>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_skin_pick: bool,
 }
 
 impl PartialEq for WinampState {
@@ -209,7 +211,7 @@ impl PartialEq for WinampState {
 impl WinampState {
     #[cfg(not(target_arch = "wasm32"))]
     fn pending_pick_eq(&self, other: &Self) -> bool {
-        self.pending_pick == other.pending_pick
+        self.pending_pick == other.pending_pick && self.pending_skin_pick == other.pending_skin_pick
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -254,6 +256,8 @@ impl Default for WinampState {
             android_bridge_pending: false,
             #[cfg(not(target_arch = "wasm32"))]
             pending_pick: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            pending_skin_pick: false,
         }
     }
 }
@@ -745,6 +749,7 @@ fn WinampRuntimeEffects(
     PlaylistDurationHydrationEffect(state);
     AndroidPickerEffect(state, skin_state);
     CranposePickerEffect(state);
+    SkinPickerEffect(state, skin_state);
     WebSurfaceSizeEffect(state);
     PlayerStatePersistence(state);
     NativeWindowPersistence(peer_windows);
@@ -764,7 +769,7 @@ fn PlaylistDurationHydrationEffect(_state: MutableState<WinampState>) {}
 
 #[cfg(target_os = "android")]
 #[composable]
-fn AndroidPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+fn AndroidPickerEffect(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
     let bridge_pending = state.get().android_bridge_pending;
     cranpose_core::LaunchedEffectAsync!(bridge_pending, move |scope| {
         Box::pin(async move {
@@ -780,7 +785,7 @@ fn AndroidPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinS
                 if !scope.is_active() {
                     break;
                 }
-                handle_android_bridge_results(state, skin_state);
+                handle_android_bridge_results(state);
                 if !state.get_non_reactive().android_bridge_pending {
                     break;
                 }
@@ -848,6 +853,61 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
         })
     });
 }
+
+/// Drives the native skin picker (desktop/Android/iOS) through the same Cranpose
+/// file picker as audio, so picking a `.wsz` never blocks the event loop with a
+/// nested modal. The chosen file is read as bytes and applied directly.
+#[cfg(not(target_arch = "wasm32"))]
+#[composable]
+fn SkinPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+    let pending = state.get().pending_skin_pick;
+    let picker = cranpose::local_file_picker().current();
+    cranpose_core::LaunchedEffectAsync!(pending, move |_scope| {
+        let picker = picker.clone();
+        Box::pin(async move {
+            if !pending {
+                return;
+            }
+            let options = cranpose::FilePickerOptions::default()
+                .with_title("Open Winamp skin")
+                .with_filter(cranpose::FileFilter::new("Winamp skin", &["wsz", "zip"]));
+            match picker.pick_file(options).await {
+                Ok(Some(entry)) => {
+                    let label = entry.name();
+                    let display_path = entry.display_path();
+                    match entry.read_bytes().await {
+                        Ok(bytes) => {
+                            state.update(|s| s.pending_skin_pick = false);
+                            apply_loaded_skin(
+                                state,
+                                skin_state,
+                                &bytes,
+                                &label,
+                                Some(display_path),
+                            );
+                        }
+                        Err(error) => state.update(|s| {
+                            s.pending_skin_pick = false;
+                            s.status = format!("Skin Load Failed: {error}");
+                        }),
+                    }
+                }
+                Ok(None) => state.update(|s| {
+                    s.pending_skin_pick = false;
+                    s.status = "Skin Open Cancelled".to_string();
+                }),
+                Err(error) => state.update(|s| {
+                    s.pending_skin_pick = false;
+                    s.status = error.to_string();
+                }),
+            }
+        })
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+#[composable]
+fn SkinPickerEffect(_state: MutableState<WinampState>, _skin_state: WinampSkinState) {}
 
 #[cfg(target_arch = "wasm32")]
 #[composable]
@@ -4634,7 +4694,6 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
     }
 }
 
-#[cfg(target_arch = "wasm32")]
 fn apply_loaded_skin(
     state: MutableState<WinampState>,
     skin_state: WinampSkinState,
@@ -4660,51 +4719,14 @@ fn apply_loaded_skin(
     }
 }
 
-#[cfg(target_os = "android")]
+// Native platforms (desktop, Android, iOS) pick a skin through the Cranpose
+// file picker; `SkinPickerEffect` runs it and applies the selection.
+#[cfg(not(target_arch = "wasm32"))]
 fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
-    request_android_bridge_operation(state, "Opening Android Skin Picker", || {
-        android_bridge::request_skin_import()
+    state.update(|s| {
+        s.pending_skin_pick = true;
+        s.status = "Opening skin picker".to_string();
     });
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    feature = "native-dialogs"
-))]
-fn open_skin_file(state: MutableState<WinampState>, skin_state: WinampSkinState) {
-    state.update(|s| s.status = "Opening Skin".to_string());
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Open Winamp skin")
-        .add_filter("Winamp skin", &["wsz", "zip"])
-        .pick_file()
-    else {
-        state.update(|s| s.status = "Skin Open Cancelled".to_string());
-        return;
-    };
-
-    let label = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("skin.wsz")
-        .to_string();
-    load_skin_file_background(
-        state,
-        skin_state,
-        path,
-        true,
-        Some(format!("Loaded Skin {label}")),
-        true,
-    );
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(feature = "native-dialogs")
-))]
-fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
-    state.update(|s| s.status = "Native skin picker is unavailable".to_string());
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -5826,7 +5848,7 @@ fn format_m3u_playlist(playlist: &[Track]) -> String {
 }
 
 #[cfg(target_os = "android")]
-fn handle_android_bridge_results(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+fn handle_android_bridge_results(state: MutableState<WinampState>) {
     let results = android_bridge::take_results();
     if results.is_empty() {
         return;
@@ -5835,26 +5857,6 @@ fn handle_android_bridge_results(state: MutableState<WinampState>, skin_state: W
 
     for result in results {
         match result {
-            AndroidBridgeResult::AudioPaths { mode, paths } => {
-                let text = paths
-                    .iter()
-                    .map(|path| path.to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let tracks = parse_m3u_playlist(&text, None);
-                if tracks.is_empty() {
-                    state.update(|s| s.status = "No Android Audio Tracks".to_string());
-                    continue;
-                }
-                match mode {
-                    AndroidLoadMode::Replace => {
-                        replace_playlist_and_play(state, tracks);
-                    }
-                    AndroidLoadMode::Append => {
-                        append_playlist_and_play(state, tracks);
-                    }
-                }
-            }
             AndroidBridgeResult::PlaylistImport { text } => {
                 let tracks = parse_m3u_playlist(&text, None);
                 if tracks.is_empty() {
@@ -5877,21 +5879,6 @@ fn handle_android_bridge_results(state: MutableState<WinampState>, skin_state: W
                         format!("Exported {target}")
                     };
                 });
-            }
-            AndroidBridgeResult::SkinImport { path } => {
-                let label = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("skin.wsz")
-                    .to_string();
-                load_skin_file_background(
-                    state,
-                    skin_state,
-                    path,
-                    true,
-                    Some(format!("Loaded Skin {label}")),
-                    true,
-                );
             }
             AndroidBridgeResult::Cancelled { operation } => {
                 state.update(|s| s.status = format!("{operation} Cancelled"));

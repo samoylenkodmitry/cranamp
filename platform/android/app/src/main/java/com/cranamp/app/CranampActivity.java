@@ -1,15 +1,9 @@
 package com.cranamp.app;
 
-import android.app.NativeActivity;
 import android.content.ActivityNotFoundException;
-import android.content.ContentResolver;
 import android.content.Intent;
-import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.DocumentsContract;
-import android.provider.OpenableColumns;
-import android.util.Log;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -17,77 +11,33 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Locale;
-import java.util.Set;
 
-public class CranampActivity extends NativeActivity {
-    private static final String TAG = "CranampActivity";
+import dev.cranpose.android.CranposeFilePickerActivity;
 
+/**
+ * Cranamp's launcher activity. Audio and skin selection go through Cranpose's
+ * file picker (provided by the {@link CranposeFilePickerActivity} base class via
+ * JNI), so this class only adds the playlist import/export bridge that is still
+ * driven through result files in the bridge directory.
+ */
+public class CranampActivity extends CranposeFilePickerActivity {
     static {
         System.loadLibrary("cranamp");
     }
 
-    private static final int MODE_REPLACE = 0;
-    private static final int MODE_APPEND = 1;
-    private static final int REQ_AUDIO_REPLACE = 1001;
-    private static final int REQ_AUDIO_APPEND = 1002;
-    private static final int REQ_FOLDER_REPLACE = 1003;
-    private static final int REQ_FOLDER_APPEND = 1004;
     private static final int REQ_IMPORT_PLAYLIST = 1005;
     private static final int REQ_EXPORT_PLAYLIST = 1006;
-    private static final int REQ_IMPORT_SKIN = 1007;
 
     private String pendingExportText = "";
-
-    private static final Set<String> AUDIO_EXTENSIONS = new HashSet<>();
-
-    static {
-        Collections.addAll(
-                AUDIO_EXTENSIONS,
-                "aac", "aiff", "alac", "caf", "flac", "m4a", "m4b", "m4v", "mov",
-                "mp1", "mp2", "mp3", "mp4", "oga", "ogg", "opus", "wav", "wave", "webm"
-        );
-    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         ensureBridgeDir();
-        ensureMediaDir();
-        ensureSkinDir();
     }
 
     public String cranampBridgeDirectory() {
         return ensureBridgeDir().getAbsolutePath();
-    }
-
-    public void cranampPickAudioFiles(int mode) {
-        final int requestCode = mode == MODE_REPLACE ? REQ_AUDIO_REPLACE : REQ_AUDIO_APPEND;
-        final String resultName = mode == MODE_REPLACE ? "audio_replace" : "audio_append";
-        runOnUiThread(() -> {
-            clearResult(resultName);
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("audio/*");
-            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            launchIntent(intent, requestCode, resultName);
-        });
-    }
-
-    public void cranampPickAudioFolder(int mode) {
-        final int requestCode = mode == MODE_REPLACE ? REQ_FOLDER_REPLACE : REQ_FOLDER_APPEND;
-        final String resultName = mode == MODE_REPLACE ? "audio_replace" : "audio_append";
-        runOnUiThread(() -> {
-            clearResult(resultName);
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            launchIntent(intent, requestCode, resultName);
-        });
     }
 
     public void cranampImportPlaylist() {
@@ -120,55 +70,22 @@ public class CranampActivity extends NativeActivity {
         });
     }
 
-    public void cranampPickSkinFile() {
-        runOnUiThread(() -> {
-            clearResult("skin_import");
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("*/*");
-            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-                    "application/zip",
-                    "application/octet-stream",
-                    "application/x-zip-compressed"
-            });
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            launchIntent(intent, REQ_IMPORT_SKIN, "skin_import");
-        });
-    }
-
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        // Let the picker base class handle its own request codes first.
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_IMPORT_PLAYLIST && requestCode != REQ_EXPORT_PLAYLIST) {
+            return;
+        }
         if (resultCode != RESULT_OK || data == null) {
             writeCancel(resultNameForRequest(requestCode));
             return;
         }
-
         try {
-            switch (requestCode) {
-                case REQ_AUDIO_REPLACE:
-                    writePickedAudioUris("audio_replace", collectAudioUris(data));
-                    break;
-                case REQ_AUDIO_APPEND:
-                    writePickedAudioUris("audio_append", collectAudioUris(data));
-                    break;
-                case REQ_FOLDER_REPLACE:
-                    writePickedAudioUris("audio_replace", collectFolderAudioUris(data.getData()));
-                    break;
-                case REQ_FOLDER_APPEND:
-                    writePickedAudioUris("audio_append", collectFolderAudioUris(data.getData()));
-                    break;
-                case REQ_IMPORT_PLAYLIST:
-                    writePlaylistImport(data.getData());
-                    break;
-                case REQ_EXPORT_PLAYLIST:
-                    writePlaylistExport(data.getData());
-                    break;
-                case REQ_IMPORT_SKIN:
-                    writeSkinImport(data.getData());
-                    break;
-                default:
-                    break;
+            if (requestCode == REQ_IMPORT_PLAYLIST) {
+                writePlaylistImport(data.getData());
+            } else {
+                writePlaylistExport(data.getData());
             }
         } catch (Exception error) {
             writeError(resultNameForRequest(requestCode), error.toString());
@@ -183,86 +100,12 @@ public class CranampActivity extends NativeActivity {
         }
     }
 
-    private ArrayList<Uri> collectAudioUris(Intent data) {
-        ArrayList<Uri> uris = new ArrayList<>();
-        if (data.getClipData() != null) {
-            for (int i = 0; i < data.getClipData().getItemCount(); i++) {
-                Uri uri = data.getClipData().getItemAt(i).getUri();
-                if (uri != null) {
-                    uris.add(uri);
-                }
-            }
-        } else if (data.getData() != null) {
-            uris.add(data.getData());
-        }
-        return uris;
-    }
-
-    private ArrayList<Uri> collectFolderAudioUris(Uri treeUri) {
-        ArrayList<Uri> uris = new ArrayList<>();
-        if (treeUri == null) {
-            return uris;
-        }
-        int flags = Intent.FLAG_GRANT_READ_URI_PERMISSION;
-        try {
-            getContentResolver().takePersistableUriPermission(treeUri, flags);
-        } catch (SecurityException ignored) {
-        }
-        String rootDocumentId = DocumentsContract.getTreeDocumentId(treeUri);
-        collectDocumentTreeAudioUris(treeUri, rootDocumentId, uris);
-        return uris;
-    }
-
-    private void collectDocumentTreeAudioUris(Uri treeUri, String documentId, ArrayList<Uri> out) {
-        Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId);
-        String[] columns = new String[]{
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE
-        };
-        try (Cursor cursor = getContentResolver().query(childrenUri, columns, null, null, null)) {
-            if (cursor == null) {
-                return;
-            }
-            while (cursor.moveToNext()) {
-                String childDocumentId = cursor.getString(0);
-                String displayName = cursor.getString(1);
-                String mimeType = cursor.getString(2);
-                if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mimeType)) {
-                    collectDocumentTreeAudioUris(treeUri, childDocumentId, out);
-                } else if (isAudioName(displayName)) {
-                    out.add(DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocumentId));
-                }
-            }
-        }
-    }
-
-    private void writePickedAudioUris(String resultName, ArrayList<Uri> uris) throws IOException {
-        ArrayList<String> copiedPaths = new ArrayList<>();
-        int index = 0;
-        for (Uri uri : uris) {
-            String displayName = displayNameForUri(uri, "track-" + index + ".mp3");
-            if (!isAudioName(displayName)) {
-                index += 1;
-                continue;
-            }
-            File copied = copyUriToMediaFile(uri, displayName, index);
-            if (copied != null) {
-                copiedPaths.add(copied.getAbsolutePath());
-            }
-            index += 1;
-        }
-        Collections.sort(copiedPaths);
-        writeAtomic(resultName + ".paths", String.join("\n", copiedPaths) + "\n");
-    }
-
     private void writePlaylistImport(Uri uri) throws IOException {
         if (uri == null) {
             writeCancel("playlist_import");
             return;
         }
-        String text = readUriText(uri);
-        writeAtomic("playlist_import.m3u", text);
+        writeAtomic("playlist_import.m3u", readUriText(uri));
     }
 
     private void writePlaylistExport(Uri uri) throws IOException {
@@ -277,16 +120,6 @@ public class CranampActivity extends NativeActivity {
             output.write(pendingExportText.getBytes(StandardCharsets.UTF_8));
         }
         writeAtomic("playlist_export.ok", uri.toString());
-    }
-
-    private void writeSkinImport(Uri uri) throws IOException {
-        if (uri == null) {
-            writeCancel("skin_import");
-            return;
-        }
-        String displayName = displayNameForUri(uri, "skin.wsz");
-        File copied = copyUriToSkinFile(uri, displayName);
-        writeAtomic("skin_import.path", copied.getAbsolutePath());
     }
 
     private String readUriText(Uri uri) throws IOException {
@@ -304,120 +137,12 @@ public class CranampActivity extends NativeActivity {
         }
     }
 
-    private File copyUriToMediaFile(Uri uri, String displayName, int index) throws IOException {
-        File mediaDir = ensureMediaDir();
-        String safeName = safeFileName(displayName);
-        if (safeName.isEmpty()) {
-            safeName = "track-" + index + ".mp3";
-        }
-        File outputFile = uniqueFile(mediaDir, safeName, index);
-        try (
-                InputStream input = getContentResolver().openInputStream(uri);
-                OutputStream output = new FileOutputStream(outputFile)
-        ) {
-            if (input == null) {
-                throw new IOException("Android returned no input stream");
-            }
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = input.read(buffer)) >= 0) {
-                output.write(buffer, 0, read);
-            }
-        }
-        return outputFile;
-    }
-
-    private File copyUriToSkinFile(Uri uri, String displayName) throws IOException {
-        File skinDir = ensureSkinDir();
-        String safeName = safeFileName(displayName);
-        if (safeName.isEmpty()) {
-            safeName = "skin.wsz";
-        }
-        if (!safeName.toLowerCase(Locale.US).endsWith(".wsz")
-                && !safeName.toLowerCase(Locale.US).endsWith(".zip")) {
-            safeName = safeName + ".wsz";
-        }
-        File outputFile = uniqueFile(skinDir, safeName, 0);
-        try (
-                InputStream input = getContentResolver().openInputStream(uri);
-                OutputStream output = new FileOutputStream(outputFile)
-        ) {
-            if (input == null) {
-                throw new IOException("Android returned no input stream");
-            }
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = input.read(buffer)) >= 0) {
-                output.write(buffer, 0, read);
-            }
-        }
-        return outputFile;
-    }
-
-    private File uniqueFile(File directory, String safeName, int index) {
-        String baseName = safeName;
-        String extension = "";
-        int dot = safeName.lastIndexOf('.');
-        if (dot > 0) {
-            baseName = safeName.substring(0, dot);
-            extension = safeName.substring(dot);
-        }
-        File candidate = new File(directory, safeName);
-        if (!candidate.exists()) {
-            return candidate;
-        }
-        return new File(directory, baseName + "-" + System.currentTimeMillis() + "-" + index + extension);
-    }
-
-    private String displayNameForUri(Uri uri, String fallback) {
-        ContentResolver resolver = getContentResolver();
-        try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                String displayName = cursor.getString(0);
-                if (displayName != null && !displayName.isEmpty()) {
-                    return displayName;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        String lastSegment = uri.getLastPathSegment();
-        return lastSegment == null || lastSegment.isEmpty() ? fallback : lastSegment;
-    }
-
-    private boolean isAudioName(String name) {
-        if (name == null) {
-            return false;
-        }
-        int dot = name.lastIndexOf('.');
-        if (dot < 0 || dot == name.length() - 1) {
-            return false;
-        }
-        String extension = name.substring(dot + 1).toLowerCase(Locale.US);
-        return AUDIO_EXTENSIONS.contains(extension);
-    }
-
-    private String safeFileName(String name) {
-        return name.replaceAll("[^A-Za-z0-9._ -]", "_").trim();
-    }
-
-    private synchronized File ensureBridgeDir() {
-        return ensureAppPrivateDir("cranamp_bridge");
-    }
-
-    private synchronized File ensureMediaDir() {
-        return ensureAppPrivateDir("cranamp_media");
-    }
-
-    private synchronized File ensureSkinDir() {
-        return ensureAppPrivateDir("cranamp_skins");
-    }
-
-    private File ensureAppPrivateDir(String name) {
+    private File ensureBridgeDir() {
         File baseDir = getFilesDir();
         if (baseDir == null) {
             throw new IllegalStateException("app files directory is unavailable");
         }
-        File dir = new File(baseDir, name);
+        File dir = new File(baseDir, "cranamp_bridge");
         if (dir.isDirectory()) {
             return dir;
         }
@@ -431,9 +156,7 @@ public class CranampActivity extends NativeActivity {
     }
 
     private void clearResult(String name) {
-        deleteResultFile(name + ".paths");
         deleteResultFile(name + ".m3u");
-        deleteResultFile(name + ".path");
         deleteResultFile(name + ".ok");
         deleteResultFile(name + ".cancel");
         deleteResultFile(name + ".error");
@@ -477,18 +200,10 @@ public class CranampActivity extends NativeActivity {
 
     private String resultNameForRequest(int requestCode) {
         switch (requestCode) {
-            case REQ_AUDIO_REPLACE:
-            case REQ_FOLDER_REPLACE:
-                return "audio_replace";
-            case REQ_AUDIO_APPEND:
-            case REQ_FOLDER_APPEND:
-                return "audio_append";
             case REQ_IMPORT_PLAYLIST:
                 return "playlist_import";
             case REQ_EXPORT_PLAYLIST:
                 return "playlist_export";
-            case REQ_IMPORT_SKIN:
-                return "skin_import";
             default:
                 return "";
         }
