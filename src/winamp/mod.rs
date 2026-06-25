@@ -112,9 +112,50 @@ where
     };
     let dispatcher = runtime.dispatcher();
     std::thread::spawn(move || {
-        let value = work();
-        dispatcher.post_invoke(continuation_id, value);
+        // Guard against a panic in `work` (e.g. a decoder choking on a malformed
+        // track): without this the worker thread would die before posting the
+        // continuation, leaving the UI stuck with no feedback ("nothing happens").
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
+            Ok(value) => dispatcher.post_invoke(continuation_id, value),
+            Err(payload) => {
+                log::error!("background task panicked: {}", describe_panic(&*payload));
+            }
+        }
     });
+}
+
+/// Best-effort extraction of a human-readable message from a panic payload.
+#[cfg(not(target_arch = "wasm32"))]
+fn describe_panic(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
+/// Apply the equalizer and start playback, converting a panic in the decode/playback
+/// pipeline into a surfaced error instead of a silently dead worker thread. A panic
+/// here would otherwise drop the audio mutex while poisoned, breaking every later
+/// track too — see `native::with_audio`'s poison recovery.
+#[cfg(not(target_arch = "wasm32"))]
+fn play_track_caught(
+    track: &Track,
+    volume: f32,
+    eq_enabled: bool,
+    eq_values: [f32; 11],
+) -> Result<(), String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        audio::set_equalizer(eq_enabled, eq_values)?;
+        audio::play_track(track, volume, false)
+    }))
+    .unwrap_or_else(|payload| {
+        let message = describe_panic(&*payload);
+        log::error!("playback task panicked for {}: {message}", track.title);
+        Err(format!("playback failed: {message}"))
+    })
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -6228,10 +6269,7 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         let eq_values = snapshot.eq_values;
         let track_for_play = track.clone();
         run_native_io(
-            move || {
-                audio::set_equalizer(eq_enabled, eq_values)?;
-                audio::play_track(&track_for_play, volume, false)
-            },
+            move || play_track_caught(&track_for_play, volume, eq_enabled, eq_values),
             move |result| match result {
                 Ok(()) => {
                     state.update(|s| {
@@ -7357,6 +7395,21 @@ mod tests {
         assert_eq!(time_digits(0.0), [0, 0, 0, 0]);
         assert_eq!(time_digits(65.0), [0, 1, 0, 5]);
         assert_eq!(time_digits(-1.0), [0, 0, 0, 0]);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn describe_panic_extracts_messages() {
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let static_payload = std::panic::catch_unwind(|| panic!("static message")).unwrap_err();
+        let owned = String::from("owned message");
+        let owned_payload = std::panic::catch_unwind(move || panic!("{owned}")).unwrap_err();
+        std::panic::set_hook(previous_hook);
+
+        assert_eq!(describe_panic(&*static_payload), "static message");
+        assert_eq!(describe_panic(&*owned_payload), "owned message");
+        assert_eq!(describe_panic(&42_i32), "unknown panic");
     }
 
     #[test]

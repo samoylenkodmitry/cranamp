@@ -659,7 +659,8 @@ mod native {
         track_id: u32,
         samples: Vec<Sample>,
         sample_offset: usize,
-        spec: AudioSpec,
+        sample_rate: SampleRate,
+        channels: ChannelCount,
         total_duration: Option<Duration>,
         exhausted: bool,
     }
@@ -684,6 +685,9 @@ mod native {
             let (track_id, mut decoder, total_duration) = select_audio_track(&*format)?;
             let (spec, samples) = read_next_audio_buffer(&mut *format, &mut *decoder, track_id)?
                 .ok_or_else(|| "no decodable audio packets found".to_string())?;
+            // Validate the audio spec up front and cache the derived rodio values so
+            // the `Source` trait methods never have to panic on a malformed stream.
+            let (sample_rate, channels) = validate_audio_spec(&spec)?;
 
             Ok(Self {
                 decoder,
@@ -691,7 +695,8 @@ mod native {
                 track_id,
                 samples,
                 sample_offset: 0,
-                spec,
+                sample_rate,
+                channels,
                 total_duration,
                 exhausted: false,
             })
@@ -699,8 +704,7 @@ mod native {
 
         fn load_next_buffer(&mut self) -> bool {
             match read_next_audio_buffer(&mut *self.format, &mut *self.decoder, self.track_id) {
-                Ok(Some((spec, samples))) => {
-                    self.spec = spec;
+                Ok(Some((_spec, samples))) => {
                     self.samples = samples;
                     self.sample_offset = 0;
                     true
@@ -737,18 +741,11 @@ mod native {
         }
 
         fn channels(&self) -> ChannelCount {
-            ChannelCount::new(
-                self.spec
-                    .channels()
-                    .count()
-                    .try_into()
-                    .expect("audio channel count exceeds u16::MAX"),
-            )
-            .expect("audio should have at least one channel")
+            self.channels
         }
 
         fn sample_rate(&self) -> SampleRate {
-            SampleRate::new(self.spec.rate()).expect("audio should have a non-zero sample rate")
+            self.sample_rate
         }
 
         fn total_duration(&self) -> Option<Duration> {
@@ -830,6 +827,19 @@ mod native {
         let mut samples = Vec::<Sample>::with_capacity(decoded.samples_interleaved());
         decoded.copy_to_vec_interleaved(&mut samples);
         (spec, samples)
+    }
+
+    /// Convert a decoded [`AudioSpec`] into the rodio sample rate and channel count,
+    /// returning a descriptive error instead of panicking on a malformed stream.
+    fn validate_audio_spec(spec: &AudioSpec) -> Result<(SampleRate, ChannelCount), String> {
+        let channel_count = spec.channels().count();
+        let channel_count = u16::try_from(channel_count)
+            .map_err(|_| format!("unsupported audio channel count: {channel_count}"))?;
+        let channels = ChannelCount::new(channel_count)
+            .ok_or_else(|| "audio track has no channels".to_string())?;
+        let sample_rate = SampleRate::new(spec.rate())
+            .ok_or_else(|| "audio track has a zero sample rate".to_string())?;
+        Ok((sample_rate, channels))
     }
 
     fn time_to_std_duration(time: Time) -> Option<Duration> {
@@ -1017,14 +1027,27 @@ mod native {
 
     fn with_audio<T>(f: impl FnOnce(&mut NativeAudio) -> Result<T, String>) -> Result<T, String> {
         let audio = AUDIO.get_or_init(|| Mutex::new(None));
-        let mut audio = audio
-            .lock()
-            .map_err(|_| "audio backend lock is poisoned".to_string())?;
+        // Recover from a poisoned lock instead of failing forever: a panic in a
+        // previous playback task (e.g. while decoding a malformed track) must not
+        // permanently disable audio for every later track.
+        let mut audio = match audio.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!(
+                    "audio backend lock was poisoned by a previous panic; recovering and continuing"
+                );
+                poisoned.into_inner()
+            }
+        };
 
         if audio.is_none() {
-            let mut sink = DeviceSinkBuilder::open_default_sink()
-                .map_err(|error| format!("failed to open default audio device: {error}"))?;
+            log::info!("opening default audio output device");
+            let mut sink = DeviceSinkBuilder::open_default_sink().map_err(|error| {
+                log::error!("failed to open default audio device: {error}");
+                format!("failed to open default audio device: {error}")
+            })?;
             sink.log_on_drop(false);
+            log::info!("default audio output device opened");
             *audio = Some(NativeAudio {
                 sink,
                 player: None,
@@ -1043,8 +1066,21 @@ mod native {
             .path
             .as_deref()
             .ok_or_else(|| "selected track has no filesystem path".to_string())?;
-        let (source, duration) = decode_track_source(Path::new(path), repeat)
-            .map_err(|error| format!("failed to decode {}: {error}", track.title))?;
+        log::info!("play_track: decoding {} ({path})", track.title);
+        let (source, duration) = decode_track_source(Path::new(path), repeat).map_err(|error| {
+            log::error!(
+                "play_track: failed to decode {} ({path}): {error}",
+                track.title
+            );
+            format!("failed to decode {}: {error}", track.title)
+        })?;
+        log::info!(
+            "play_track: decoded {} -> {} Hz, {} channel(s), duration {:?}",
+            track.title,
+            source.sample_rate().get(),
+            source.channels().get(),
+            duration
+        );
 
         with_audio(|audio| {
             if let Some(player) = audio.player.take() {
@@ -1058,6 +1094,7 @@ mod native {
             player.play();
             audio.player = Some(player);
             audio.duration = duration;
+            log::info!("play_track: playback started for {}", track.title);
             Ok(())
         })
     }
