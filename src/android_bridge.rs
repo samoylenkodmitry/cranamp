@@ -101,6 +101,15 @@ pub fn config_dir() -> Option<PathBuf> {
     BRIDGE.get().map(|bridge| bridge.bridge_dir.join("config"))
 }
 
+/// App-private directory for temporary streaming caches. Lives under the same
+/// writable bridge directory as the config, so the audio engine can spool a
+/// `content://` stream to disk for seeking without touching shared storage.
+pub fn stream_cache_dir() -> Option<PathBuf> {
+    BRIDGE
+        .get()
+        .map(|bridge| bridge.bridge_dir.join("stream-cache"))
+}
+
 fn call_android_picker(method: &str, signature: &str, args: &[JValue<'_>]) -> Result<(), String> {
     let Some(bridge) = BRIDGE.get() else {
         return Err("Android activity bridge is not initialized".to_string());
