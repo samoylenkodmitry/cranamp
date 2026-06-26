@@ -897,25 +897,43 @@ async fn stream_picked_folder(
         }
     };
     state.update(|s| s.status = "Scanning folder".to_string());
+    log::info!(target: "cranamp::picker", "folder stream started (append={append})");
 
     let clock = scope.runtime().frame_clock();
     let replace = !append;
     let mut started = false;
     let mut total = 0usize;
+    let mut seen = 0usize;
     let mut tick = 0usize;
     loop {
         if !scope.is_active() {
+            log::info!(target: "cranamp::picker", "folder stream scope inactive; abandoning after {total}/{seen} audio/total");
             break;
         }
         // Drain everything discovered since the previous frame and append it.
         let ready = stream.take_ready();
-        if !ready.is_empty() {
-            let mut batch = Vec::with_capacity(ready.len());
+        let drained = ready.len();
+        if drained > 0 {
+            seen += drained;
+            let mut batch = Vec::with_capacity(drained);
             for entry in ready {
+                let name = entry.name();
                 if let Some(track) = audio::track_from_picked_file(entry).await {
                     batch.push(track);
+                } else {
+                    // Surface why a discovered file was skipped — a provider that
+                    // reports display names without extensions (some WebDAV
+                    // shares) would otherwise silently drop every track.
+                    log::info!(target: "cranamp::picker", "skipped non-audio entry: {name:?}");
                 }
             }
+            log::info!(
+                target: "cranamp::picker",
+                "folder batch: {drained} discovered, {} audio (running {}/{})",
+                batch.len(),
+                total + batch.len(),
+                seen,
+            );
             if !batch.is_empty() {
                 batch.sort_by(|a, b| a.display_title().cmp(b.display_title()));
                 total += batch.len();
@@ -928,9 +946,14 @@ async fn stream_picked_folder(
             }
         }
         if let Some(error) = stream.take_error() {
+            log::warn!(target: "cranamp::picker", "folder stream error: {error}");
             state.update(|s| s.status = format!("Scan error: {error}"));
         }
         if stream.is_finished() {
+            log::info!(
+                target: "cranamp::picker",
+                "folder stream finished: {total} audio of {seen} files discovered"
+            );
             state.update(|s| {
                 s.pending_pick = None;
                 s.status = if total == 0 {
@@ -4425,11 +4448,7 @@ fn DragSlider(
                                             dragging = true;
                                             on_drag_state(true);
                                             let value = horizontal_slider_fraction(
-                                                horizontal_slider_pointer_x(
-                                                    event.position.x,
-                                                    event.global_position.x,
-                                                    area,
-                                                ),
+                                                event.position.x,
                                                 area,
                                                 thumb_width,
                                             );
@@ -4438,11 +4457,7 @@ fn DragSlider(
                                         }
                                         PointerEventKind::Move if dragging => {
                                             let value = horizontal_slider_fraction(
-                                                horizontal_slider_pointer_x(
-                                                    event.position.x,
-                                                    event.global_position.x,
-                                                    area,
-                                                ),
+                                                event.position.x,
                                                 area,
                                                 thumb_width,
                                             );
@@ -7422,28 +7437,19 @@ fn slider_thumb_x(value: f32, bar_width: f32, knob_width: f32) -> f32 {
     clamp01(value) * (bar_width - knob_width)
 }
 
+/// Fraction (0..1, left to right) of a horizontal slider for a pointer position.
+///
+/// `pointer_x` is the pointer's position in the slider box's local, scaled
+/// coordinate space (0..`scaled_width`) — i.e. `event.position.x`, the same
+/// model the vertical slider uses. An earlier Android branch derived this from
+/// `event.global_position.x` and the surface origin instead, which only matched
+/// when the input surface started at (0,0); on a real device the surface origin
+/// is offset by the status bar / display cutout, so the thumb misread the
+/// finger. Using the local position is correct on every platform.
 fn horizontal_slider_fraction(pointer_x: f32, area: ControlRect, knob_width: f32) -> f32 {
     let scaled_knob_width = scaled(knob_width.max(0.0), area.scale);
     let travel_width = (area.scaled_width() - scaled_knob_width).max(1.0);
     ((pointer_x - scaled_knob_width * 0.5) / travel_width).clamp(0.0, 1.0)
-}
-
-fn horizontal_slider_pointer_x(local_x: f32, global_x: f32, area: ControlRect) -> f32 {
-    #[cfg(target_os = "android")]
-    {
-        let _ = local_x;
-        horizontal_slider_surface_pointer_x(global_x, area)
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = (global_x, area);
-        local_x
-    }
-}
-
-#[cfg(any(target_os = "android", test))]
-fn horizontal_slider_surface_pointer_x(surface_x: f32, area: ControlRect) -> f32 {
-    scaled(surface_x, area.scale) - area.scaled_x()
 }
 
 /// Fraction (0..1, top to bottom) of a vertical slider/scrollbar for a local
@@ -7539,19 +7545,6 @@ mod tests {
             let middle = horizontal_slider_fraction(124.0, area, 29.0);
             assert!((middle - 0.5).abs() < 0.0001);
             assert!((slider_thumb_x(middle, 248.0, 29.0) + 14.5 - 124.0).abs() < 0.0001);
-        });
-    }
-
-    #[test]
-    fn horizontal_slider_surface_pointer_scales_with_layout() {
-        with_test_app_context(|| {
-            let area = ControlRect::new(17.0, 72.0, 248.0, 10.0, 1.5);
-
-            assert_eq!(horizontal_slider_surface_pointer_x(17.0, area), 0.0);
-            assert_eq!(
-                horizontal_slider_surface_pointer_x(265.0, area),
-                area.scaled_width()
-            );
         });
     }
 
