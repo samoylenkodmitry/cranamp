@@ -195,6 +195,18 @@ pub async fn tracks_from_picked_entry(entry: cranpose_services::PickedEntryRef) 
     tracks
 }
 
+/// Builds a single playable track from one file entry yielded by a streaming
+/// folder pick ([`cranpose_services::FolderStream`]), or `None` if the entry is
+/// not a supported audio file. Used to append discovered tracks incrementally so
+/// a huge folder on a slow provider starts playing before the walk finishes.
+pub async fn track_from_picked_file(entry: cranpose_services::PickedEntryRef) -> Option<Track> {
+    if entry.kind() != cranpose_services::PickedKind::File || !is_audio_name(&entry.name()) {
+        return None;
+    }
+    let cache = picker_cache_dir();
+    picked_audio_track(&entry, &cache).await
+}
+
 fn picker_cache_dir() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join("cranamp-picker");
     let _ = std::fs::create_dir_all(&dir);

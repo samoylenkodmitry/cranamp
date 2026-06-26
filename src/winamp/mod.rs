@@ -810,7 +810,7 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
     // active. Reading `.current()` inside the async closure would run after the
     // effect is detached from composition and panic ("no active composer").
     let picker = cranpose::local_file_picker().current();
-    cranpose_core::LaunchedEffectAsync!(pending, move |_scope| {
+    cranpose_core::LaunchedEffectAsync!(pending, move |scope| {
         let picker = picker.clone();
         Box::pin(async move {
             let Some(request) = pending else {
@@ -821,37 +821,132 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
             } else {
                 "Open audio file"
             });
-            let result = if request.folder {
-                picker.pick_folder(options).await
+            if request.folder {
+                stream_picked_folder(state, scope, picker, request.append, options).await;
             } else {
-                picker.pick_file(options).await
-            };
-            match result {
-                Ok(Some(entry)) => {
-                    state.update(|s| {
-                        s.pending_pick = None;
-                        s.status = "Loading selection".to_string();
-                    });
-                    let tracks = audio::tracks_from_picked_entry(entry).await;
-                    if tracks.is_empty() {
-                        state.update(|s| s.status = "No audio files found".to_string());
-                    } else if request.append {
-                        append_playlist_and_play(state, tracks);
-                    } else {
-                        replace_playlist_and_play(state, tracks);
-                    }
-                }
-                Ok(None) => state.update(|s| {
-                    s.pending_pick = None;
-                    s.status = "Open Cancelled".to_string();
-                }),
-                Err(error) => state.update(|s| {
-                    s.pending_pick = None;
-                    s.status = error.to_string();
-                }),
+                load_picked_file(state, picker, request.append, options).await;
             }
         })
     });
+}
+
+/// Picks a single file and loads it into the playlist (replace or append).
+#[cfg(not(target_arch = "wasm32"))]
+async fn load_picked_file(
+    state: MutableState<WinampState>,
+    picker: cranpose::FilePickerRef,
+    append: bool,
+    options: cranpose::FilePickerOptions,
+) {
+    match picker.pick_file(options).await {
+        Ok(Some(entry)) => {
+            state.update(|s| {
+                s.pending_pick = None;
+                s.status = "Loading selection".to_string();
+            });
+            let tracks = audio::tracks_from_picked_entry(entry).await;
+            if tracks.is_empty() {
+                state.update(|s| s.status = "No audio files found".to_string());
+            } else if append {
+                append_playlist_and_play(state, tracks);
+            } else {
+                replace_playlist_and_play(state, tracks);
+            }
+        }
+        Ok(None) => state.update(|s| {
+            s.pending_pick = None;
+            s.status = "Open Cancelled".to_string();
+        }),
+        Err(error) => state.update(|s| {
+            s.pending_pick = None;
+            s.status = error.to_string();
+        }),
+    }
+}
+
+/// Picks a folder and streams its audio into the playlist as the provider
+/// discovers it. The first tracks play immediately and the rest keep arriving,
+/// so a huge folder on a slow share (cloud/WebDAV) never freezes the UI.
+///
+/// `pending_pick` is deliberately held until the walk finishes: clearing it
+/// re-keys this `LaunchedEffectAsync` and would cancel the streaming loop at the
+/// next frame, so it is cleared only once discovery completes (or is abandoned).
+#[cfg(not(target_arch = "wasm32"))]
+async fn stream_picked_folder(
+    state: MutableState<WinampState>,
+    scope: cranpose_core::LaunchedEffectScope,
+    picker: cranpose::FilePickerRef,
+    append: bool,
+    options: cranpose::FilePickerOptions,
+) {
+    let stream = match picker.pick_folder_streaming(options).await {
+        Ok(Some(stream)) => stream,
+        Ok(None) => {
+            state.update(|s| {
+                s.pending_pick = None;
+                s.status = "Open Cancelled".to_string();
+            });
+            return;
+        }
+        Err(error) => {
+            state.update(|s| {
+                s.pending_pick = None;
+                s.status = error.to_string();
+            });
+            return;
+        }
+    };
+    state.update(|s| s.status = "Scanning folder".to_string());
+
+    let clock = scope.runtime().frame_clock();
+    let replace = !append;
+    let mut started = false;
+    let mut total = 0usize;
+    let mut tick = 0usize;
+    loop {
+        if !scope.is_active() {
+            break;
+        }
+        // Drain everything discovered since the previous frame and append it.
+        let ready = stream.take_ready();
+        if !ready.is_empty() {
+            let mut batch = Vec::with_capacity(ready.len());
+            for entry in ready {
+                if let Some(track) = audio::track_from_picked_file(entry).await {
+                    batch.push(track);
+                }
+            }
+            if !batch.is_empty() {
+                batch.sort_by(|a, b| a.display_title().cmp(b.display_title()));
+                total += batch.len();
+                if replace && !started {
+                    replace_playlist_and_play(state, batch);
+                } else {
+                    append_playlist_and_play(state, batch);
+                }
+                started = true;
+            }
+        }
+        if let Some(error) = stream.take_error() {
+            state.update(|s| s.status = format!("Scan error: {error}"));
+        }
+        if stream.is_finished() {
+            state.update(|s| {
+                s.pending_pick = None;
+                s.status = if total == 0 {
+                    "No audio files found".to_string()
+                } else {
+                    format!("Loaded {total} Track(s)")
+                };
+            });
+            break;
+        }
+        // Keep a live, animated count visible while the walk continues.
+        let dots = ".".repeat((tick / 12) % 4);
+        state.update(|s| s.status = format!("Scanning {total} tracks{dots}"));
+        tick += 1;
+        let _ = clock.next_frame().await;
+    }
 }
 
 /// Drives the native skin picker (desktop/Android/iOS) through the same Cranpose
