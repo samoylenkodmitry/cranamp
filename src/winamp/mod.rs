@@ -4401,19 +4401,19 @@ fn VerticalDragSlider(
                                         PointerEventKind::Down => {
                                             dragging = true;
                                             on_drag_state(true);
-                                            let raw =
-                                                (vertical_slider_pointer_y(event.position.y, area)
-                                                    / area.scaled_height())
-                                                .clamp(0.0, 1.0);
+                                            let raw = vertical_slider_fraction(
+                                                event.position.y,
+                                                area.scaled_height(),
+                                            );
                                             let value = if invert { 1.0 - raw } else { raw };
                                             on_change(value);
                                             event.consume();
                                         }
                                         PointerEventKind::Move if dragging => {
-                                            let raw =
-                                                (vertical_slider_pointer_y(event.position.y, area)
-                                                    / area.scaled_height())
-                                                .clamp(0.0, 1.0);
+                                            let raw = vertical_slider_fraction(
+                                                event.position.y,
+                                                area.scaled_height(),
+                                            );
                                             let value = if invert { 1.0 - raw } else { raw };
                                             on_change(value);
                                             event.consume();
@@ -7351,21 +7351,17 @@ fn horizontal_slider_surface_pointer_x(surface_x: f32, area: ControlRect) -> f32
     scaled(surface_x, area.scale) - area.scaled_x()
 }
 
-fn vertical_slider_pointer_y(local_y: f32, area: ControlRect) -> f32 {
-    #[cfg(target_os = "android")]
-    {
-        scaled(local_y, area.scale)
+/// Fraction (0..1, top to bottom) of a vertical slider/scrollbar for a local
+/// pointer position. Cranpose reports the pointer already in the box's local,
+/// scaled coordinate space (matching `scaled_height`) the same way on Android
+/// and desktop, so the fraction is just the local offset over the scaled track
+/// height. (Scaling the local position again — as an older Cranpose required —
+/// made the thumb overshoot the finger on Android.)
+fn vertical_slider_fraction(local_y: f32, scaled_height: f32) -> f32 {
+    if scaled_height <= 0.0 {
+        return 0.0;
     }
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = area;
-        local_y
-    }
-}
-
-#[cfg(test)]
-fn vertical_slider_android_pointer_y(local_y: f32, area: ControlRect) -> f32 {
-    scaled(local_y, area.scale)
+    (local_y / scaled_height).clamp(0.0, 1.0)
 }
 
 fn slider_frame(value: f32, frames: u32) -> u32 {
@@ -7536,14 +7532,24 @@ mod tests {
     }
 
     #[test]
-    fn vertical_slider_android_pointer_scales_with_layout() {
+    fn vertical_slider_fraction_maps_local_pointer_over_scaled_track() {
         with_test_app_context(|| {
             let area = ControlRect::new(0.0, 0.0, 14.0, 63.0, 1.5);
+            let scaled_height = area.scaled_height();
 
-            assert_eq!(vertical_slider_android_pointer_y(0.0, area), 0.0);
+            // The pointer is already in the scaled track space: the top maps to
+            // 0, the bottom to 1, the middle to 0.5 — no extra scaling.
+            assert_eq!(vertical_slider_fraction(0.0, scaled_height), 0.0);
+            assert_eq!(vertical_slider_fraction(scaled_height, scaled_height), 1.0);
             assert_eq!(
-                vertical_slider_android_pointer_y(63.0, area),
-                area.scaled_height()
+                vertical_slider_fraction(scaled_height / 2.0, scaled_height),
+                0.5
+            );
+            // Out-of-range positions clamp.
+            assert_eq!(vertical_slider_fraction(-10.0, scaled_height), 0.0);
+            assert_eq!(
+                vertical_slider_fraction(scaled_height + 10.0, scaled_height),
+                1.0
             );
         });
     }
