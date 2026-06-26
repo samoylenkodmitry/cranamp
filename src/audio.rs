@@ -559,9 +559,10 @@ mod native {
     };
     use std::f32::consts::PI;
     use std::fs::File;
-    use std::path::Path;
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-    use std::sync::{Mutex, OnceLock};
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+    use std::sync::{Arc, Condvar, Mutex, OnceLock};
     use std::time::Duration;
     use symphonia::core::audio::{AudioSpec, GenericAudioBufferRef};
     use symphonia::core::codecs::audio::{
@@ -1143,18 +1144,44 @@ mod native {
         repeat: bool,
     ) -> Result<(BoxedSource, Option<Duration>), String> {
         let location = path.to_str().unwrap_or_default();
-        let file = open_audio_file(location)
+        let content = is_content_uri(location);
+        let mut file = open_audio_file(location)
             .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+        // A real file (desktop, or a local document provider) is seekable, so the
+        // decoder reads it in place. A network/cloud/WebDAV `content://` document
+        // is usually a non-seekable pipe whose `len()` reads back as 0; assuming
+        // it is a seekable, sized file makes the decoder treat it as empty, so the
+        // track "loads" but never plays.
+        let seekable = file.stream_position().is_ok();
         // A `content://` document carries no usable filesystem extension, so let
         // the decoder probe the format; a real path keeps its extension hint.
-        let extension_hint = if is_content_uri(location) {
+        let extension_hint = if content {
             None
         } else {
             path.extension()
                 .and_then(|extension| extension.to_str())
                 .map(str::to_ascii_lowercase)
         };
+        log::info!(
+            "decode_track_source: {} (content={content}, seekable={seekable})",
+            path.display()
+        );
 
+        if !seekable {
+            // Spool the stream to a temporary on-disk cache: playback starts
+            // immediately from the front while the rest downloads in the
+            // background, and seeking works as soon as the target offset is
+            // cached. The cache is bounded — it is deleted when the track stops.
+            let cached = StreamCache::spool(Box::new(file))
+                .map_err(|error| format!("failed to start streaming cache: {error}"))?;
+            return finish_rodio_decode(cached, None, extension_hint.as_deref(), repeat);
+        }
+
+        let byte_len = file
+            .metadata()
+            .ok()
+            .map(|metadata| metadata.len())
+            .filter(|&len| len > 0);
         if extension_hint
             .as_deref()
             .map(is_iso_mp4_extension)
@@ -1169,14 +1196,28 @@ mod native {
             };
         }
 
-        let byte_len = file.metadata().map(|metadata| metadata.len()).ok();
+        finish_rodio_decode(file, byte_len, extension_hint.as_deref(), repeat)
+    }
+
+    /// Build a rodio decoder over any seekable reader (a real file, or a
+    /// [`StreamCache`] spooling a non-seekable provider stream) and wrap it for
+    /// optional looping.
+    fn finish_rodio_decode<R>(
+        data: R,
+        byte_len: Option<u64>,
+        extension_hint: Option<&str>,
+        repeat: bool,
+    ) -> Result<(BoxedSource, Option<Duration>), String>
+    where
+        R: std::io::Read + std::io::Seek + Send + Sync + 'static,
+    {
         let mut builder = rodio::Decoder::builder()
-            .with_data(file)
+            .with_data(data)
             .with_seekable(true);
         if let Some(byte_len) = byte_len {
             builder = builder.with_byte_len(byte_len);
         }
-        if let Some(extension_hint) = extension_hint.as_deref() {
+        if let Some(extension_hint) = extension_hint {
             builder = builder.with_hint(extension_hint);
         }
 
@@ -1206,6 +1247,231 @@ mod native {
         File::open(location)
     }
 
+    // ----- Streaming cache for non-seekable provider documents ----------------
+    //
+    // A cloud/WebDAV `content://` descriptor is typically a non-seekable pipe, so
+    // the decoder can neither probe nor seek it. Spool it to a temporary file in
+    // a background thread: the decoder reads from the file and only blocks until
+    // the bytes it needs have arrived, so playback starts at the front right away
+    // and seeking works once the target offset is cached. The spool file is
+    // deleted as soon as the track stops, so the cache stays bounded even for a
+    // terabyte-scale library — only the track(s) currently playing are on disk.
+
+    struct StreamCacheState {
+        downloaded: u64,
+        total: Option<u64>,
+        finished: bool,
+        error: Option<String>,
+    }
+
+    struct StreamCacheShared {
+        state: Mutex<StreamCacheState>,
+        ready: Condvar,
+        cancel: AtomicBool,
+        path: PathBuf,
+    }
+
+    impl StreamCacheShared {
+        /// Block until at least `wanted` bytes are cached, the download finishes,
+        /// or it is cancelled/errored; returns how many bytes are available.
+        fn wait_for(&self, wanted: u64) -> std::io::Result<u64> {
+            let mut state = self.state.lock().unwrap();
+            loop {
+                if let Some(error) = &state.error {
+                    return Err(std::io::Error::other(error.clone()));
+                }
+                if state.downloaded >= wanted
+                    || state.finished
+                    || self.cancel.load(Ordering::Relaxed)
+                {
+                    return Ok(state.downloaded);
+                }
+                state = self.ready.wait(state).unwrap();
+            }
+        }
+
+        /// Block until the total length is known (the download finished).
+        fn wait_for_total(&self) -> std::io::Result<u64> {
+            let mut state = self.state.lock().unwrap();
+            loop {
+                if let Some(error) = &state.error {
+                    return Err(std::io::Error::other(error.clone()));
+                }
+                if let Some(total) = state.total {
+                    return Ok(total);
+                }
+                if state.finished || self.cancel.load(Ordering::Relaxed) {
+                    return Ok(state.downloaded);
+                }
+                state = self.ready.wait(state).unwrap();
+            }
+        }
+    }
+
+    /// Stops the downloader and deletes the spool file once every reader is gone.
+    struct StreamCacheGuard {
+        shared: Arc<StreamCacheShared>,
+    }
+
+    impl Drop for StreamCacheGuard {
+        fn drop(&mut self) {
+            self.shared.cancel.store(true, Ordering::Relaxed);
+            self.shared.ready.notify_all();
+            let _ = std::fs::remove_file(&self.shared.path);
+        }
+    }
+
+    /// A seekable `Read` view over a source being spooled to a temporary file.
+    pub(super) struct StreamCache {
+        shared: Arc<StreamCacheShared>,
+        file: File,
+        position: u64,
+        _guard: Arc<StreamCacheGuard>,
+    }
+
+    impl StreamCache {
+        pub(super) fn spool(source: Box<dyn Read + Send>) -> std::io::Result<Self> {
+            let directory = stream_cache_directory().ok_or_else(|| {
+                std::io::Error::other("no writable directory for the streaming cache")
+            })?;
+            sweep_stale_stream_cache(&directory);
+            let path = directory.join(next_stream_cache_name());
+            let writer = File::create(&path)?;
+            let reader = File::open(&path)?;
+            let shared = Arc::new(StreamCacheShared {
+                state: Mutex::new(StreamCacheState {
+                    downloaded: 0,
+                    total: None,
+                    finished: false,
+                    error: None,
+                }),
+                ready: Condvar::new(),
+                cancel: AtomicBool::new(false),
+                path,
+            });
+            let guard = Arc::new(StreamCacheGuard {
+                shared: Arc::clone(&shared),
+            });
+            let download_shared = Arc::clone(&shared);
+            std::thread::spawn(move || run_stream_download(source, writer, download_shared));
+            Ok(Self {
+                shared,
+                file: reader,
+                position: 0,
+                _guard: guard,
+            })
+        }
+    }
+
+    impl Read for StreamCache {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let available = self.shared.wait_for(self.position + 1)?;
+            if self.position >= available {
+                return Ok(0);
+            }
+            self.file.seek(SeekFrom::Start(self.position))?;
+            let limit = (available - self.position).min(buf.len() as u64) as usize;
+            let read = self.file.read(&mut buf[..limit])?;
+            self.position += read as u64;
+            Ok(read)
+        }
+    }
+
+    impl Seek for StreamCache {
+        fn seek(&mut self, from: SeekFrom) -> std::io::Result<u64> {
+            let target = match from {
+                SeekFrom::Start(offset) => offset,
+                SeekFrom::Current(delta) => offset_from(self.position, delta)?,
+                SeekFrom::End(delta) => offset_from(self.shared.wait_for_total()?, delta)?,
+            };
+            self.position = target;
+            Ok(target)
+        }
+    }
+
+    fn offset_from(base: u64, delta: i64) -> std::io::Result<u64> {
+        let target = base as i64 + delta;
+        u64::try_from(target).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "attempted to seek before the start of the stream",
+            )
+        })
+    }
+
+    fn run_stream_download(
+        mut source: Box<dyn Read + Send>,
+        mut writer: File,
+        shared: Arc<StreamCacheShared>,
+    ) {
+        let mut buffer = vec![0_u8; 64 * 1024];
+        loop {
+            if shared.cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            match source.read(&mut buffer) {
+                Ok(0) => {
+                    let mut state = shared.state.lock().unwrap();
+                    state.total = Some(state.downloaded);
+                    state.finished = true;
+                    shared.ready.notify_all();
+                    break;
+                }
+                Ok(read) => {
+                    if let Err(error) = writer.write_all(&buffer[..read]) {
+                        fail_stream_download(&shared, format!("cache write failed: {error}"));
+                        break;
+                    }
+                    let mut state = shared.state.lock().unwrap();
+                    state.downloaded += read as u64;
+                    shared.ready.notify_all();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    fail_stream_download(&shared, format!("stream read failed: {error}"));
+                    break;
+                }
+            }
+        }
+    }
+
+    fn fail_stream_download(shared: &StreamCacheShared, message: String) {
+        log::error!("streaming cache: {message}");
+        let mut state = shared.state.lock().unwrap();
+        state.error = Some(message);
+        state.finished = true;
+        shared.ready.notify_all();
+    }
+
+    fn next_stream_cache_name() -> String {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        format!("stream-{}-{sequence}.tmp", std::process::id())
+    }
+
+    fn stream_cache_directory() -> Option<PathBuf> {
+        #[cfg(target_os = "android")]
+        let directory = crate::android_bridge::stream_cache_dir();
+        #[cfg(not(target_os = "android"))]
+        let directory = Some(std::env::temp_dir().join("cranamp-stream-cache"));
+        let directory = directory?;
+        std::fs::create_dir_all(&directory).ok()?;
+        Some(directory)
+    }
+
+    /// Remove spool files left behind by a previous run (e.g. after a crash).
+    /// Runs once per process; live tracks delete their own files on drop.
+    fn sweep_stale_stream_cache(directory: &Path) {
+        static SWEPT: std::sync::Once = std::sync::Once::new();
+        SWEPT.call_once(|| {
+            if let Ok(entries) = std::fs::read_dir(directory) {
+                for entry in entries.flatten() {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        });
+    }
+
     fn is_iso_mp4_extension(extension: &str) -> bool {
         matches!(extension, "m4a" | "m4b" | "m4v" | "mov" | "mp4")
     }
@@ -1219,14 +1485,25 @@ mod native {
 
     fn with_audio<T>(f: impl FnOnce(&mut NativeAudio) -> Result<T, String>) -> Result<T, String> {
         let audio = AUDIO.get_or_init(|| Mutex::new(None));
-        let mut audio = audio
-            .lock()
-            .map_err(|_| "audio backend lock is poisoned".to_string())?;
+        // Recover from a poisoned lock instead of failing forever: a panic while
+        // decoding one (e.g. malformed streamed) track must not permanently
+        // disable audio for every later track.
+        let mut audio = match audio.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("audio backend lock was poisoned by a previous panic; recovering");
+                poisoned.into_inner()
+            }
+        };
 
         if audio.is_none() {
-            let mut sink = DeviceSinkBuilder::open_default_sink()
-                .map_err(|error| format!("failed to open default audio device: {error}"))?;
+            log::info!("opening default audio output device");
+            let mut sink = DeviceSinkBuilder::open_default_sink().map_err(|error| {
+                log::error!("failed to open default audio device: {error}");
+                format!("failed to open default audio device: {error}")
+            })?;
             sink.log_on_drop(false);
+            log::info!("default audio output device opened");
             *audio = Some(NativeAudio {
                 sink,
                 player: None,
@@ -1245,8 +1522,17 @@ mod native {
             .path
             .as_deref()
             .ok_or_else(|| "selected track has no filesystem path".to_string())?;
-        let (source, duration) = decode_track_source(Path::new(path), repeat)
-            .map_err(|error| format!("failed to decode {}: {error}", track.title))?;
+        let (source, duration) = decode_track_source(Path::new(path), repeat).map_err(|error| {
+            log::error!("play_track: failed to decode {}: {error}", track.title);
+            format!("failed to decode {}: {error}", track.title)
+        })?;
+        log::info!(
+            "play_track: decoded {} -> {} Hz, {} channel(s), duration {:?}",
+            track.title,
+            source.sample_rate().get(),
+            source.channels().get(),
+            duration
+        );
 
         with_audio(|audio| {
             if let Some(player) = audio.player.take() {
@@ -1260,6 +1546,7 @@ mod native {
             player.play();
             audio.player = Some(player);
             audio.duration = duration;
+            log::info!("play_track: playback started for {}", track.title);
             Ok(())
         })
     }
@@ -1693,6 +1980,62 @@ mod tests {
             .expect("video mp4 should decode its AAC audio track");
         assert!(duration.is_some());
         assert!(source.by_ref().take(4096).count() > 0);
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
+    #[test]
+    fn stream_cache_streams_and_seeks_a_nonseekable_source() {
+        use std::io::{Read, Seek, SeekFrom};
+
+        // A reader that refuses to seek, mimicking a network/WebDAV pipe.
+        struct PipeReader(std::io::Cursor<Vec<u8>>);
+        impl Read for PipeReader {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.0.read(buf)
+            }
+        }
+
+        let data: Vec<u8> = (0..20_000u32).map(|byte| byte as u8).collect();
+        let source = Box::new(PipeReader(std::io::Cursor::new(data.clone())));
+        let mut cache =
+            super::native::StreamCache::spool(source).expect("spool should start the cache");
+
+        // Sequential read blocks only until bytes arrive, then yields all of them.
+        let mut streamed = vec![0_u8; data.len()];
+        cache
+            .read_exact(&mut streamed)
+            .expect("the whole source should stream through");
+        assert_eq!(streamed, data);
+
+        // Backward seek into already-cached data is exact.
+        cache.seek(SeekFrom::Start(1_000)).expect("seek back");
+        let mut window = [0_u8; 256];
+        cache.read_exact(&mut window).expect("re-read cached bytes");
+        assert_eq!(&window[..], &data[1_000..1_256]);
+
+        // Seeking to the end resolves to the full, now-known length.
+        assert_eq!(
+            cache.seek(SeekFrom::End(0)).expect("seek end"),
+            data.len() as u64
+        );
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
+    #[test]
+    fn real_files_decode_through_the_seekable_rodio_path() {
+        for relative in [
+            "assets/demo-music/generated/cranamp-demo-01-retro-tracker.mp3",
+            "assets/demo-music/generated/cranamp-demo-01-retro-tracker.ogg",
+        ] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+            let (mut source, duration) = super::native::decode_track_source(&path, false)
+                .unwrap_or_else(|error| panic!("{relative} should decode: {error}"));
+            assert!(duration.is_some(), "{relative} should report a duration");
+            assert!(
+                source.by_ref().take(4096).count() > 0,
+                "{relative} should yield samples"
+            );
+        }
     }
 
     #[cfg(all(not(target_arch = "wasm32"), feature = "native-audio"))]
