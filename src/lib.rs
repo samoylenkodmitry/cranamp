@@ -4,6 +4,7 @@
 mod android_bridge;
 pub mod audio;
 mod fonts;
+mod sync;
 pub mod winamp;
 
 use cranpose::AppLauncher;

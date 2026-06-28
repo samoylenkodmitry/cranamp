@@ -159,10 +159,12 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
     shell.set_viewport(500.0, 700.0);
     pump(&mut shell);
 
-    // Settings is closed on launch.
+    // Settings is closed on launch. "SYNC" is a section heading unique to the
+    // open panel, so it is an unambiguous open/closed marker (the player status
+    // line can itself read "Settings"/"Settings Closed").
     let before = visible_texts(&mut shell);
     assert!(
-        !contains(&before, "CRANAMP SETTINGS"),
+        !contains(&before, "SYNC"),
         "settings panel should be closed on launch; visible={before:?}"
     );
 
@@ -181,10 +183,10 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         "pointer down/up should hit the logo target at ({logo_x},{logo_y})"
     );
 
-    // The Settings panel and its sections are now present.
+    // The modern Settings panel and its sections are now present.
     let after = visible_texts(&mut shell);
     assert!(
-        contains(&after, "CRANAMP SETTINGS"),
+        contains(&after, "Settings"),
         "settings panel header should appear after logo click; visible={after:?}"
     );
     assert!(
@@ -196,15 +198,18 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         "bundled skin row should be listed; visible={after:?}"
     );
     assert!(
+        contains(&after, "SYNC"),
+        "sync section should appear; visible={after:?}"
+    );
+    assert!(
         contains(&after, "UPDATES"),
         "updates section should appear; visible={after:?}"
     );
 
-    // Clicking the close box (top-right of the centered panel) dismisses it.
-    // Panel is centered: x in [(500-264)/2 ..], y in [(700-230)/2 ..].
-    let panel_x = (500.0 - 264.0) / 2.0;
-    let panel_y = (700.0 - 230.0) / 2.0;
-    shell.set_cursor(panel_x + 264.0 - 10.0, panel_y + 8.0);
+    // Tapping outside the centered panel hits the dim backdrop, which dismisses
+    // the modal. (500x700 surface; the 300x500 panel is centered, so the corner
+    // at (20,20) is safely on the backdrop.)
+    shell.set_cursor(20.0, 20.0);
     shell.pointer_pressed();
     pump(&mut shell);
     shell.pointer_released();
@@ -212,7 +217,7 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
 
     let after_close = visible_texts(&mut shell);
     assert!(
-        !contains(&after_close, "CRANAMP SETTINGS"),
-        "settings panel should close after clicking the X; visible={after_close:?}"
+        !contains(&after_close, "SYNC"),
+        "settings panel should close after tapping the backdrop; visible={after_close:?}"
     );
 }
