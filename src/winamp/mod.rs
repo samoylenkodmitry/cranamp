@@ -34,8 +34,8 @@ use cranpose_foundation::PointerButton;
 use cranpose_ui::text::{FontFamily, ParagraphStyle, TextOverflow, TextUnit};
 use cranpose_ui::{
     composable, current_density, Alignment, BasicText, BasicTextField, Box, BoxSpec, Button,
-    ButtonSpec, Canvas, Color, Column, ColumnSpec, Modifier, Point, PointerEventKind,
-    PointerInputScope, Size, SpanStyle, Text, TextStyle,
+    ButtonSpec, Canvas, Color, Column, ColumnSpec, LinearArrangement, Modifier, Point,
+    PointerEventKind, PointerInputScope, Row, RowSpec, Size, SpanStyle, Text, TextStyle,
 };
 #[cfg(target_os = "android")]
 use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
@@ -142,6 +142,10 @@ struct WinampState {
     eq_auto: bool,
     eq_preset_menu_open: bool,
     settings_open: bool,
+    /// Cross-device (and same-device) resume cue: `(playlist_index, seconds)`.
+    /// Set when a synced resume point matches a restored track; consumed by the
+    /// next playback tick to seek once the track is playing. See [`crate::sync`].
+    pending_resume: Option<(usize, f32)>,
     eq_values: [f32; 11],
     skin_path: Option<String>,
     shuffle_order: Vec<usize>,
@@ -168,6 +172,9 @@ struct WinampState {
     pending_pick: Option<PendingPick>,
     #[cfg(not(target_arch = "wasm32"))]
     pending_skin_pick: bool,
+    /// `true` while awaiting the cross-platform writable sync-folder picker.
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_sync_folder_pick: bool,
 }
 
 impl PartialEq for WinampState {
@@ -182,6 +189,7 @@ impl PartialEq for WinampState {
             && self.eq_auto == other.eq_auto
             && self.eq_preset_menu_open == other.eq_preset_menu_open
             && self.settings_open == other.settings_open
+            && self.pending_resume == other.pending_resume
             && self.eq_values == other.eq_values
             && self.skin_path == other.skin_path
             && self.shuffle_order == other.shuffle_order
@@ -211,7 +219,9 @@ impl PartialEq for WinampState {
 impl WinampState {
     #[cfg(not(target_arch = "wasm32"))]
     fn pending_pick_eq(&self, other: &Self) -> bool {
-        self.pending_pick == other.pending_pick && self.pending_skin_pick == other.pending_skin_pick
+        self.pending_pick == other.pending_pick
+            && self.pending_skin_pick == other.pending_skin_pick
+            && self.pending_sync_folder_pick == other.pending_sync_folder_pick
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -233,6 +243,7 @@ impl Default for WinampState {
             eq_auto: false,
             eq_preset_menu_open: false,
             settings_open: false,
+            pending_resume: None,
             eq_values: DEFAULT_EQ_VALUES,
             skin_path: None,
             shuffle_order: Vec::new(),
@@ -259,6 +270,8 @@ impl Default for WinampState {
             pending_pick: None,
             #[cfg(not(target_arch = "wasm32"))]
             pending_skin_pick: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            pending_sync_folder_pick: false,
         }
     }
 }
@@ -890,6 +903,8 @@ fn WinampRuntimeEffects(
     WebSurfaceSizeEffect(state);
     PlayerStatePersistence(state);
     NativeWindowPersistence(peer_windows);
+    #[cfg(not(target_arch = "wasm32"))]
+    SyncEffect(state);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1302,7 +1317,15 @@ fn PlayerStatePersistence(state: MutableState<WinampState>) {
         let config = SavedPlayerState::from_state(&snapshot);
         Some((key, config))
     };
+    // When player state changes, also publish the playlist to the sync folder.
+    // `set_playlist` no-ops when the list is unchanged, so this is cheap.
+    #[cfg(not(target_arch = "wasm32"))]
+    let sync_tracks = config.as_ref().map(|_| sync_tracks_from_state(&snapshot));
     cranpose_core::SideEffect(move || {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(tracks) = sync_tracks {
+            crate::sync::runtime::set_playlist(tracks);
+        }
         let Some((key, config)) = config else { return };
         last_saved.update(|last| {
             if last.as_ref() != Some(&config) {
@@ -1311,6 +1334,184 @@ fn PlayerStatePersistence(state: MutableState<WinampState>) {
             }
             last_key.replace(Some(key));
         });
+    });
+}
+
+/// Builds the cross-device playlist payload (title + path/URI + duration) from
+/// the current playlist, dropping entries with no usable path.
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_tracks_from_state(state: &WinampState) -> Vec<crate::sync::SyncTrack> {
+    state
+        .playlist
+        .iter()
+        .filter_map(|track| {
+            let path = track.path.clone().filter(|path| !path.is_empty())?;
+            Some(crate::sync::SyncTrack {
+                title: track.title.clone(),
+                path,
+                duration_s: track.duration_seconds,
+            })
+        })
+        .collect()
+}
+
+/// Records the current playback position for cross-device resume. Cheap (mutates
+/// in-memory state under a brief lock); the worker debounces the folder write.
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_record_resume(state: &WinampState) {
+    let Some(track) = state
+        .current_index
+        .and_then(|index| state.playlist.get(index))
+    else {
+        return;
+    };
+    let Some(path) = track.path.as_deref().filter(|path| !path.is_empty()) else {
+        return;
+    };
+    crate::sync::runtime::record_resume(
+        path,
+        &track.title,
+        track.duration_seconds,
+        state.elapsed_seconds,
+    );
+}
+
+/// Records a completed play into this device's history (counts merge across
+/// devices by track fingerprint).
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_record_play(state: &WinampState) {
+    let Some(track) = state
+        .current_index
+        .and_then(|index| state.playlist.get(index))
+    else {
+        return;
+    };
+    let Some(path) = track.path.as_deref().filter(|path| !path.is_empty()) else {
+        return;
+    };
+    crate::sync::runtime::record_play(path, &track.title, track.duration_seconds);
+}
+
+/// Seeks to a pending resume position once the cued track is playing and its
+/// duration is known (needed to convert seconds → fraction for `seek_fraction`).
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_apply_pending_resume(state: MutableState<WinampState>, snap: &WinampState) {
+    let Some((index, seconds)) = snap.pending_resume else {
+        return;
+    };
+    if snap.current_index != Some(index) || snap.playback != PlaybackState::Playing {
+        return;
+    }
+    let Some(duration) = snap.duration_seconds.filter(|duration| *duration > 0.0) else {
+        return;
+    };
+    if snap.elapsed_seconds + 1.0 >= seconds {
+        state.update(|s| s.pending_resume = None);
+        return;
+    }
+    let fraction = (seconds / duration).clamp(0.0, 1.0);
+    let _ = audio::seek_fraction(fraction);
+    state.update(|s| {
+        s.pending_resume = None;
+        s.elapsed_seconds = seconds.min(duration);
+        s.position = fraction;
+    });
+}
+
+/// Cues the newest resume point onto the matching restored track. The merge has
+/// already chosen the most recent across all devices (this one included), so it
+/// also gives same-device "continue where I left off" on relaunch.
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_try_apply_resume(state: MutableState<WinampState>, merged: &crate::sync::MergedSync) {
+    let Some(resume) = merged.resume.as_ref() else {
+        return;
+    };
+    // Skip near-start / just-finished positions — nothing worth resuming.
+    if resume.position_s < 5.0 {
+        return;
+    }
+    let snapshot = state.get_non_reactive();
+    let matched = snapshot.playlist.iter().position(|track| {
+        crate::sync::TrackFingerprint::from_path(
+            track.path.as_deref().unwrap_or_default(),
+            track.duration_seconds,
+        )
+        .matches(&resume.fingerprint)
+    });
+    let Some(index) = matched else {
+        return;
+    };
+    let seconds = resume.position_s;
+    let stamp = format!("{}:{:02}", (seconds as u32) / 60, (seconds as u32) % 60);
+    state.update(|s| {
+        s.current_index = Some(index);
+        set_playlist_selection(s, [index]);
+        scroll_playlist_to_track(s, index);
+        s.pending_resume = Some((index, seconds));
+        s.status = format!("Resume available at {stamp}");
+    });
+}
+
+/// Native effect: starts the background sync worker and applies the newest
+/// resume point to the restored playlist exactly once after launch.
+#[cfg(not(target_arch = "wasm32"))]
+#[composable]
+fn SyncEffect(state: MutableState<WinampState>) {
+    cranpose_core::remember(crate::sync::runtime::start_worker);
+
+    let applied = cranpose_core::useState(|| false);
+    cranpose_core::LaunchedEffectAsync!(0u8, move |scope| {
+        Box::pin(async move {
+            let clock = scope.runtime().frame_clock();
+            let mut ticks = 0u32;
+            loop {
+                if !scope.is_active() || applied.get() {
+                    break;
+                }
+                let _ = clock.next_frame().await;
+                if let Some(merged) = crate::sync::runtime::latest_merged() {
+                    sync_try_apply_resume(state, &merged);
+                    applied.set(true);
+                    break;
+                }
+                ticks += 1;
+                if ticks > 1200 {
+                    break;
+                }
+            }
+        })
+    });
+
+    // Drive cranpose's cross-platform writable sync-folder picker. Tapping
+    // "choose folder" flips `pending_sync_folder_pick`, re-keying this effect;
+    // it awaits the picker and applies the chosen folder off the UI executor
+    // (the probe + first flush is folder I/O that may hit a network mount).
+    let pending_folder_pick = state.get().pending_sync_folder_pick;
+    cranpose_core::LaunchedEffectAsync!(pending_folder_pick, move |_scope| {
+        Box::pin(async move {
+            if !pending_folder_pick {
+                return;
+            }
+            match cranpose_services::pick_writable_folder().await {
+                Ok(Some(handle)) => {
+                    std::thread::spawn(move || {
+                        let _ = crate::sync::runtime::set_folder(Some(handle));
+                    });
+                    state.update(|s| {
+                        s.pending_sync_folder_pick = false;
+                        s.status = "Sync folder set".to_string();
+                    });
+                }
+                Ok(None) => state.update(|s| {
+                    s.pending_sync_folder_pick = false;
+                    s.status = "Sync folder unchanged".to_string();
+                }),
+                Err(error) => state.update(|s| {
+                    s.pending_sync_folder_pick = false;
+                    s.status = error.to_string();
+                }),
+            }
+        })
     });
 }
 
@@ -1342,6 +1543,12 @@ fn sync_playback_progress(state: MutableState<WinampState>) {
                 s.position = progress_fraction(elapsed, duration);
                 s.title_marquee_phase = elapsed * TITLE_MARQUEE_CHARS_PER_SECOND;
             });
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let snapshot = state.get_non_reactive();
+                sync_record_resume(&snapshot);
+                sync_apply_pending_resume(state, &snapshot);
+            }
             if finished {
                 advance_finished_track(state);
             }
@@ -2960,14 +3167,90 @@ fn eq_preset_menu_rows() -> usize {
     EQ_PRESETS.len().div_ceil(EQ_PRESET_MENU_COLUMNS)
 }
 
-const SETTINGS_WIDTH: f32 = 264.0;
-const SETTINGS_HEIGHT: f32 = 230.0;
+const SETTINGS_WIDTH: f32 = 300.0;
+const SETTINGS_HEIGHT: f32 = 500.0;
+
+// Modern (non-Winamp) Settings palette. The main player stays skinned; this
+// panel is a clean flat-design surface built from cranpose-ui widgets.
+const SETTINGS_BG: Color = Color(0.07, 0.08, 0.11, 1.0);
+const SETTINGS_CARD: Color = Color(0.13, 0.15, 0.19, 1.0);
+// Accent/status colors are only referenced by the native sections (skins cards,
+// sync status, action buttons); the web build renders static section text.
 #[cfg(not(target_arch = "wasm32"))]
-const SETTINGS_ROW_HEIGHT: f32 = 14.0;
+const SETTINGS_CARD_ACTIVE: Color = Color(0.16, 0.31, 0.54, 1.0);
 #[cfg(not(target_arch = "wasm32"))]
-const SETTINGS_MAX_SKIN_ROWS: usize = 7;
+const SETTINGS_ACCENT: Color = Color(0.24, 0.50, 0.95, 1.0);
 #[cfg(not(target_arch = "wasm32"))]
-const SETTINGS_BUTTON_HEIGHT: f32 = 16.0;
+const SETTINGS_GOOD: Color = Color(0.30, 0.70, 0.46, 1.0);
+#[cfg(not(target_arch = "wasm32"))]
+const SETTINGS_WARN: Color = Color(0.92, 0.70, 0.30, 1.0);
+#[cfg(not(target_arch = "wasm32"))]
+const SETTINGS_DANGER: Color = Color(0.90, 0.42, 0.42, 1.0);
+const SETTINGS_TEXT: Color = Color(0.93, 0.95, 0.98, 1.0);
+const SETTINGS_TEXT_DIM: Color = Color(0.60, 0.65, 0.73, 1.0);
+
+/// Text style helper for the modern Settings panel.
+fn settings_text_style(size_sp: f32, color: Color) -> TextStyle {
+    TextStyle::from_span_style(SpanStyle {
+        color: Some(color),
+        font_size: TextUnit::Sp(size_sp),
+        ..SpanStyle::default()
+    })
+}
+
+/// A full-width pill button used across the Settings sections.
+#[cfg(not(target_arch = "wasm32"))]
+#[composable]
+fn SettingsActionButton(label: String, fill: Color, on_click: impl Fn() + 'static) {
+    Button(
+        Modifier::empty()
+            .fill_max_width()
+            .background(fill)
+            .rounded_corners(8.0)
+            .padding(9.0),
+        ButtonSpec::default(),
+        on_click,
+        move || {
+            Text(
+                label.clone(),
+                Modifier::empty(),
+                settings_text_style(12.0, SETTINGS_TEXT),
+            );
+        },
+    );
+}
+
+/// Settings header: title + close button.
+#[composable]
+fn SettingsHeader(state: MutableState<WinampState>) {
+    Row(
+        Modifier::empty().fill_max_width(),
+        RowSpec::default().horizontal_arrangement(LinearArrangement::SpaceBetween),
+        move || {
+            Text(
+                "Settings",
+                Modifier::empty().padding(2.0),
+                settings_text_style(17.0, SETTINGS_TEXT),
+            );
+            let state_close = state;
+            Button(
+                Modifier::empty()
+                    .background(SETTINGS_CARD)
+                    .rounded_corners(6.0)
+                    .padding(7.0),
+                ButtonSpec::default(),
+                move || state_close.update(|s| s.settings_open = false),
+                || {
+                    Text(
+                        "X",
+                        Modifier::empty(),
+                        settings_text_style(12.0, SETTINGS_TEXT),
+                    );
+                },
+            );
+        },
+    );
+}
 
 /// Transient state for the Settings "Updates" section. Lives in a local
 /// `useState` inside the update section (not on `WinampState`) so per-frame
@@ -3024,163 +3307,244 @@ impl UpdateUi {
     }
 }
 
-/// A simple filled button used throughout the Settings panel. Native only; the
-/// web Settings sections render static text instead.
+/// Cross-device sync section: status, enable toggle, folder picker, and the
+/// list of devices currently in the shared folder. Reads cheap cached state
+/// (no folder I/O) and re-reads it on a slow ticker while the panel is open.
 #[cfg(not(target_arch = "wasm32"))]
 #[composable]
-fn SettingsButton(
-    x: f32,
-    y: f32,
-    width: f32,
-    label: String,
-    text_color: [u8; 4],
-    scale: f32,
-    on_click: impl Fn() + 'static,
-) {
-    let height = SETTINGS_BUTTON_HEIGHT;
-    FilledRect(x, y, width, height, scale, Color(0.10, 0.16, 0.22, 1.0));
-    FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
-    FilledRect(
-        x,
-        y + height - 1.0,
-        width,
-        1.0,
-        scale,
-        Color(0.02, 0.03, 0.04, 1.0),
+fn SettingsSyncSection(state: MutableState<WinampState>) {
+    let refresh = cranpose_core::useState(|| 0u64);
+    cranpose_core::LaunchedEffectAsync!(0u8, move |scope| {
+        Box::pin(async move {
+            let clock = scope.runtime().frame_clock();
+            let mut frames = 0u32;
+            loop {
+                if !scope.is_active() {
+                    break;
+                }
+                let _ = clock.next_frame().await;
+                frames += 1;
+                if frames.is_multiple_of(90) {
+                    refresh.update(|value| *value += 1);
+                }
+            }
+        })
+    });
+    let _ = refresh.get(); // subscribe so worker updates re-render the section
+
+    let status = crate::sync::runtime::status();
+    let config = crate::sync::runtime::config_snapshot();
+    let merged = crate::sync::runtime::latest_merged();
+    let enabled = config.as_ref().map(|c| c.enabled).unwrap_or(false);
+    let folder = config.as_ref().and_then(|c| c.folder.clone());
+    let own_id = config
+        .as_ref()
+        .map(|c| c.device_id.clone())
+        .unwrap_or_default();
+
+    Column(
+        Modifier::empty().fill_max_width(),
+        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(6.0)),
+        move || {
+            Text(
+                "SYNC",
+                Modifier::empty(),
+                settings_text_style(11.0, SETTINGS_TEXT_DIM),
+            );
+
+            let (color, line) = sync_status_display(&status);
+            Text(line, Modifier::empty(), settings_text_style(12.0, color));
+
+            {
+                let state_toggle = state;
+                let label = if enabled {
+                    "Turn off sync".to_string()
+                } else {
+                    "Turn on sync".to_string()
+                };
+                let fill = if enabled {
+                    SETTINGS_CARD
+                } else {
+                    SETTINGS_ACCENT
+                };
+                SettingsActionButton(label, fill, move || {
+                    let status = crate::sync::runtime::set_enabled(!enabled);
+                    state_toggle.update(|s| s.status = status.summary());
+                });
+            }
+
+            Text(
+                match &folder {
+                    Some(path) => format!("Folder: {}", shorten_sync_folder(path)),
+                    None => "No sync folder chosen yet".to_string(),
+                },
+                Modifier::empty(),
+                settings_text_style(10.0, SETTINGS_TEXT_DIM),
+            );
+            {
+                let state_pick = state;
+                let label = if folder.is_some() {
+                    "Change sync folder…".to_string()
+                } else {
+                    "Choose sync folder…".to_string()
+                };
+                SettingsActionButton(label, SETTINGS_CARD, move || sync_pick_folder(state_pick));
+            }
+
+            if let Some(merged) = merged.as_ref() {
+                if !merged.devices.is_empty() {
+                    Text(
+                        "Devices",
+                        Modifier::empty(),
+                        settings_text_style(11.0, SETTINGS_TEXT_DIM),
+                    );
+                    for device in merged.devices.iter().take(4) {
+                        let suffix = if device.device_id == own_id {
+                            "  (this device)"
+                        } else {
+                            ""
+                        };
+                        Text(
+                            format!("• {} · {}{}", device.label, device.platform, suffix),
+                            Modifier::empty(),
+                            settings_text_style(11.0, SETTINGS_TEXT),
+                        );
+                    }
+                }
+            }
+        },
     );
-    SystemWinampText(
-        label,
-        x + 6.0,
-        y + 2.0,
-        width - 12.0,
-        12.0,
-        scale,
-        text_color,
-    );
-    ClickTarget(x, y, width, height, scale, on_click);
 }
 
-/// Skins section: the bundled skin plus every library file, with an "Add Skin"
-/// button that routes through the existing native skin picker.
+/// Color + one-line summary for a sync status, used in the section header.
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_status_display(status: &crate::sync::SyncStatus) -> (Color, String) {
+    use crate::sync::SyncStatus;
+    match status {
+        SyncStatus::Active => (SETTINGS_GOOD, "● Syncing".to_string()),
+        SyncStatus::ReceiveOnly => (
+            SETTINGS_WARN,
+            "● Receive-only (folder is read-only)".to_string(),
+        ),
+        SyncStatus::Disabled => (SETTINGS_TEXT_DIM, "○ Off".to_string()),
+        SyncStatus::NotConfigured => (SETTINGS_TEXT_DIM, "○ Choose a folder to start".to_string()),
+        SyncStatus::Error(message) => (SETTINGS_DANGER, format!("● {message}")),
+    }
+}
+
+/// Trims a folder handle to its last couple of path components for display.
+#[cfg(not(target_arch = "wasm32"))]
+fn shorten_sync_folder(path: &str) -> String {
+    let parts: Vec<&str> = path
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .take(2)
+        .collect();
+    match parts.as_slice() {
+        [last, parent] => format!("…/{parent}/{last}"),
+        [only] => only.to_string(),
+        _ => path.to_string(),
+    }
+}
+
+/// Triggers cranpose's cross-platform writable sync-folder picker (desktop native
+/// dialog / Android SAF). The pick is asynchronous; `SyncEffect` awaits it and
+/// applies the chosen folder via the sync runtime.
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_pick_folder(state: MutableState<WinampState>) {
+    state.update(|s| {
+        s.pending_sync_folder_pick = true;
+        s.status = "Choose a sync folder…".to_string();
+    });
+}
+
+/// Skins section: the bundled skin plus every library file as tappable cards,
+/// with an "Add skin" button that routes through the existing native picker.
 #[cfg(not(target_arch = "wasm32"))]
 #[composable]
-fn SettingsSkinsSection(
-    state: MutableState<WinampState>,
-    skin_state: WinampSkinState,
-    ox: f32,
-    base_y: f32,
-    width: f32,
-    text_color: [u8; 4],
-    scale: f32,
-) {
+fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+    const MAX_SKIN_ROWS: usize = 4;
     let active_path = state.get().skin_path.clone();
-    SystemWinampText(
-        "SKINS".to_string(),
-        ox + 8.0,
-        base_y,
-        width - 16.0,
-        12.0,
-        scale,
-        text_color,
-    );
-
-    let list_y = base_y + 14.0;
     let skins = list_library_skins();
-    let shown = skins.len().min(SETTINGS_MAX_SKIN_ROWS);
-    for (index, skin) in skins.iter().take(shown).enumerate() {
-        let row_y = list_y + SETTINGS_ROW_HEIGHT * index as f32;
-        let is_active = match &skin.path {
-            Some(path) => active_path.as_deref() == Some(path.to_string_lossy().as_ref()),
-            None => active_path.is_none(),
-        };
-        if is_active {
-            FilledRect(
-                ox + 6.0,
-                row_y,
-                width - 12.0,
-                SETTINGS_ROW_HEIGHT,
-                scale,
-                Color(0.16, 0.26, 0.34, 1.0),
+    let shown = skins.len().min(MAX_SKIN_ROWS);
+
+    Column(
+        Modifier::empty().fill_max_width(),
+        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(5.0)),
+        move || {
+            Text(
+                "SKINS",
+                Modifier::empty(),
+                settings_text_style(11.0, SETTINGS_TEXT_DIM),
             );
-        }
-        let prefix = if is_active { "> " } else { "   " };
-        SystemWinampText(
-            format!("{prefix}{}", skin.label),
-            ox + 8.0,
-            row_y + 1.0,
-            width - 16.0,
-            SETTINGS_ROW_HEIGHT,
-            scale,
-            text_color,
-        );
-        let state_click = state;
-        let skin_click = skin_state;
-        let chosen = skin.clone();
-        ClickTarget(
-            ox + 6.0,
-            row_y,
-            width - 12.0,
-            SETTINGS_ROW_HEIGHT,
-            scale,
-            move || apply_library_skin(state_click, skin_click, &chosen),
-        );
-    }
 
-    if skins.len() > shown {
-        let more_y = list_y + SETTINGS_ROW_HEIGHT * shown as f32;
-        SystemWinampText(
-            format!("...and {} more in skins folder", skins.len() - shown),
-            ox + 8.0,
-            more_y + 1.0,
-            width - 16.0,
-            SETTINGS_ROW_HEIGHT,
-            scale,
-            text_color,
-        );
-    }
+            for skin in skins.iter().take(shown) {
+                let is_active = match &skin.path {
+                    Some(path) => active_path.as_deref() == Some(path.to_string_lossy().as_ref()),
+                    None => active_path.is_none(),
+                };
+                let fill = if is_active {
+                    SETTINGS_CARD_ACTIVE
+                } else {
+                    SETTINGS_CARD
+                };
+                let state_click = state;
+                let skin_click = skin_state;
+                let chosen = skin.clone();
+                let label = skin.label.clone();
+                Box(
+                    Modifier::empty()
+                        .fill_max_width()
+                        .background(fill)
+                        .rounded_corners(6.0)
+                        .padding(8.0)
+                        .clickable(move |_| apply_library_skin(state_click, skin_click, &chosen)),
+                    BoxSpec::default(),
+                    move || {
+                        Text(
+                            label.clone(),
+                            Modifier::empty(),
+                            settings_text_style(12.0, SETTINGS_TEXT),
+                        );
+                    },
+                );
+            }
 
-    let button_y = list_y + SETTINGS_ROW_HEIGHT * SETTINGS_MAX_SKIN_ROWS as f32 + 2.0;
-    let state_click = state;
-    let skin_click = skin_state;
-    SettingsButton(
-        ox + 6.0,
-        button_y,
-        width - 12.0,
-        "+ Add Skin...".to_string(),
-        text_color,
-        scale,
-        move || open_skin_file(state_click, skin_click),
+            if skins.len() > shown {
+                Text(
+                    format!("+{} more in your skins folder", skins.len() - shown),
+                    Modifier::empty(),
+                    settings_text_style(10.0, SETTINGS_TEXT_DIM),
+                );
+            }
+
+            let state_add = state;
+            let skin_add = skin_state;
+            SettingsActionButton("+ Add skin…".to_string(), SETTINGS_ACCENT, move || {
+                open_skin_file(state_add, skin_add)
+            });
+        },
     );
 }
 
 #[cfg(target_arch = "wasm32")]
 #[composable]
-fn SettingsSkinsSection(
-    _state: MutableState<WinampState>,
-    _skin_state: WinampSkinState,
-    ox: f32,
-    base_y: f32,
-    width: f32,
-    text_color: [u8; 4],
-    scale: f32,
-) {
-    SystemWinampText(
-        "SKINS".to_string(),
-        ox + 8.0,
-        base_y,
-        width - 16.0,
-        12.0,
-        scale,
-        text_color,
-    );
-    SystemWinampText(
-        "Skin library is available on desktop and mobile".to_string(),
-        ox + 8.0,
-        base_y + 16.0,
-        width - 16.0,
-        12.0,
-        scale,
-        text_color,
+fn SettingsSkinsSection(_state: MutableState<WinampState>, _skin_state: WinampSkinState) {
+    Column(
+        Modifier::empty().fill_max_width(),
+        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(4.0)),
+        || {
+            Text(
+                "SKINS",
+                Modifier::empty(),
+                settings_text_style(11.0, SETTINGS_TEXT_DIM),
+            );
+            Text(
+                "The skin library is available on the desktop and mobile builds.",
+                Modifier::empty(),
+                settings_text_style(11.0, SETTINGS_TEXT_DIM),
+            );
+        },
     );
 }
 
@@ -3188,14 +3552,7 @@ fn SettingsSkinsSection(
 /// place through the Android bridge, polling `update_status.json` each frame.
 #[cfg(target_os = "android")]
 #[composable]
-fn SettingsUpdateSection(
-    _state: MutableState<WinampState>,
-    ox: f32,
-    base_y: f32,
-    width: f32,
-    text_color: [u8; 4],
-    scale: f32,
-) {
+fn SettingsUpdateSection(_state: MutableState<WinampState>) {
     let update_ui = cranpose_core::useState(|| UpdateUi::Idle);
     let poll_gen = cranpose_core::useState(|| 0u64);
 
@@ -3226,143 +3583,109 @@ fn SettingsUpdateSection(
         })
     });
 
-    SystemWinampText(
-        "UPDATES".to_string(),
-        ox + 8.0,
-        base_y,
-        width - 16.0,
-        12.0,
-        scale,
-        text_color,
-    );
-    SystemWinampText(
-        update_ui.get().status_line(),
-        ox + 8.0,
-        base_y + 14.0,
-        width - 16.0,
-        12.0,
-        scale,
-        text_color,
-    );
-
-    let button_y = base_y + 30.0;
-    match update_ui.get() {
-        UpdateUi::Available { version, url } => {
-            SettingsButton(
-                ox + 6.0,
-                button_y,
-                width - 12.0,
-                format!("Download & Install v{version}"),
-                text_color,
-                scale,
-                move || {
-                    update_ui.set(UpdateUi::Downloading { pct: 0 });
-                    match android_bridge::request_install_update(&url) {
-                        Ok(()) => poll_gen.update(|gen| *gen += 1),
-                        Err(error) => update_ui.set(UpdateUi::Error(error)),
-                    }
-                },
+    Column(
+        Modifier::empty().fill_max_width(),
+        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(6.0)),
+        move || {
+            Text(
+                "UPDATES",
+                Modifier::empty(),
+                settings_text_style(11.0, SETTINGS_TEXT_DIM),
             );
-        }
-        UpdateUi::Checking | UpdateUi::Downloading { .. } | UpdateUi::Installing => {}
-        _ => {
-            SettingsButton(
-                ox + 6.0,
-                button_y,
-                width - 12.0,
-                "Check for Updates".to_string(),
-                text_color,
-                scale,
-                move || {
-                    update_ui.set(UpdateUi::Checking);
-                    match android_bridge::request_check_update(env!("CARGO_PKG_VERSION")) {
-                        Ok(()) => poll_gen.update(|gen| *gen += 1),
-                        Err(error) => update_ui.set(UpdateUi::Error(error)),
-                    }
-                },
+            Text(
+                update_ui.get().status_line(),
+                Modifier::empty(),
+                settings_text_style(12.0, SETTINGS_TEXT),
             );
-        }
-    }
+            match update_ui.get() {
+                UpdateUi::Available { version, url } => {
+                    SettingsActionButton(
+                        format!("Download & install v{version}"),
+                        SETTINGS_ACCENT,
+                        move || {
+                            update_ui.set(UpdateUi::Downloading { pct: 0 });
+                            match android_bridge::request_install_update(&url) {
+                                Ok(()) => poll_gen.update(|gen| *gen += 1),
+                                Err(error) => update_ui.set(UpdateUi::Error(error)),
+                            }
+                        },
+                    );
+                }
+                UpdateUi::Checking | UpdateUi::Downloading { .. } | UpdateUi::Installing => {}
+                _ => {
+                    SettingsActionButton(
+                        "Check for updates".to_string(),
+                        SETTINGS_ACCENT,
+                        move || {
+                            update_ui.set(UpdateUi::Checking);
+                            match android_bridge::request_check_update(env!("CARGO_PKG_VERSION")) {
+                                Ok(()) => poll_gen.update(|gen| *gen += 1),
+                                Err(error) => update_ui.set(UpdateUi::Error(error)),
+                            }
+                        },
+                    );
+                }
+            }
+        },
+    );
 }
 
 /// Desktop/iOS update section: no in-app HTTP client, so this just opens the
 /// GitHub releases page in the default browser.
 #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 #[composable]
-fn SettingsUpdateSection(
-    state: MutableState<WinampState>,
-    ox: f32,
-    base_y: f32,
-    width: f32,
-    text_color: [u8; 4],
-    scale: f32,
-) {
-    SystemWinampText(
-        "UPDATES".to_string(),
-        ox + 8.0,
-        base_y,
-        width - 16.0,
-        12.0,
-        scale,
-        text_color,
-    );
-    SystemWinampText(
-        format!("Current version v{}", env!("CARGO_PKG_VERSION")),
-        ox + 8.0,
-        base_y + 14.0,
-        width - 16.0,
-        12.0,
-        scale,
-        text_color,
-    );
-    let state_click = state;
-    SettingsButton(
-        ox + 6.0,
-        base_y + 30.0,
-        width - 12.0,
-        "View Releases on GitHub".to_string(),
-        text_color,
-        scale,
+fn SettingsUpdateSection(state: MutableState<WinampState>) {
+    Column(
+        Modifier::empty().fill_max_width(),
+        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(6.0)),
         move || {
-            let opened = open_releases_page();
-            state_click.update(|s| {
-                s.status = if opened {
-                    "Opened releases page".to_string()
-                } else {
-                    "See github.com/samoylenkodmitry/cranamp/releases".to_string()
-                };
-            });
+            Text(
+                "UPDATES",
+                Modifier::empty(),
+                settings_text_style(11.0, SETTINGS_TEXT_DIM),
+            );
+            Text(
+                format!("Current version v{}", env!("CARGO_PKG_VERSION")),
+                Modifier::empty(),
+                settings_text_style(12.0, SETTINGS_TEXT),
+            );
+            let state_click = state;
+            SettingsActionButton(
+                "View releases on GitHub".to_string(),
+                SETTINGS_CARD,
+                move || {
+                    let opened = open_releases_page();
+                    state_click.update(|s| {
+                        s.status = if opened {
+                            "Opened releases page".to_string()
+                        } else {
+                            "See github.com/samoylenkodmitry/cranamp/releases".to_string()
+                        };
+                    });
+                },
+            );
         },
     );
 }
 
 #[cfg(target_arch = "wasm32")]
 #[composable]
-fn SettingsUpdateSection(
-    _state: MutableState<WinampState>,
-    ox: f32,
-    base_y: f32,
-    width: f32,
-    text_color: [u8; 4],
-    scale: f32,
-) {
-    SystemWinampText(
-        "UPDATES".to_string(),
-        ox + 8.0,
-        base_y,
-        width - 16.0,
-        12.0,
-        scale,
-        text_color,
-    );
-    SystemWinampText(
-        "Reload the page for the latest web build".to_string(),
-        ox + 8.0,
-        base_y + 14.0,
-        width - 16.0,
-        12.0,
-        scale,
-        text_color,
+fn SettingsUpdateSection(_state: MutableState<WinampState>) {
+    Column(
+        Modifier::empty().fill_max_width(),
+        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(4.0)),
+        || {
+            Text(
+                "UPDATES",
+                Modifier::empty(),
+                settings_text_style(11.0, SETTINGS_TEXT_DIM),
+            );
+            Text(
+                "Reload the page for the latest web build.",
+                Modifier::empty(),
+                settings_text_style(11.0, SETTINGS_TEXT_DIM),
+            );
+        },
     );
 }
 
@@ -3395,105 +3718,53 @@ fn open_releases_page() -> bool {
     }
 }
 
-/// The Settings content, drawn at a local origin so it can be mounted either in
-/// a dedicated desktop window (origin 0,0, draggable header) or centered in the
-/// full-surface modal overlay used on Android/mobile.
+/// The modern Settings content. Layout-driven (no coordinate math), so it fills
+/// whatever container it is mounted in: a dedicated desktop window or the
+/// centered full-surface modal on Android/mobile/web. `origin_*` are unused now
+/// that layout handles placement; `with_drag` adds a window drag region over the
+/// desktop title area.
 #[composable]
 fn SettingsPanel(
     state: MutableState<WinampState>,
     skin_state: WinampSkinState,
     text_color: [u8; 4],
-    origin_x: f32,
-    origin_y: f32,
+    _origin_x: f32,
+    _origin_y: f32,
     with_drag: bool,
     scale: f32,
 ) {
-    let ox = origin_x;
-    let oy = origin_y;
-    let w = SETTINGS_WIDTH;
-    let h = SETTINGS_HEIGHT;
-
-    FilledRect(ox, oy, w, h, scale, Color(0.04, 0.05, 0.07, 1.0));
-    FilledRect(ox, oy, w, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
-    FilledRect(
-        ox,
-        oy + h - 1.0,
-        w,
-        1.0,
-        scale,
-        Color(0.30, 0.42, 0.50, 1.0),
-    );
-    FilledRect(ox, oy, 1.0, h, scale, Color(0.30, 0.42, 0.50, 1.0));
-    FilledRect(
-        ox + w - 1.0,
-        oy,
-        1.0,
-        h,
-        scale,
-        Color(0.30, 0.42, 0.50, 1.0),
-    );
-
-    FilledRect(ox, oy, w, 16.0, scale, Color(0.08, 0.12, 0.16, 1.0));
-    if with_drag {
-        WindowDragHandle(
-            WinampDragTarget::NativeGroup,
-            (ox, oy, w - 20.0, 16.0),
-            scale,
-        );
-    }
-    SystemWinampText(
-        "CRANAMP SETTINGS".to_string(),
-        ox + 8.0,
-        oy + 3.0,
-        w - 30.0,
-        12.0,
-        scale,
-        text_color,
-    );
-    {
-        let state_click = state;
-        FilledRect(
-            ox + w - 17.0,
-            oy + 2.0,
-            13.0,
-            12.0,
-            scale,
-            Color(0.10, 0.16, 0.22, 1.0),
-        );
-        SystemWinampText(
-            "X".to_string(),
-            ox + w - 13.0,
-            oy + 3.0,
-            10.0,
-            12.0,
-            scale,
-            text_color,
-        );
-        ClickTarget(ox + w - 18.0, oy + 1.0, 16.0, 14.0, scale, move || {
-            state_click.update(|s| s.settings_open = false);
-        });
-    }
-
-    SettingsSkinsSection(state, skin_state, ox, oy + 22.0, w, text_color, scale);
-
-    FilledRect(
-        ox + 6.0,
-        oy + 154.0,
-        w - 12.0,
-        1.0,
-        scale,
-        Color(0.12, 0.20, 0.24, 1.0),
-    );
-    SettingsUpdateSection(state, ox, oy + 160.0, w, text_color, scale);
-
-    SystemWinampText(
-        format!("Cranamp v{} on cranpose", env!("CARGO_PKG_VERSION")),
-        ox + 8.0,
-        oy + 212.0,
-        w - 16.0,
-        12.0,
-        scale,
-        text_color,
+    let _ = text_color;
+    Box(
+        Modifier::empty()
+            .fill_max_size()
+            .background(SETTINGS_BG)
+            .rounded_corners(10.0),
+        BoxSpec::default(),
+        move || {
+            if with_drag {
+                WindowDragHandle(
+                    WinampDragTarget::NativeGroup,
+                    (0.0, 0.0, SETTINGS_WIDTH - 30.0, 26.0),
+                    scale,
+                );
+            }
+            Column(
+                Modifier::empty().fill_max_size().padding(14.0),
+                ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(12.0)),
+                move || {
+                    SettingsHeader(state);
+                    SettingsSkinsSection(state, skin_state);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    SettingsSyncSection(state);
+                    SettingsUpdateSection(state);
+                    Text(
+                        format!("Cranamp v{} · cranpose", env!("CARGO_PKG_VERSION")),
+                        Modifier::empty(),
+                        settings_text_style(10.0, SETTINGS_TEXT_DIM),
+                    );
+                },
+            );
+        },
     );
 }
 
@@ -7040,6 +7311,10 @@ fn previous_track(state: MutableState<WinampState>) {
 }
 
 fn advance_finished_track(state: MutableState<WinampState>) {
+    // The just-finished track is still `current_index` here, with its duration
+    // known — the ideal moment to record a completed play.
+    #[cfg(not(target_arch = "wasm32"))]
+    sync_record_play(&state.get_non_reactive());
     advance_track(state, TrackDirection::Next, TrackAdvanceMode::Automatic);
 }
 
@@ -7163,6 +7438,15 @@ fn finish_playlist(state: MutableState<WinampState>) {
 }
 
 fn start_track(state: MutableState<WinampState>, index: usize) {
+    // A pending resume cue only applies to its own track; playing anything else
+    // cancels it.
+    #[cfg(not(target_arch = "wasm32"))]
+    state.update(|s| {
+        if !matches!(s.pending_resume, Some((cued, _)) if cued == index) {
+            s.pending_resume = None;
+        }
+    });
+
     let snapshot = state.get_non_reactive();
     let Some(track) = snapshot.playlist.get(index).cloned() else {
         state.update(|s| s.status = "Track Missing".to_string());
@@ -7868,6 +8152,13 @@ fn save_player_state_text(text: &str) -> Result<(), String> {
 #[cfg(not(target_arch = "wasm32"))]
 fn player_config_path() -> std::path::PathBuf {
     config_home_dir().join("cranamp").join("player.conf")
+}
+
+/// Path to the cross-device sync configuration (device id, label, folder). Lives
+/// beside `player.conf`; the sync runtime reads/writes it. See [`crate::sync`].
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn sync_config_path() -> std::path::PathBuf {
+    config_home_dir().join("cranamp").join("sync.conf")
 }
 
 #[cfg(target_arch = "wasm32")]
