@@ -32,13 +32,13 @@ use cranpose_core::{self, MutableState};
 use cranpose_foundation::text::{TextFieldState, TextRange};
 use cranpose_foundation::PointerButton;
 use cranpose_ui::text::{FontFamily, ParagraphStyle, TextOverflow, TextUnit};
-#[cfg(target_os = "android")]
-use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui::{
     composable, current_density, Alignment, BasicText, BasicTextField, Box, BoxSpec, Button,
     ButtonSpec, Canvas, Color, Column, ColumnSpec, Modifier, Point, PointerEventKind,
     PointerInputScope, Size, SpanStyle, Text, TextStyle,
 };
+#[cfg(target_os = "android")]
+use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
 #[cfg(target_os = "android")]
@@ -1141,13 +1141,7 @@ fn SkinPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinStat
                                 .ok()
                                 .map(|path| path.to_string_lossy().to_string())
                                 .unwrap_or(display_path);
-                            apply_loaded_skin(
-                                state,
-                                skin_state,
-                                &bytes,
-                                &label,
-                                Some(stored_path),
-                            );
+                            apply_loaded_skin(state, skin_state, &bytes, &label, Some(stored_path));
                         }
                         Err(error) => state.update(|s| {
                             s.pending_skin_pick = false;
@@ -2028,15 +2022,7 @@ fn WinampNativeWindows(
                 {
                     let display_text_color = skin.display_text_color;
                     move || {
-                        SettingsPanel(
-                            state,
-                            skin_state,
-                            display_text_color,
-                            0.0,
-                            0.0,
-                            true,
-                            scale,
-                        );
+                        SettingsPanel(state, skin_state, display_text_color, 0.0, 0.0, true, scale);
                     }
                 },
             );
@@ -3054,8 +3040,23 @@ fn SettingsButton(
     let height = SETTINGS_BUTTON_HEIGHT;
     FilledRect(x, y, width, height, scale, Color(0.10, 0.16, 0.22, 1.0));
     FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
-    FilledRect(x, y + height - 1.0, width, 1.0, scale, Color(0.02, 0.03, 0.04, 1.0));
-    SystemWinampText(label, x + 6.0, y + 2.0, width - 12.0, 12.0, scale, text_color);
+    FilledRect(
+        x,
+        y + height - 1.0,
+        width,
+        1.0,
+        scale,
+        Color(0.02, 0.03, 0.04, 1.0),
+    );
+    SystemWinampText(
+        label,
+        x + 6.0,
+        y + 2.0,
+        width - 12.0,
+        12.0,
+        scale,
+        text_color,
+    );
     ClickTarget(x, y, width, height, scale, on_click);
 }
 
@@ -3414,9 +3415,23 @@ fn SettingsPanel(
 
     FilledRect(ox, oy, w, h, scale, Color(0.04, 0.05, 0.07, 1.0));
     FilledRect(ox, oy, w, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
-    FilledRect(ox, oy + h - 1.0, w, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
+    FilledRect(
+        ox,
+        oy + h - 1.0,
+        w,
+        1.0,
+        scale,
+        Color(0.30, 0.42, 0.50, 1.0),
+    );
     FilledRect(ox, oy, 1.0, h, scale, Color(0.30, 0.42, 0.50, 1.0));
-    FilledRect(ox + w - 1.0, oy, 1.0, h, scale, Color(0.30, 0.42, 0.50, 1.0));
+    FilledRect(
+        ox + w - 1.0,
+        oy,
+        1.0,
+        h,
+        scale,
+        Color(0.30, 0.42, 0.50, 1.0),
+    );
 
     FilledRect(ox, oy, w, 16.0, scale, Color(0.08, 0.12, 0.16, 1.0));
     if with_drag {
@@ -3437,7 +3452,14 @@ fn SettingsPanel(
     );
     {
         let state_click = state;
-        FilledRect(ox + w - 17.0, oy + 2.0, 13.0, 12.0, scale, Color(0.10, 0.16, 0.22, 1.0));
+        FilledRect(
+            ox + w - 17.0,
+            oy + 2.0,
+            13.0,
+            12.0,
+            scale,
+            Color(0.10, 0.16, 0.22, 1.0),
+        );
         SystemWinampText(
             "X".to_string(),
             ox + w - 13.0,
@@ -3515,7 +3537,10 @@ fn SettingsModal(
                 let skin_panel = skin_state;
                 Box(
                     Modifier::empty()
-                        .size_points(scaled(SETTINGS_WIDTH, scale), scaled(SETTINGS_HEIGHT, scale))
+                        .size_points(
+                            scaled(SETTINGS_WIDTH, scale),
+                            scaled(SETTINGS_HEIGHT, scale),
+                        )
                         .clickable(|_| {}),
                     BoxSpec::default(),
                     move || {
@@ -8322,7 +8347,10 @@ mod tests {
             "Theme.wsz"
         );
         // A name without a recognized extension gains `.wsz`.
-        assert_eq!(sanitize_skin_file_name("Untitled Skin"), "Untitled Skin.wsz");
+        assert_eq!(
+            sanitize_skin_file_name("Untitled Skin"),
+            "Untitled Skin.wsz"
+        );
         // Empty/blank names fall back to a default.
         assert_eq!(sanitize_skin_file_name("   "), "skin.wsz");
     }

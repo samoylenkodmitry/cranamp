@@ -80,7 +80,12 @@ impl Renderer for HitGraphRenderer {
         let mut sink = SceneHitSink {
             scene: &mut self.scene,
         };
-        collect_hits_from_graph(&graph.root, ProjectiveTransform::identity(), &mut sink, None);
+        collect_hits_from_graph(
+            &graph.root,
+            ProjectiveTransform::identity(),
+            &mut sink,
+            None,
+        );
         self.scene.replace_graph(graph);
         Ok(())
     }
@@ -98,7 +103,12 @@ impl Renderer for HitGraphRenderer {
             let mut sink = SceneHitSink {
                 scene: &mut self.scene,
             };
-            collect_hits_from_graph(&graph.root, ProjectiveTransform::identity(), &mut sink, None);
+            collect_hits_from_graph(
+                &graph.root,
+                ProjectiveTransform::identity(),
+                &mut sink,
+                None,
+            );
             self.scene.replace_graph(graph);
         }
         Ok(())
