@@ -112,3 +112,10 @@ web-sys = { version = "0.3", optional = true, features = [
     "Url",
     "Window",
 ] }
+
+# Framework-level e2e tests drive the real cranpose hit-dispatch pipeline
+# headlessly (see tests/settings_e2e.rs). Published crates, same 0.1.23 as the
+# cranpose runtime deps above.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+cranpose-app-shell = "0.1.23"
+cranpose-render-common = "0.1.23"

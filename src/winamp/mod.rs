@@ -32,15 +32,13 @@ use cranpose_core::{self, MutableState};
 use cranpose_foundation::text::{TextFieldState, TextRange};
 use cranpose_foundation::PointerButton;
 use cranpose_ui::text::{FontFamily, ParagraphStyle, TextOverflow, TextUnit};
-#[cfg(target_os = "android")]
-use cranpose_ui::BoxWithConstraints;
-#[cfg(target_os = "android")]
-use cranpose_ui::BoxWithConstraintsScope;
 use cranpose_ui::{
-    composable, current_density, BasicText, BasicTextField, Box, BoxSpec, Button, ButtonSpec,
-    Canvas, Color, Column, ColumnSpec, Modifier, Point, PointerEventKind, PointerInputScope, Size,
-    SpanStyle, Text, TextStyle,
+    composable, current_density, Alignment, BasicText, BasicTextField, Box, BoxSpec, Button,
+    ButtonSpec, Canvas, Color, Column, ColumnSpec, Modifier, Point, PointerEventKind,
+    PointerInputScope, Size, SpanStyle, Text, TextStyle,
 };
+#[cfg(target_os = "android")]
+use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
 #[cfg(target_os = "android")]
@@ -143,6 +141,7 @@ struct WinampState {
     eq_enabled: bool,
     eq_auto: bool,
     eq_preset_menu_open: bool,
+    settings_open: bool,
     eq_values: [f32; 11],
     skin_path: Option<String>,
     shuffle_order: Vec<usize>,
@@ -182,6 +181,7 @@ impl PartialEq for WinampState {
             && self.eq_enabled == other.eq_enabled
             && self.eq_auto == other.eq_auto
             && self.eq_preset_menu_open == other.eq_preset_menu_open
+            && self.settings_open == other.settings_open
             && self.eq_values == other.eq_values
             && self.skin_path == other.skin_path
             && self.shuffle_order == other.shuffle_order
@@ -232,6 +232,7 @@ impl Default for WinampState {
             eq_enabled: true,
             eq_auto: false,
             eq_preset_menu_open: false,
+            settings_open: false,
             eq_values: DEFAULT_EQ_VALUES,
             skin_path: None,
             shuffle_order: Vec::new(),
@@ -379,6 +380,7 @@ const MAIN_SKIN_CHOOSER_HIT_AREA: SpriteRect = (249.0, 79.0, 26.0, 33.0);
 const CRANAMP_WINAMP_MAIN_TITLE: &str = "Cranamp Winamp";
 const CRANAMP_WINAMP_EQUALIZER_TITLE: &str = "Cranamp Winamp Equalizer";
 const CRANAMP_WINAMP_PLAYLIST_TITLE: &str = "Cranamp Winamp Playlist";
+const CRANAMP_WINAMP_SETTINGS_TITLE: &str = "Cranamp Settings";
 const WINAMP_DEFAULT_SCREEN_POSITION: Point = Point { x: 140.0, y: 120.0 };
 const TITLE_MARQUEE_CHARS_PER_SECOND: f32 = 2.0;
 const PLAYBACK_PROGRESS_UPDATE_MS: u64 = 1_000;
@@ -739,6 +741,141 @@ fn load_skin_file(path: &std::path::Path) -> Result<WinampSkin, String> {
     load_skin(&bytes).map_err(|err| format!("{err:#}"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+const BUNDLED_SKIN_LABEL: &str = "Bundled (Cranamp)";
+
+/// A skin entry shown in the Settings skin list. `path` is `None` for the
+/// built-in bundled skin and `Some` for a `.wsz`/`.zip` file copied into the
+/// library directory.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, PartialEq)]
+struct LibrarySkin {
+    label: String,
+    path: Option<std::path::PathBuf>,
+}
+
+/// On-disk skin library: `~/.config/cranamp/skins` (desktop) or the app config
+/// dir under the Android bridge directory. Added skins are copied here so they
+/// persist and appear in the Settings list.
+#[cfg(not(target_arch = "wasm32"))]
+fn skins_library_dir() -> std::path::PathBuf {
+    config_home_dir().join("cranamp").join("skins")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ensure_skins_library_dir() -> std::io::Result<std::path::PathBuf> {
+    let dir = skins_library_dir();
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Lists every applyable skin: the bundled skin first, then each `.wsz`/`.zip`
+/// in the library directory sorted by file name.
+#[cfg(not(target_arch = "wasm32"))]
+fn list_library_skins() -> Vec<LibrarySkin> {
+    let mut skins = vec![LibrarySkin {
+        label: BUNDLED_SKIN_LABEL.to_string(),
+        path: None,
+    }];
+    if let Ok(entries) = std::fs::read_dir(skins_library_dir()) {
+        let mut files: Vec<std::path::PathBuf> = entries
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.is_file() && is_skin_archive(path))
+            .collect();
+        files.sort();
+        for path in files {
+            let label = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("skin")
+                .to_string();
+            skins.push(LibrarySkin {
+                label,
+                path: Some(path),
+            });
+        }
+    }
+    skins
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_skin_archive(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("wsz") | Some("zip")
+    )
+}
+
+/// Copies picked skin bytes into the library directory so the skin persists and
+/// shows up in the Settings list. Returns the stored path.
+#[cfg(not(target_arch = "wasm32"))]
+fn copy_into_library(bytes: &[u8], file_name: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = ensure_skins_library_dir()?;
+    let path = dir.join(sanitize_skin_file_name(file_name));
+    std::fs::write(&path, bytes)?;
+    Ok(path)
+}
+
+/// Strips any directory components from a picked skin name and forces a
+/// `.wsz`/`.zip` extension so the copy lands as a single library file.
+#[cfg(not(target_arch = "wasm32"))]
+fn sanitize_skin_file_name(file_name: &str) -> String {
+    let base = file_name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(file_name)
+        .trim();
+    let base = if base.is_empty() { "skin.wsz" } else { base };
+    let cleaned: String = base
+        .chars()
+        .map(|ch| if ch.is_control() { '_' } else { ch })
+        .collect();
+    let lower = cleaned.to_ascii_lowercase();
+    if lower.ends_with(".wsz") || lower.ends_with(".zip") {
+        cleaned
+    } else {
+        format!("{cleaned}.wsz")
+    }
+}
+
+/// Applies a library skin: loads the file in the background (and persists its
+/// path) for a real skin, or restores the bundled skin for the `None` entry.
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_library_skin(
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    skin: &LibrarySkin,
+) {
+    match &skin.path {
+        Some(path) => {
+            let label = skin.label.clone();
+            load_skin_file_background(
+                state,
+                skin_state,
+                path.clone(),
+                true,
+                Some(format!("Loaded Skin {label}")),
+                true,
+            );
+        }
+        None => match bundled_skin() {
+            Ok(loaded) => {
+                skin_state.set(Ok(loaded));
+                state.update(|s| {
+                    s.skin_path = None;
+                    s.status = "Loaded Bundled Skin".to_string();
+                });
+            }
+            Err(error) => {
+                state.update(|s| s.status = format!("Skin Load Failed: {error}"));
+            }
+        },
+    }
+}
+
 #[composable]
 fn WinampRuntimeEffects(
     state: MutableState<WinampState>,
@@ -996,13 +1133,15 @@ fn SkinPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinStat
                     match entry.read_bytes().await {
                         Ok(bytes) => {
                             state.update(|s| s.pending_skin_pick = false);
-                            apply_loaded_skin(
-                                state,
-                                skin_state,
-                                &bytes,
-                                &label,
-                                Some(display_path),
-                            );
+                            // Persist the picked skin into the library so it
+                            // survives restarts and shows up in Settings. Fall
+                            // back to the picker's display path if the copy
+                            // fails (e.g. read-only config dir).
+                            let stored_path = copy_into_library(&bytes, &label)
+                                .ok()
+                                .map(|path| path.to_string_lossy().to_string())
+                                .unwrap_or(display_path);
+                            apply_loaded_skin(state, skin_state, &bytes, &label, Some(stored_path));
                         }
                         Err(error) => state.update(|s| {
                             s.pending_skin_pick = false;
@@ -1288,6 +1427,13 @@ pub fn WinampAndroidApp() {
                 };
                 WinampStackedStage(skin_for_stack.clone(), tab_state.player, skin_state, layout);
             });
+
+            SettingsModal(
+                tab_state.player,
+                skin_state,
+                skin.display_text_color,
+                ui_scale(),
+            );
         },
     );
 }
@@ -1320,6 +1466,13 @@ pub fn WinampWebStackedApp() {
                 tab_state.player,
                 skin_state,
                 web_stacked_layout(&snapshot),
+            );
+
+            SettingsModal(
+                tab_state.player,
+                skin_state,
+                skin.display_text_color,
+                ui_scale(),
             );
         },
     );
@@ -1439,6 +1592,8 @@ fn WinampInlineStage(
                     scale,
                 );
             }
+
+            SettingsModal(state, skin_state, skin.display_text_color, scale);
         },
     );
 }
@@ -1779,6 +1934,7 @@ fn WinampNativeWindows(
     scale: f32,
     snapshot: WinampState,
 ) {
+    let settings_window = rememberWindowState(SETTINGS_WIDTH, SETTINGS_HEIGHT);
     WindowGroup("cranamp-winamp", winamp_attach_policy(), move || {
         WindowNode(
             winamp_main_window_id(),
@@ -1854,6 +2010,23 @@ fn WinampNativeWindows(
                 },
             );
         }
+
+        if snapshot.settings_open {
+            WindowNode(
+                settings_window_id(),
+                winamp_window_config(WinampWindowPlacement {
+                    title: CRANAMP_WINAMP_SETTINGS_TITLE,
+                    initial_position: WinampInitialWindowPosition::Host(inline_windows.main.get()),
+                    state: settings_window,
+                }),
+                {
+                    let display_text_color = skin.display_text_color;
+                    move || {
+                        SettingsPanel(state, skin_state, display_text_color, 0.0, 0.0, true, scale);
+                    }
+                },
+            );
+        }
     });
 }
 
@@ -1866,6 +2039,7 @@ pub fn WinampStandaloneApp() {
         playlist: rememberWindowState(PLAYLIST_WIDTH, PLAYLIST_HEIGHT),
     };
     remember_saved_window_config(peer_windows);
+    let settings_window = rememberWindowState(SETTINGS_WIDTH, SETTINGS_HEIGHT);
     let skin_state = remember_winamp_skin(state);
     WinampRuntimeEffects(state, peer_windows, skin_state);
     let snapshot = state.get();
@@ -1951,6 +2125,33 @@ pub fn WinampStandaloneApp() {
                             state,
                             WinampDragTarget::NativeGroup,
                             WinampWindowSize::State(peer_windows.playlist),
+                            ui_scale(),
+                        );
+                    }
+                },
+            );
+        }
+
+        if snapshot.settings_open {
+            WindowNode(
+                settings_window_id(),
+                winamp_window_config(WinampWindowPlacement {
+                    title: CRANAMP_WINAMP_SETTINGS_TITLE,
+                    initial_position: WinampInitialWindowPosition::Screen(
+                        default_settings_position(),
+                    ),
+                    state: settings_window,
+                }),
+                {
+                    let display_text_color = skin.display_text_color;
+                    move || {
+                        SettingsPanel(
+                            state,
+                            skin_state,
+                            display_text_color,
+                            0.0,
+                            0.0,
+                            true,
                             ui_scale(),
                         );
                     }
@@ -2431,7 +2632,6 @@ fn MainWindow(
 
             {
                 let state_click = state;
-                let skin_click = skin_state;
                 ClickTarget(
                     MAIN_SKIN_CHOOSER_HIT_AREA.0,
                     MAIN_SKIN_CHOOSER_HIT_AREA.1,
@@ -2439,7 +2639,14 @@ fn MainWindow(
                     MAIN_SKIN_CHOOSER_HIT_AREA.3,
                     scale,
                     move || {
-                        open_skin_file(state_click, skin_click);
+                        state_click.update(|s| {
+                            s.settings_open = !s.settings_open;
+                            s.status = if s.settings_open {
+                                "Settings".to_string()
+                            } else {
+                                "Settings Closed".to_string()
+                            };
+                        });
                     },
                 );
             }
@@ -2751,6 +2958,598 @@ fn apply_eq_preset(state: MutableState<WinampState>, preset: EqPreset) {
 
 fn eq_preset_menu_rows() -> usize {
     EQ_PRESETS.len().div_ceil(EQ_PRESET_MENU_COLUMNS)
+}
+
+const SETTINGS_WIDTH: f32 = 264.0;
+const SETTINGS_HEIGHT: f32 = 230.0;
+#[cfg(not(target_arch = "wasm32"))]
+const SETTINGS_ROW_HEIGHT: f32 = 14.0;
+#[cfg(not(target_arch = "wasm32"))]
+const SETTINGS_MAX_SKIN_ROWS: usize = 7;
+#[cfg(not(target_arch = "wasm32"))]
+const SETTINGS_BUTTON_HEIGHT: f32 = 16.0;
+
+/// Transient state for the Settings "Updates" section. Lives in a local
+/// `useState` inside the update section (not on `WinampState`) so per-frame
+/// download progress does not invalidate the whole player tree. Android-only:
+/// other platforms link out to the releases page instead of self-updating.
+#[cfg(target_os = "android")]
+#[derive(Clone, PartialEq)]
+enum UpdateUi {
+    Idle,
+    Checking,
+    UpToDate,
+    Available { version: String, url: String },
+    Downloading { pct: u8 },
+    Installing,
+    Error(String),
+}
+
+#[cfg(target_os = "android")]
+impl UpdateUi {
+    fn status_line(&self) -> String {
+        match self {
+            UpdateUi::Idle => format!("Current version v{}", env!("CARGO_PKG_VERSION")),
+            UpdateUi::Checking => "Checking GitHub for updates...".to_string(),
+            UpdateUi::UpToDate => format!("Up to date (v{})", env!("CARGO_PKG_VERSION")),
+            UpdateUi::Available { version, .. } => format!("Update available: v{version}"),
+            UpdateUi::Downloading { pct } => format!("Downloading update... {pct}%"),
+            UpdateUi::Installing => "Launching installer...".to_string(),
+            UpdateUi::Error(error) => format!("Update error: {error}"),
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            UpdateUi::UpToDate
+                | UpdateUi::Available { .. }
+                | UpdateUi::Installing
+                | UpdateUi::Error(_)
+        )
+    }
+
+    #[cfg(target_os = "android")]
+    fn from_status(status: android_bridge::UpdateStatus) -> Self {
+        use android_bridge::UpdateStatus;
+        match status {
+            UpdateStatus::Checking => UpdateUi::Checking,
+            UpdateStatus::UpToDate => UpdateUi::UpToDate,
+            UpdateStatus::Available { version, url } => UpdateUi::Available { version, url },
+            UpdateStatus::Downloading { pct } => UpdateUi::Downloading { pct },
+            UpdateStatus::Installing => UpdateUi::Installing,
+            UpdateStatus::Error(error) => UpdateUi::Error(error),
+        }
+    }
+}
+
+/// A simple filled button used throughout the Settings panel. Native only; the
+/// web Settings sections render static text instead.
+#[cfg(not(target_arch = "wasm32"))]
+#[composable]
+fn SettingsButton(
+    x: f32,
+    y: f32,
+    width: f32,
+    label: String,
+    text_color: [u8; 4],
+    scale: f32,
+    on_click: impl Fn() + 'static,
+) {
+    let height = SETTINGS_BUTTON_HEIGHT;
+    FilledRect(x, y, width, height, scale, Color(0.10, 0.16, 0.22, 1.0));
+    FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
+    FilledRect(
+        x,
+        y + height - 1.0,
+        width,
+        1.0,
+        scale,
+        Color(0.02, 0.03, 0.04, 1.0),
+    );
+    SystemWinampText(
+        label,
+        x + 6.0,
+        y + 2.0,
+        width - 12.0,
+        12.0,
+        scale,
+        text_color,
+    );
+    ClickTarget(x, y, width, height, scale, on_click);
+}
+
+/// Skins section: the bundled skin plus every library file, with an "Add Skin"
+/// button that routes through the existing native skin picker.
+#[cfg(not(target_arch = "wasm32"))]
+#[composable]
+fn SettingsSkinsSection(
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    ox: f32,
+    base_y: f32,
+    width: f32,
+    text_color: [u8; 4],
+    scale: f32,
+) {
+    let active_path = state.get().skin_path.clone();
+    SystemWinampText(
+        "SKINS".to_string(),
+        ox + 8.0,
+        base_y,
+        width - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+
+    let list_y = base_y + 14.0;
+    let skins = list_library_skins();
+    let shown = skins.len().min(SETTINGS_MAX_SKIN_ROWS);
+    for (index, skin) in skins.iter().take(shown).enumerate() {
+        let row_y = list_y + SETTINGS_ROW_HEIGHT * index as f32;
+        let is_active = match &skin.path {
+            Some(path) => active_path.as_deref() == Some(path.to_string_lossy().as_ref()),
+            None => active_path.is_none(),
+        };
+        if is_active {
+            FilledRect(
+                ox + 6.0,
+                row_y,
+                width - 12.0,
+                SETTINGS_ROW_HEIGHT,
+                scale,
+                Color(0.16, 0.26, 0.34, 1.0),
+            );
+        }
+        let prefix = if is_active { "> " } else { "   " };
+        SystemWinampText(
+            format!("{prefix}{}", skin.label),
+            ox + 8.0,
+            row_y + 1.0,
+            width - 16.0,
+            SETTINGS_ROW_HEIGHT,
+            scale,
+            text_color,
+        );
+        let state_click = state;
+        let skin_click = skin_state;
+        let chosen = skin.clone();
+        ClickTarget(
+            ox + 6.0,
+            row_y,
+            width - 12.0,
+            SETTINGS_ROW_HEIGHT,
+            scale,
+            move || apply_library_skin(state_click, skin_click, &chosen),
+        );
+    }
+
+    if skins.len() > shown {
+        let more_y = list_y + SETTINGS_ROW_HEIGHT * shown as f32;
+        SystemWinampText(
+            format!("...and {} more in skins folder", skins.len() - shown),
+            ox + 8.0,
+            more_y + 1.0,
+            width - 16.0,
+            SETTINGS_ROW_HEIGHT,
+            scale,
+            text_color,
+        );
+    }
+
+    let button_y = list_y + SETTINGS_ROW_HEIGHT * SETTINGS_MAX_SKIN_ROWS as f32 + 2.0;
+    let state_click = state;
+    let skin_click = skin_state;
+    SettingsButton(
+        ox + 6.0,
+        button_y,
+        width - 12.0,
+        "+ Add Skin...".to_string(),
+        text_color,
+        scale,
+        move || open_skin_file(state_click, skin_click),
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+#[composable]
+fn SettingsSkinsSection(
+    _state: MutableState<WinampState>,
+    _skin_state: WinampSkinState,
+    ox: f32,
+    base_y: f32,
+    width: f32,
+    text_color: [u8; 4],
+    scale: f32,
+) {
+    SystemWinampText(
+        "SKINS".to_string(),
+        ox + 8.0,
+        base_y,
+        width - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+    SystemWinampText(
+        "Skin library is available on desktop and mobile".to_string(),
+        ox + 8.0,
+        base_y + 16.0,
+        width - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+}
+
+/// Android update section: checks GitHub, then downloads + installs the APK in
+/// place through the Android bridge, polling `update_status.json` each frame.
+#[cfg(target_os = "android")]
+#[composable]
+fn SettingsUpdateSection(
+    _state: MutableState<WinampState>,
+    ox: f32,
+    base_y: f32,
+    width: f32,
+    text_color: [u8; 4],
+    scale: f32,
+) {
+    let update_ui = cranpose_core::useState(|| UpdateUi::Idle);
+    let poll_gen = cranpose_core::useState(|| 0u64);
+
+    let poll_gen_value = poll_gen.get();
+    cranpose_core::LaunchedEffectAsync!(poll_gen_value, move |scope| {
+        Box::pin(async move {
+            if poll_gen_value == 0 {
+                return;
+            }
+            let clock = scope.runtime().frame_clock();
+            loop {
+                if !scope.is_active() {
+                    break;
+                }
+                let _ = clock.next_frame().await;
+                if !scope.is_active() {
+                    break;
+                }
+                if let Some(status) = android_bridge::read_update_status() {
+                    let next = UpdateUi::from_status(status);
+                    let terminal = next.is_terminal();
+                    update_ui.set(next);
+                    if terminal {
+                        break;
+                    }
+                }
+            }
+        })
+    });
+
+    SystemWinampText(
+        "UPDATES".to_string(),
+        ox + 8.0,
+        base_y,
+        width - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+    SystemWinampText(
+        update_ui.get().status_line(),
+        ox + 8.0,
+        base_y + 14.0,
+        width - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+
+    let button_y = base_y + 30.0;
+    match update_ui.get() {
+        UpdateUi::Available { version, url } => {
+            SettingsButton(
+                ox + 6.0,
+                button_y,
+                width - 12.0,
+                format!("Download & Install v{version}"),
+                text_color,
+                scale,
+                move || {
+                    update_ui.set(UpdateUi::Downloading { pct: 0 });
+                    match android_bridge::request_install_update(&url) {
+                        Ok(()) => poll_gen.update(|gen| *gen += 1),
+                        Err(error) => update_ui.set(UpdateUi::Error(error)),
+                    }
+                },
+            );
+        }
+        UpdateUi::Checking | UpdateUi::Downloading { .. } | UpdateUi::Installing => {}
+        _ => {
+            SettingsButton(
+                ox + 6.0,
+                button_y,
+                width - 12.0,
+                "Check for Updates".to_string(),
+                text_color,
+                scale,
+                move || {
+                    update_ui.set(UpdateUi::Checking);
+                    match android_bridge::request_check_update(env!("CARGO_PKG_VERSION")) {
+                        Ok(()) => poll_gen.update(|gen| *gen += 1),
+                        Err(error) => update_ui.set(UpdateUi::Error(error)),
+                    }
+                },
+            );
+        }
+    }
+}
+
+/// Desktop/iOS update section: no in-app HTTP client, so this just opens the
+/// GitHub releases page in the default browser.
+#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+#[composable]
+fn SettingsUpdateSection(
+    state: MutableState<WinampState>,
+    ox: f32,
+    base_y: f32,
+    width: f32,
+    text_color: [u8; 4],
+    scale: f32,
+) {
+    SystemWinampText(
+        "UPDATES".to_string(),
+        ox + 8.0,
+        base_y,
+        width - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+    SystemWinampText(
+        format!("Current version v{}", env!("CARGO_PKG_VERSION")),
+        ox + 8.0,
+        base_y + 14.0,
+        width - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+    let state_click = state;
+    SettingsButton(
+        ox + 6.0,
+        base_y + 30.0,
+        width - 12.0,
+        "View Releases on GitHub".to_string(),
+        text_color,
+        scale,
+        move || {
+            let opened = open_releases_page();
+            state_click.update(|s| {
+                s.status = if opened {
+                    "Opened releases page".to_string()
+                } else {
+                    "See github.com/samoylenkodmitry/cranamp/releases".to_string()
+                };
+            });
+        },
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+#[composable]
+fn SettingsUpdateSection(
+    _state: MutableState<WinampState>,
+    ox: f32,
+    base_y: f32,
+    width: f32,
+    text_color: [u8; 4],
+    scale: f32,
+) {
+    SystemWinampText(
+        "UPDATES".to_string(),
+        ox + 8.0,
+        base_y,
+        width - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+    SystemWinampText(
+        "Reload the page for the latest web build".to_string(),
+        ox + 8.0,
+        base_y + 14.0,
+        width - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+}
+
+/// Opens the GitHub releases page in the platform browser. Best-effort: returns
+/// false if no opener is available (e.g. iOS, where there is no shell).
+#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+fn open_releases_page() -> bool {
+    const URL: &str = "https://github.com/samoylenkodmitry/cranamp/releases";
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", URL])
+            .spawn()
+            .is_ok()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(URL).spawn().is_ok()
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(URL)
+            .spawn()
+            .is_ok()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+    {
+        false
+    }
+}
+
+/// The Settings content, drawn at a local origin so it can be mounted either in
+/// a dedicated desktop window (origin 0,0, draggable header) or centered in the
+/// full-surface modal overlay used on Android/mobile.
+#[composable]
+fn SettingsPanel(
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    text_color: [u8; 4],
+    origin_x: f32,
+    origin_y: f32,
+    with_drag: bool,
+    scale: f32,
+) {
+    let ox = origin_x;
+    let oy = origin_y;
+    let w = SETTINGS_WIDTH;
+    let h = SETTINGS_HEIGHT;
+
+    FilledRect(ox, oy, w, h, scale, Color(0.04, 0.05, 0.07, 1.0));
+    FilledRect(ox, oy, w, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
+    FilledRect(
+        ox,
+        oy + h - 1.0,
+        w,
+        1.0,
+        scale,
+        Color(0.30, 0.42, 0.50, 1.0),
+    );
+    FilledRect(ox, oy, 1.0, h, scale, Color(0.30, 0.42, 0.50, 1.0));
+    FilledRect(
+        ox + w - 1.0,
+        oy,
+        1.0,
+        h,
+        scale,
+        Color(0.30, 0.42, 0.50, 1.0),
+    );
+
+    FilledRect(ox, oy, w, 16.0, scale, Color(0.08, 0.12, 0.16, 1.0));
+    if with_drag {
+        WindowDragHandle(
+            WinampDragTarget::NativeGroup,
+            (ox, oy, w - 20.0, 16.0),
+            scale,
+        );
+    }
+    SystemWinampText(
+        "CRANAMP SETTINGS".to_string(),
+        ox + 8.0,
+        oy + 3.0,
+        w - 30.0,
+        12.0,
+        scale,
+        text_color,
+    );
+    {
+        let state_click = state;
+        FilledRect(
+            ox + w - 17.0,
+            oy + 2.0,
+            13.0,
+            12.0,
+            scale,
+            Color(0.10, 0.16, 0.22, 1.0),
+        );
+        SystemWinampText(
+            "X".to_string(),
+            ox + w - 13.0,
+            oy + 3.0,
+            10.0,
+            12.0,
+            scale,
+            text_color,
+        );
+        ClickTarget(ox + w - 18.0, oy + 1.0, 16.0, 14.0, scale, move || {
+            state_click.update(|s| s.settings_open = false);
+        });
+    }
+
+    SettingsSkinsSection(state, skin_state, ox, oy + 22.0, w, text_color, scale);
+
+    FilledRect(
+        ox + 6.0,
+        oy + 154.0,
+        w - 12.0,
+        1.0,
+        scale,
+        Color(0.12, 0.20, 0.24, 1.0),
+    );
+    SettingsUpdateSection(state, ox, oy + 160.0, w, text_color, scale);
+
+    SystemWinampText(
+        format!("Cranamp v{} on cranpose", env!("CARGO_PKG_VERSION")),
+        ox + 8.0,
+        oy + 212.0,
+        w - 16.0,
+        12.0,
+        scale,
+        text_color,
+    );
+}
+
+/// Full-surface modal that dims the player and centers the Settings panel. It
+/// is layout-driven — a `fill_max_size` dim backdrop and a fixed-size centered
+/// panel box — so it covers the whole surface without any coordinate math.
+/// Mounted as the last child of the surface-based roots (Android, inline/iOS,
+/// web); desktop uses a dedicated window instead (see `WinampStandaloneApp`).
+#[composable]
+fn SettingsModal(
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    text_color: [u8; 4],
+    scale: f32,
+) {
+    if !state.get().settings_open {
+        return;
+    }
+    Box(
+        Modifier::empty().fill_max_size(),
+        BoxSpec::default().content_alignment(Alignment::CENTER),
+        move || {
+            // Dim backdrop that fills the surface and dismisses on tap-outside.
+            {
+                let state_dismiss = state;
+                Box(
+                    Modifier::empty()
+                        .fill_max_size()
+                        .background(Color(0.0, 0.0, 0.0, 0.55))
+                        .clickable(move |_| {
+                            state_dismiss.update(|s| s.settings_open = false);
+                        }),
+                    BoxSpec::default(),
+                    || {},
+                );
+            }
+            // Centered fixed-size panel. Its own `clickable` swallows taps so
+            // they do not fall through to the dismiss backdrop below.
+            {
+                let state_panel = state;
+                let skin_panel = skin_state;
+                Box(
+                    Modifier::empty()
+                        .size_points(
+                            scaled(SETTINGS_WIDTH, scale),
+                            scaled(SETTINGS_HEIGHT, scale),
+                        )
+                        .clickable(|_| {}),
+                    BoxSpec::default(),
+                    move || {
+                        SettingsPanel(state_panel, skin_panel, text_color, 0.0, 0.0, false, scale);
+                    },
+                );
+            }
+        },
+    );
 }
 
 #[composable]
@@ -7326,6 +8125,13 @@ fn default_playlist_position() -> Point {
     )
 }
 
+fn default_settings_position() -> Point {
+    Point::new(
+        WINAMP_DEFAULT_SCREEN_POSITION.x + MAIN_WIDTH + 16.0,
+        WINAMP_DEFAULT_SCREEN_POSITION.y,
+    )
+}
+
 fn native_winamp_windows_available() -> bool {
     #[cfg(all(
         not(target_arch = "wasm32"),
@@ -7383,6 +8189,10 @@ fn winamp_equalizer_window_id() -> WindowId {
 
 fn winamp_playlist_window_id() -> WindowId {
     WindowId::from_static("cranamp-winamp-playlist")
+}
+
+fn settings_window_id() -> WindowId {
+    WindowId::from_static("cranamp-winamp-settings")
 }
 
 fn winamp_window_modifier(
@@ -7522,6 +8332,27 @@ mod tests {
         assert_eq!(time_digits(0.0), [0, 0, 0, 0]);
         assert_eq!(time_digits(65.0), [0, 1, 0, 5]);
         assert_eq!(time_digits(-1.0), [0, 0, 0, 0]);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn sanitize_skin_file_name_strips_dirs_and_forces_extension() {
+        // Existing skin archive names are kept as-is.
+        assert_eq!(sanitize_skin_file_name("base-2.91.wsz"), "base-2.91.wsz");
+        assert_eq!(sanitize_skin_file_name("Cool.ZIP"), "Cool.ZIP");
+        // Directory components (from a content:// display path) are dropped.
+        assert_eq!(sanitize_skin_file_name("skins/MyTheme.wsz"), "MyTheme.wsz");
+        assert_eq!(
+            sanitize_skin_file_name("C:\\Downloads\\Theme.wsz"),
+            "Theme.wsz"
+        );
+        // A name without a recognized extension gains `.wsz`.
+        assert_eq!(
+            sanitize_skin_file_name("Untitled Skin"),
+            "Untitled Skin.wsz"
+        );
+        // Empty/blank names fall back to a default.
+        assert_eq!(sanitize_skin_file_name("   "), "skin.wsz");
     }
 
     #[test]

@@ -21,6 +21,18 @@ pub enum AndroidBridgeResult {
     Error(String),
 }
 
+/// Progress of an in-app self-update, parsed from `update_status` written by the
+/// Java side (see `CranampActivity.cranampCheckUpdate`/`cranampInstallUpdate`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpdateStatus {
+    Checking,
+    UpToDate,
+    Available { version: String, url: String },
+    Downloading { pct: u8 },
+    Installing,
+    Error(String),
+}
+
 struct AndroidBridge {
     vm: JavaVM,
     activity: Global<JObject<'static>>,
@@ -86,6 +98,62 @@ pub fn request_playlist_export(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Asks the Java side to query GitHub for the latest release and compare it to
+/// `current_version`. The result is written to `update_status` and surfaced via
+/// [`read_update_status`].
+pub fn request_check_update(current_version: &str) -> Result<(), String> {
+    call_android_string_arg("cranampCheckUpdate", current_version)
+        .map_err(|error| format!("failed to start update check: {error}"))
+}
+
+/// Asks the Java side to download the APK at `url` and launch the in-place
+/// installer. Download/install progress is written to `update_status`.
+pub fn request_install_update(url: &str) -> Result<(), String> {
+    call_android_string_arg("cranampInstallUpdate", url)
+        .map_err(|error| format!("failed to start update install: {error}"))
+}
+
+/// Reads (and consumes) the latest `update_status` line written by the Java
+/// update worker. Returns `None` when no new status is pending.
+pub fn read_update_status() -> Option<UpdateStatus> {
+    let bridge = BRIDGE.get()?;
+    let text = take_file_to_string(&bridge.bridge_dir.join("update_status"))?;
+
+    let mut state = None;
+    let mut version = String::new();
+    let mut url = String::new();
+    let mut pct: u8 = 0;
+    let mut message = String::new();
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim();
+        match key.trim() {
+            "state" => state = Some(value.to_string()),
+            "version" => version = value.to_string(),
+            "url" => url = value.to_string(),
+            "pct" => pct = value.parse().unwrap_or(0),
+            "message" => message = value.to_string(),
+            _ => {}
+        }
+    }
+
+    match state.as_deref()? {
+        "checking" => Some(UpdateStatus::Checking),
+        "uptodate" => Some(UpdateStatus::UpToDate),
+        "available" => Some(UpdateStatus::Available { version, url }),
+        "downloading" => Some(UpdateStatus::Downloading { pct }),
+        "installing" => Some(UpdateStatus::Installing),
+        "error" => Some(UpdateStatus::Error(if message.is_empty() {
+            "update failed".to_string()
+        } else {
+            message
+        })),
+        _ => None,
+    }
+}
+
 pub fn take_results() -> Vec<AndroidBridgeResult> {
     let Some(bridge) = BRIDGE.get() else {
         return Vec::new();
@@ -108,6 +176,29 @@ pub fn stream_cache_dir() -> Option<PathBuf> {
     BRIDGE
         .get()
         .map(|bridge| bridge.bridge_dir.join("stream-cache"))
+}
+
+/// Calls a `void method(String)` on the activity with a single string argument.
+fn call_android_string_arg(method: &str, value: &str) -> Result<(), String> {
+    let Some(bridge) = BRIDGE.get() else {
+        return Err("Android activity bridge is not initialized".to_string());
+    };
+    let method = JNIString::new(method);
+    bridge
+        .vm
+        .attach_current_thread(|env| -> JniResult<()> {
+            let value = env.new_string(value)?;
+            let value_obj: &JObject<'_> = value.as_ref();
+            env.call_method(
+                bridge.activity.as_obj(),
+                method.as_ref(),
+                jni_sig!("(Ljava/lang/String;)V"),
+                &[JValue::Object(value_obj)],
+            )?;
+            Ok(())
+        })
+        .map_err(|error| format!("{error}"))?;
+    Ok(())
 }
 
 fn call_android_picker(method: &str, signature: &str, args: &[JValue<'_>]) -> Result<(), String> {
