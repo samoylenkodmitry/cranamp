@@ -433,11 +433,14 @@ fn reconfigure(mutate: impl FnOnce(&mut SyncConfig)) -> SyncStatus {
     })
     .flatten();
 
-    // Phase 2 (unlocked): probe + seed + flush against the (maybe network) folder.
+    // Phase 2 (unlocked): seed + flush against the (maybe network) folder. The
+    // first `force_flush` is the authoritative writability check — its actual
+    // write sets `Active` or `ReceiveOnly` via `finish_flush`. We deliberately do
+    // not pre-probe with `is_writable()`: on a slow/flaky network provider that
+    // extra round-trip both doubles the enable latency and can transiently report
+    // a writable folder (a writable WebDAV mount) as read-only before the real
+    // write proves otherwise.
     if let Some(store) = prepared {
-        if !store.is_writable() {
-            with_runtime(|rt| rt.status = SyncStatus::ReceiveOnly);
-        }
         seed_from_folder(&store);
         force_flush();
         refresh_merged();
