@@ -1613,6 +1613,7 @@ pub fn WinampAndroidApp() {
         BoxSpec::default(),
         move || {
             let skin_for_stack = skin.clone();
+            let display_color = skin.display_text_color;
             BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
                 let snapshot = tab_state.player.get();
                 let layout = if android_floating_overlay_enabled() {
@@ -1633,14 +1634,14 @@ pub fn WinampAndroidApp() {
                     )
                 };
                 WinampStackedStage(skin_for_stack.clone(), tab_state.player, skin_state, layout);
-            });
 
-            SettingsModal(
-                tab_state.player,
-                skin_state,
-                skin.display_text_color,
-                ui_scale(),
-            );
+                // SettingsModal must live INSIDE the BoxWithConstraints subcompose
+                // layer: a SubcomposeLayout paints its content over later siblings,
+                // so a modal mounted as a sibling after this block renders underneath
+                // the stage and is invisible on real devices. Inside the closure,
+                // source order (last child = on top) applies again.
+                SettingsModal(tab_state.player, skin_state, display_color, ui_scale());
+            });
         },
     );
 }
