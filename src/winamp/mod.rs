@@ -899,6 +899,7 @@ fn WinampRuntimeEffects(
     PlaylistDurationHydrationEffect(state);
     AndroidPickerEffect(state, skin_state);
     CranposePickerEffect(state);
+    ResumePickEffect(state);
     SkinPickerEffect(state, skin_state);
     WebSurfaceSizeEffect(state);
     PlayerStatePersistence(state);
@@ -990,7 +991,12 @@ async fn load_picked_file(
     append: bool,
     options: cranpose::FilePickerOptions,
 ) {
-    match picker.pick_file(options).await {
+    let outcome = picker.pick_file(options).await;
+    // The picker returned, so this live pick resolved here (an activity
+    // recreation would instead drop this future before it returns); drop the
+    // resume marker so the next start does not try to recover a finished pick.
+    clear_pending_pick_sidecar();
+    match outcome {
         Ok(Some(entry)) => {
             state.update(|s| {
                 s.pending_pick = None;
@@ -1031,7 +1037,13 @@ async fn stream_picked_folder(
     append: bool,
     options: cranpose::FilePickerOptions,
 ) {
-    let stream = match picker.pick_folder_streaming(options).await {
+    let outcome = picker.pick_folder_streaming(options).await;
+    // The folder selection resolved (the picker closed); from here the walk runs
+    // with cranamp in front, so the in-flight marker is no longer needed. On an
+    // activity recreation this future is dropped before returning, so the marker
+    // survives for `ResumePickEffect` instead.
+    clear_pending_pick_sidecar();
+    let stream = match outcome {
         Ok(Some(stream)) => stream,
         Ok(None) => {
             state.update(|s| {
@@ -1048,6 +1060,22 @@ async fn stream_picked_folder(
             return;
         }
     };
+    consume_folder_stream(state, &scope, stream, append).await;
+}
+
+/// Drains an already-resolved folder [`cranpose::FolderStream`] into the
+/// playlist, frame by frame, until the provider finishes the walk. Shared by the
+/// live folder pick ([`stream_picked_folder`]) and the resume path
+/// ([`ResumePickEffect`]), which both receive a stream the same way — one from a
+/// fresh SAF prompt, one re-walked from a grant recovered after the activity was
+/// destroyed mid-pick.
+#[cfg(not(target_arch = "wasm32"))]
+async fn consume_folder_stream(
+    state: MutableState<WinampState>,
+    scope: &cranpose_core::LaunchedEffectScope,
+    stream: cranpose::FolderStreamRef,
+    append: bool,
+) {
     state.update(|s| s.status = "Scanning folder".to_string());
     log::info!(target: "cranamp::picker", "folder stream started (append={append})");
 
@@ -1124,6 +1152,78 @@ async fn stream_picked_folder(
     }
 }
 
+/// Recovers a folder/file selection whose result arrived after the composition
+/// that requested it was torn down (see [`PendingPickPersistence`]). Runs once on
+/// startup: if the sidecar shows a pick was in flight, it polls cranpose's resume
+/// inbox for a short window (the recreated activity's `onActivityResult` fires
+/// after the native app restarts, so the grant is not there immediately) and
+/// then loads the recovered selection through the same code paths as a live pick.
+/// It never launches a new SAF prompt, so there is no double-prompt or race with
+/// the live picker.
+#[cfg(not(target_arch = "wasm32"))]
+#[composable]
+fn ResumePickEffect(state: MutableState<WinampState>) {
+    let picker = cranpose::local_file_picker().current();
+    cranpose_core::LaunchedEffectAsync!(0u8, move |scope| {
+        let picker = picker.clone();
+        Box::pin(async move {
+            // Only a pick that was launched and never resolved leaves the sidecar
+            // behind; without it there is nothing orphaned to recover.
+            let Some(pending) = load_pending_pick() else {
+                return;
+            };
+            let append = pending.append;
+            let clock = scope.runtime().frame_clock();
+            // ~10s at 60fps — long enough for a recreated activity to deliver its
+            // result, short enough to give up if the pick was actually abandoned.
+            let mut resumed = Vec::new();
+            for _ in 0..600 {
+                if !scope.is_active() {
+                    return;
+                }
+                resumed = picker.take_resumed_picks();
+                if !resumed.is_empty() {
+                    break;
+                }
+                let _ = clock.next_frame().await;
+            }
+            // The in-flight marker is resolved now (recovered or abandoned); clear
+            // it so the next start does not poll again for a stale pick.
+            clear_pending_pick_sidecar();
+            if resumed.is_empty() {
+                log::info!(target: "cranamp::picker", "resume: no orphaned pick recovered");
+                return;
+            }
+            log::info!(
+                target: "cranamp::picker",
+                "resume: recovered {} orphaned pick(s) (append={append})",
+                resumed.len()
+            );
+            state.update(|s| {
+                s.pending_pick = None;
+                s.status = "Resuming selection".to_string();
+            });
+            for pick in resumed {
+                match pick {
+                    cranpose::ResumedPick::Folder(stream) => {
+                        consume_folder_stream(state, &scope, stream, append).await;
+                    }
+                    cranpose::ResumedPick::File(entry) => {
+                        let tracks = audio::tracks_from_picked_entry(entry).await;
+                        if tracks.is_empty() {
+                            state.update(|s| s.status = "No audio files found".to_string());
+                        } else if append {
+                            append_playlist_and_play(state, tracks);
+                        } else {
+                            replace_playlist_and_play(state, tracks);
+                        }
+                    }
+                }
+            }
+        })
+    });
+}
+
 /// Drives the native skin picker (desktop/Android/iOS) through the same Cranpose
 /// file picker as audio, so picking a `.wsz` never blocks the event loop with a
 /// nested modal. The chosen file is read as bytes and applied directly.
@@ -1184,6 +1284,10 @@ fn SkinPickerEffect(_state: MutableState<WinampState>, _skin_state: WinampSkinSt
 #[cfg(target_arch = "wasm32")]
 #[composable]
 fn CranposePickerEffect(_state: MutableState<WinampState>) {}
+
+#[cfg(target_arch = "wasm32")]
+#[composable]
+fn ResumePickEffect(_state: MutableState<WinampState>) {}
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 #[composable]
@@ -1492,7 +1596,12 @@ fn SyncEffect(state: MutableState<WinampState>) {
             if !pending_folder_pick {
                 return;
             }
-            match cranpose_services::pick_writable_folder().await {
+            let outcome = cranpose_services::pick_writable_folder().await;
+            // The picker returned, so this live pick resolved here (an activity
+            // recreation would instead drop this future before it returns); drop
+            // the resume marker so the next start does not re-recover it.
+            clear_pending_sync_pick();
+            match outcome {
                 Ok(Some(handle)) => {
                     std::thread::spawn(move || {
                         let _ = crate::sync::runtime::set_folder(Some(handle));
@@ -1511,6 +1620,41 @@ fn SyncEffect(state: MutableState<WinampState>) {
                     s.status = error.to_string();
                 }),
             }
+        })
+    });
+
+    // Recover a sync-folder grant orphaned by an activity recreation while the
+    // SAF writable-folder picker was in front — the write-side analogue of
+    // `ResumePickEffect`. Runs once on startup: if the marker shows a pick was in
+    // flight, poll cranpose's resume inbox briefly (the recreated activity's
+    // result arrives after the app restarts) and apply the recovered folder.
+    cranpose_core::LaunchedEffectAsync!(1u8, move |scope| {
+        Box::pin(async move {
+            if !pending_sync_pick_exists() {
+                return;
+            }
+            let clock = scope.runtime().frame_clock();
+            let mut handle = None;
+            for _ in 0..600 {
+                if !scope.is_active() {
+                    return;
+                }
+                handle = cranpose_services::take_resumed_writable_folder();
+                if handle.is_some() {
+                    break;
+                }
+                let _ = clock.next_frame().await;
+            }
+            clear_pending_sync_pick();
+            let Some(handle) = handle else {
+                log::info!(target: "cranamp::sync", "resume: no orphaned sync folder grant recovered");
+                return;
+            };
+            log::info!(target: "cranamp::sync", "resume: recovered orphaned sync folder grant");
+            std::thread::spawn(move || {
+                let _ = crate::sync::runtime::set_folder(Some(handle));
+            });
+            state.update(|s| s.status = "Sync folder set".to_string());
         })
     });
 }
@@ -1613,6 +1757,7 @@ pub fn WinampAndroidApp() {
         BoxSpec::default(),
         move || {
             let skin_for_stack = skin.clone();
+            let display_color = skin.display_text_color;
             BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
                 let snapshot = tab_state.player.get();
                 let layout = if android_floating_overlay_enabled() {
@@ -1633,14 +1778,14 @@ pub fn WinampAndroidApp() {
                     )
                 };
                 WinampStackedStage(skin_for_stack.clone(), tab_state.player, skin_state, layout);
-            });
 
-            SettingsModal(
-                tab_state.player,
-                skin_state,
-                skin.display_text_color,
-                ui_scale(),
-            );
+                // SettingsModal must live INSIDE the BoxWithConstraints subcompose
+                // layer: a SubcomposeLayout paints its content over later siblings,
+                // so a modal mounted as a sibling after this block renders underneath
+                // the stage and is invisible on real devices. Inside the closure,
+                // source order (last child = on top) applies again.
+                SettingsModal(tab_state.player, skin_state, display_color, ui_scale());
+            });
         },
     );
 }
@@ -3452,6 +3597,10 @@ fn shorten_sync_folder(path: &str) -> String {
 /// applies the chosen folder via the sync runtime.
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_pick_folder(state: MutableState<WinampState>) {
+    // Persist the in-flight marker before the SAF prompt launches so an activity
+    // recreation while it is in front can be recovered by `SyncEffect` (the
+    // writable-folder picker has the same recreation hazard as the audio picker).
+    mark_pending_sync_pick();
     state.update(|s| {
         s.pending_sync_folder_pick = true;
         s.status = "Choose a sync folder…".to_string();
@@ -5943,8 +6092,15 @@ fn open_audio_files(state: MutableState<WinampState>) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn request_pick(state: MutableState<WinampState>, folder: bool, append: bool) {
+    let pick = PendingPick { folder, append };
+    // Persist the in-flight marker *before* the picker launches, synchronously, so
+    // an activity recreation while the SAF prompt is in front (some Android
+    // devices) can be recovered by `ResumePickEffect`. Writing it here — rather
+    // than reactively from `pending_pick` — avoids a fresh post-recreation
+    // composition clearing it before the resume effect reads it.
+    save_pending_pick(pick);
     state.update(|s| {
-        s.pending_pick = Some(PendingPick { folder, append });
+        s.pending_pick = Some(pick);
         s.status = if folder {
             "Opening folder picker"
         } else {
@@ -8159,6 +8315,87 @@ fn player_config_path() -> std::path::PathBuf {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn sync_config_path() -> std::path::PathBuf {
     config_home_dir().join("cranamp").join("sync.conf")
+}
+
+/// Path to the in-flight pick marker. Present only while a file/folder selection
+/// is outstanding, so an activity recreation during the SAF prompt can be
+/// recovered by [`ResumePickEffect`]. See [`PendingPickPersistence`].
+#[cfg(not(target_arch = "wasm32"))]
+fn pending_pick_config_path() -> std::path::PathBuf {
+    config_home_dir().join("cranamp").join("pending_pick.conf")
+}
+
+/// Records that a pick is outstanding (and whether it appends), so the
+/// `append` intent survives the native app being destroyed mid-pick.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_pending_pick(pick: PendingPick) {
+    let path = pending_pick_config_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let text = format!(
+        "folder={}\nappend={}\n",
+        pick.folder as u8, pick.append as u8
+    );
+    let _ = std::fs::write(path, text);
+}
+
+/// Removes the in-flight pick marker once the selection resolves (or is found to
+/// be stale on the next start).
+#[cfg(not(target_arch = "wasm32"))]
+fn clear_pending_pick_sidecar() {
+    let _ = std::fs::remove_file(pending_pick_config_path());
+}
+
+/// Reads the in-flight pick marker left by a pick that never resolved, or `None`
+/// if no selection was outstanding. `append` defaults to `true` (the common
+/// "ADD FOLDER" case) so a recovered pick never silently wipes the playlist.
+#[cfg(not(target_arch = "wasm32"))]
+fn load_pending_pick() -> Option<PendingPick> {
+    let text = std::fs::read_to_string(pending_pick_config_path()).ok()?;
+    let mut folder = false;
+    let mut append = true;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("folder=") {
+            folder = value.trim() == "1";
+        } else if let Some(value) = line.strip_prefix("append=") {
+            append = value.trim() == "1";
+        }
+    }
+    Some(PendingPick { folder, append })
+}
+
+/// Path to the in-flight sync-folder pick marker. Present only while the
+/// cross-device sync writable-folder picker is outstanding, so an activity
+/// recreation during the SAF prompt can be recovered. See [`SyncEffect`].
+#[cfg(not(target_arch = "wasm32"))]
+fn pending_sync_pick_path() -> std::path::PathBuf {
+    config_home_dir()
+        .join("cranamp")
+        .join("pending_sync_pick.conf")
+}
+
+/// Records (synchronously, before the picker launches) that a sync-folder pick is
+/// outstanding, so the grant survives the native app being destroyed mid-pick.
+#[cfg(not(target_arch = "wasm32"))]
+fn mark_pending_sync_pick() {
+    let path = pending_sync_pick_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, b"1");
+}
+
+/// Removes the sync-folder pick marker once the pick resolves (or is found stale).
+#[cfg(not(target_arch = "wasm32"))]
+fn clear_pending_sync_pick() {
+    let _ = std::fs::remove_file(pending_sync_pick_path());
+}
+
+/// Whether a sync-folder pick was outstanding when the app last stopped.
+#[cfg(not(target_arch = "wasm32"))]
+fn pending_sync_pick_exists() -> bool {
+    pending_sync_pick_path().exists()
 }
 
 #[cfg(target_arch = "wasm32")]

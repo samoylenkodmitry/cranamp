@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.35"
+version = "0.1.36"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -62,12 +62,12 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.24", default-features = false }
-cranpose-core = "0.1.24"
-cranpose-foundation = "0.1.24"
-cranpose-services = { version = "0.1.24", default-features = false }
-cranpose-ui = "0.1.24"
-cranpose-ui-graphics = "0.1.24"
+cranpose = { version = "0.1.26", default-features = false }
+cranpose-core = "0.1.26"
+cranpose-foundation = "0.1.26"
+cranpose-services = { version = "0.1.26", default-features = false }
+cranpose-ui = "0.1.26"
+cranpose-ui-graphics = "0.1.26"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 log = "0.4"
@@ -114,8 +114,8 @@ web-sys = { version = "0.3", optional = true, features = [
 ] }
 
 # Framework-level e2e tests drive the real cranpose hit-dispatch pipeline
-# headlessly (see tests/settings_e2e.rs). Published crates, same 0.1.24 as the
+# headlessly (see tests/settings_e2e.rs). Published crates, same 0.1.26 as the
 # cranpose runtime deps above.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cranpose-app-shell = "0.1.24"
-cranpose-render-common = "0.1.24"
+cranpose-app-shell = "0.1.26"
+cranpose-render-common = "0.1.26"
