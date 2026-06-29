@@ -4,6 +4,8 @@
 mod android_bridge;
 pub mod audio;
 mod fonts;
+#[cfg(not(target_arch = "wasm32"))]
+mod peer;
 mod sync;
 pub mod winamp;
 

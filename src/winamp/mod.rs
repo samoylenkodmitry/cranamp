@@ -35,7 +35,8 @@ use cranpose_ui::text::{FontFamily, ParagraphStyle, TextOverflow, TextUnit};
 use cranpose_ui::{
     composable, current_density, Alignment, BasicText, BasicTextField, Box, BoxSpec, Button,
     ButtonSpec, Canvas, Color, Column, ColumnSpec, LinearArrangement, Modifier, Point,
-    PointerEventKind, PointerInputScope, Row, RowSpec, Size, SpanStyle, Text, TextStyle,
+    PointerEventKind, PointerInputScope, Row, RowSpec, ScrollState, Size, SpanStyle, Text,
+    TextStyle,
 };
 #[cfg(target_os = "android")]
 use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
@@ -3458,6 +3459,158 @@ fn sync_pick_folder(state: MutableState<WinampState>) {
     });
 }
 
+/// Network section (desktop proof): share the loaded library on the LAN, and
+/// connect to a peer by `ip:port token` to stream and play its first track.
+#[cfg(not(target_arch = "wasm32"))]
+#[composable]
+fn SettingsNetworkSection(state: MutableState<WinampState>) {
+    // Refresh ticker so the host status reflects start/stop.
+    let refresh = cranpose_core::useState(|| 0u64);
+    cranpose_core::LaunchedEffectAsync!(7u8, move |scope| {
+        Box::pin(async move {
+            let clock = scope.runtime().frame_clock();
+            let mut frames = 0u32;
+            loop {
+                if !scope.is_active() {
+                    break;
+                }
+                let _ = clock.next_frame().await;
+                frames += 1;
+                if frames.is_multiple_of(90) {
+                    refresh.update(|value| *value += 1);
+                }
+            }
+        })
+    });
+    let _ = refresh.get();
+
+    let host = crate::peer::host_info();
+    // While hosting, keep the shared set in step with the local-file playlist.
+    if host.is_some() {
+        let snapshot = state.get_non_reactive();
+        let tracks: Vec<(String, String)> = snapshot
+            .playlist
+            .iter()
+            .filter_map(|track| {
+                let path = track.path.clone()?;
+                std::path::Path::new(&path)
+                    .is_file()
+                    .then(|| (path, track.title.clone()))
+            })
+            .collect();
+        crate::peer::set_shared_tracks(&tracks);
+    }
+
+    let address_field =
+        cranpose_core::remember(|| TextFieldState::new("")).with(|field| field.clone());
+
+    Column(
+        Modifier::empty().fill_max_width(),
+        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(6.0)),
+        move || {
+            Text(
+                "NETWORK (LAN)",
+                Modifier::empty(),
+                settings_text_style(11.0, SETTINGS_TEXT_DIM),
+            );
+
+            match &host {
+                Some((addr, token)) => {
+                    Text(
+                        format!("● Sharing at {addr}"),
+                        Modifier::empty(),
+                        settings_text_style(12.0, SETTINGS_GOOD),
+                    );
+                    Text(
+                        format!("token {token}"),
+                        Modifier::empty(),
+                        settings_text_style(10.0, SETTINGS_TEXT_DIM),
+                    );
+                    SettingsActionButton("Stop sharing".to_string(), SETTINGS_CARD, || {
+                        crate::peer::stop_host();
+                    });
+                }
+                None => {
+                    let state_host = state;
+                    SettingsActionButton(
+                        "Share my library on this network".to_string(),
+                        SETTINGS_ACCENT,
+                        move || match crate::peer::start_host() {
+                            Ok((addr, _)) => {
+                                state_host.update(|s| s.status = format!("Sharing at {addr}"))
+                            }
+                            Err(error) => state_host.update(|s| s.status = error),
+                        },
+                    );
+                }
+            }
+
+            Text(
+                "Connect to a peer — paste \"ip:port token\":",
+                Modifier::empty(),
+                settings_text_style(10.0, SETTINGS_TEXT_DIM),
+            );
+            {
+                let address_field = address_field.clone();
+                Box(
+                    Modifier::empty()
+                        .fill_max_width()
+                        .background(SETTINGS_CARD)
+                        .rounded_corners(6.0)
+                        .padding(8.0),
+                    BoxSpec::default(),
+                    move || {
+                        BasicTextField(
+                            address_field.clone(),
+                            Modifier::empty().fill_max_width(),
+                            settings_text_style(11.0, SETTINGS_TEXT),
+                        );
+                    },
+                );
+            }
+            {
+                let state_connect = state;
+                let address_field = address_field.clone();
+                SettingsActionButton("Connect & play".to_string(), SETTINGS_ACCENT, move || {
+                    play_from_peer(state_connect, address_field.text().to_string())
+                });
+            }
+        },
+    );
+}
+
+/// Connects to a peer (`"ip:port token"`), spools its first shared track and
+/// plays it. The network I/O runs off the UI thread.
+#[cfg(not(target_arch = "wasm32"))]
+fn play_from_peer(state: MutableState<WinampState>, input: String) {
+    let mut parts = input.split_whitespace();
+    let (Some(base), Some(token)) = (
+        parts.next().map(str::to_string),
+        parts.next().map(str::to_string),
+    ) else {
+        state.update(|s| s.status = "Enter: ip:port token".to_string());
+        return;
+    };
+    state.update(|s| s.status = "Connecting to peer…".to_string());
+    run_native_io(
+        move || -> Result<(String, String), String> {
+            let manifest = crate::peer::fetch_manifest(&base, &token)?;
+            let first = manifest
+                .into_iter()
+                .next()
+                .ok_or_else(|| "peer is not sharing any tracks".to_string())?;
+            crate::peer::spool_peer_track(&base, &token, &first)
+        },
+        move |result| match result {
+            Ok((path, title)) => {
+                let track = audio::track_from_title_path(format!("[peer] {title}"), path);
+                replace_playlist_and_play(state, vec![track]);
+            }
+            Err(error) => state.update(|s| s.status = format!("Peer: {error}")),
+        },
+    );
+}
+
 /// Skins section: the bundled skin plus every library file as tappable cards,
 /// with an "Add skin" button that routes through the existing native picker.
 #[cfg(not(target_arch = "wasm32"))]
@@ -3741,6 +3894,9 @@ fn SettingsPanel(
             .rounded_corners(10.0),
         BoxSpec::default(),
         move || {
+            // Scroll the content — the panel now has several sections and can
+            // exceed a small window/modal.
+            let scroll = cranpose_core::remember(|| ScrollState::new(0.0)).with(|s| s.clone());
             if with_drag {
                 WindowDragHandle(
                     WinampDragTarget::NativeGroup,
@@ -3749,13 +3905,18 @@ fn SettingsPanel(
                 );
             }
             Column(
-                Modifier::empty().fill_max_size().padding(14.0),
+                Modifier::empty()
+                    .fill_max_width()
+                    .padding(14.0)
+                    .vertical_scroll(scroll, false),
                 ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(12.0)),
                 move || {
                     SettingsHeader(state);
                     SettingsSkinsSection(state, skin_state);
                     #[cfg(not(target_arch = "wasm32"))]
                     SettingsSyncSection(state);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    SettingsNetworkSection(state);
                     SettingsUpdateSection(state);
                     Text(
                         format!("Cranamp v{} · cranpose", env!("CARGO_PKG_VERSION")),
