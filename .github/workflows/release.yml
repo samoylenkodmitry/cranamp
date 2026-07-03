@@ -25,15 +25,16 @@ jobs:
             target: x86_64-unknown-linux-gnu
             binary: target/x86_64-unknown-linux-gnu/dist-min/cranamp
             archive: tar.gz
-            # lld's --icf=all folds identical functions (ELF-only).
-            extra_rustflags: " -Clink-arg=-fuse-ld=lld -Clink-arg=-Wl,--icf=all"
+            # lld's --icf=all folds identical functions (ELF-only);
+            # unwind tables are droppable everywhere except MSVC (SEH).
+            extra_rustflags: " -Cforce-unwind-tables=no -Clink-arg=-fuse-ld=lld -Clink-arg=-Wl,--icf=all"
           - os: macos-latest
             artifact: cranamp-macos
             platform: macos
             target: aarch64-apple-darwin
             binary: target/aarch64-apple-darwin/dist-min/cranamp
             archive: tar.gz
-            extra_rustflags: ""
+            extra_rustflags: " -Cforce-unwind-tables=no"
           - os: windows-latest
             artifact: cranamp-windows-x86_64
             platform: windows-x86_64
@@ -60,8 +61,7 @@ jobs:
         env:
           DIST_MIN_RUSTFLAGS: >-
             -Cpanic=immediate-abort -Zunstable-options
-            -Zlocation-detail=none -Zfmt-debug=none
-            -Cforce-unwind-tables=no${{ matrix.extra_rustflags }}
+            -Zlocation-detail=none -Zfmt-debug=none${{ matrix.extra_rustflags }}
         run: >
           RUSTFLAGS="$DIST_MIN_RUSTFLAGS"
           cargo build --profile dist-min
