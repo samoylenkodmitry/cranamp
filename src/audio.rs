@@ -604,7 +604,7 @@ mod native {
     const EQUALIZER_CENTER_FREQUENCIES: [f32; EQUALIZER_BAND_COUNT] = [
         60.0, 170.0, 310.0, 600.0, 1_000.0, 3_000.0, 6_000.0, 12_000.0, 14_000.0, 16_000.0,
     ];
-    type BoxedSource = Box<dyn Source + Send>;
+    pub(super) type BoxedSource = Box<dyn Source + Send>;
     type SelectedAudioTrack = (u32, Box<dyn SymphoniaDecoder>, Option<Duration>);
 
     struct EqualizerShared {
@@ -841,7 +841,7 @@ mod native {
         }
     }
 
-    struct IsoMp4AudioSource {
+    struct SymphoniaAudioSource {
         decoder: Box<dyn SymphoniaDecoder>,
         format: Box<dyn FormatReader>,
         track_id: u32,
@@ -852,14 +852,17 @@ mod native {
         exhausted: bool,
     }
 
-    impl IsoMp4AudioSource {
-        fn new(file: File, extension_hint: Option<&str>) -> Result<Self, String> {
+    impl SymphoniaAudioSource {
+        fn new(
+            source: Box<dyn symphonia::core::io::MediaSource>,
+            extension_hint: Option<&str>,
+        ) -> Result<Self, String> {
             let mut hint = Hint::new();
             if let Some(extension_hint) = extension_hint {
                 hint.with_extension(extension_hint);
             }
 
-            let stream = MediaSourceStream::new(Box::new(file), Default::default());
+            let stream = MediaSourceStream::new(source, Default::default());
             let mut format = symphonia::default::get_probe()
                 .probe(
                     &hint,
@@ -901,12 +904,17 @@ mod native {
         }
     }
 
-    impl Iterator for IsoMp4AudioSource {
+    impl Iterator for SymphoniaAudioSource {
         type Item = Sample;
 
         fn next(&mut self) -> Option<Self::Item> {
-            if self.sample_offset >= self.samples.len() && !self.load_next_buffer() {
-                return None;
+            // A decoded packet can legitimately carry zero samples (e.g. the
+            // first packet after a seek resets the decoder), so keep pulling
+            // buffers until one yields audio.
+            while self.sample_offset >= self.samples.len() {
+                if !self.load_next_buffer() {
+                    return None;
+                }
             }
 
             let sample = self.samples[self.sample_offset];
@@ -915,7 +923,7 @@ mod native {
         }
     }
 
-    impl Source for IsoMp4AudioSource {
+    impl Source for SymphoniaAudioSource {
         fn current_span_len(&self) -> Option<usize> {
             if self.exhausted {
                 Some(0)
@@ -941,6 +949,34 @@ mod native {
 
         fn total_duration(&self) -> Option<Duration> {
             self.total_duration
+        }
+
+        fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+            use symphonia::core::formats::{SeekMode, SeekTo};
+
+            let Some(time) = Time::try_from_nanos_u128(pos.as_nanos()) else {
+                return Err(rodio::source::SeekError::Other(std::sync::Arc::new(
+                    std::io::Error::other("seek target out of range"),
+                )));
+            };
+            self.format
+                .seek(
+                    SeekMode::Coarse,
+                    SeekTo::Time {
+                        time,
+                        track_id: Some(self.track_id),
+                    },
+                )
+                .map_err(|error| {
+                    rodio::source::SeekError::Other(std::sync::Arc::new(std::io::Error::other(
+                        format!("symphonia seek failed: {error}"),
+                    )))
+                })?;
+            self.decoder.reset();
+            self.samples.clear();
+            self.sample_offset = 0;
+            self.exhausted = false;
+            Ok(())
         }
     }
 
@@ -1179,61 +1215,18 @@ mod native {
             path.display()
         );
 
-        if !seekable {
+        let media: Box<dyn symphonia::core::io::MediaSource> = if seekable {
+            Box::new(file)
+        } else {
             // Spool the stream to a temporary on-disk cache: playback starts
             // immediately from the front while the rest downloads in the
             // background, and seeking works as soon as the target offset is
             // cached. The cache is bounded — it is deleted when the track stops.
             let cached = StreamCache::spool(Box::new(file))
                 .map_err(|error| format!("failed to start streaming cache: {error}"))?;
-            return finish_rodio_decode(cached, None, extension_hint.as_deref(), repeat);
-        }
-
-        let byte_len = file
-            .metadata()
-            .ok()
-            .map(|metadata| metadata.len())
-            .filter(|&len| len > 0);
-        if extension_hint
-            .as_deref()
-            .map(is_iso_mp4_extension)
-            .unwrap_or(false)
-        {
-            let source = IsoMp4AudioSource::new(file, extension_hint.as_deref())?;
-            let duration = source.total_duration();
-            return if repeat {
-                Ok((Box::new(source.repeat_infinite()), duration))
-            } else {
-                Ok((Box::new(source), duration))
-            };
-        }
-
-        finish_rodio_decode(file, byte_len, extension_hint.as_deref(), repeat)
-    }
-
-    /// Build a rodio decoder over any seekable reader (a real file, or a
-    /// [`StreamCache`] spooling a non-seekable provider stream) and wrap it for
-    /// optional looping.
-    fn finish_rodio_decode<R>(
-        data: R,
-        byte_len: Option<u64>,
-        extension_hint: Option<&str>,
-        repeat: bool,
-    ) -> Result<(BoxedSource, Option<Duration>), String>
-    where
-        R: std::io::Read + std::io::Seek + Send + Sync + 'static,
-    {
-        let mut builder = rodio::Decoder::builder()
-            .with_data(data)
-            .with_seekable(true);
-        if let Some(byte_len) = byte_len {
-            builder = builder.with_byte_len(byte_len);
-        }
-        if let Some(extension_hint) = extension_hint {
-            builder = builder.with_hint(extension_hint);
-        }
-
-        let source = builder.build().map_err(|error| error.to_string())?;
+            Box::new(cached)
+        };
+        let source = SymphoniaAudioSource::new(media, extension_hint.as_deref())?;
         let duration = source.total_duration();
         if repeat {
             Ok((Box::new(source.repeat_infinite()), duration))
@@ -1389,6 +1382,16 @@ mod native {
         }
     }
 
+    impl symphonia::core::io::MediaSource for StreamCache {
+        fn is_seekable(&self) -> bool {
+            true
+        }
+
+        fn byte_len(&self) -> Option<u64> {
+            None
+        }
+    }
+
     impl Seek for StreamCache {
         fn seek(&mut self, from: SeekFrom) -> std::io::Result<u64> {
             let target = match from {
@@ -1482,10 +1485,6 @@ mod native {
                 }
             }
         });
-    }
-
-    fn is_iso_mp4_extension(extension: &str) -> bool {
-        matches!(extension, "m4a" | "m4b" | "m4v" | "mov" | "mp4")
     }
 
     fn format_symphonia_error(error: SymphoniaError) -> String {
@@ -2064,5 +2063,58 @@ mod tests {
         let bands = super::native::compute_analyzer_bands(&samples, sample_rate);
 
         assert!(bands.iter().any(|band| *band > 0.2));
+    }
+}
+
+/// Regression net for the unified symphonia decode path: every format now
+/// routes through [`native::SymphoniaAudioSource`] (rodio carries no decoder
+/// features), so decoding and seeking must keep working for the formats the
+/// bundled demo playlist ships.
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "native-audio"))]
+mod symphonia_source_tests {
+    use rodio::Source;
+    use std::path::Path;
+    use std::time::Duration;
+
+    fn demo_track(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets/demo-music/generated")
+            .join(name)
+    }
+
+    fn decode(name: &str) -> (super::native::BoxedSource, Option<Duration>) {
+        super::native::decode_track_source(&demo_track(name), false)
+            .unwrap_or_else(|error| panic!("decode {name}: {error}"))
+    }
+
+    #[test]
+    fn demo_tracks_decode_with_duration_and_samples() {
+        for name in [
+            "cranamp-demo-01-retro-tracker.mp3",
+            "cranamp-demo-01-retro-tracker.ogg",
+        ] {
+            let (mut source, duration) = decode(name);
+            let duration = duration.unwrap_or_else(|| panic!("{name} should report duration"));
+            assert!(duration > Duration::from_secs(1), "{name}: {duration:?}");
+            assert!(source.sample_rate().get() > 8_000, "{name}");
+            assert!(source.channels().get() >= 1, "{name}");
+            let decoded = source.by_ref().take(48_000).count();
+            assert_eq!(decoded, 48_000, "{name} should yield a second of samples");
+        }
+    }
+
+    #[test]
+    fn seeking_moves_forward_and_keeps_decoding() {
+        for name in [
+            "cranamp-demo-01-retro-tracker.mp3",
+            "cranamp-demo-01-retro-tracker.ogg",
+        ] {
+            let (mut source, _) = decode(name);
+            source
+                .try_seek(Duration::from_secs(2))
+                .unwrap_or_else(|error| panic!("seek {name}: {error}"));
+            let decoded = source.by_ref().take(4_800).count();
+            assert_eq!(decoded, 4_800, "{name} should keep decoding after seek");
+        }
     }
 }

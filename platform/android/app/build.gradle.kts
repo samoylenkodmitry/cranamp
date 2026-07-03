@@ -57,6 +57,9 @@ fun cargoPackageDir(packageName: String): File {
     return file(manifestPath).parentFile
 }
 
+val isCiBuild = (System.getenv("CI") ?: "").isNotEmpty() ||
+    (System.getenv("GITHUB_ACTIONS") ?: "").isNotEmpty()
+
 android {
     namespace = "com.cranamp.app"
     compileSdk = 36
@@ -80,10 +83,24 @@ android {
         }
     }
 
+    // CI release APKs ship one ABI each (app-<abi>-release.apk); phones
+    // never download the emulator architectures. Local builds keep the
+    // abiFilters flow (splits and abiFilters are mutually exclusive in AGP).
+    splits {
+        abi {
+            isEnable = isCiBuild
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
     buildTypes {
         debug {
-            ndk {
-                abiFilters.add("x86_64")
+            if (!isCiBuild) {
+                ndk {
+                    abiFilters.add("x86_64")
+                }
             }
         }
         release {
@@ -98,8 +115,10 @@ android {
                 signingConfigs.getByName("debug")
             }
 
-            ndk {
-                abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            if (!isCiBuild) {
+                ndk {
+                    abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                }
             }
         }
     }

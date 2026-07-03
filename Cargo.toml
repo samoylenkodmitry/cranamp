@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.37"
+version = "0.1.38"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -17,7 +17,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "cranamp"
 path = "src/main.rs"
-required-features = ["desktop", "renderer-wgpu"]
+required-features = ["desktop"]
 
 [[bin]]
 name = "cranamp-ios"
@@ -30,6 +30,19 @@ renderer-wgpu = ["cranpose/renderer-wgpu"]
 renderer-pixels = ["cranpose/renderer-pixels"]
 desktop = [
     "cranpose/desktop",
+    "cranpose-services/file-picker-native",
+    "native-audio",
+    "native-dialogs",
+]
+# Per-display-server variants for size-critical release builds.
+desktop-x11 = [
+    "cranpose/desktop-x11",
+    "cranpose-services/file-picker-native",
+    "native-audio",
+    "native-dialogs",
+]
+desktop-wayland = [
+    "cranpose/desktop-wayland",
     "cranpose-services/file-picker-native",
     "native-audio",
     "native-dialogs",
@@ -62,19 +75,19 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.27", default-features = false }
-cranpose-core = "0.1.27"
-cranpose-foundation = "0.1.27"
-cranpose-services = { version = "0.1.27", default-features = false }
-cranpose-ui = "0.1.27"
-cranpose-ui-graphics = "0.1.27"
+cranpose = { version = "0.1.28", default-features = false }
+cranpose-core = "0.1.28"
+cranpose-foundation = "0.1.28"
+cranpose-services = { version = "0.1.28", default-features = false }
+cranpose-ui = "0.1.28"
+cranpose-ui-graphics = "0.1.28"
 getrandom = { version = "0.4", features = ["wasm_js"] }
-image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
+image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }
 log = "0.4"
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3", "flac", "vorbis", "wav", "mp4", "symphonia-all"], optional = true }
+rodio = { version = "0.22.2", default-features = false, features = ["playback"], optional = true }
 symphonia = { version = "0.6.0", default-features = false, features = ["all-codecs", "all-formats"], optional = true }
 
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))'.dependencies]
@@ -114,8 +127,31 @@ web-sys = { version = "0.3", optional = true, features = [
 ] }
 
 # Framework-level e2e tests drive the real cranpose hit-dispatch pipeline
-# headlessly (see tests/settings_e2e.rs). Published crates, same 0.1.27 as the
+# headlessly (see tests/settings_e2e.rs). Published crates, same 0.1.28 as the
 # cranpose runtime deps above.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cranpose-app-shell = "0.1.27"
-cranpose-render-common = "0.1.27"
+cranpose-app-shell = "0.1.28"
+cranpose-render-common = "0.1.28"
+
+# Distribution profile: LTO + strip + abort panics keep the binary small
+# (see cranpose README "Binary Size").
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+
+# Size-optimized distribution profile (see cranpose docs/binary_size.md).
+[profile.release-small]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+
+# Nightly size floor: abort panics + size-tuned std (build-std).
+# (`immediate-abort` was removed from nightly cargo ~2026-03; plain abort
+# costs only the panic-formatting shims relative to it.)
+[profile.dist-min]
+inherits = "release-small"
+panic = "abort"

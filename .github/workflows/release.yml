@@ -22,27 +22,52 @@ jobs:
           - os: ubuntu-latest
             artifact: cranamp-linux-x86_64
             platform: linux-x86_64
-            binary: target/release/cranamp
+            target: x86_64-unknown-linux-gnu
+            binary: target/x86_64-unknown-linux-gnu/dist-min/cranamp
             archive: tar.gz
+            # lld's --icf=all folds identical functions (ELF-only).
+            extra_rustflags: " -Clink-arg=-fuse-ld=lld -Clink-arg=-Wl,--icf=all"
           - os: macos-latest
             artifact: cranamp-macos
             platform: macos
-            binary: target/release/cranamp
+            target: aarch64-apple-darwin
+            binary: target/aarch64-apple-darwin/dist-min/cranamp
             archive: tar.gz
+            extra_rustflags: ""
           - os: windows-latest
             artifact: cranamp-windows-x86_64
             platform: windows-x86_64
-            binary: target/release/cranamp.exe
+            target: x86_64-pc-windows-msvc
+            binary: target/x86_64-pc-windows-msvc/dist-min/cranamp.exe
             archive: zip
+            extra_rustflags: ""
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      # dist-min needs nightly cargo with build-std (rust-src).
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: ${{ matrix.target }}
+          components: rust-src
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux audio/dialog dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
-      - name: Build
-        run: cargo build --release
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config lld
+      # Size-minimized distribution build: abort panics without location
+      # strings, no Debug formatting, no unwind tables, size-tuned std
+      # (see cranpose docs/binary_size.md for the recipe and trade-offs).
+      - name: Build (dist-min)
+        shell: bash
+        env:
+          DIST_MIN_RUSTFLAGS: >-
+            -Cpanic=immediate-abort -Zunstable-options
+            -Zlocation-detail=none -Zfmt-debug=none
+            -Cforce-unwind-tables=no${{ matrix.extra_rustflags }}
+        run: >
+          RUSTFLAGS="$DIST_MIN_RUSTFLAGS"
+          cargo build --profile dist-min
+          --target ${{ matrix.target }}
+          -Zbuild-std=std,panic_abort
+          -Zbuild-std-features=optimize_for_size
       - name: Package artifact
         shell: bash
         run: |
@@ -116,15 +141,19 @@ jobs:
       - name: Verify APK is release-signed
         shell: bash
         run: |
-          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs \
-            platform/android/app/build/outputs/apk/release/app-release.apk | tee certs.txt
+          for apk in platform/android/app/build/outputs/apk/release/app-*-release.apk; do
+            "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "$apk" | tee -a certs.txt
+          done
           grep -q "CN=Cranamp" certs.txt || { echo "APK is not signed with the Cranamp release key"; exit 1; }
       - name: Stage APK
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
           mkdir -p assets
-          cp platform/android/app/build/outputs/apk/release/app-release.apk "assets/cranamp-${version}-android.apk"
+          for apk in platform/android/app/build/outputs/apk/release/app-*-release.apk; do
+            abi=$(basename "$apk" | sed 's/^app-\(.*\)-release\.apk$/\1/')
+            cp "$apk" "assets/cranamp-${version}-android-${abi}.apk"
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: cranamp-android
