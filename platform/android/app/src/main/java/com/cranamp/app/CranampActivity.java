@@ -24,15 +24,15 @@ import java.nio.charset.StandardCharsets;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import dev.cranpose.android.CranposeFilePickerActivity;
+import dev.cranpose.android.CranposeActivity;
 
 /**
  * Cranamp's launcher activity. Audio and skin selection go through Cranpose's
- * file picker (provided by the {@link CranposeFilePickerActivity} base class via
+ * file picker (provided by the {@link CranposeActivity} base class via
  * JNI), so this class only adds the playlist import/export bridge that is still
  * driven through result files in the bridge directory.
  */
-public class CranampActivity extends CranposeFilePickerActivity {
+public class CranampActivity extends CranposeActivity {
     static {
         System.loadLibrary("cranamp");
     }
