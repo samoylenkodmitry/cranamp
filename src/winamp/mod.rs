@@ -7614,6 +7614,14 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         return;
     };
 
+    // A peer-served track is spooled from its host on demand, then played as the
+    // resulting local file.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(peer_ref) = track.path.as_deref().and_then(crate::peer::parse_peer_ref) {
+        start_peer_track(state, index, peer_ref);
+        return;
+    }
+
     #[cfg(target_arch = "wasm32")]
     if track.path.is_none() {
         match audio::seek_fraction(0.0).and_then(|()| audio::resume()) {
