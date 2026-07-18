@@ -11,6 +11,7 @@ env:
 
 jobs:
   rust:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Rust
     runs-on: ubuntu-latest
     steps:
@@ -33,6 +34,7 @@ jobs:
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features web,renderer-wgpu
 
   web:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Web Build
     runs-on: ubuntu-latest
     steps:
@@ -51,6 +53,7 @@ jobs:
           path: dist
 
   ios:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: iOS Build
     runs-on: macos-latest
     steps:
