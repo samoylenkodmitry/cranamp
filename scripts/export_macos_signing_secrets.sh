@@ -44,11 +44,13 @@ fi
 command -v gh >/dev/null || { echo "gh CLI not found." >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "gh is not authenticated. Run: gh auth login" >&2; exit 1; }
 
-if ! security cms -D -i "$P12" >/dev/null 2>&1; then
-  openssl pkcs12 -in "$P12" -passin "pass:$P12_PASSWORD" -nokeys -clcerts 2>/dev/null \
-    | openssl x509 -noout -subject | grep -q "Developer ID Application" \
-    || { echo "$P12 holds no Developer ID Application certificate" >&2; exit 1; }
-fi
+p12_certificates() {
+  openssl pkcs12 -in "$P12" -passin fd:3 -nokeys -clcerts -legacy 3<<< "$P12_PASSWORD" 2>/dev/null \
+    || openssl pkcs12 -in "$P12" -passin fd:3 -nokeys -clcerts 3<<< "$P12_PASSWORD" 2>/dev/null
+}
+
+p12_certificates | openssl x509 -noout -subject 2>/dev/null | grep -q "Developer ID Application" \
+  || { echo "$P12 holds no Developer ID Application certificate, or the password is wrong" >&2; exit 1; }
 
 base64 -i "$P12" | gh secret set CRANAMP_MACOS_DEVID_P12_BASE64
 printf '%s' "$P12_PASSWORD" | gh secret set CRANAMP_MACOS_DEVID_P12_PASSWORD
