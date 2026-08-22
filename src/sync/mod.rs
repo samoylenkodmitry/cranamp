@@ -494,7 +494,7 @@ fn hex_decode(input: &str) -> Option<String> {
         return None;
     }
     let mut output = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         output.push((hex_value(pair[0])? << 4) | hex_value(pair[1])?);
     }
     String::from_utf8(output).ok()

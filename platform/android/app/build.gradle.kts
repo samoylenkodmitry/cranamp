@@ -1,7 +1,12 @@
-import groovy.json.JsonSlurper
-
+// Cranamp's Android build, on the Cranpose Gradle plugin.
+//
+// The native build, the ABIs, the Cargo profile, the JNI packaging, the
+// framework's Java and its manifest contributions all come from the plugin.
+// What is left here is what is specific to this product: the store identity,
+// the release versioning, and the signing.
 plugins {
     id("com.android.application")
+    id("dev.cranpose.android")
 }
 
 fun releaseVersionName(): String {
@@ -27,38 +32,24 @@ fun requiredSigningEnv(name: String): String =
     System.getenv(name)
         ?: throw GradleException("$name must be set when CRANAMP_RELEASE_KEYSTORE is configured")
 
-fun cargoPackageDir(packageName: String): File {
-    val output = providers.exec {
-        commandLine(
-            "cargo",
-            "metadata",
-            "--format-version",
-            "1",
-            "--locked",
-            "--manifest-path",
-            rootProject.file("../../Cargo.toml").absolutePath
-        )
-        isIgnoreExitValue = true
-    }
-    val result = output.result.get()
-
-    if (result.exitValue != 0) {
-        throw GradleException("failed to resolve Cargo metadata for $packageName")
-    }
-
-    val metadata = JsonSlurper().parseText(output.standardOutput.asText.get()) as Map<*, *>
-    val packages = metadata["packages"] as List<*>
-    val manifestPath = packages
-        .filterIsInstance<Map<*, *>>()
-        .firstOrNull { it["name"] == packageName }
-        ?.get("manifest_path") as? String
-        ?: throw GradleException("Cargo metadata did not include package $packageName")
-
-    return file(manifestPath).parentFile
-}
-
 val isCiBuild = (System.getenv("CI") ?: "").isNotEmpty() ||
     (System.getenv("GITHUB_ACTIONS") ?: "").isNotEmpty()
+
+cranpose {
+    // The Cargo workspace is two directories up from this Gradle project.
+    workspaceRoot.set("../..")
+    cargoPackage.set("cranamp")
+    features.set(listOf("android", "renderer-wgpu"))
+    releaseAbis.set(listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
+    label.set("Cranamp")
+    // Playback continues with the app off screen, and the visualiser reads
+    // analysis samples; the media module contributes the foreground service
+    // and the permissions that needs, so the manifest declares neither.
+    services.add("media")
+    // The in-app updater hands its package to PackageInstaller, which Android
+    // refuses without REQUEST_INSTALL_PACKAGES.
+    services.add("update")
+}
 
 android {
     namespace = "com.cranamp.app"
@@ -83,26 +74,17 @@ android {
         }
     }
 
-    // CI release APKs ship one ABI each (app-<abi>-release.apk); phones
-    // never download the emulator architectures. Local builds keep the
-    // abiFilters flow (splits and abiFilters are mutually exclusive in AGP).
+    // CI release APKs ship one ABI each (app-<abi>-release.apk); phones never
+    // download the emulator architectures. Which architectures those are comes
+    // from `cranpose { releaseAbis }`, which the plugin writes into the split.
     splits {
         abi {
             isEnable = isCiBuild
-            reset()
-            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
             isUniversalApk = false
         }
     }
 
     buildTypes {
-        debug {
-            if (!isCiBuild) {
-                ndk {
-                    abiFilters.add("x86_64")
-                }
-            }
-        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -114,97 +96,6 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
-
-            if (!isCiBuild) {
-                ndk {
-                    abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
-                }
-            }
-        }
-    }
-
-    sourceSets {
-        getByName("main") {
-            java.directories.add(cargoPackageDir("cranpose").resolve("android/java").absolutePath)
-        }
-        getByName("debug") {
-            jniLibs.directories.add("../target/android")
-        }
-        getByName("release") {
-            jniLibs.directories.add("../target/android")
-        }
-    }
-}
-
-fun checkCargoNdk() {
-    val result = providers.exec {
-        commandLine("cargo", "ndk", "--version")
-        isIgnoreExitValue = true
-    }.result.get()
-
-    if (result.exitValue != 0) {
-        throw GradleException(
-            "cargo-ndk is not installed. Install it with: cargo install cargo-ndk"
-        )
-    }
-}
-
-tasks.register<Exec>("buildRustDebug") {
-    description = "Build Cranamp Rust library for Android debug."
-    group = "rust"
-
-    doFirst {
-        checkCargoNdk()
-    }
-
-    workingDir = rootProject.projectDir
-
-    commandLine("sh", "-c", """
-        cargo ndk \
-            --platform 26 \
-            -t x86_64 \
-            -o target/android \
-            build \
-            --manifest-path ../../Cargo.toml \
-            --lib \
-            --features android,renderer-wgpu \
-            --no-default-features
-    """)
-}
-
-tasks.register<Exec>("buildRustRelease") {
-    description = "Build Cranamp Rust library for Android release."
-    group = "rust"
-
-    doFirst {
-        checkCargoNdk()
-    }
-
-    workingDir = rootProject.projectDir
-
-    commandLine("sh", "-c", """
-        cargo ndk \
-            --platform 26 \
-            -t arm64-v8a \
-            -t armeabi-v7a \
-            -t x86 \
-            -t x86_64 \
-            -o target/android \
-            build \
-            --release \
-            --manifest-path ../../Cargo.toml \
-            --lib \
-            --features android,renderer-wgpu \
-            --no-default-features
-    """)
-}
-
-afterEvaluate {
-    tasks.matching { it.name.startsWith("merge") && it.name.contains("NativeLibs") }.configureEach {
-        if (name.contains("Debug", ignoreCase = true)) {
-            dependsOn("buildRustDebug")
-        } else if (name.contains("Release", ignoreCase = true)) {
-            dependsOn("buildRustRelease")
         }
     }
 }

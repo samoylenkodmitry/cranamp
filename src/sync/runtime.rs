@@ -13,10 +13,10 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use cranpose_services::{open_writable_folder, FolderError, WritableFolderStoreRef};
+use cranpose_services::{open_writable_folder, FolderError, Signal, WritableFolderStoreRef};
 
 use super::config::{self, SyncConfig};
 use super::{
@@ -42,12 +42,15 @@ fn store_write(store: &SharedStore, file_name: &str, contents: &str) -> Result<(
 fn store_read_documents(store: &SharedStore) -> Result<Vec<(String, String)>, FolderError> {
     let suffix = format!(".{}", super::SYNC_FILE_EXT);
     let mut documents = Vec::new();
-    for name in store.list()? {
-        if !name.ends_with(&suffix) {
+    // A listing carries what the provider knows about each file now — name,
+    // length, modification time — rather than a bare name, so a caller that
+    // wants to skip an unchanged or empty file never has to open it to find out.
+    for entry in store.list()? {
+        if !entry.name.ends_with(&suffix) {
             continue;
         }
-        if let Ok(bytes) = store.read(&name) {
-            documents.push((name, String::from_utf8_lossy(&bytes).into_owned()));
+        if let Ok(bytes) = store.read(&entry.name) {
+            documents.push((entry.name, String::from_utf8_lossy(&bytes).into_owned()));
         }
     }
     Ok(documents)
@@ -86,6 +89,11 @@ static RUNTIME: Mutex<Option<SyncRuntime>> = Mutex::new(None);
 /// without doing folder I/O on the render thread.
 static LATEST_MERGED: Mutex<Option<MergedSync>> = Mutex::new(None);
 static WORKER_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Carries the first merged view the worker produces to whoever is waiting for
+/// it. The worker runs off the render thread and the resume point is wanted
+/// exactly once per launch, which is the one-value hand-off [`Signal`] is.
+static FIRST_MERGED: OnceLock<Signal<MergedSync>> = OnceLock::new();
 
 /// How often the background worker flushes pending writes and re-reads peers.
 const WORKER_INTERVAL: Duration = Duration::from_secs(5);
@@ -386,9 +394,18 @@ pub fn latest_merged() -> Option<MergedSync> {
 fn refresh_merged() {
     if let Some(merged) = poll() {
         if let Ok(mut slot) = LATEST_MERGED.lock() {
-            *slot = Some(merged);
+            *slot = Some(merged.clone());
         }
+        // A second `set` is ignored, so this delivers the launch-time view and
+        // nothing after it.
+        first_merged().set(merged);
     }
+}
+
+/// Resolves with the first merged view across devices. Awaiting this is how the
+/// composition picks up the resume point without watching the frame clock.
+pub fn first_merged() -> Signal<MergedSync> {
+    FIRST_MERGED.get_or_init(Signal::new).clone()
 }
 
 /// Starts the background sync worker exactly once. It loads config, then on a
@@ -494,23 +511,57 @@ pub fn set_label(label: String) -> SyncStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cranpose_services::WritableFolderStore;
+    use cranpose_services::{FolderEntry, FolderReader, FolderWriter, WritableFolderStore};
     use std::sync::{Arc, Mutex as StdMutex};
+
+    /// The mock folder's file table: name to bytes, shared between the store
+    /// and whatever writer is currently committing into it.
+    type MockFiles = Arc<StdMutex<Vec<(String, Vec<u8>)>>>;
 
     /// In-memory writable folder so the inner runtime can be exercised without a
     /// real filesystem or the process-global state.
     #[derive(Default)]
     struct MockStore {
-        files: StdMutex<Vec<(String, Vec<u8>)>>,
+        // Shared so a writer handed out by `open_write` can commit into it when
+        // it finishes, the way a real provider's writer commits to its folder.
+        files: MockFiles,
         writable: bool,
     }
 
     impl MockStore {
         fn new(writable: bool) -> Arc<Self> {
             Arc::new(Self {
-                files: StdMutex::new(Vec::new()),
+                files: Arc::new(StdMutex::new(Vec::new())),
                 writable,
             })
+        }
+    }
+
+    struct OneChunkReader(Option<Vec<u8>>);
+
+    impl FolderReader for OneChunkReader {
+        fn read_chunk(&mut self) -> Result<Option<Vec<u8>>, FolderError> {
+            Ok(self.0.take())
+        }
+    }
+
+    struct CollectingWriter {
+        store: MockFiles,
+        name: String,
+        buffer: Vec<u8>,
+    }
+
+    impl FolderWriter for CollectingWriter {
+        fn write_chunk(&mut self, bytes: &[u8]) -> Result<(), FolderError> {
+            self.buffer.extend_from_slice(bytes);
+            Ok(())
+        }
+
+        fn finish(self: Box<Self>) -> Result<(), FolderError> {
+            let mut files = self.store.lock().unwrap();
+            files.retain(|(name, _)| name != &self.name);
+            files.push((self.name, self.buffer));
+            Ok(())
         }
     }
 
@@ -533,14 +584,37 @@ mod tests {
                 .map(|(_, bytes)| bytes.clone())
                 .ok_or_else(|| FolderError::NotFound(name.to_string()))
         }
-        fn list(&self) -> Result<Vec<String>, FolderError> {
+        fn list(&self) -> Result<Vec<FolderEntry>, FolderError> {
             Ok(self
                 .files
                 .lock()
                 .unwrap()
                 .iter()
-                .map(|(name, _)| name.clone())
+                .map(|(name, contents)| FolderEntry {
+                    name: name.clone(),
+                    len: contents.len() as u64,
+                    modified_millis: None,
+                })
                 .collect())
+        }
+
+        // The store reads and writes whole files in this test, so its streaming
+        // operations are the chunked shape over exactly one chunk. A real
+        // provider streams; a mock only has to keep the contract.
+        fn open_read(&self, name: &str) -> Result<Box<dyn FolderReader>, FolderError> {
+            let bytes = self.read(name)?;
+            Ok(Box::new(OneChunkReader(Some(bytes))))
+        }
+
+        fn open_write(&self, name: &str) -> Result<Box<dyn FolderWriter>, FolderError> {
+            if !self.writable {
+                return Err(FolderError::ReadOnly);
+            }
+            Ok(Box::new(CollectingWriter {
+                store: Arc::clone(&self.files),
+                name: name.to_string(),
+                buffer: Vec::new(),
+            }))
         }
         fn remove(&self, name: &str) -> Result<(), FolderError> {
             self.files

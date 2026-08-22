@@ -11,16 +11,11 @@ mod sprites;
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::rc::Rc;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
 #[cfg(target_os = "android")]
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 #[cfg(target_os = "android")]
 use cranpose::{rememberAndroidHostWindowState, AndroidHostWindowState};
@@ -41,14 +36,9 @@ use cranpose_ui::{
 use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
-#[cfg(target_os = "android")]
-use crate::android_bridge::{self, AndroidBridgeResult};
 use crate::audio::{self, Track};
 use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-use wasm_bindgen::{closure::Closure, JsCast, JsValue};
-
 #[cfg(target_os = "android")]
 pub(crate) const ANDROID_OVERLAY_INITIAL_X: i32 = 26;
 #[cfg(target_os = "android")]
@@ -95,26 +85,6 @@ fn android_winamp_surface_origin_state() -> &'static Mutex<Point> {
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn run_native_io<T>(work: impl FnOnce() -> T + Send + 'static, on_ui: impl FnOnce(T) + 'static)
-where
-    T: Send + 'static,
-{
-    let Some(runtime) = cranpose_core::current_runtime_handle() else {
-        let value = work();
-        on_ui(value);
-        return;
-    };
-    let Some(continuation_id) = runtime.register_ui_cont(on_ui) else {
-        return;
-    };
-    let dispatcher = runtime.dispatcher();
-    std::thread::spawn(move || {
-        let value = work();
-        dispatcher.post_invoke(continuation_id, value);
-    });
-}
-
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 enum PlaybackState {
     Stopped,
@@ -122,12 +92,17 @@ enum PlaybackState {
     Paused,
 }
 
-/// A pending native file/folder selection driven by `CranposePickerEffect`.
-#[cfg(not(target_arch = "wasm32"))]
+/// A pending file/folder selection driven by `CranposePickerEffect`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct PendingPick {
     folder: bool,
     append: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum PendingDocument {
+    ImportPlaylist,
+    ExportPlaylist(String),
 }
 
 #[derive(Clone, Debug)]
@@ -167,10 +142,8 @@ struct WinampState {
     playlist_search_visible: bool,
     playlist_search_query: String,
     playlist_search_revision: u64,
-    android_bridge_pending: bool,
-    #[cfg(not(target_arch = "wasm32"))]
+    pending_document: Option<PendingDocument>,
     pending_pick: Option<PendingPick>,
-    #[cfg(not(target_arch = "wasm32"))]
     pending_skin_pick: bool,
     /// `true` while awaiting the cross-platform writable sync-folder picker.
     #[cfg(not(target_arch = "wasm32"))]
@@ -211,21 +184,23 @@ impl PartialEq for WinampState {
             && self.playlist_search_visible == other.playlist_search_visible
             && self.playlist_search_query == other.playlist_search_query
             && self.playlist_search_revision == other.playlist_search_revision
-            && self.android_bridge_pending == other.android_bridge_pending
-            && self.pending_pick_eq(other)
+            && self.pending_document == other.pending_document
+            && self.pending_pick == other.pending_pick
+            && self.pending_skin_pick == other.pending_skin_pick
+            && self.pending_sync_pick_eq(other)
     }
 }
 
 impl WinampState {
+    /// Cross-device sync is a native feature, so its pending pick only takes
+    /// part in equality where the field exists.
     #[cfg(not(target_arch = "wasm32"))]
-    fn pending_pick_eq(&self, other: &Self) -> bool {
-        self.pending_pick == other.pending_pick
-            && self.pending_skin_pick == other.pending_skin_pick
-            && self.pending_sync_folder_pick == other.pending_sync_folder_pick
+    fn pending_sync_pick_eq(&self, other: &Self) -> bool {
+        self.pending_sync_folder_pick == other.pending_sync_folder_pick
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn pending_pick_eq(&self, _other: &Self) -> bool {
+    fn pending_sync_pick_eq(&self, _other: &Self) -> bool {
         true
     }
 }
@@ -265,10 +240,8 @@ impl Default for WinampState {
             playlist_search_visible: false,
             playlist_search_query: String::new(),
             playlist_search_revision: 0,
-            android_bridge_pending: false,
-            #[cfg(not(target_arch = "wasm32"))]
+            pending_document: None,
             pending_pick: None,
-            #[cfg(not(target_arch = "wasm32"))]
             pending_skin_pick: false,
             #[cfg(not(target_arch = "wasm32"))]
             pending_sync_folder_pick: false,
@@ -396,7 +369,6 @@ const CRANAMP_WINAMP_PLAYLIST_TITLE: &str = "Cranamp Winamp Playlist";
 const CRANAMP_WINAMP_SETTINGS_TITLE: &str = "Cranamp Settings";
 const WINAMP_DEFAULT_SCREEN_POSITION: Point = Point { x: 140.0, y: 120.0 };
 const TITLE_MARQUEE_CHARS_PER_SECOND: f32 = 2.0;
-const PLAYBACK_PROGRESS_UPDATE_MS: u64 = 1_000;
 const VISUALIZER_REFRESH_MS: u64 = 66;
 const PLAYLIST_DOUBLE_CLICK_MS: u64 = 500;
 const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 19;
@@ -611,12 +583,12 @@ pub(crate) fn remember_winamp_tab_state() -> WinampTabState {
     remember_saved_window_config(peer_windows);
 
     WinampTabState {
-        player: cranpose_core::useState(initial_winamp_state),
-        detached: cranpose_core::useState(native_winamp_windows_available),
+        player: cranpose_core::rememberMutableStateOf(initial_winamp_state),
+        detached: cranpose_core::rememberMutableStateOf(native_winamp_windows_available),
         inline_windows: WinampInlineWindowStates {
-            main: cranpose_core::useState(|| Point::new(26.0, 22.0)),
-            equalizer: cranpose_core::useState(|| Point::new(26.0, 142.0)),
-            playlist: cranpose_core::useState(|| Point::new(26.0, 262.0)),
+            main: cranpose_core::rememberMutableStateOf(|| Point::new(26.0, 22.0)),
+            equalizer: cranpose_core::rememberMutableStateOf(|| Point::new(26.0, 142.0)),
+            playlist: cranpose_core::rememberMutableStateOf(|| Point::new(26.0, 262.0)),
         },
         peer_windows,
     }
@@ -687,7 +659,7 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
 }
 
 fn remember_winamp_skin(_state: MutableState<WinampState>) -> WinampSkinState {
-    let skin_state = cranpose_core::useState(bundled_skin);
+    let skin_state = cranpose_core::rememberMutableStateOf(bundled_skin);
     #[cfg(not(target_arch = "wasm32"))]
     {
         let skin_path = _state.get_non_reactive().skin_path;
@@ -718,7 +690,7 @@ fn load_skin_file_background(
 ) {
     let path_for_work = path.clone();
     let saved_skin_path = persist_path.then(|| path.to_string_lossy().to_string());
-    run_native_io(
+    cranpose_core::launchBlocking(
         move || load_skin_file(&path_for_work),
         move |result| match result {
             Ok(skin) => {
@@ -772,7 +744,7 @@ struct LibrarySkin {
 /// persist and appear in the Settings list.
 #[cfg(not(target_arch = "wasm32"))]
 fn skins_library_dir() -> std::path::PathBuf {
-    config_home_dir().join("cranamp").join("skins")
+    app_config_dir().join("skins")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -820,6 +792,25 @@ fn is_skin_archive(path: &std::path::Path) -> bool {
             .as_deref(),
         Some("wsz") | Some("zip")
     )
+}
+
+/// Keeps picked skin bytes in the library so the skin survives a restart and
+/// shows up in Settings, and answers with where it was kept.
+///
+/// `None` where there is no library to keep it in - the browser has no
+/// directory, so a skin picked there lasts the session.
+fn store_skin_in_library(bytes: &[u8], file_name: &str) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        copy_into_library(bytes, file_name)
+            .ok()
+            .map(|path| path.to_string_lossy().to_string())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (bytes, file_name);
+        None
+    }
 }
 
 /// Copies picked skin bytes into the library directory so the skin persists and
@@ -897,9 +888,8 @@ fn WinampRuntimeEffects(
 ) {
     PlaybackProgressEffect(state);
     PlaylistDurationHydrationEffect(state);
-    AndroidPickerEffect(state, skin_state);
+    DocumentPickerEffect(state);
     CranposePickerEffect(state);
-    ResumePickEffect(state);
     SkinPickerEffect(state, skin_state);
     WebSurfaceSizeEffect(state);
     PlayerStatePersistence(state);
@@ -920,184 +910,292 @@ fn PlaylistDurationHydrationEffect(state: MutableState<WinampState>) {
 #[composable]
 fn PlaylistDurationHydrationEffect(_state: MutableState<WinampState>) {}
 
-#[cfg(target_os = "android")]
+/// Drives playlist import/export through keyed launchers, the same
+/// composition-owned pattern as `CranposePickerEffect`: the request key is
+/// what a grant comes back to, so a chooser that outlives the activity — or
+/// the whole process — is redelivered to the launcher that asked for it,
+/// rather than being dropped by an abandoned `LaunchedEffectAsync` future.
 #[composable]
-fn AndroidPickerEffect(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
-    let bridge_pending = state.get().android_bridge_pending;
-    cranpose_core::LaunchedEffectAsync!(bridge_pending, move |scope| {
-        Box::pin(async move {
-            if !bridge_pending {
-                return;
+fn DocumentPickerEffect(state: MutableState<WinampState>) {
+    let import_playlist =
+        cranpose_services::rememberOpenFileLauncher("cranamp.import-playlist", move |result| {
+            receive_playlist_import(state, result)
+        });
+    let export_playlist =
+        cranpose_services::rememberSaveDocumentLauncher("cranamp.export-playlist", move |result| {
+            receive_playlist_export(state, result)
+        });
+
+    let pending = state.get().pending_document;
+    cranpose_core::LaunchedEffect!(pending.clone(), move |_scope| {
+        match pending {
+            None => {}
+            Some(PendingDocument::ImportPlaylist) => {
+                let options = cranpose::FilePickerOptions::default()
+                    .with_title("Import playlist")
+                    .with_filter(cranpose::FileFilter::new("Playlist", &["m3u", "m3u8"]));
+                import_playlist.launch(options);
             }
-            let clock = scope.runtime().frame_clock();
-            loop {
-                if !scope.is_active() {
-                    break;
-                }
-                let _ = clock.next_frame().await;
-                if !scope.is_active() {
-                    break;
-                }
-                handle_android_bridge_results(state);
-                if !state.get_non_reactive().android_bridge_pending {
-                    break;
-                }
+            Some(PendingDocument::ExportPlaylist(_)) => {
+                // The request carries only the destination's name and MIME
+                // type: saving opens a sink on whatever the user chose and
+                // streams to it, rather than handing the whole document to
+                // the picker up front, so the bytes never have to exist
+                // twice. The text itself is read back from `pending_document`
+                // once the sink is granted (see `receive_playlist_export`).
+                let request = cranpose::SaveDocumentRequest::new("playlist.m3u", "audio/x-mpegurl");
+                export_playlist.launch(request);
             }
-        })
+        }
     });
 }
 
-#[cfg(not(target_os = "android"))]
-#[composable]
-fn AndroidPickerEffect(_state: MutableState<WinampState>, _skin_state: WinampSkinState) {}
+/// Takes a chosen file and imports it as the playlist.
+fn receive_playlist_import(
+    state: MutableState<WinampState>,
+    result: cranpose_services::LauncherResult<Option<cranpose::ContentHandle>>,
+) {
+    match result {
+        Ok(Some(entry)) => {
+            cranpose_core::spawn_ui_task(async move {
+                match entry.read_all().await {
+                    Ok(bytes) => match String::from_utf8(bytes) {
+                        Ok(text) => apply_imported_playlist(state, &text),
+                        Err(error) => state.update(|app| {
+                            app.pending_document = None;
+                            app.status = format!("Playlist is not UTF-8: {error}");
+                        }),
+                    },
+                    Err(error) => state.update(|app| {
+                        app.pending_document = None;
+                        app.status = error.to_string();
+                    }),
+                }
+            });
+        }
+        Ok(None) => state.update(|app| {
+            app.pending_document = None;
+            app.status = "Import Cancelled".to_string();
+        }),
+        Err(error) => state.update(|app| {
+            app.pending_document = None;
+            app.status = error.to_string();
+        }),
+    }
+}
 
-/// Drives the Cranpose native file/folder picker when a selection is requested
-/// (see `request_pick`), then loads the chosen audio into the playlist. Works
-/// on desktop, Android (SAF) and iOS (UIDocumentPicker), so folders served by
-/// system providers such as a mounted WebDAV share can be opened anywhere.
-#[cfg(not(target_arch = "wasm32"))]
+/// Writes the pending playlist text to a chosen save destination. The text
+/// lives in `pending_document`, not in the launcher's request, so it is read
+/// back here rather than threaded through the picker.
+fn receive_playlist_export(
+    state: MutableState<WinampState>,
+    result: cranpose_services::LauncherResult<Option<cranpose::ContentSinkRef>>,
+) {
+    match result {
+        Ok(Some(sink)) => {
+            let text = match state.get().pending_document {
+                Some(PendingDocument::ExportPlaylist(text)) => text,
+                _ => String::new(),
+            };
+            cranpose_core::spawn_ui_task(async move {
+                match cranpose::write_all(&sink, text.into_bytes()).await {
+                    Ok(()) => state.update(|app| {
+                        app.pending_document = None;
+                        app.status = "Exported Playlist".to_string();
+                    }),
+                    Err(error) => state.update(|app| {
+                        app.pending_document = None;
+                        app.status = error.to_string();
+                    }),
+                }
+            });
+        }
+        Ok(None) => state.update(|app| {
+            app.pending_document = None;
+            app.status = "Export Cancelled".to_string();
+        }),
+        Err(error) => state.update(|app| {
+            app.pending_document = None;
+            app.status = error.to_string();
+        }),
+    }
+}
+
+fn apply_imported_playlist(state: MutableState<WinampState>, text: &str) {
+    let tracks = parse_m3u_playlist(text, None);
+    if tracks.is_empty() {
+        state.update(|app| {
+            app.pending_document = None;
+            app.status = "No Playlist Tracks".to_string();
+        });
+        return;
+    }
+    let _ = audio::stop();
+    state.update(|app| {
+        app.pending_document = None;
+        replace_playlist_tracks(app, tracks);
+        app.playback = PlaybackState::Stopped;
+        app.status = format!("Imported {} Track(s)", app.playlist.len());
+    });
+    hydrate_playlist_durations_background(state);
+}
+
+/// Drives the Cranpose file/folder launchers when a selection is requested (see
+/// `request_pick`), then loads the chosen audio into the playlist. Works on
+/// desktop, Android (SAF) and iOS (UIDocumentPicker), so folders served by system
+/// providers such as a mounted WebDAV share can be opened anywhere.
+///
+/// One launcher per request shape, because the request key *is* the request: a
+/// grant that comes back after the activity — or the whole process — was
+/// destroyed is delivered to the launcher whose key asked for it, and that
+/// launcher already knows whether it was replacing or appending.
 #[composable]
 fn CranposePickerEffect(state: MutableState<WinampState>) {
+    let folder_replace = cranpose_services::rememberOpenFolderLauncher(
+        "cranamp.open-folder.replace",
+        move |result| receive_folder(state, result, false),
+    );
+    let folder_append = cranpose_services::rememberOpenFolderLauncher(
+        "cranamp.open-folder.append",
+        move |result| receive_folder(state, result, true),
+    );
+    let file_replace =
+        cranpose_services::rememberOpenFileLauncher("cranamp.open-file.replace", move |result| {
+            receive_file(state, result, false)
+        });
+    let file_append =
+        cranpose_services::rememberOpenFileLauncher("cranamp.open-file.append", move |result| {
+            receive_file(state, result, true)
+        });
+
     let pending = state.get().pending_pick;
-    // Resolve the picker from the composition local now, while a composer is
-    // active. Reading `.current()` inside the async closure would run after the
-    // effect is detached from composition and panic ("no active composer").
-    let picker = cranpose::local_file_picker().current();
-    cranpose_core::LaunchedEffectAsync!(pending, move |scope| {
-        let picker = picker.clone();
-        Box::pin(async move {
-            let Some(request) = pending else {
-                return;
-            };
-            let options = cranpose::FilePickerOptions::default().with_title(if request.folder {
-                "Open folder"
-            } else {
-                "Open audio file"
-            });
-            if request.folder {
-                stream_picked_folder(state, scope, picker, request.append, options).await;
-            } else {
-                load_picked_file(state, picker, request.append, options).await;
-            }
-        })
+    cranpose_core::LaunchedEffect!(pending, move |_scope| {
+        let Some(request) = pending else {
+            return;
+        };
+        let options = cranpose::FilePickerOptions::default().with_title(if request.folder {
+            "Open folder"
+        } else {
+            "Open audio file"
+        });
+        match (request.folder, request.append) {
+            (true, false) => folder_replace.launch(options),
+            (true, true) => folder_append.launch(options),
+            (false, false) => file_replace.launch(options),
+            (false, true) => file_append.launch(options),
+        }
     });
 }
 
-/// Picks a single file and loads it into the playlist (replace or append).
-#[cfg(not(target_arch = "wasm32"))]
-async fn load_picked_file(
+/// Takes a chosen folder and walks it into the playlist.
+fn receive_folder(
     state: MutableState<WinampState>,
-    picker: cranpose::FilePickerRef,
+    result: cranpose_services::LauncherResult<Option<cranpose::ContentFolderRef>>,
     append: bool,
-    options: cranpose::FilePickerOptions,
 ) {
-    let outcome = picker.pick_file(options).await;
-    // The picker returned, so this live pick resolved here (an activity
-    // recreation would instead drop this future before it returns); drop the
-    // resume marker so the next start does not try to recover a finished pick.
-    clear_pending_pick_sidecar();
-    match outcome {
-        Ok(Some(entry)) => {
-            state.update(|s| {
-                s.pending_pick = None;
-                s.status = "Loading selection".to_string();
+    match result {
+        Ok(Some(folder)) => {
+            state.update(|s| s.status = "Loading selection".to_string());
+            cranpose_core::spawn_ui_task(async move {
+                consume_folder_stream(state, cranpose::folder_files(folder), append).await;
             });
-            let tracks = audio::tracks_from_picked_entry(entry).await;
-            if tracks.is_empty() {
-                state.update(|s| s.status = "No audio files found".to_string());
-            } else if append {
-                append_playlist_and_play(state, tracks);
-            } else {
-                replace_playlist_and_play(state, tracks);
-            }
         }
         Ok(None) => state.update(|s| {
             s.pending_pick = None;
             s.status = "Open Cancelled".to_string();
         }),
-        Err(error) => state.update(|s| {
+        Err(error) => state.update(move |s| {
             s.pending_pick = None;
             s.status = error.to_string();
         }),
     }
 }
 
-/// Picks a folder and streams its audio into the playlist as the provider
-/// discovers it. The first tracks play immediately and the rest keep arriving,
-/// so a huge folder on a slow share (cloud/WebDAV) never freezes the UI.
-///
-/// `pending_pick` is deliberately held until the walk finishes: clearing it
-/// re-keys this `LaunchedEffectAsync` and would cancel the streaming loop at the
-/// next frame, so it is cleared only once discovery completes (or is abandoned).
-#[cfg(not(target_arch = "wasm32"))]
-async fn stream_picked_folder(
+/// Takes a chosen file and loads it into the playlist.
+fn receive_file(
     state: MutableState<WinampState>,
-    scope: cranpose_core::LaunchedEffectScope,
-    picker: cranpose::FilePickerRef,
+    result: cranpose_services::LauncherResult<Option<cranpose::ContentHandle>>,
     append: bool,
-    options: cranpose::FilePickerOptions,
 ) {
-    let outcome = picker.pick_folder_streaming(options).await;
-    // The folder selection resolved (the picker closed); from here the walk runs
-    // with cranamp in front, so the in-flight marker is no longer needed. On an
-    // activity recreation this future is dropped before returning, so the marker
-    // survives for `ResumePickEffect` instead.
-    clear_pending_pick_sidecar();
-    let stream = match outcome {
-        Ok(Some(stream)) => stream,
-        Ok(None) => {
-            state.update(|s| {
-                s.pending_pick = None;
-                s.status = "Open Cancelled".to_string();
+    match result {
+        Ok(Some(entry)) => {
+            state.update(|s| s.status = "Loading selection".to_string());
+            cranpose_core::spawn_ui_task(async move {
+                let tracks = audio::tracks_from_picked_entry(entry).await;
+                state.update(|s| s.pending_pick = None);
+                load_recovered_tracks(state, tracks, append);
             });
-            return;
         }
-        Err(error) => {
-            state.update(|s| {
-                s.pending_pick = None;
-                s.status = error.to_string();
-            });
-            return;
-        }
-    };
-    consume_folder_stream(state, &scope, stream, append).await;
+        Ok(None) => state.update(|s| {
+            s.pending_pick = None;
+            s.status = "Open Cancelled".to_string();
+        }),
+        Err(error) => state.update(move |s| {
+            s.pending_pick = None;
+            s.status = error.to_string();
+        }),
+    }
+}
+
+/// Puts a selection into the playlist, replacing or appending as the request
+/// asked.
+fn load_recovered_tracks(state: MutableState<WinampState>, tracks: Vec<Track>, append: bool) {
+    if tracks.is_empty() {
+        state.update(|s| s.status = "No audio files found".to_string());
+    } else if append {
+        append_playlist_and_play(state, tracks);
+    } else {
+        replace_playlist_and_play(state, tracks);
+    }
 }
 
 /// Drains an already-resolved folder [`cranpose::FolderStream`] into the
 /// playlist, frame by frame, until the provider finishes the walk. Shared by the
-/// live folder pick ([`stream_picked_folder`]) and the resume path
+/// live folder pick and the recovered one
 /// ([`ResumePickEffect`]), which both receive a stream the same way — one from a
 /// fresh SAF prompt, one re-walked from a grant recovered after the activity was
 /// destroyed mid-pick.
-#[cfg(not(target_arch = "wasm32"))]
 async fn consume_folder_stream(
     state: MutableState<WinampState>,
-    scope: &cranpose_core::LaunchedEffectScope,
-    stream: cranpose::FolderStreamRef,
+    stream: cranpose::ContentStreamRef,
     append: bool,
 ) {
     state.update(|s| s.status = "Scanning folder".to_string());
     log::info!(target: "cranamp::picker", "folder stream started (append={append})");
 
-    let clock = scope.runtime().frame_clock();
+    // The provider wakes this future when it has the next file, so the walk
+    // costs nothing while it is quiet. Polling a ready queue once a frame
+    // instead would wake the whole application sixty times a second for as long
+    // as the folder took to walk, whether or not anything had been discovered.
+    // Tracks are handed over in batches so a huge folder starts playing before
+    // the walk finishes.
+    const BATCH: usize = 24;
     let replace = !append;
     let mut started = false;
     let mut total = 0usize;
     let mut seen = 0usize;
-    let mut tick = 0usize;
-    loop {
-        if !scope.is_active() {
-            log::info!(target: "cranamp::picker", "folder stream scope inactive; abandoning after {total}/{seen} audio/total");
-            break;
+    let mut batch: Vec<Track> = Vec::with_capacity(BATCH);
+
+    let flush = |batch: &mut Vec<Track>, total: &mut usize, started: &mut bool| {
+        if batch.is_empty() {
+            return;
         }
-        // Drain everything discovered since the previous frame and append it.
-        let ready = stream.take_ready();
-        let drained = ready.len();
-        if drained > 0 {
-            seen += drained;
-            let mut batch = Vec::with_capacity(drained);
-            for entry in ready {
-                let name = entry.name();
+        batch.sort_by(|a, b| a.display_title().cmp(b.display_title()));
+        *total += batch.len();
+        let ready = std::mem::take(batch);
+        if replace && !*started {
+            replace_playlist_and_play(state, ready);
+        } else {
+            append_playlist_and_play(state, ready);
+        }
+        *started = true;
+    };
+
+    loop {
+        match stream.next().await {
+            Ok(Some(entry)) => {
+                seen += 1;
+                let name = entry.metadata().name;
                 if let Some(track) = audio::track_from_picked_file(entry).await {
                     batch.push(track);
                 } else {
@@ -1106,188 +1204,100 @@ async fn consume_folder_stream(
                     // shares) would otherwise silently drop every track.
                     log::info!(target: "cranamp::picker", "skipped non-audio entry: {name:?}");
                 }
-            }
-            log::info!(
-                target: "cranamp::picker",
-                "folder batch: {drained} discovered, {} audio (running {}/{})",
-                batch.len(),
-                total + batch.len(),
-                seen,
-            );
-            if !batch.is_empty() {
-                batch.sort_by(|a, b| a.display_title().cmp(b.display_title()));
-                total += batch.len();
-                if replace && !started {
-                    replace_playlist_and_play(state, batch);
-                } else {
-                    append_playlist_and_play(state, batch);
+                if batch.len() >= BATCH {
+                    flush(&mut batch, &mut total, &mut started);
+                    state.update(|s| s.status = format!("Scanning {total} tracks…"));
                 }
-                started = true;
+            }
+            Ok(None) => {
+                flush(&mut batch, &mut total, &mut started);
+                log::info!(
+                    target: "cranamp::picker",
+                    "folder stream finished: {total} audio of {seen} files discovered"
+                );
+                state.update(|s| {
+                    s.pending_pick = None;
+                    s.status = if total == 0 {
+                        "No audio files found".to_string()
+                    } else {
+                        format!("Loaded {total} Track(s)")
+                    };
+                });
+                break;
+            }
+            Err(error) => {
+                log::warn!(target: "cranamp::picker", "folder stream error: {error}");
+                state.update(move |s| s.status = format!("Scan error: {error}"));
+                flush(&mut batch, &mut total, &mut started);
+                break;
             }
         }
-        if let Some(error) = stream.take_error() {
-            log::warn!(target: "cranamp::picker", "folder stream error: {error}");
-            state.update(|s| s.status = format!("Scan error: {error}"));
-        }
-        if stream.is_finished() {
-            log::info!(
-                target: "cranamp::picker",
-                "folder stream finished: {total} audio of {seen} files discovered"
-            );
-            state.update(|s| {
-                s.pending_pick = None;
-                s.status = if total == 0 {
-                    "No audio files found".to_string()
-                } else {
-                    format!("Loaded {total} Track(s)")
-                };
-            });
-            break;
-        }
-        // Keep a live, animated count visible while the walk continues.
-        let dots = ".".repeat((tick / 12) % 4);
-        state.update(|s| s.status = format!("Scanning {total} tracks{dots}"));
-        tick += 1;
-        let _ = clock.next_frame().await;
     }
 }
 
-/// Recovers a folder/file selection whose result arrived after the composition
-/// that requested it was torn down (see [`PendingPickPersistence`]). Runs once on
-/// startup: if the sidecar shows a pick was in flight, it polls cranpose's resume
-/// inbox for a short window (the recreated activity's `onActivityResult` fires
-/// after the native app restarts, so the grant is not there immediately) and
-/// then loads the recovered selection through the same code paths as a live pick.
-/// It never launches a new SAF prompt, so there is no double-prompt or race with
-/// the live picker.
-#[cfg(not(target_arch = "wasm32"))]
-#[composable]
-fn ResumePickEffect(state: MutableState<WinampState>) {
-    let picker = cranpose::local_file_picker().current();
-    cranpose_core::LaunchedEffectAsync!(0u8, move |scope| {
-        let picker = picker.clone();
-        Box::pin(async move {
-            // Only a pick that was launched and never resolved leaves the sidecar
-            // behind; without it there is nothing orphaned to recover.
-            let Some(pending) = load_pending_pick() else {
-                return;
-            };
-            let append = pending.append;
-            let clock = scope.runtime().frame_clock();
-            // ~10s at 60fps — long enough for a recreated activity to deliver its
-            // result, short enough to give up if the pick was actually abandoned.
-            let mut resumed = Vec::new();
-            for _ in 0..600 {
-                if !scope.is_active() {
-                    return;
-                }
-                resumed = picker.take_resumed_picks();
-                if !resumed.is_empty() {
-                    break;
-                }
-                let _ = clock.next_frame().await;
-            }
-            // The in-flight marker is resolved now (recovered or abandoned); clear
-            // it so the next start does not poll again for a stale pick.
-            clear_pending_pick_sidecar();
-            if resumed.is_empty() {
-                log::info!(target: "cranamp::picker", "resume: no orphaned pick recovered");
-                return;
-            }
-            log::info!(
-                target: "cranamp::picker",
-                "resume: recovered {} orphaned pick(s) (append={append})",
-                resumed.len()
-            );
-            state.update(|s| {
-                s.pending_pick = None;
-                s.status = "Resuming selection".to_string();
-            });
-            for pick in resumed {
-                match pick {
-                    cranpose::ResumedPick::Folder(stream) => {
-                        consume_folder_stream(state, &scope, stream, append).await;
-                    }
-                    cranpose::ResumedPick::File(entry) => {
-                        let tracks = audio::tracks_from_picked_entry(entry).await;
-                        if tracks.is_empty() {
-                            state.update(|s| s.status = "No audio files found".to_string());
-                        } else if append {
-                            append_playlist_and_play(state, tracks);
-                        } else {
-                            replace_playlist_and_play(state, tracks);
-                        }
-                    }
-                }
-            }
-        })
-    });
-}
-
-/// Drives the native skin picker (desktop/Android/iOS) through the same Cranpose
-/// file picker as audio, so picking a `.wsz` never blocks the event loop with a
-/// nested modal. The chosen file is read as bytes and applied directly.
-#[cfg(not(target_arch = "wasm32"))]
+/// Drives the skin picker through a keyed launcher, the same
+/// composition-owned pattern as `CranposePickerEffect`, so picking a `.wsz`
+/// never blocks the event loop with a nested modal and a grant that outlives
+/// the activity is redelivered rather than dropped. The chosen file is read
+/// as bytes and applied directly.
 #[composable]
 fn SkinPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+    let skin_picker =
+        cranpose_services::rememberOpenFileLauncher("cranamp.open-skin", move |result| {
+            receive_skin_pick(state, skin_state, result)
+        });
+
     let pending = state.get().pending_skin_pick;
-    let picker = cranpose::local_file_picker().current();
-    cranpose_core::LaunchedEffectAsync!(pending, move |_scope| {
-        let picker = picker.clone();
-        Box::pin(async move {
-            if !pending {
-                return;
-            }
-            let options = cranpose::FilePickerOptions::default()
-                .with_title("Open Winamp skin")
-                .with_filter(cranpose::FileFilter::new("Winamp skin", &["wsz", "zip"]));
-            match picker.pick_file(options).await {
-                Ok(Some(entry)) => {
-                    let label = entry.name();
-                    let display_path = entry.display_path();
-                    match entry.read_bytes().await {
-                        Ok(bytes) => {
-                            state.update(|s| s.pending_skin_pick = false);
-                            // Persist the picked skin into the library so it
-                            // survives restarts and shows up in Settings. Fall
-                            // back to the picker's display path if the copy
-                            // fails (e.g. read-only config dir).
-                            let stored_path = copy_into_library(&bytes, &label)
-                                .ok()
-                                .map(|path| path.to_string_lossy().to_string())
-                                .unwrap_or(display_path);
-                            apply_loaded_skin(state, skin_state, &bytes, &label, Some(stored_path));
-                        }
-                        Err(error) => state.update(|s| {
-                            s.pending_skin_pick = false;
-                            s.status = format!("Skin Load Failed: {error}");
-                        }),
-                    }
-                }
-                Ok(None) => state.update(|s| {
-                    s.pending_skin_pick = false;
-                    s.status = "Skin Open Cancelled".to_string();
-                }),
-                Err(error) => state.update(|s| {
-                    s.pending_skin_pick = false;
-                    s.status = error.to_string();
-                }),
-            }
-        })
+    cranpose_core::LaunchedEffect!(pending, move |_scope| {
+        if !pending {
+            return;
+        }
+        let options = cranpose::FilePickerOptions::default()
+            .with_title("Open Winamp skin")
+            .with_filter(cranpose::FileFilter::new("Winamp skin", &["wsz", "zip"]));
+        skin_picker.launch(options);
     });
 }
 
-#[cfg(target_arch = "wasm32")]
-#[composable]
-fn SkinPickerEffect(_state: MutableState<WinampState>, _skin_state: WinampSkinState) {}
-
-#[cfg(target_arch = "wasm32")]
-#[composable]
-fn CranposePickerEffect(_state: MutableState<WinampState>) {}
-
-#[cfg(target_arch = "wasm32")]
-#[composable]
-fn ResumePickEffect(_state: MutableState<WinampState>) {}
+/// Takes a chosen skin file and applies it.
+fn receive_skin_pick(
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    result: cranpose_services::LauncherResult<Option<cranpose::ContentHandle>>,
+) {
+    match result {
+        Ok(Some(entry)) => {
+            let label = entry.metadata().name;
+            let display_path = entry.metadata().identifier;
+            cranpose_core::spawn_ui_task(async move {
+                match entry.read_all().await {
+                    Ok(bytes) => {
+                        state.update(|s| s.pending_skin_pick = false);
+                        // Persist the picked skin into the library so it
+                        // survives restarts and shows up in Settings. Fall
+                        // back to the picker's display path if the copy
+                        // fails (e.g. read-only config dir).
+                        let stored_path =
+                            store_skin_in_library(&bytes, &label).unwrap_or(display_path);
+                        apply_loaded_skin(state, skin_state, &bytes, &label, Some(stored_path));
+                    }
+                    Err(error) => state.update(|s| {
+                        s.pending_skin_pick = false;
+                        s.status = format!("Skin Load Failed: {error}");
+                    }),
+                }
+            });
+        }
+        Ok(None) => state.update(|s| {
+            s.pending_skin_pick = false;
+            s.status = "Skin Open Cancelled".to_string();
+        }),
+        Err(error) => state.update(|s| {
+            s.pending_skin_pick = false;
+            s.status = error.to_string();
+        }),
+    }
+}
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 #[composable]
@@ -1295,7 +1305,9 @@ fn WebSurfaceSizeEffect(state: MutableState<WinampState>) {
     let snapshot = state.get();
     cranpose_core::SideEffect(move || {
         let layout = web_stacked_layout(&snapshot);
-        publish_web_surface_size(
+        // A host with no resize facility refuses, which is the answer everywhere
+        // the stacked window layout is not the browser's.
+        let _ = cranpose_services::request_host_surface_size(
             stacked_surface_width(layout),
             stacked_surface_height(&snapshot, layout),
         );
@@ -1306,107 +1318,20 @@ fn WebSurfaceSizeEffect(state: MutableState<WinampState>) {
 #[composable]
 fn WebSurfaceSizeEffect(_state: MutableState<WinampState>) {}
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn publish_web_surface_size(width: f32, height: f32) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Ok(callback) = js_sys::Reflect::get(&window, &JsValue::from_str("cranampApplySurfaceSize"))
-        .and_then(|value| value.dyn_into::<js_sys::Function>().map_err(Into::into))
-    else {
-        return;
-    };
-    let _ = callback.call2(
-        &window,
-        &JsValue::from_f64(width as f64),
-        &JsValue::from_f64(height as f64),
-    );
-}
-
+/// Follows the open item: where it is, and when it ends.
+///
+/// Both are published by the media backend as they happen, so there is nothing
+/// here on a timer. A track that reaches its end says so, rather than being
+/// found to have ended by the next sample.
 #[composable]
 fn PlaybackProgressEffect(state: MutableState<WinampState>) {
-    let playback = state.get().playback;
-    #[cfg(not(target_arch = "wasm32"))]
-    let dispatcher =
-        cranpose_core::with_current_composer(|composer| composer.runtime_handle().dispatcher());
-    cranpose_core::DisposableEffect!(playback, move |_| {
-        if playback != PlaybackState::Playing {
-            return cranpose_core::DisposableEffectResult::default();
-        }
-
-        sync_playback_progress(state);
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            start_native_interval(
-                dispatcher,
-                Duration::from_millis(PLAYBACK_PROGRESS_UPDATE_MS),
-                move || {
-                    sync_playback_progress(state);
-                },
-            )
-        }
-
-        #[cfg(all(feature = "web", target_arch = "wasm32"))]
-        {
-            start_web_interval(
-                Duration::from_millis(PLAYBACK_PROGRESS_UPDATE_MS),
-                move || {
-                    sync_playback_progress(state);
-                },
-            )
-        }
-
-        #[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
-        {
-            cranpose_core::DisposableEffectResult::default()
-        }
+    let progress = cranpose_services::rememberPlaybackProgress();
+    let media_state = cranpose_services::rememberPlaybackState();
+    let position = progress.get();
+    let ended = matches!(media_state.get(), cranpose_services::PlaybackState::Ended);
+    cranpose_core::LaunchedEffect!((position, ended), move |_scope| {
+        sync_playback_progress(state, &position, ended);
     });
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn start_native_interval(
-    dispatcher: cranpose_core::runtime::UiDispatcher,
-    interval: Duration,
-    tick: impl Fn() + Copy + Send + 'static,
-) -> cranpose_core::DisposableEffectResult {
-    let active = Arc::new(AtomicBool::new(true));
-    let thread_active = Arc::clone(&active);
-    std::thread::spawn(move || {
-        while thread_active.load(Ordering::SeqCst) {
-            std::thread::sleep(interval);
-            if !thread_active.load(Ordering::SeqCst) {
-                break;
-            }
-            dispatcher.post(tick);
-        }
-    });
-
-    cranpose_core::DisposableEffectResult::new(move || {
-        active.store(false, Ordering::SeqCst);
-    })
-}
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn start_web_interval(
-    interval: Duration,
-    tick: impl FnMut() + 'static,
-) -> cranpose_core::DisposableEffectResult {
-    let Some(window) = web_sys::window() else {
-        return cranpose_core::DisposableEffectResult::default();
-    };
-    let callback = Closure::<dyn FnMut()>::wrap(Box::new(tick));
-    let Ok(interval_id) = window.set_interval_with_callback_and_timeout_and_arguments_0(
-        callback.as_ref().unchecked_ref(),
-        interval.as_millis().min(i32::MAX as u128) as i32,
-    ) else {
-        return cranpose_core::DisposableEffectResult::default();
-    };
-
-    cranpose_core::DisposableEffectResult::new(move || {
-        window.clear_interval_with_handle(interval_id);
-        drop(callback);
-    })
 }
 
 #[composable]
@@ -1556,121 +1481,81 @@ fn sync_try_apply_resume(state: MutableState<WinampState>, merged: &crate::sync:
     });
 }
 
-/// Native effect: starts the background sync worker and applies the newest
-/// resume point to the restored playlist exactly once after launch.
+/// Native effect: starts the background sync worker, applies the newest resume
+/// point to the restored playlist exactly once after launch, and owns the
+/// writable sync-folder pick.
 #[cfg(not(target_arch = "wasm32"))]
 #[composable]
 fn SyncEffect(state: MutableState<WinampState>) {
     cranpose_core::remember(crate::sync::runtime::start_worker);
 
-    let applied = cranpose_core::useState(|| false);
-    cranpose_core::LaunchedEffectAsync!(0u8, move |scope| {
+    cranpose_core::LaunchedEffectAsync!(0u8, move |_scope| {
         Box::pin(async move {
-            let clock = scope.runtime().frame_clock();
-            let mut ticks = 0u32;
-            loop {
-                if !scope.is_active() || applied.get() {
-                    break;
-                }
-                let _ = clock.next_frame().await;
-                if let Some(merged) = crate::sync::runtime::latest_merged() {
-                    sync_try_apply_resume(state, &merged);
-                    applied.set(true);
-                    break;
-                }
-                ticks += 1;
-                if ticks > 1200 {
-                    break;
-                }
+            if let Some(merged) = crate::sync::runtime::first_merged().wait().await {
+                sync_try_apply_resume(state, &merged);
             }
         })
     });
 
-    // Drive cranpose's cross-platform writable sync-folder picker. Tapping
-    // "choose folder" flips `pending_sync_folder_pick`, re-keying this effect;
-    // it awaits the picker and applies the chosen folder off the UI executor
-    // (the probe + first flush is folder I/O that may hit a network mount).
+    // The request key is what the grant comes back to, so a SAF prompt that
+    // outlives the activity - or the whole process - is redelivered to this
+    // callback. The application marks nothing on disk and polls no inbox.
+    let folder =
+        cranpose_services::rememberWritableFolderLauncher("cranamp.sync-folder", move |result| {
+            receive_sync_folder(state, result)
+        });
+
     let pending_folder_pick = state.get().pending_sync_folder_pick;
-    cranpose_core::LaunchedEffectAsync!(pending_folder_pick, move |_scope| {
-        Box::pin(async move {
-            if !pending_folder_pick {
-                return;
-            }
-            let outcome = cranpose_services::pick_writable_folder().await;
-            // The picker returned, so this live pick resolved here (an activity
-            // recreation would instead drop this future before it returns); drop
-            // the resume marker so the next start does not re-recover it.
-            clear_pending_sync_pick();
-            match outcome {
-                Ok(Some(handle)) => {
-                    std::thread::spawn(move || {
-                        let _ = crate::sync::runtime::set_folder(Some(handle));
-                    });
-                    state.update(|s| {
-                        s.pending_sync_folder_pick = false;
-                        s.status = "Sync folder set".to_string();
-                    });
-                }
-                Ok(None) => state.update(|s| {
-                    s.pending_sync_folder_pick = false;
-                    s.status = "Sync folder unchanged".to_string();
-                }),
-                Err(error) => state.update(|s| {
-                    s.pending_sync_folder_pick = false;
-                    s.status = error.to_string();
-                }),
-            }
-        })
-    });
-
-    // Recover a sync-folder grant orphaned by an activity recreation while the
-    // SAF writable-folder picker was in front — the write-side analogue of
-    // `ResumePickEffect`. Runs once on startup: if the marker shows a pick was in
-    // flight, poll cranpose's resume inbox briefly (the recreated activity's
-    // result arrives after the app restarts) and apply the recovered folder.
-    cranpose_core::LaunchedEffectAsync!(1u8, move |scope| {
-        Box::pin(async move {
-            if !pending_sync_pick_exists() {
-                return;
-            }
-            let clock = scope.runtime().frame_clock();
-            let mut handle = None;
-            for _ in 0..600 {
-                if !scope.is_active() {
-                    return;
-                }
-                handle = cranpose_services::take_resumed_writable_folder();
-                if handle.is_some() {
-                    break;
-                }
-                let _ = clock.next_frame().await;
-            }
-            clear_pending_sync_pick();
-            let Some(handle) = handle else {
-                log::info!(target: "cranamp::sync", "resume: no orphaned sync folder grant recovered");
-                return;
-            };
-            log::info!(target: "cranamp::sync", "resume: recovered orphaned sync folder grant");
-            std::thread::spawn(move || {
-                let _ = crate::sync::runtime::set_folder(Some(handle));
-            });
-            state.update(|s| s.status = "Sync folder set".to_string());
-        })
+    cranpose_core::LaunchedEffect!(pending_folder_pick, move |_scope| {
+        if pending_folder_pick {
+            folder.launch(cranpose::FilePickerOptions::default().with_title("Choose sync folder"));
+        }
     });
 }
 
-fn sync_playback_progress(state: MutableState<WinampState>) {
+/// Applies a chosen sync folder. The probe and first flush are folder I/O that
+/// can hit a network mount, so they run off the UI executor.
+#[cfg(not(target_arch = "wasm32"))]
+fn receive_sync_folder(
+    state: MutableState<WinampState>,
+    result: cranpose_services::LauncherResult<Option<String>>,
+) {
+    let status = match result {
+        Ok(Some(handle)) => {
+            cranpose_core::launchBlocking(
+                move || {
+                    let _ = crate::sync::runtime::set_folder(Some(handle));
+                },
+                |_| {},
+            );
+            "Sync folder set".to_string()
+        }
+        Ok(None) => "Sync folder unchanged".to_string(),
+        Err(error) => error.to_string(),
+    };
+    state.update(move |s| {
+        s.pending_sync_folder_pick = false;
+        s.status = status.clone();
+    });
+}
+
+fn sync_playback_progress(
+    state: MutableState<WinampState>,
+    progress: &cranpose_services::PlaybackProgress,
+    finished: bool,
+) {
     let snapshot = state.get_non_reactive();
     if snapshot.playback != PlaybackState::Playing || playlist_scroll_drag_active() {
         return;
     }
 
-    match audio::playback_progress() {
-        Ok(Some(progress)) => {
-            let finished = progress.finished;
+    {
+        {
+            let elapsed_seconds = progress.position.as_secs_f32();
+            let reported_duration = progress.duration.map(|duration| duration.as_secs_f32());
             state.update(|s| {
-                let duration = progress.duration_seconds.or(s.duration_seconds);
-                let elapsed = normalized_elapsed_seconds(progress.elapsed_seconds, duration);
+                let duration = reported_duration.or(s.duration_seconds);
+                let elapsed = normalized_elapsed_seconds(elapsed_seconds, duration);
                 s.elapsed_seconds = elapsed;
                 s.duration_seconds = duration;
                 if let (Some(index), Some(duration)) = (s.current_index, duration) {
@@ -1697,8 +1582,6 @@ fn sync_playback_progress(state: MutableState<WinampState>) {
                 advance_finished_track(state);
             }
         }
-        Ok(None) => {}
-        Err(error) => state.update(|s| s.status = error),
     }
 }
 
@@ -1975,7 +1858,7 @@ fn WinampStackedStage(
     #[cfg(target_os = "android")]
     let overlay_enabled = android_floating_overlay_enabled();
     #[cfg(target_os = "android")]
-    let overlay_position = cranpose_core::useState(|| {
+    let overlay_position = cranpose_core::rememberMutableStateOf(|| {
         Point::new(
             ANDROID_OVERLAY_INITIAL_X as f32,
             ANDROID_OVERLAY_INITIAL_Y as f32,
@@ -2231,22 +2114,14 @@ fn web_stacked_layout(snapshot: &WinampState) -> AndroidStackedLayout {
     )
 }
 
+/// The surface the host last reported, when it has measured one. Before the
+/// first frame there is nothing to read and the caller falls back to the skin's
+/// own size.
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn web_current_surface_size() -> Option<Size> {
-    let window = web_sys::window()?;
-    let callback = js_sys::Reflect::get(&window, &JsValue::from_str("cranampCurrentSurfaceSize"))
-        .ok()?
-        .dyn_into::<js_sys::Function>()
-        .ok()?;
-    let size = callback.call0(&window).ok()?;
-    let width = js_sys::Reflect::get(&size, &JsValue::from_str("width"))
-        .ok()?
-        .as_f64()? as f32;
-    let height = js_sys::Reflect::get(&size, &JsValue::from_str("height"))
-        .ok()?
-        .as_f64()? as f32;
-    (width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0)
-        .then_some(Size::new(width, height))
+    let size = cranpose_services::host_surface_size();
+    (size.width.is_finite() && size.width > 0.0 && size.height.is_finite() && size.height > 0.0)
+        .then(|| Size::new(size.width, size.height))
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -2384,7 +2259,7 @@ fn WinampNativeWindows(
 
 #[composable]
 pub fn WinampStandaloneApp() {
-    let state = cranpose_core::useState(initial_winamp_state);
+    let state = cranpose_core::rememberMutableStateOf(initial_winamp_state);
     let peer_windows = WinampPeerWindowStates {
         main: rememberWindowState(MAIN_WIDTH, MAIN_HEIGHT),
         equalizer: rememberWindowState(EQ_WIDTH, EQ_HEIGHT),
@@ -2677,8 +2552,8 @@ fn MainWindow(
                 POS_POSBAR.1,
                 scale,
             );
-            let posbar_pressed = cranpose_core::useState(|| false);
-            let position_drag = cranpose_core::useState(|| None::<f32>);
+            let posbar_pressed = cranpose_core::rememberMutableStateOf(|| false);
+            let position_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
             let display_position = position_drag.get().unwrap_or(snapshot.position);
             let position_thumb_x = slider_thumb_x(display_position, POSBAR_BG.2, POSBAR_THUMB.2);
             let posbar_thumb_sprite = if posbar_pressed.get() {
@@ -2699,6 +2574,7 @@ fn MainWindow(
                 let snapshot_duration = snapshot.duration_seconds;
                 DragSlider(
                     ControlRect::new(POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3, scale),
+                    display_position,
                     POSBAR_THUMB.2,
                     move |fraction| {
                         position_drag_change.set(Some(fraction));
@@ -2726,8 +2602,8 @@ fn MainWindow(
 
             TransportButtons(skin.cbuttons.clone(), state, scale);
 
-            let volume_pressed = cranpose_core::useState(|| false);
-            let volume_drag = cranpose_core::useState(|| None::<f32>);
+            let volume_pressed = cranpose_core::rememberMutableStateOf(|| false);
+            let volume_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
             let display_volume = volume_drag.get().unwrap_or(snapshot.volume);
             let vol_frame = slider_frame(display_volume, VOLUME_FRAMES);
             Sprite(
@@ -2766,6 +2642,7 @@ fn MainWindow(
                         VOLUME_BG_HEIGHT,
                         scale,
                     ),
+                    display_volume,
                     VOLUME_THUMB.2,
                     move |fraction| {
                         volume_drag_change.set(Some(fraction));
@@ -2788,8 +2665,8 @@ fn MainWindow(
                 );
             }
 
-            let balance_pressed = cranpose_core::useState(|| false);
-            let balance_drag = cranpose_core::useState(|| None::<f32>);
+            let balance_pressed = cranpose_core::rememberMutableStateOf(|| false);
+            let balance_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
             let display_balance = balance_drag.get().unwrap_or(snapshot.balance);
             let bal_frame = slider_frame(display_balance, BALANCE_FRAMES);
             Sprite(
@@ -2829,6 +2706,7 @@ fn MainWindow(
                         BALANCE_BG_HEIGHT,
                         scale,
                     ),
+                    display_balance,
                     BALANCE_THUMB.2,
                     move |fraction| {
                         balance_drag_change.set(Some(fraction));
@@ -3161,8 +3039,8 @@ fn EqualizerWindow(
 
             for (index, slider_x) in EQ_SLIDER_XS.iter().copied().enumerate() {
                 let thumb_x = EQ_THUMB_XS[index];
-                let eq_pressed = cranpose_core::useState(|| false);
-                let eq_drag = cranpose_core::useState(|| None::<f32>);
+                let eq_pressed = cranpose_core::rememberMutableStateOf(|| false);
+                let eq_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
                 let value = eq_drag.get().unwrap_or(snapshot.eq_values[index]);
                 let thumb_y = EQ_SLIDER_BG_Y
                     + vertical_slider_thumb_y(value, EQ_SLIDER_TRACK_HEIGHT, EQ_SLIDER_THUMB.3);
@@ -3199,6 +3077,7 @@ fn EqualizerWindow(
                         EQ_SLIDER_TRACK_HEIGHT,
                         scale,
                     ),
+                    value,
                     true,
                     move |fraction| {
                         eq_drag_change.set(Some(fraction));
@@ -3397,60 +3276,9 @@ fn SettingsHeader(state: MutableState<WinampState>) {
     );
 }
 
-/// Transient state for the Settings "Updates" section. Lives in a local
-/// `useState` inside the update section (not on `WinampState`) so per-frame
-/// download progress does not invalidate the whole player tree. Android-only:
-/// other platforms link out to the releases page instead of self-updating.
-#[cfg(target_os = "android")]
-#[derive(Clone, PartialEq)]
-enum UpdateUi {
-    Idle,
-    Checking,
-    UpToDate,
-    Available { version: String, url: String },
-    Downloading { pct: u8 },
-    Installing,
-    Error(String),
-}
-
-#[cfg(target_os = "android")]
-impl UpdateUi {
-    fn status_line(&self) -> String {
-        match self {
-            UpdateUi::Idle => format!("Current version v{}", env!("CARGO_PKG_VERSION")),
-            UpdateUi::Checking => "Checking GitHub for updates...".to_string(),
-            UpdateUi::UpToDate => format!("Up to date (v{})", env!("CARGO_PKG_VERSION")),
-            UpdateUi::Available { version, .. } => format!("Update available: v{version}"),
-            UpdateUi::Downloading { pct } => format!("Downloading update... {pct}%"),
-            UpdateUi::Installing => "Launching installer...".to_string(),
-            UpdateUi::Error(error) => format!("Update error: {error}"),
-        }
-    }
-
-    #[cfg(target_os = "android")]
-    fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            UpdateUi::UpToDate
-                | UpdateUi::Available { .. }
-                | UpdateUi::Installing
-                | UpdateUi::Error(_)
-        )
-    }
-
-    #[cfg(target_os = "android")]
-    fn from_status(status: android_bridge::UpdateStatus) -> Self {
-        use android_bridge::UpdateStatus;
-        match status {
-            UpdateStatus::Checking => UpdateUi::Checking,
-            UpdateStatus::UpToDate => UpdateUi::UpToDate,
-            UpdateStatus::Available { version, url } => UpdateUi::Available { version, url },
-            UpdateStatus::Downloading { pct } => UpdateUi::Downloading { pct },
-            UpdateStatus::Installing => UpdateUi::Installing,
-            UpdateStatus::Error(error) => UpdateUi::Error(error),
-        }
-    }
-}
+/// How often the sync panel re-reads the worker's cached view while it is open.
+#[cfg(not(target_arch = "wasm32"))]
+const SYNC_PANEL_REFRESH: Duration = Duration::from_millis(1500);
 
 /// Cross-device sync section: status, enable toggle, folder picker, and the
 /// list of devices currently in the shared folder. Reads cheap cached state
@@ -3458,21 +3286,16 @@ impl UpdateUi {
 #[cfg(not(target_arch = "wasm32"))]
 #[composable]
 fn SettingsSyncSection(state: MutableState<WinampState>) {
-    let refresh = cranpose_core::useState(|| 0u64);
-    cranpose_core::LaunchedEffectAsync!(0u8, move |scope| {
+    let refresh = cranpose_core::rememberMutableStateOf(|| 0u64);
+    cranpose_core::LaunchedEffectAsync!(0u8, move |_scope| {
         Box::pin(async move {
-            let clock = scope.runtime().frame_clock();
-            let mut frames = 0u32;
-            loop {
-                if !scope.is_active() {
-                    break;
-                }
-                let _ = clock.next_frame().await;
-                frames += 1;
-                if frames.is_multiple_of(90) {
-                    refresh.update(|value| *value += 1);
-                }
-            }
+            // The timer costs nothing between ticks; counting frames to reach
+            // the same cadence would keep the clock awake for as long as the
+            // panel is open.
+            cranpose_core::interval(SYNC_PANEL_REFRESH, move || {
+                refresh.update(|value| *value += 1);
+            })
+            .await;
         })
     });
     let _ = refresh.get(); // subscribe so worker updates re-render the section
@@ -3597,10 +3420,6 @@ fn shorten_sync_folder(path: &str) -> String {
 /// applies the chosen folder via the sync runtime.
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_pick_folder(state: MutableState<WinampState>) {
-    // Persist the in-flight marker before the SAF prompt launches so an activity
-    // recreation while it is in front can be recovered by `SyncEffect` (the
-    // writable-folder picker has the same recreation hazard as the audio picker).
-    mark_pending_sync_pick();
     state.update(|s| {
         s.pending_sync_folder_pick = true;
         s.status = "Choose a sync folder…".to_string();
@@ -3697,40 +3516,10 @@ fn SettingsSkinsSection(_state: MutableState<WinampState>, _skin_state: WinampSk
     );
 }
 
-/// Android update section: checks GitHub, then downloads + installs the APK in
-/// place through the Android bridge, polling `update_status.json` each frame.
 #[cfg(target_os = "android")]
 #[composable]
 fn SettingsUpdateSection(_state: MutableState<WinampState>) {
-    let update_ui = cranpose_core::useState(|| UpdateUi::Idle);
-    let poll_gen = cranpose_core::useState(|| 0u64);
-
-    let poll_gen_value = poll_gen.get();
-    cranpose_core::LaunchedEffectAsync!(poll_gen_value, move |scope| {
-        Box::pin(async move {
-            if poll_gen_value == 0 {
-                return;
-            }
-            let clock = scope.runtime().frame_clock();
-            loop {
-                if !scope.is_active() {
-                    break;
-                }
-                let _ = clock.next_frame().await;
-                if !scope.is_active() {
-                    break;
-                }
-                if let Some(status) = android_bridge::read_update_status() {
-                    let next = UpdateUi::from_status(status);
-                    let terminal = next.is_terminal();
-                    update_ui.set(next);
-                    if terminal {
-                        break;
-                    }
-                }
-            }
-        })
-    });
+    let update_status = cranpose::rememberAppUpdateState();
 
     Column(
         Modifier::empty().fill_max_width(),
@@ -3742,41 +3531,81 @@ fn SettingsUpdateSection(_state: MutableState<WinampState>) {
                 settings_text_style(11.0, SETTINGS_TEXT_DIM),
             );
             Text(
-                update_ui.get().status_line(),
+                app_update_status_line(&update_status.get()),
                 Modifier::empty(),
                 settings_text_style(12.0, SETTINGS_TEXT),
             );
-            match update_ui.get() {
-                UpdateUi::Available { version, url } => {
+            match update_status.get() {
+                cranpose::AppUpdateStatus::Available { package } => {
                     SettingsActionButton(
-                        format!("Download & install v{version}"),
+                        format!("Download & install v{}", package.version),
                         SETTINGS_ACCENT,
                         move || {
-                            update_ui.set(UpdateUi::Downloading { pct: 0 });
-                            match android_bridge::request_install_update(&url) {
-                                Ok(()) => poll_gen.update(|gen| *gen += 1),
-                                Err(error) => update_ui.set(UpdateUi::Error(error)),
-                            }
+                            // The whole package, not just its URL: the framework
+                            // checks the bytes against the digest the release
+                            // feed published before any installer sees them. It
+                            // publishes every outcome into the status this
+                            // screen already reads, so there is nothing to
+                            // record here that reading it would not show.
+                            let _ = cranpose::install_app_update(&package);
                         },
                     );
                 }
-                UpdateUi::Checking | UpdateUi::Downloading { .. } | UpdateUi::Installing => {}
+                cranpose::AppUpdateStatus::Checking
+                | cranpose::AppUpdateStatus::Downloading { .. }
+                | cranpose::AppUpdateStatus::Verifying
+                | cranpose::AppUpdateStatus::AwaitingConfirmation
+                | cranpose::AppUpdateStatus::Installing => {}
                 _ => {
                     SettingsActionButton(
                         "Check for updates".to_string(),
                         SETTINGS_ACCENT,
                         move || {
-                            update_ui.set(UpdateUi::Checking);
-                            match android_bridge::request_check_update(env!("CARGO_PKG_VERSION")) {
-                                Ok(()) => poll_gen.update(|gen| *gen += 1),
-                                Err(error) => update_ui.set(UpdateUi::Error(error)),
-                            }
+                            let source = cranpose::GitHubReleaseUpdate::new(
+                                "samoylenkodmitry/cranamp",
+                                env!("CARGO_PKG_VERSION"),
+                                ".apk",
+                            );
+                            let _ = cranpose::check_for_app_update(&source);
                         },
                     );
                 }
             }
         },
     );
+}
+
+#[cfg(target_os = "android")]
+fn app_update_status_line(status: &cranpose::AppUpdateStatus) -> String {
+    match status {
+        cranpose::AppUpdateStatus::Idle => {
+            format!("Current version v{}", env!("CARGO_PKG_VERSION"))
+        }
+        cranpose::AppUpdateStatus::Checking => "Checking GitHub for updates...".to_string(),
+        cranpose::AppUpdateStatus::UpToDate => {
+            format!("Up to date (v{})", env!("CARGO_PKG_VERSION"))
+        }
+        cranpose::AppUpdateStatus::Available { package } => {
+            format!("Update available: v{}", package.version)
+        }
+        cranpose::AppUpdateStatus::Downloading { downloaded, total } => match total {
+            Some(total) if *total > 0 => {
+                format!(
+                    "Downloading update... {}%",
+                    downloaded.saturating_mul(100) / total
+                )
+            }
+            _ => format!("Downloading update... {downloaded} bytes"),
+        },
+        cranpose::AppUpdateStatus::Verifying => {
+            "Checking the download against its digest...".to_string()
+        }
+        cranpose::AppUpdateStatus::AwaitingConfirmation => {
+            "Waiting for install confirmation...".to_string()
+        }
+        cranpose::AppUpdateStatus::Installing => "Launching installer...".to_string(),
+        cranpose::AppUpdateStatus::Error(error) => format!("Update error: {error}"),
+    }
 }
 
 /// Desktop/iOS update section: no in-app HTTP client, so this just opens the
@@ -3983,10 +3812,11 @@ fn PlaylistWindow(
     scale: f32,
 ) {
     let snapshot = state.get();
-    let footer_menu = cranpose_core::useState(|| None::<PlaylistFooterMenu>);
-    let playlist_scroll_state = cranpose_core::useState(|| snapshot.playlist_scroll);
-    let playlist_entries_scroll_state = cranpose_core::useState(|| snapshot.playlist_scroll);
-    let playlist_scroll_dragging = cranpose_core::useState(|| false);
+    let footer_menu = cranpose_core::rememberMutableStateOf(|| None::<PlaylistFooterMenu>);
+    let playlist_scroll_state = cranpose_core::rememberMutableStateOf(|| snapshot.playlist_scroll);
+    let playlist_entries_scroll_state =
+        cranpose_core::rememberMutableStateOf(|| snapshot.playlist_scroll);
+    let playlist_scroll_dragging = cranpose_core::rememberMutableStateOf(|| false);
     {
         let local_scroll = playlist_scroll_state;
         let local_entries_scroll = playlist_entries_scroll_state;
@@ -4003,8 +3833,7 @@ fn PlaylistWindow(
             }
         });
     }
-    let search_field =
-        cranpose_core::remember(|| TextFieldState::new("")).with(|field| field.clone());
+    let search_field = cranpose_core::remember(|| TextFieldState::new("")).with(|field| *field);
     let window_size = window_size.get();
     let skin_scale = scale.max(f32::EPSILON);
     let width = (window_size.width / skin_scale).max(PLAYLIST_WIDTH);
@@ -4117,7 +3946,7 @@ fn PlaylistWindow(
                     palette,
                     state,
                     snapshot.clone(),
-                    search_field.clone(),
+                    search_field,
                     list_width,
                     scale,
                 );
@@ -4171,7 +4000,7 @@ fn PlaylistScrollbar(
     let scroll = playlist_scroll.thumb.get();
     let scroll_y = PLAYLIST_LIST_BG.1
         + vertical_slider_thumb_y_down(scroll, list_height, PLAYLIST_SCROLL_HANDLE.3);
-    let scroll_pressed = cranpose_core::useState(|| false);
+    let scroll_pressed = cranpose_core::rememberMutableStateOf(|| false);
     let scroll_handle_sprite = if scroll_pressed.get() {
         PLAYLIST_SCROLL_HANDLE_SELECTED
     } else {
@@ -4227,6 +4056,7 @@ fn PlaylistScrollbarInput(
                 list_height,
                 scale,
             ),
+            initial_scroll,
             false,
             move |fraction| {
                 latest_scroll_change.update(|latest| *latest = fraction);
@@ -4452,11 +4282,11 @@ fn PlaylistSearchOverlay(
     let width = (list_width - 28.0).clamp(150.0, 260.0);
     let height = 40.0;
     let query = search_field.text();
-    let last_revision = cranpose_core::useState(|| 0u64);
+    let last_revision = cranpose_core::rememberMutableStateOf(|| 0u64);
 
     {
         let state_for_sync = state;
-        let field_for_sync = search_field.clone();
+        let field_for_sync = search_field;
         let snapshot_query = snapshot.playlist_search_query.clone();
         let snapshot_revision = snapshot.playlist_search_revision;
         let query_for_sync = query.clone();
@@ -4642,7 +4472,8 @@ fn PlaylistFooterClickTarget(
     scale: f32,
     on_click: impl Fn() + 'static,
 ) {
-    let is_pressed = cranpose_core::useState(|| false);
+    let interaction_source = cranpose_ui::rememberMutableInteractionSource();
+    let is_pressed = cranpose_ui::collect_is_pressed_as_state(&interaction_source);
     let area = ControlRect::new(area.0, bottom_y + area.1, area.2, area.3, scale);
     if is_pressed.get() {
         FilledRect(
@@ -4654,13 +4485,13 @@ fn PlaylistFooterClickTarget(
             Color(0.0, 0.0, 0.0, 0.4),
         );
     }
-    PressableClickArea(area, is_pressed, on_click);
+    PressableClickArea(area, interaction_source, on_click);
 }
 
 #[composable]
 fn PressableClickArea(
     area: ControlRect,
-    is_pressed: MutableState<bool>,
+    interaction_source: cranpose_ui::MutableInteractionSource,
     on_click: impl Fn() + 'static,
 ) {
     let on_click = Rc::new(on_click);
@@ -4671,7 +4502,7 @@ fn PressableClickArea(
         Modifier::empty()
             .size_points(w, h)
             .absolute_offset(area.scaled_x(), area.scaled_y())
-            .pointer_input((), pressed_state_pointer_input(is_pressed))
+            .press_interaction_source(interaction_source)
             .clickable(move |_| on_click()),
         BoxSpec::default(),
         || {},
@@ -4960,13 +4791,13 @@ fn playlist_footer_menu_x(menu: PlaylistFooterMenu, window_width: f32, menu_widt
 fn FilledRect(x: f32, y: f32, width: f32, height: f32, scale: f32, color: Color) {
     let width = scaled(width, scale);
     let height = scaled(height, scale);
-    Canvas(
+    Box(
         Modifier::empty()
             .size_points(width, height)
-            .absolute_offset(scaled(x, scale), scaled(y, scale)),
-        move |scope| {
-            scope.draw_rect(Brush::solid(color));
-        },
+            .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .background(color),
+        BoxSpec::default(),
+        || {},
     );
 }
 
@@ -5169,37 +5000,17 @@ fn main_display_meta(state: &WinampState) -> String {
 
 #[composable]
 fn Visualizer(playing: bool, viscolor: VisColor, scale: f32) {
-    let refresh_tick = cranpose_core::useState(|| 0_u64);
-    #[cfg(not(target_arch = "wasm32"))]
-    let dispatcher =
-        cranpose_core::with_current_composer(|composer| composer.runtime_handle().dispatcher());
-    cranpose_core::DisposableEffect!(playing, move |_| {
-        if !playing {
-            return cranpose_core::DisposableEffectResult::default();
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            start_native_interval(
-                dispatcher,
-                Duration::from_millis(VISUALIZER_REFRESH_MS),
-                move || {
-                    refresh_tick.update(|tick| *tick = tick.wrapping_add(1));
-                },
-            )
-        }
-
-        #[cfg(all(feature = "web", target_arch = "wasm32"))]
-        {
-            start_web_interval(Duration::from_millis(VISUALIZER_REFRESH_MS), move || {
+    let refresh_tick = cranpose_core::rememberMutableStateOf(|| 0_u64);
+    cranpose_core::LaunchedEffectAsync!(playing, move |_scope| {
+        Box::pin(async move {
+            if !playing {
+                return;
+            }
+            cranpose_core::interval(Duration::from_millis(VISUALIZER_REFRESH_MS), move || {
                 refresh_tick.update(|tick| *tick = tick.wrapping_add(1));
             })
-        }
-
-        #[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
-        {
-            cranpose_core::DisposableEffectResult::default()
-        }
+            .await;
+        })
     });
 
     let tick = if playing { refresh_tick.value() } else { 0 };
@@ -5276,26 +5087,19 @@ fn EqCurve(values: [f32; 11], display_text_color: [u8; 4], scale: f32) {
     let width = scaled(EQ_GRAPH_BG.2, scale);
     let height = scaled(EQ_GRAPH_BG.3, scale);
 
-    Canvas(
+    cranpose_ui::Image(
+        bitmap,
+        None,
         Modifier::empty()
             .size_points(width, height)
             .absolute_offset(
                 scaled(POS_EQ_GRAPH_BG.0, scale),
                 scaled(POS_EQ_GRAPH_BG.1, scale),
             ),
-        move |scope| {
-            scope.draw_image_at(
-                Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width,
-                    height,
-                },
-                bitmap.clone(),
-                1.0,
-                None,
-            );
-        },
+        Alignment::TOP_START,
+        cranpose_ui::ContentScale::FillBounds,
+        1.0,
+        None,
     );
 }
 
@@ -5391,8 +5195,8 @@ fn visualizer_bitmap(
     let height = VISUALIZER_HEIGHT as u32;
     let bg = viscolor.background();
     let mut pixels = vec![0u8; width as usize * height as usize * 4];
-    for pixel in pixels.chunks_exact_mut(4) {
-        pixel.copy_from_slice(&bg);
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        *pixel = bg;
     }
 
     if !playing {
@@ -5470,19 +5274,20 @@ fn visualizer_segment_rgba(
 fn Sprite(image: ImageBitmap, source: SpriteRect, x: f32, y: f32, scale: f32) {
     let w = scaled(source.2, scale);
     let h = scaled(source.3, scale);
-    Canvas(
+    cranpose_ui::Image(
+        cranpose_ui::BitmapRegionPainter(
+            image,
+            to_rect(source),
+            cranpose_ui::ImageSampling::Nearest,
+        ),
+        None,
         Modifier::empty()
             .size_points(w, h)
             .absolute_offset(scaled(x, scale), scaled(y, scale)),
-        move |scope| {
-            let dst = Rect {
-                x: 0.0,
-                y: 0.0,
-                width: w,
-                height: h,
-            };
-            scope.draw_image_src(image.clone(), to_rect(source), dst, 1.0, None);
-        },
+        Alignment::TOP_START,
+        cranpose_ui::ContentScale::FillBounds,
+        1.0,
+        None,
     );
 }
 
@@ -5498,19 +5303,20 @@ fn StretchSprite(
 ) {
     let w = scaled(width.max(1.0), scale);
     let h = scaled(height.max(1.0), scale);
-    Canvas(
+    cranpose_ui::Image(
+        cranpose_ui::BitmapRegionPainter(
+            image,
+            to_rect(source),
+            cranpose_ui::ImageSampling::Nearest,
+        ),
+        None,
         Modifier::empty()
             .size_points(w, h)
             .absolute_offset(scaled(x, scale), scaled(y, scale)),
-        move |scope| {
-            let dst = Rect {
-                x: 0.0,
-                y: 0.0,
-                width: w,
-                height: h,
-            };
-            scope.draw_image_src(image.clone(), to_rect(source), dst, 1.0, None);
-        },
+        Alignment::TOP_START,
+        cranpose_ui::ContentScale::FillBounds,
+        1.0,
+        None,
     );
 }
 
@@ -5547,7 +5353,8 @@ fn PressableSpriteHitArea(
     scale: f32,
     on_click: impl Fn() + 'static,
 ) {
-    let is_pressed = cranpose_core::useState(|| false);
+    let interaction_source = cranpose_ui::rememberMutableInteractionSource();
+    let is_pressed = cranpose_ui::collect_is_pressed_as_state(&interaction_source);
     let on_click = Rc::new(on_click);
 
     let current = if is_pressed.get() { pressed } else { normal };
@@ -5556,22 +5363,23 @@ fn PressableSpriteHitArea(
     let hit_w = scaled(layout.hit_area.2, scale);
     let hit_h = scaled(layout.hit_area.3, scale);
 
-    Canvas(
+    cranpose_ui::Image(
+        cranpose_ui::BitmapRegionPainter(
+            image,
+            to_rect(current),
+            cranpose_ui::ImageSampling::Nearest,
+        ),
+        None,
         Modifier::empty()
             .size_points(sprite_w, sprite_h)
             .absolute_offset(
                 scaled(layout.sprite_x, scale),
                 scaled(layout.sprite_y, scale),
             ),
-        move |scope| {
-            let dst = Rect {
-                x: 0.0,
-                y: 0.0,
-                width: sprite_w,
-                height: sprite_h,
-            };
-            scope.draw_image_src(image.clone(), to_rect(current), dst, 1.0, None);
-        },
+        Alignment::TOP_START,
+        cranpose_ui::ContentScale::FillBounds,
+        1.0,
+        None,
     );
 
     Box(
@@ -5581,45 +5389,11 @@ fn PressableSpriteHitArea(
                 scaled(layout.hit_area.0, scale),
                 scaled(layout.hit_area.1, scale),
             )
-            .pointer_input((), pressed_state_pointer_input(is_pressed))
+            .press_interaction_source(interaction_source)
             .clickable(move |_| on_click()),
         BoxSpec::default(),
         || {},
     );
-}
-
-/// Pointer-input handler that tracks the visual pressed state of a control
-/// without consuming events, so a sibling `clickable` still receives the click.
-fn pressed_state_pointer_input(
-    is_pressed: MutableState<bool>,
-) -> impl Fn(PointerInputScope) -> std::pin::Pin<std::boxed::Box<dyn std::future::Future<Output = ()>>>
-{
-    move |scope: PointerInputScope| {
-        std::boxed::Box::pin(async move {
-            scope
-                .await_pointer_event_scope(|await_scope| async move {
-                    loop {
-                        let event = await_scope.await_pointer_event().await;
-                        match event.kind {
-                            PointerEventKind::Down => {
-                                is_pressed.set(true);
-                            }
-                            PointerEventKind::Move
-                                if is_pressed.get()
-                                    && !event.buttons.contains(PointerButton::Primary) =>
-                            {
-                                is_pressed.set(false);
-                            }
-                            PointerEventKind::Up | PointerEventKind::Cancel => {
-                                is_pressed.set(false);
-                            }
-                            _ => {}
-                        }
-                    }
-                })
-                .await;
-        })
-    }
 }
 
 #[composable]
@@ -5641,128 +5415,74 @@ fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: im
 #[composable]
 fn DragSlider(
     area: ControlRect,
+    value: f32,
     thumb_width: f32,
     on_change: impl Fn(f32) + 'static,
     on_drag_state: impl Fn(bool) + 'static,
 ) {
     let on_change = Rc::new(on_change);
     let on_drag_state = Rc::new(on_drag_state);
-
-    Box(
+    let dragging = cranpose_core::rememberMutableStateOf(|| false);
+    let on_change_input = Rc::clone(&on_change);
+    let on_drag_input = Rc::clone(&on_drag_state);
+    cranpose_ui::Slider(
         Modifier::empty()
             .size_points(area.scaled_width(), area.scaled_height())
-            .absolute_offset(area.scaled_x(), area.scaled_y())
-            .pointer_input((), {
-                move |scope: PointerInputScope| {
-                    let on_change = on_change.clone();
-                    let on_drag_state = on_drag_state.clone();
-                    async move {
-                        scope
-                            .await_pointer_event_scope(|await_scope| async move {
-                                let mut dragging = false;
-                                loop {
-                                    let event = await_scope.await_pointer_event().await;
-                                    match event.kind {
-                                        PointerEventKind::Down => {
-                                            dragging = true;
-                                            on_drag_state(true);
-                                            let value = horizontal_slider_fraction(
-                                                event.position.x,
-                                                area,
-                                                thumb_width,
-                                            );
-                                            on_change(value);
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Move if dragging => {
-                                            let value = horizontal_slider_fraction(
-                                                event.position.x,
-                                                area,
-                                                thumb_width,
-                                            );
-                                            on_change(value);
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Up | PointerEventKind::Cancel
-                                            if dragging =>
-                                        {
-                                            dragging = false;
-                                            on_drag_state(false);
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            })
-                            .await;
-                    }
-                }
-            }),
-        BoxSpec::default(),
-        || {},
+            .absolute_offset(area.scaled_x(), area.scaled_y()),
+        value,
+        move |value| {
+            if !dragging.get_non_reactive() {
+                dragging.set(true);
+                on_drag_input(true);
+            }
+            on_change_input(value);
+        },
+        move || {
+            if dragging.get_non_reactive() {
+                dragging.set(false);
+                on_drag_state(false);
+            }
+        },
+        cranpose_ui::SliderSpec::new().thumb_extent(scaled(thumb_width, area.scale)),
+        |_| {},
     );
 }
 
 #[composable]
 fn VerticalDragSlider(
     area: ControlRect,
+    value: f32,
     invert: bool,
     on_change: impl Fn(f32) + 'static,
     on_drag_state: impl Fn(bool) + 'static,
 ) {
     let on_change = Rc::new(on_change);
     let on_drag_state = Rc::new(on_drag_state);
-
-    Box(
+    let dragging = cranpose_core::rememberMutableStateOf(|| false);
+    let on_change_input = Rc::clone(&on_change);
+    let on_drag_input = Rc::clone(&on_drag_state);
+    cranpose_ui::Slider(
         Modifier::empty()
             .size_points(area.scaled_width(), area.scaled_height())
-            .absolute_offset(area.scaled_x(), area.scaled_y())
-            .pointer_input((), {
-                move |scope: PointerInputScope| {
-                    let on_change = on_change.clone();
-                    let on_drag_state = on_drag_state.clone();
-                    async move {
-                        scope
-                            .await_pointer_event_scope(|await_scope| async move {
-                                let mut dragging = false;
-                                loop {
-                                    let event = await_scope.await_pointer_event().await;
-                                    match event.kind {
-                                        PointerEventKind::Down => {
-                                            dragging = true;
-                                            on_drag_state(true);
-                                            let raw = vertical_slider_fraction(
-                                                event.position.y,
-                                                area.scaled_height(),
-                                            );
-                                            let value = if invert { 1.0 - raw } else { raw };
-                                            on_change(value);
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Move if dragging => {
-                                            let raw = vertical_slider_fraction(
-                                                event.position.y,
-                                                area.scaled_height(),
-                                            );
-                                            let value = if invert { 1.0 - raw } else { raw };
-                                            on_change(value);
-                                            event.consume();
-                                        }
-                                        PointerEventKind::Up | PointerEventKind::Cancel
-                                            if dragging =>
-                                        {
-                                            dragging = false;
-                                            on_drag_state(false);
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            })
-                            .await;
-                    }
-                }
-            }),
-        BoxSpec::default(),
-        || {},
+            .absolute_offset(area.scaled_x(), area.scaled_y()),
+        value,
+        move |value| {
+            if !dragging.get_non_reactive() {
+                dragging.set(true);
+                on_drag_input(true);
+            }
+            on_change_input(value);
+        },
+        move || {
+            if dragging.get_non_reactive() {
+                dragging.set(false);
+                on_drag_state(false);
+            }
+        },
+        cranpose_ui::SliderSpec::new()
+            .orientation(cranpose_ui::SliderOrientation::Vertical)
+            .reverse_direction(invert),
+        |_| {},
     );
 }
 
@@ -5782,8 +5502,8 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
             overlay_position,
             ..
         } => {
-            let drag_origin = cranpose_core::useState(|| None::<(Point, Point)>);
-            let drag_active = cranpose_core::useState(|| false);
+            let drag_origin = cranpose_core::rememberMutableStateOf(|| None::<(Point, Point)>);
+            let drag_active = cranpose_core::rememberMutableStateOf(|| false);
 
             Box(
                 modifier.pointer_input((), {
@@ -5835,6 +5555,8 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
                                             drag_active.set(false);
                                         }
                                         PointerEventKind::Scroll
+                                        | PointerEventKind::RotaryScrollPre
+                                        | PointerEventKind::RotaryScroll
                                         | PointerEventKind::Zoom
                                         | PointerEventKind::Enter
                                         | PointerEventKind::Exit => {}
@@ -5853,7 +5575,7 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
             Box(modifier, BoxSpec::default(), || {});
         }
         WinampDragTarget::Inline(window_position) => {
-            let drag_offset = cranpose_core::useState(|| None::<Point>);
+            let drag_offset = cranpose_core::rememberMutableStateOf(|| None::<Point>);
 
             Box(
                 modifier.pointer_input((), {
@@ -5892,6 +5614,8 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
                                             drag_offset.set(None);
                                         }
                                         PointerEventKind::Scroll
+                                        | PointerEventKind::RotaryScrollPre
+                                        | PointerEventKind::RotaryScroll
                                         | PointerEventKind::Zoom
                                         | PointerEventKind::Enter
                                         | PointerEventKind::Exit => {}
@@ -6050,9 +5774,8 @@ fn apply_loaded_skin(
     }
 }
 
-// Native platforms (desktop, Android, iOS) pick a skin through the Cranpose
-// file picker; `SkinPickerEffect` runs it and applies the selection.
-#[cfg(not(target_arch = "wasm32"))]
+// Every target picks a skin through the Cranpose file picker;
+// `SkinPickerEffect` runs it and applies the selection.
 fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
     state.update(|s| {
         s.pending_skin_pick = true;
@@ -6060,47 +5783,15 @@ fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState
     });
 }
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn open_skin_file(state: MutableState<WinampState>, skin_state: WinampSkinState) {
-    state.update(|s| s.status = "Opening Skin".to_string());
-    wasm_bindgen_futures::spawn_local(async move {
-        let Some(handle) = rfd::AsyncFileDialog::new()
-            .set_title("Open Winamp skin")
-            .add_filter("Winamp skin", &["wsz", "zip"])
-            .pick_file()
-            .await
-        else {
-            state.update(|s| s.status = "Skin Open Cancelled".to_string());
-            return;
-        };
-        let label = handle.file_name();
-        let bytes = handle.read().await;
-        apply_loaded_skin(state, skin_state, &bytes, &label, None);
-    });
-}
-
-#[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
-fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
-    state.update(|s| s.status = "Web skin picker is not enabled".to_string());
-}
-
-// Native platforms (desktop, Android, iOS) pick through the Cranpose file
-// picker; `CranposePickerEffect` runs it and loads the selection. The folder
-// picker uses the system document provider, so cloud/WebDAV folders work too.
-#[cfg(not(target_arch = "wasm32"))]
+// Every target picks through the Cranpose file picker;
+// `CranposePickerEffect` runs it and loads the selection. The folder picker
+// uses the system document provider, so cloud/WebDAV folders work too.
 fn open_audio_files(state: MutableState<WinampState>) {
     request_pick(state, false, false);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn request_pick(state: MutableState<WinampState>, folder: bool, append: bool) {
     let pick = PendingPick { folder, append };
-    // Persist the in-flight marker *before* the picker launches, synchronously, so
-    // an activity recreation while the SAF prompt is in front (some Android
-    // devices) can be recovered by `ResumePickEffect`. Writing it here — rather
-    // than reactively from `pending_pick` — avoids a fresh post-recreation
-    // composition clearing it before the resume effect reads it.
-    save_pending_pick(pick);
     state.update(|s| {
         s.pending_pick = Some(pick);
         s.status = if folder {
@@ -6112,94 +5803,14 @@ fn request_pick(state: MutableState<WinampState>, folder: bool, append: bool) {
     });
 }
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn open_audio_files(state: MutableState<WinampState>) {
-    pick_web_into_playlist(state, false, false);
-}
-
-#[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
-fn open_audio_files(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Web picker is not enabled".to_string());
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn add_audio_files(state: MutableState<WinampState>) {
     request_pick(state, false, true);
 }
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn add_audio_files(state: MutableState<WinampState>) {
-    pick_web_into_playlist(state, false, true);
-}
-
-#[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
-fn add_audio_files(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Web picker is not enabled".to_string());
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn add_audio_folder(state: MutableState<WinampState>) {
     request_pick(state, true, true);
 }
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn add_audio_folder(state: MutableState<WinampState>) {
-    pick_web_into_playlist(state, true, true);
-}
-
-#[cfg(all(not(feature = "web"), target_arch = "wasm32"))]
-fn add_audio_folder(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Web picker is not enabled".to_string());
-}
-
-/// Runs the browser file/folder picker and loads the chosen audio into the
-/// playlist — replacing it (Open) or appending (Add). Each track plays from its
-/// own blob URL, so the web widget supports real multi-track playlists.
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn pick_web_into_playlist(state: MutableState<WinampState>, folder: bool, append: bool) {
-    state.update(|s| {
-        s.status = if folder {
-            "Opening folder picker"
-        } else {
-            "Opening file picker"
-        }
-        .to_string();
-    });
-    wasm_bindgen_futures::spawn_local(async move {
-        match audio::pick_web_audio_tracks(folder).await {
-            Ok(tracks) if tracks.is_empty() => {
-                state.update(|s| s.status = "No audio files selected".to_string());
-            }
-            Ok(tracks) if append => append_web_playlist_and_play(state, tracks),
-            Ok(tracks) => replace_web_playlist_and_play(state, tracks),
-            Err(error) => state.update(|s| s.status = error),
-        }
-    });
-}
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn replace_web_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
-    state.update(|s| {
-        set_playlist_tracks(s, tracks);
-        s.current_index = None;
-        refresh_shuffle_order(s);
-    });
-    start_track(state, 0);
-}
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn append_web_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
-    let was_empty = state.get_non_reactive().playlist.is_empty();
-    let start_index = state.get_non_reactive().playlist.len();
-    state.update(|s| {
-        append_playlist_tracks(s, tracks);
-    });
-    if was_empty {
-        start_track(state, start_index);
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn replace_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
     if tracks.is_empty() {
         state.update(|s| {
@@ -6215,7 +5826,6 @@ fn replace_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track
     start_track(state, 0);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
     if tracks.is_empty() {
         state.update(|s| {
@@ -6234,7 +5844,6 @@ fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
     let jobs = state
         .get_non_reactive()
@@ -6248,7 +5857,7 @@ fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
         return;
     }
 
-    run_native_io(
+    cranpose_core::launchBlocking(
         move || {
             jobs.into_iter()
                 .filter_map(|(index, path)| {
@@ -6278,7 +5887,6 @@ fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
     );
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
 fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     set_playlist_tracks(state, tracks);
     state.current_index = Some(0);
@@ -6925,55 +6533,13 @@ fn new_playlist(state: MutableState<WinampState>) {
     });
 }
 
-#[cfg(target_os = "android")]
 fn import_playlist(state: MutableState<WinampState>) {
-    request_android_bridge_operation(state, "Importing Android Playlist", || {
-        android_bridge::request_playlist_import()
+    state.update(|app| {
+        app.pending_document = Some(PendingDocument::ImportPlaylist);
+        app.status = "Importing Playlist".to_string();
     });
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn import_playlist(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Importing Playlist".to_string());
-    let picked = pick_playlist_file().map(|path| {
-        let path = path?;
-        Some(path)
-    });
-    match picked {
-        Ok(Some(path)) => run_native_io(
-            move || {
-                let text = std::fs::read_to_string(&path)
-                    .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-                let tracks = parse_m3u_playlist(&text, path.parent());
-                Ok::<_, String>(tracks)
-            },
-            move |result| match result {
-                Ok(tracks) if tracks.is_empty() => {
-                    state.update(|s| s.status = "No Playlist Tracks".to_string());
-                }
-                Ok(tracks) => {
-                    let _ = audio::stop();
-                    state.update(|s| {
-                        replace_playlist_tracks(s, tracks);
-                        s.playback = PlaybackState::Stopped;
-                        s.status = format!("Imported {} Track(s)", s.playlist.len());
-                    });
-                    hydrate_playlist_durations_background(state);
-                }
-                Err(error) => state.update(|s| s.status = error),
-            },
-        ),
-        Ok(None) => state.update(|s| s.status = "Import Cancelled".to_string()),
-        Err(error) => state.update(|s| s.status = error),
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn import_playlist(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Playlist import unavailable in the web widget".to_string());
-}
-
-#[cfg(target_os = "android")]
 fn export_playlist(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     if snapshot.playlist.is_empty() {
@@ -6982,98 +6548,12 @@ fn export_playlist(state: MutableState<WinampState>) {
     }
 
     let text = format_m3u_playlist(snapshot.playlist.as_slice());
-    request_android_bridge_operation(state, "Exporting Android Playlist", || {
-        android_bridge::request_playlist_export(&text)
+    state.update(|app| {
+        app.pending_document = Some(PendingDocument::ExportPlaylist(text));
+        app.status = "Exporting Playlist".to_string();
     });
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn export_playlist(state: MutableState<WinampState>) {
-    let snapshot = state.get_non_reactive();
-    if snapshot.playlist.is_empty() {
-        state.update(|s| s.status = "Playlist Empty".to_string());
-        return;
-    }
-
-    state.update(|s| s.status = "Exporting Playlist".to_string());
-    match save_playlist_file().map(|path| {
-        let path = path?;
-        let text = format_m3u_playlist(snapshot.playlist.as_slice());
-        Some((path, text))
-    }) {
-        Ok(Some((path, text))) => run_native_io(
-            {
-                let path_for_work = path.clone();
-                move || {
-                    std::fs::write(&path_for_work, text).map_err(|error| {
-                        format!("failed to write {}: {error}", path_for_work.display())
-                    })?;
-                    Ok::<_, String>(path_for_work)
-                }
-            },
-            move |result| match result {
-                Ok(path) => {
-                    state.update(|s| s.status = format!("Exported {}", path.display()));
-                }
-                Err(error) => state.update(|s| s.status = error),
-            },
-        ),
-        Ok(None) => state.update(|s| s.status = "Export Cancelled".to_string()),
-        Err(error) => state.update(|s| s.status = error),
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn export_playlist(state: MutableState<WinampState>) {
-    state.update(|s| s.status = "Playlist export unavailable in the web widget".to_string());
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(target_os = "ios"),
-    feature = "native-dialogs"
-))]
-fn pick_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
-    Ok(rfd::FileDialog::new()
-        .set_title("Import playlist")
-        .add_filter("Playlist", &["m3u", "m3u8", "M3U", "M3U8"])
-        .pick_file())
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(all(not(target_os = "ios"), feature = "native-dialogs"))
-))]
-fn pick_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
-    Err("native playlist picker is not available on this target yet".to_string())
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(target_os = "ios"),
-    feature = "native-dialogs"
-))]
-fn save_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
-    Ok(rfd::FileDialog::new()
-        .set_title("Export playlist")
-        .set_file_name("playlist.m3u")
-        .add_filter("Playlist", &["m3u", "m3u8"])
-        .save_file())
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(all(not(target_os = "ios"), feature = "native-dialogs"))
-))]
-fn save_playlist_file() -> Result<Option<std::path::PathBuf>, String> {
-    Err("native playlist saver is not available on this target yet".to_string())
-}
-
-#[cfg(any(not(target_arch = "wasm32"), test))]
 fn parse_m3u_playlist(input: &str, base_dir: Option<&std::path::Path>) -> Vec<Track> {
     let mut tracks = Vec::new();
     let mut pending_extinf = None::<(Option<f32>, String)>;
@@ -7113,7 +6593,6 @@ fn parse_m3u_playlist(input: &str, base_dir: Option<&std::path::Path>) -> Vec<Tr
     tracks
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
 fn parse_extinf(input: &str) -> Option<(Option<f32>, String)> {
     let (duration, title) = input.split_once(',').unwrap_or((input, ""));
     let duration_seconds = duration
@@ -7124,7 +6603,6 @@ fn parse_extinf(input: &str) -> Option<(Option<f32>, String)> {
     Some((duration_seconds, title.trim().to_string()))
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
 fn resolve_playlist_path(path: &str, base_dir: Option<&std::path::Path>) -> String {
     let path = path.trim();
     if path.starts_with("file://") {
@@ -7139,7 +6617,6 @@ fn resolve_playlist_path(path: &str, base_dir: Option<&std::path::Path>) -> Stri
         .unwrap_or_else(|| path.to_string())
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
 fn is_supported_playlist_path(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()
@@ -7153,7 +6630,6 @@ fn is_supported_playlist_path(path: &str) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
 fn playlist_title_from_path(path: &str) -> String {
     std::path::Path::new(path)
         .file_stem()
@@ -7164,7 +6640,6 @@ fn playlist_title_from_path(path: &str) -> String {
         .to_string()
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
 fn format_m3u_playlist(playlist: &[Track]) -> String {
     let mut lines = vec!["#EXTM3U".to_string()];
     for track in playlist {
@@ -7183,65 +6658,6 @@ fn format_m3u_playlist(playlist: &[Track]) -> String {
         );
     }
     lines.join("\n") + "\n"
-}
-
-#[cfg(target_os = "android")]
-fn handle_android_bridge_results(state: MutableState<WinampState>) {
-    let results = android_bridge::take_results();
-    if results.is_empty() {
-        return;
-    }
-    state.update(|s| s.android_bridge_pending = false);
-
-    for result in results {
-        match result {
-            AndroidBridgeResult::PlaylistImport { text } => {
-                let tracks = parse_m3u_playlist(&text, None);
-                if tracks.is_empty() {
-                    state.update(|s| s.status = "No Playlist Tracks".to_string());
-                } else {
-                    let _ = audio::stop();
-                    state.update(|s| {
-                        replace_playlist_tracks(s, tracks);
-                        s.playback = PlaybackState::Stopped;
-                        s.status = format!("Imported {} Track(s)", s.playlist.len());
-                    });
-                    hydrate_playlist_durations_background(state);
-                }
-            }
-            AndroidBridgeResult::PlaylistExport { target } => {
-                state.update(|s| {
-                    s.status = if target.is_empty() {
-                        "Exported Playlist".to_string()
-                    } else {
-                        format!("Exported {target}")
-                    };
-                });
-            }
-            AndroidBridgeResult::Cancelled { operation } => {
-                state.update(|s| s.status = format!("{operation} Cancelled"));
-            }
-            AndroidBridgeResult::Error(error) => state.update(|s| s.status = error),
-        }
-    }
-}
-
-#[cfg(target_os = "android")]
-fn request_android_bridge_operation(
-    state: MutableState<WinampState>,
-    status: &'static str,
-    request: impl FnOnce() -> Result<(), String>,
-) {
-    state.update(|s| {
-        s.status = status.to_string();
-        s.android_bridge_pending = true;
-    });
-    if let Err(error) = request() {
-        state.update(|s| {
-            s.status = error;
-            s.android_bridge_pending = false;
-        });
-    }
 }
 
 fn scroll_playlist_by_rows(state: MutableState<WinampState>, rows: i32) {
@@ -7646,7 +7062,7 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         let eq_enabled = snapshot.eq_enabled;
         let eq_values = snapshot.eq_values;
         let track_for_play = track.clone();
-        run_native_io(
+        cranpose_core::launchBlocking(
             move || {
                 audio::set_equalizer(eq_enabled, eq_values)?;
                 audio::play_track(&track_for_play, volume, false)
@@ -7797,20 +7213,12 @@ fn select_playlist_row_in_state(
     };
 }
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
+/// Wall clock in Unix milliseconds. `web_time` is the standard-library clock on
+/// every native target and the browser's on wasm, so this reads the same time
+/// everywhere instead of one implementation per target.
 fn current_time_ms() -> u64 {
-    js_sys::Date::now().max(0.0).min(u64::MAX as f64) as u64
-}
-
-#[cfg(all(target_arch = "wasm32", not(feature = "web")))]
-fn current_time_ms() -> u64 {
-    0
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn current_time_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
 }
@@ -8238,7 +7646,7 @@ fn hex_decode(input: &str) -> Option<String> {
     }
 
     let mut output = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         let high = hex_value(pair[0])?;
         let low = hex_value(pair[1])?;
         output.push((high << 4) | low);
@@ -8255,164 +7663,40 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
+/// Where the restored player state lives. One key on every target: the
+/// framework's preferences store is a file beside the application's data on
+/// desktop and Android, and `localStorage` in the browser.
+const PLAYER_STATE_KEY: &str = "cranamp.player";
+
 fn load_saved_player_state() -> Option<SavedPlayerState> {
-    load_player_state_text().map(|text| parse_player_state(&text))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn load_player_state_text() -> Option<String> {
-    std::fs::read_to_string(player_config_path()).ok()
-}
-
-#[cfg(target_arch = "wasm32")]
-fn load_player_state_text() -> Option<String> {
-    browser_storage()?
-        .get_item(PLAYER_STORAGE_KEY)
-        .ok()
-        .flatten()
+    cranpose_services::preferences()
+        .get(PLAYER_STATE_KEY)
+        .map(|text| parse_player_state(&text))
 }
 
 fn save_player_state(config: &SavedPlayerState) -> Result<(), String> {
-    save_player_state_text(&serialize_player_state(config))
+    cranpose_services::preferences()
+        .set(PLAYER_STATE_KEY, &serialize_player_state(config))
+        .map_err(|error| error.to_string())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+/// Writes the state off the UI thread. The web has no thread to move it to and
+/// `launchBlocking` runs the work inline there, which is the right answer for a
+/// single small write.
 fn save_player_state_background(config: SavedPlayerState) {
-    std::thread::spawn(move || {
-        let _ = save_player_state(&config);
-    });
-}
-
-#[cfg(target_arch = "wasm32")]
-fn save_player_state_background(config: SavedPlayerState) {
-    let _ = save_player_state(&config);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn save_player_state_text(text: &str) -> Result<(), String> {
-    let path = player_config_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-    std::fs::write(&path, text)
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn save_player_state_text(text: &str) -> Result<(), String> {
-    browser_storage()
-        .ok_or_else(|| "browser localStorage is unavailable".to_string())?
-        .set_item(PLAYER_STORAGE_KEY, text)
-        .map_err(js_storage_error)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn player_config_path() -> std::path::PathBuf {
-    config_home_dir().join("cranamp").join("player.conf")
+    cranpose_core::launchBlocking(
+        move || {
+            let _ = save_player_state(&config);
+        },
+        |_| {},
+    );
 }
 
 /// Path to the cross-device sync configuration (device id, label, folder). Lives
 /// beside `player.conf`; the sync runtime reads/writes it. See [`crate::sync`].
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn sync_config_path() -> std::path::PathBuf {
-    config_home_dir().join("cranamp").join("sync.conf")
-}
-
-/// Path to the in-flight pick marker. Present only while a file/folder selection
-/// is outstanding, so an activity recreation during the SAF prompt can be
-/// recovered by [`ResumePickEffect`]. See [`PendingPickPersistence`].
-#[cfg(not(target_arch = "wasm32"))]
-fn pending_pick_config_path() -> std::path::PathBuf {
-    config_home_dir().join("cranamp").join("pending_pick.conf")
-}
-
-/// Records that a pick is outstanding (and whether it appends), so the
-/// `append` intent survives the native app being destroyed mid-pick.
-#[cfg(not(target_arch = "wasm32"))]
-fn save_pending_pick(pick: PendingPick) {
-    let path = pending_pick_config_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let text = format!(
-        "folder={}\nappend={}\n",
-        pick.folder as u8, pick.append as u8
-    );
-    let _ = std::fs::write(path, text);
-}
-
-/// Removes the in-flight pick marker once the selection resolves (or is found to
-/// be stale on the next start).
-#[cfg(not(target_arch = "wasm32"))]
-fn clear_pending_pick_sidecar() {
-    let _ = std::fs::remove_file(pending_pick_config_path());
-}
-
-/// Reads the in-flight pick marker left by a pick that never resolved, or `None`
-/// if no selection was outstanding. `append` defaults to `true` (the common
-/// "ADD FOLDER" case) so a recovered pick never silently wipes the playlist.
-#[cfg(not(target_arch = "wasm32"))]
-fn load_pending_pick() -> Option<PendingPick> {
-    let text = std::fs::read_to_string(pending_pick_config_path()).ok()?;
-    let mut folder = false;
-    let mut append = true;
-    for line in text.lines() {
-        if let Some(value) = line.strip_prefix("folder=") {
-            folder = value.trim() == "1";
-        } else if let Some(value) = line.strip_prefix("append=") {
-            append = value.trim() == "1";
-        }
-    }
-    Some(PendingPick { folder, append })
-}
-
-/// Path to the in-flight sync-folder pick marker. Present only while the
-/// cross-device sync writable-folder picker is outstanding, so an activity
-/// recreation during the SAF prompt can be recovered. See [`SyncEffect`].
-#[cfg(not(target_arch = "wasm32"))]
-fn pending_sync_pick_path() -> std::path::PathBuf {
-    config_home_dir()
-        .join("cranamp")
-        .join("pending_sync_pick.conf")
-}
-
-/// Records (synchronously, before the picker launches) that a sync-folder pick is
-/// outstanding, so the grant survives the native app being destroyed mid-pick.
-#[cfg(not(target_arch = "wasm32"))]
-fn mark_pending_sync_pick() {
-    let path = pending_sync_pick_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(path, b"1");
-}
-
-/// Removes the sync-folder pick marker once the pick resolves (or is found stale).
-#[cfg(not(target_arch = "wasm32"))]
-fn clear_pending_sync_pick() {
-    let _ = std::fs::remove_file(pending_sync_pick_path());
-}
-
-/// Whether a sync-folder pick was outstanding when the app last stopped.
-#[cfg(not(target_arch = "wasm32"))]
-fn pending_sync_pick_exists() -> bool {
-    pending_sync_pick_path().exists()
-}
-
-#[cfg(target_arch = "wasm32")]
-const PLAYER_STORAGE_KEY: &str = "cranamp.player";
-
-#[cfg(target_arch = "wasm32")]
-fn browser_storage() -> Option<web_sys::Storage> {
-    web_sys::window()?.local_storage().ok().flatten()
-}
-
-#[cfg(target_arch = "wasm32")]
-fn js_storage_error(value: wasm_bindgen::JsValue) -> String {
-    value
-        .as_string()
-        .unwrap_or_else(|| "browser localStorage operation failed".to_string())
+    app_config_dir().join("sync.conf")
 }
 
 const WINAMP_NATIVE_HOST_OFFSET_X: f32 = 640.0;
@@ -8610,31 +7894,24 @@ fn save_window_config(config: SavedWinampWindowConfig) -> Result<(), String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn save_window_config_background(config: SavedWinampWindowConfig) {
-    std::thread::spawn(move || {
-        let _ = save_window_config(config);
-    });
+    cranpose_core::launchBlocking(
+        move || {
+            let _ = save_window_config(config);
+        },
+        |_| {},
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn window_config_path() -> std::path::PathBuf {
-    config_home_dir().join("cranamp").join("windows.conf")
+    app_config_dir().join("windows.conf")
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn config_home_dir() -> std::path::PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .map(std::path::PathBuf::from)
-                .map(|home| home.join(".config"))
-        })
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-}
-
-#[cfg(target_os = "android")]
-fn config_home_dir() -> std::path::PathBuf {
-    android_bridge::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
+#[cfg(not(target_arch = "wasm32"))]
+fn app_config_dir() -> std::path::PathBuf {
+    cranpose::application_directories()
+        .map(|directories| directories.config)
+        .unwrap_or_else(|_| std::env::temp_dir().join("cranamp-config"))
 }
 
 fn default_main_position() -> Point {
@@ -8777,34 +8054,6 @@ fn slider_thumb_x(value: f32, bar_width: f32, knob_width: f32) -> f32 {
     clamp01(value) * (bar_width - knob_width)
 }
 
-/// Fraction (0..1, left to right) of a horizontal slider for a pointer position.
-///
-/// `pointer_x` is the pointer's position in the slider box's local, scaled
-/// coordinate space (0..`scaled_width`) — i.e. `event.position.x`, the same
-/// model the vertical slider uses. An earlier Android branch derived this from
-/// `event.global_position.x` and the surface origin instead, which only matched
-/// when the input surface started at (0,0); on a real device the surface origin
-/// is offset by the status bar / display cutout, so the thumb misread the
-/// finger. Using the local position is correct on every platform.
-fn horizontal_slider_fraction(pointer_x: f32, area: ControlRect, knob_width: f32) -> f32 {
-    let scaled_knob_width = scaled(knob_width.max(0.0), area.scale);
-    let travel_width = (area.scaled_width() - scaled_knob_width).max(1.0);
-    ((pointer_x - scaled_knob_width * 0.5) / travel_width).clamp(0.0, 1.0)
-}
-
-/// Fraction (0..1, top to bottom) of a vertical slider/scrollbar for a local
-/// pointer position. Cranpose reports the pointer already in the box's local,
-/// scaled coordinate space (matching `scaled_height`) the same way on Android
-/// and desktop, so the fraction is just the local offset over the scaled track
-/// height. (Scaling the local position again — as an older Cranpose required —
-/// made the thumb overshoot the finger on Android.)
-fn vertical_slider_fraction(local_y: f32, scaled_height: f32) -> f32 {
-    if scaled_height <= 0.0 {
-        return 0.0;
-    }
-    (local_y / scaled_height).clamp(0.0, 1.0)
-}
-
 fn slider_frame(value: f32, frames: u32) -> u32 {
     if frames <= 1 {
         return 0;
@@ -8853,10 +8102,6 @@ mod tests {
         Rc::new(tracks)
     }
 
-    fn with_test_app_context<R>(block: impl FnOnce() -> R) -> R {
-        cranpose_ui::AppContext::new().enter(block)
-    }
-
     #[test]
     fn time_digits_are_mapped_correctly() {
         assert_eq!(time_digits(0.0), [0, 0, 0, 0]);
@@ -8891,22 +8136,6 @@ mod tests {
         assert_eq!(slider_frame(2.0, 28), 27);
         assert_eq!(slider_thumb_x(-1.0, 248.0, 29.0), 0.0);
         assert_eq!(slider_thumb_x(2.0, 248.0, 29.0), 219.0);
-    }
-
-    #[test]
-    fn horizontal_slider_fraction_tracks_thumb_center() {
-        with_test_app_context(|| {
-            let area = ControlRect::new(0.0, 0.0, 248.0, 10.0, 1.0);
-
-            assert_eq!(horizontal_slider_fraction(0.0, area, 29.0), 0.0);
-            assert_eq!(horizontal_slider_fraction(14.5, area, 29.0), 0.0);
-            assert_eq!(horizontal_slider_fraction(233.5, area, 29.0), 1.0);
-            assert_eq!(horizontal_slider_fraction(248.0, area, 29.0), 1.0);
-
-            let middle = horizontal_slider_fraction(124.0, area, 29.0);
-            assert!((middle - 0.5).abs() < 0.0001);
-            assert!((slider_thumb_x(middle, 248.0, 29.0) + 14.5 - 124.0).abs() < 0.0001);
-        });
     }
 
     #[test]
@@ -8981,29 +8210,6 @@ mod tests {
     }
 
     #[test]
-    fn vertical_slider_fraction_maps_local_pointer_over_scaled_track() {
-        with_test_app_context(|| {
-            let area = ControlRect::new(0.0, 0.0, 14.0, 63.0, 1.5);
-            let scaled_height = area.scaled_height();
-
-            // The pointer is already in the scaled track space: the top maps to
-            // 0, the bottom to 1, the middle to 0.5 — no extra scaling.
-            assert_eq!(vertical_slider_fraction(0.0, scaled_height), 0.0);
-            assert_eq!(vertical_slider_fraction(scaled_height, scaled_height), 1.0);
-            assert_eq!(
-                vertical_slider_fraction(scaled_height / 2.0, scaled_height),
-                0.5
-            );
-            // Out-of-range positions clamp.
-            assert_eq!(vertical_slider_fraction(-10.0, scaled_height), 0.0);
-            assert_eq!(
-                vertical_slider_fraction(scaled_height + 10.0, scaled_height),
-                1.0
-            );
-        });
-    }
-
-    #[test]
     fn progress_fraction_uses_duration_when_known() {
         assert_eq!(progress_fraction(30.0, Some(120.0)), 0.25);
         assert_eq!(progress_fraction(130.0, Some(120.0)), 1.0);
@@ -9045,7 +8251,9 @@ mod tests {
         assert_eq!(bitmap.height(), VISUALIZER_HEIGHT as u32);
         assert!(bitmap
             .pixels()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel[1] > 180 && pixel[3] == 255));
     }
 
@@ -9059,8 +8267,10 @@ mod tests {
 
         assert!(bitmap
             .pixels()
-            .chunks_exact(4)
-            .all(|pixel| pixel == [0, 0, 0, 255]));
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [0, 0, 0, 255]));
     }
 
     #[test]
@@ -9069,8 +8279,10 @@ mod tests {
         let bitmap = visualizer_bitmap(true, [1.0; audio::VISUALIZER_BAND_COUNT], palette);
         assert!(bitmap
             .pixels()
-            .chunks_exact(4)
-            .all(|pixel| pixel == [5, 5, 5, 5]));
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [5, 5, 5, 5]));
     }
 
     #[test]

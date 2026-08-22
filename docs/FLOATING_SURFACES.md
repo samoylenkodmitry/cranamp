@@ -10,7 +10,7 @@ visible after the user leaves the app.
 
 Expected shape:
 
-- The full `CranampActivity` remains the normal app experience.
+- The full app, running in the framework's `CranposeActivity`, remains the normal app experience.
 - A user action enables the floating mini-player.
 - Cranamp checks `Settings.canDrawOverlays(context)`.
 - If needed, Cranamp launches `Settings.ACTION_MANAGE_OVERLAY_PERMISSION`.

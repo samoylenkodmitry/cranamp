@@ -1,0 +1,28 @@
+# Local-only override: build against the sibling Cranpose checkout instead of
+# the crates.io release. Needed while the local framework is ahead of the
+# last crates.io publish under the same 0.1.95 version number (e.g. the
+# `cranpose/media-desktop` feature this app depends on does not exist in the
+# published 0.1.95). Not meant to be committed — remove once a matching
+# Cranpose version is published and the dependency versions in Cargo.toml are
+# bumped to it.
+[patch.crates-io]
+cranpose = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose" }
+cranpose-animation = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-animation" }
+cranpose-app-shell = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-app-shell" }
+cranpose-audio = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-audio" }
+cranpose-core = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-core" }
+cranpose-foundation = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-foundation" }
+cranpose-liquid = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-liquid" }
+cranpose-macros = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-macros" }
+cranpose-media = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-media" }
+cranpose-platform-android = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-platform/android" }
+cranpose-platform-desktop-winit = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-platform/desktop-winit" }
+cranpose-platform-web = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-platform/web" }
+cranpose-render-common = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-render/common" }
+cranpose-render-pixels = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-render/pixels" }
+cranpose-render-wgpu = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-render/wgpu" }
+cranpose-runtime-std = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-runtime-std" }
+cranpose-services = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-services" }
+cranpose-ui = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-ui" }
+cranpose-ui-graphics = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-ui-graphics" }
+cranpose-ui-layout = { path = "/Users/s/develop/projects/Cranpose/crates/cranpose-ui-layout" }
