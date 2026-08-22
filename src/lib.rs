@@ -1,7 +1,5 @@
 #![deny(unsafe_code)]
 
-#[cfg(target_os = "android")]
-mod android_bridge;
 pub mod audio;
 mod fonts;
 mod sync;
@@ -11,34 +9,40 @@ use cranpose::AppLauncher;
 
 const TITLE: &str = "Cranamp";
 
-pub fn create_desktop_app() -> AppLauncher {
+/// The id every framework-owned storage path is scoped by. It matches the
+/// Android `applicationId`, so saved state follows the application rather than
+/// the name of whichever binary launched it.
+const APPLICATION_ID: &str = "com.cranamp.app";
+
+/// What every target's launcher starts from.
+///
+/// Nothing is registered here: every shell installs its own platform's media
+/// stack - `cranpose/media-desktop` for the desktop decoder and output device,
+/// and the Android, iOS and web hosts for theirs.
+fn launcher() -> AppLauncher {
     AppLauncher::new()
         .with_title(TITLE)
-        .with_size(1, 1)
+        .with_application_id(APPLICATION_ID)
         .with_fonts(fonts::APP_FONTS)
 }
 
+pub fn create_desktop_app() -> AppLauncher {
+    launcher().with_size(1, 1)
+}
+
 pub fn create_surface_app() -> AppLauncher {
-    AppLauncher::new()
-        .with_title(TITLE)
-        .with_size(900, 700)
-        .with_fonts(fonts::APP_FONTS)
+    launcher().with_size(900, 700)
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub fn create_web_app() -> AppLauncher {
-    AppLauncher::new()
-        .with_title(TITLE)
-        .with_size(275, 493)
-        .with_fonts(fonts::APP_FONTS)
+    launcher().with_size(275, 493)
 }
 
 #[cfg(target_os = "android")]
 pub fn create_android_app() -> AppLauncher {
     winamp::set_android_floating_overlay_enabled(false);
-    AppLauncher::new()
-        .with_title(TITLE)
-        .with_fonts(fonts::APP_FONTS)
+    launcher()
 }
 
 /// iOS entry point. winit starts `UIApplicationMain`, so this is called
@@ -46,36 +50,27 @@ pub fn create_android_app() -> AppLauncher {
 /// single fullscreen surface, inset by the system safe area.
 #[cfg(all(feature = "ios", feature = "renderer-wgpu", target_os = "ios"))]
 pub fn ios_entry_point() {
-    AppLauncher::new()
-        .with_title(TITLE)
-        .with_fonts(fonts::APP_FONTS)
-        .run(ios_root);
+    launcher().run(ios_root);
 }
 
 #[cfg(all(feature = "ios", feature = "renderer-wgpu", target_os = "ios"))]
 #[cranpose::composable]
 fn ios_root() {
-    let insets = cranpose::local_safe_area_insets().current();
     cranpose::Box(
-        cranpose::Modifier::empty().fill_max_size().padding_each(
-            insets.left,
-            insets.top,
-            insets.right,
-            insets.bottom,
-        ),
+        cranpose::Modifier::empty()
+            .fill_max_size()
+            .safe_area_padding(),
         cranpose::BoxSpec::default(),
         winamp::WinampSurfaceApp,
     );
 }
 
-#[cfg(target_os = "android")]
-#[allow(unsafe_code)]
-#[no_mangle]
-pub fn android_main(app: android_activity::AndroidApp) {
-    if let Err(error) = android_bridge::init(&app) {
-        log::error!("failed to initialize Cranamp Android bridge: {error}");
-    }
-    create_android_app().run(app, winamp::WinampAndroidApp);
+// The exported `android_main` symbol `NativeActivity` looks up. The framework
+// writes it, so this crate keeps its `deny(unsafe_code)` and never names
+// `android_activity` for a parameter type.
+cranpose::android_main! {
+    launcher: create_android_app(),
+    content: winamp::WinampAndroidApp,
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

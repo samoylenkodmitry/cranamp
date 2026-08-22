@@ -1,16 +1,2 @@
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath("com.android.tools.build:gradle:9.2.1")
-    }
-}
-
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
+// Top-level build file. Plugin versions and repositories are declared in
+// `settings.gradle.kts`.

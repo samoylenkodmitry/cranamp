@@ -1,34 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        Reading the user's own music. Everything the framework needs — the
+        network, the media-playback foreground service, the package installer —
+        is contributed by `dev.cranpose:cranpose-android` and the `media` and
+        `update` service modules the build asks for.
+    -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
 
     <application
         android:allowBackup="true"
         android:label="Cranamp"
         android:resizeableActivity="true"
         android:supportsRtl="true">
+
+        <!--
+            The activity itself comes from `dev.cranpose:cranpose-android`,
+            label, theme and `android.app.lib_name` included. This says only
+            what is specific to a skinned player window: the freeform size a
+            desktop-class window manager opens it at, which is the classic
+            skin's own geometry rather than anything the framework knows.
+        -->
         <activity
-            android:name=".CranampActivity"
-            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode|layoutDirection|fontScale|density"
-            android:exported="true"
+            android:name="dev.cranpose.android.CranposeActivity"
             android:resizeableActivity="true"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
-            <meta-data
-                android:name="android.app.lib_name"
-                android:value="cranamp" />
+            tools:node="merge">
             <layout
                 android:defaultWidth="275dp"
                 android:defaultHeight="493dp"
                 android:gravity="center"
                 android:minWidth="275dp"
                 android:minHeight="116dp" />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
         </activity>
     </application>
 </manifest>
