@@ -39,7 +39,6 @@ use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 use crate::audio::{self, Track};
 use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
 #[cfg(target_os = "android")]
 pub(crate) const ANDROID_OVERLAY_INITIAL_X: i32 = 26;
 #[cfg(target_os = "android")]
@@ -3537,23 +3536,24 @@ fn SettingsUpdateSection(_state: MutableState<WinampState>) {
                 settings_text_style(12.0, SETTINGS_TEXT),
             );
             match update_status.get() {
-                cranpose::AppUpdateStatus::Available {
-                    version,
-                    download_url,
-                } => {
+                cranpose::AppUpdateStatus::Available { package } => {
                     SettingsActionButton(
-                        format!("Download & install v{version}"),
+                        format!("Download & install v{}", package.version),
                         SETTINGS_ACCENT,
                         move || {
-                            if let Err(error) = cranpose::install_app_update(&download_url) {
-                                update_status
-                                    .set(cranpose::AppUpdateStatus::Error(error.to_string()));
-                            }
+                            // The whole package, not just its URL: the framework
+                            // checks the bytes against the digest the release
+                            // feed published before any installer sees them. It
+                            // publishes every outcome into the status this
+                            // screen already reads, so there is nothing to
+                            // record here that reading it would not show.
+                            let _ = cranpose::install_app_update(&package);
                         },
                     );
                 }
                 cranpose::AppUpdateStatus::Checking
                 | cranpose::AppUpdateStatus::Downloading { .. }
+                | cranpose::AppUpdateStatus::Verifying
                 | cranpose::AppUpdateStatus::AwaitingConfirmation
                 | cranpose::AppUpdateStatus::Installing => {}
                 _ => {
@@ -3566,10 +3566,7 @@ fn SettingsUpdateSection(_state: MutableState<WinampState>) {
                                 env!("CARGO_PKG_VERSION"),
                                 ".apk",
                             );
-                            if let Err(error) = cranpose::check_for_app_update(&source) {
-                                update_status
-                                    .set(cranpose::AppUpdateStatus::Error(error.to_string()));
-                            }
+                            let _ = cranpose::check_for_app_update(&source);
                         },
                     );
                 }
@@ -3588,8 +3585,8 @@ fn app_update_status_line(status: &cranpose::AppUpdateStatus) -> String {
         cranpose::AppUpdateStatus::UpToDate => {
             format!("Up to date (v{})", env!("CARGO_PKG_VERSION"))
         }
-        cranpose::AppUpdateStatus::Available { version, .. } => {
-            format!("Update available: v{version}")
+        cranpose::AppUpdateStatus::Available { package } => {
+            format!("Update available: v{}", package.version)
         }
         cranpose::AppUpdateStatus::Downloading { downloaded, total } => match total {
             Some(total) if *total > 0 => {
@@ -3600,6 +3597,9 @@ fn app_update_status_line(status: &cranpose::AppUpdateStatus) -> String {
             }
             _ => format!("Downloading update... {downloaded} bytes"),
         },
+        cranpose::AppUpdateStatus::Verifying => {
+            "Checking the download against its digest...".to_string()
+        }
         cranpose::AppUpdateStatus::AwaitingConfirmation => {
             "Waiting for install confirmation...".to_string()
         }

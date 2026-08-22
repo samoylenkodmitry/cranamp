@@ -66,12 +66,12 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.58", default-features = false }
-cranpose-core = "0.1.58"
-cranpose-foundation = "0.1.58"
-cranpose-services = { version = "0.1.58", default-features = false }
-cranpose-ui = "0.1.58"
-cranpose-ui-graphics = "0.1.58"
+cranpose = { version = "0.1.96", default-features = false }
+cranpose-core = "0.1.96"
+cranpose-foundation = "0.1.96"
+cranpose-services = { version = "0.1.96", default-features = false }
+cranpose-ui = "0.1.96"
+cranpose-ui-graphics = "0.1.96"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }
 log = "0.4"
@@ -90,11 +90,11 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 wasm-logger = { version = "0.2", optional = true }
 
 # Framework-level e2e tests drive the real cranpose hit-dispatch pipeline
-# headlessly (see tests/settings_e2e.rs). Published crates, same 0.1.58 as the
+# headlessly (see tests/settings_e2e.rs). Published crates, same 0.1.96 as the
 # cranpose runtime deps above.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cranpose-app-shell = "0.1.58"
-cranpose-render-common = "0.1.58"
+cranpose-app-shell = "0.1.96"
+cranpose-render-common = "0.1.96"
 
 # Distribution profile: LTO + strip + abort panics keep the binary small
 # (see cranpose README "Binary Size").

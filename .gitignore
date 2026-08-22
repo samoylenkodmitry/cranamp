@@ -5,3 +5,8 @@
 /platform/android/build
 /platform/android/app/build
 /platform/android/target
+
+# Local-only build override pointing at a sibling framework checkout. It names
+# absolute paths on one machine, so it belongs to that machine and not to the
+# repository.
+.cargo/config.toml

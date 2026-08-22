@@ -13,7 +13,9 @@ Web widget: https://samoylenkodmitry.github.io/cranamp/
   app-private media files. The release APK does not request
   `SYSTEM_ALERT_WINDOW`; freeform Activity mode is optional desktop/tablet
   windowing, not the true always-on-top overlay path.
-- iOS: release output is paused while Cranpose does not provide a UIKit/CAMetalLayer backend.
+- iOS: single fullscreen Winamp surface on Cranpose's winit-based UIKit backend
+  (`CAMetalLayer`, `CADisplayLink`, touch input), inset by the system safe
+  area; no Xcode project, the pure-Rust binary owns `UIApplicationMain`.
 - WebAssembly: embeddable canvas widget built with `wasm-pack`; GitHub Pages
   deploys the widget from `dist/`. Chromium browsers can open an experimental
   Document Picture-in-Picture window containing the live Cranamp canvas.
@@ -60,7 +62,7 @@ device, then enable Android's developer freeform flags before launching:
 adb shell settings put global development_settings_enabled 1
 adb shell settings put global enable_freeform_support 1
 adb shell settings put global force_resizable_activities 1
-adb shell am start --windowingMode 5 --activity-task-on-home -n com.cranamp.app/.CranampActivity
+adb shell am start --windowingMode 5 --activity-task-on-home -n com.cranamp.app/dev.cranpose.android.CranposeActivity
 ```
 
 Phone-shaped Pixel AVDs can still force fullscreen even when the app manifest is
@@ -77,4 +79,4 @@ The macOS `.app` is signed with a Developer ID certificate and notarized, so a d
 
 ## Unsafe Policy
 
-Application code denies `unsafe` with crate-level and Cargo lints and contains no unsafe blocks. The Android loader entry symbol narrowly allows Rust's `unsafe_code` lint around `#[no_mangle]`, because Android requires a stable exported entry-point name. Third-party dependencies may use unsafe internally where their platform integrations require it.
+Application code denies `unsafe` with crate-level and Cargo lints and contains no unsafe blocks, including on Android: the exported `android_main` entry symbol is written by the Cranpose framework's `android_main!` macro, not by application code, so nothing here carries an `unsafe_code` exception. Third-party dependencies may use unsafe internally where their platform integrations require it.

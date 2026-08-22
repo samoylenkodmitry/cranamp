@@ -240,7 +240,7 @@ jobs:
 
   ios:
     name: iOS
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: [self-hosted, macOS, apple-signing]
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
