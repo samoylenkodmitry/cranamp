@@ -40,7 +40,6 @@ use crate::audio::{self, Track};
 use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-
 #[cfg(target_os = "android")]
 pub(crate) const ANDROID_OVERLAY_INITIAL_X: i32 = 26;
 #[cfg(target_os = "android")]
@@ -912,75 +911,115 @@ fn PlaylistDurationHydrationEffect(state: MutableState<WinampState>) {
 #[composable]
 fn PlaylistDurationHydrationEffect(_state: MutableState<WinampState>) {}
 
+/// Drives playlist import/export through keyed launchers, the same
+/// composition-owned pattern as `CranposePickerEffect`: the request key is
+/// what a grant comes back to, so a chooser that outlives the activity — or
+/// the whole process — is redelivered to the launcher that asked for it,
+/// rather than being dropped by an abandoned `LaunchedEffectAsync` future.
 #[composable]
 fn DocumentPickerEffect(state: MutableState<WinampState>) {
+    let import_playlist =
+        cranpose_services::rememberOpenFileLauncher("cranamp.import-playlist", move |result| {
+            receive_playlist_import(state, result)
+        });
+    let export_playlist =
+        cranpose_services::rememberSaveDocumentLauncher("cranamp.export-playlist", move |result| {
+            receive_playlist_export(state, result)
+        });
+
     let pending = state.get().pending_document;
-    let picker = cranpose::local_file_picker().current();
-    cranpose_core::LaunchedEffectAsync!(pending.clone(), move |_scope| {
-        let picker = picker.clone();
-        Box::pin(async move {
-            match pending {
-                None => {}
-                Some(PendingDocument::ImportPlaylist) => {
-                    let options = cranpose::FilePickerOptions::default()
-                        .with_title("Import playlist")
-                        .with_filter(cranpose::FileFilter::new("Playlist", &["m3u", "m3u8"]));
-                    match picker.pick_file(options).await {
-                        Ok(Some(entry)) => match entry.read_all().await {
-                            Ok(bytes) => match String::from_utf8(bytes) {
-                                Ok(text) => apply_imported_playlist(state, &text),
-                                Err(error) => state.update(|app| {
-                                    app.pending_document = None;
-                                    app.status = format!("Playlist is not UTF-8: {error}");
-                                }),
-                            },
-                            Err(error) => state.update(|app| {
-                                app.pending_document = None;
-                                app.status = error.to_string();
-                            }),
-                        },
-                        Ok(None) => state.update(|app| {
-                            app.pending_document = None;
-                            app.status = "Import Cancelled".to_string();
-                        }),
+    cranpose_core::LaunchedEffect!(pending.clone(), move |_scope| {
+        match pending {
+            None => {}
+            Some(PendingDocument::ImportPlaylist) => {
+                let options = cranpose::FilePickerOptions::default()
+                    .with_title("Import playlist")
+                    .with_filter(cranpose::FileFilter::new("Playlist", &["m3u", "m3u8"]));
+                import_playlist.launch(options);
+            }
+            Some(PendingDocument::ExportPlaylist(_)) => {
+                // The request carries only the destination's name and MIME
+                // type: saving opens a sink on whatever the user chose and
+                // streams to it, rather than handing the whole document to
+                // the picker up front, so the bytes never have to exist
+                // twice. The text itself is read back from `pending_document`
+                // once the sink is granted (see `receive_playlist_export`).
+                let request = cranpose::SaveDocumentRequest::new("playlist.m3u", "audio/x-mpegurl");
+                export_playlist.launch(request);
+            }
+        }
+    });
+}
+
+/// Takes a chosen file and imports it as the playlist.
+fn receive_playlist_import(
+    state: MutableState<WinampState>,
+    result: cranpose_services::LauncherResult<Option<cranpose::ContentHandle>>,
+) {
+    match result {
+        Ok(Some(entry)) => {
+            cranpose_core::spawn_ui_task(async move {
+                match entry.read_all().await {
+                    Ok(bytes) => match String::from_utf8(bytes) {
+                        Ok(text) => apply_imported_playlist(state, &text),
                         Err(error) => state.update(|app| {
                             app.pending_document = None;
-                            app.status = error.to_string();
+                            app.status = format!("Playlist is not UTF-8: {error}");
                         }),
-                    }
+                    },
+                    Err(error) => state.update(|app| {
+                        app.pending_document = None;
+                        app.status = error.to_string();
+                    }),
                 }
-                Some(PendingDocument::ExportPlaylist(text)) => {
-                    // Saving opens a sink on whatever the user chose and
-                    // writes to it, rather than handing the whole document to
-                    // the picker up front: the bytes never have to exist twice.
-                    let request =
-                        cranpose::SaveDocumentRequest::new("playlist.m3u", "audio/x-mpegurl");
-                    let saved = match picker.save_document(request).await {
-                        Ok(Some(sink)) => cranpose::write_all(&sink, text.into_bytes())
-                            .await
-                            .map(|()| true)
-                            .map_err(|error| error.to_string()),
-                        Ok(None) => Ok(false),
-                        Err(error) => Err(error.to_string()),
-                    };
-                    match saved {
-                        Ok(true) => state.update(|app| {
-                            app.pending_document = None;
-                            app.status = "Exported Playlist".to_string();
-                        }),
-                        Ok(false) => state.update(|app| {
-                            app.pending_document = None;
-                            app.status = "Export Cancelled".to_string();
-                        }),
-                        Err(error) => state.update(move |app| {
-                            app.pending_document = None;
-                            app.status = error;
-                        }),
-                    }
+            });
+        }
+        Ok(None) => state.update(|app| {
+            app.pending_document = None;
+            app.status = "Import Cancelled".to_string();
+        }),
+        Err(error) => state.update(|app| {
+            app.pending_document = None;
+            app.status = error.to_string();
+        }),
+    }
+}
+
+/// Writes the pending playlist text to a chosen save destination. The text
+/// lives in `pending_document`, not in the launcher's request, so it is read
+/// back here rather than threaded through the picker.
+fn receive_playlist_export(
+    state: MutableState<WinampState>,
+    result: cranpose_services::LauncherResult<Option<cranpose::ContentSinkRef>>,
+) {
+    match result {
+        Ok(Some(sink)) => {
+            let text = match state.get().pending_document {
+                Some(PendingDocument::ExportPlaylist(text)) => text,
+                _ => String::new(),
+            };
+            cranpose_core::spawn_ui_task(async move {
+                match cranpose::write_all(&sink, text.into_bytes()).await {
+                    Ok(()) => state.update(|app| {
+                        app.pending_document = None;
+                        app.status = "Exported Playlist".to_string();
+                    }),
+                    Err(error) => state.update(|app| {
+                        app.pending_document = None;
+                        app.status = error.to_string();
+                    }),
                 }
-            }
-        })
-    });
+            });
+        }
+        Ok(None) => state.update(|app| {
+            app.pending_document = None;
+            app.status = "Export Cancelled".to_string();
+        }),
+        Err(error) => state.update(|app| {
+            app.pending_document = None;
+            app.status = error.to_string();
+        }),
+    }
 }
 
 fn apply_imported_playlist(state: MutableState<WinampState>, text: &str) {
@@ -1021,14 +1060,14 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
         "cranamp.open-folder.append",
         move |result| receive_folder(state, result, true),
     );
-    let file_replace = cranpose_services::rememberOpenFileLauncher(
-        "cranamp.open-file.replace",
-        move |result| receive_file(state, result, false),
-    );
-    let file_append = cranpose_services::rememberOpenFileLauncher(
-        "cranamp.open-file.append",
-        move |result| receive_file(state, result, true),
-    );
+    let file_replace =
+        cranpose_services::rememberOpenFileLauncher("cranamp.open-file.replace", move |result| {
+            receive_file(state, result, false)
+        });
+    let file_append =
+        cranpose_services::rememberOpenFileLauncher("cranamp.open-file.append", move |result| {
+            receive_file(state, result, true)
+        });
 
     let pending = state.get().pending_pick;
     cranpose_core::LaunchedEffect!(pending, move |_scope| {
@@ -1098,8 +1137,6 @@ fn receive_file(
         }),
     }
 }
-
-
 
 /// Puts a selection into the playlist, replacing or appending as the request
 /// asked.
@@ -1199,54 +1236,68 @@ async fn consume_folder_stream(
     }
 }
 
-/// Drives the skin picker through the same Cranpose file picker as audio, so
-/// picking a `.wsz` never blocks the event loop with a nested modal. The chosen
-/// file is read as bytes and applied directly.
+/// Drives the skin picker through a keyed launcher, the same
+/// composition-owned pattern as `CranposePickerEffect`, so picking a `.wsz`
+/// never blocks the event loop with a nested modal and a grant that outlives
+/// the activity is redelivered rather than dropped. The chosen file is read
+/// as bytes and applied directly.
 #[composable]
 fn SkinPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+    let skin_picker =
+        cranpose_services::rememberOpenFileLauncher("cranamp.open-skin", move |result| {
+            receive_skin_pick(state, skin_state, result)
+        });
+
     let pending = state.get().pending_skin_pick;
-    let picker = cranpose::local_file_picker().current();
-    cranpose_core::LaunchedEffectAsync!(pending, move |_scope| {
-        let picker = picker.clone();
-        Box::pin(async move {
-            if !pending {
-                return;
-            }
-            let options = cranpose::FilePickerOptions::default()
-                .with_title("Open Winamp skin")
-                .with_filter(cranpose::FileFilter::new("Winamp skin", &["wsz", "zip"]));
-            match picker.pick_file(options).await {
-                Ok(Some(entry)) => {
-                    let label = entry.metadata().name;
-                    let display_path = entry.metadata().identifier;
-                    match entry.read_all().await {
-                        Ok(bytes) => {
-                            state.update(|s| s.pending_skin_pick = false);
-                            // Persist the picked skin into the library so it
-                            // survives restarts and shows up in Settings. Fall
-                            // back to the picker's display path if the copy
-                            // fails (e.g. read-only config dir).
-                            let stored_path =
-                                store_skin_in_library(&bytes, &label).unwrap_or(display_path);
-                            apply_loaded_skin(state, skin_state, &bytes, &label, Some(stored_path));
-                        }
-                        Err(error) => state.update(|s| {
-                            s.pending_skin_pick = false;
-                            s.status = format!("Skin Load Failed: {error}");
-                        }),
-                    }
-                }
-                Ok(None) => state.update(|s| {
-                    s.pending_skin_pick = false;
-                    s.status = "Skin Open Cancelled".to_string();
-                }),
-                Err(error) => state.update(|s| {
-                    s.pending_skin_pick = false;
-                    s.status = error.to_string();
-                }),
-            }
-        })
+    cranpose_core::LaunchedEffect!(pending, move |_scope| {
+        if !pending {
+            return;
+        }
+        let options = cranpose::FilePickerOptions::default()
+            .with_title("Open Winamp skin")
+            .with_filter(cranpose::FileFilter::new("Winamp skin", &["wsz", "zip"]));
+        skin_picker.launch(options);
     });
+}
+
+/// Takes a chosen skin file and applies it.
+fn receive_skin_pick(
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    result: cranpose_services::LauncherResult<Option<cranpose::ContentHandle>>,
+) {
+    match result {
+        Ok(Some(entry)) => {
+            let label = entry.metadata().name;
+            let display_path = entry.metadata().identifier;
+            cranpose_core::spawn_ui_task(async move {
+                match entry.read_all().await {
+                    Ok(bytes) => {
+                        state.update(|s| s.pending_skin_pick = false);
+                        // Persist the picked skin into the library so it
+                        // survives restarts and shows up in Settings. Fall
+                        // back to the picker's display path if the copy
+                        // fails (e.g. read-only config dir).
+                        let stored_path =
+                            store_skin_in_library(&bytes, &label).unwrap_or(display_path);
+                        apply_loaded_skin(state, skin_state, &bytes, &label, Some(stored_path));
+                    }
+                    Err(error) => state.update(|s| {
+                        s.pending_skin_pick = false;
+                        s.status = format!("Skin Load Failed: {error}");
+                    }),
+                }
+            });
+        }
+        Ok(None) => state.update(|s| {
+            s.pending_skin_pick = false;
+            s.status = "Skin Open Cancelled".to_string();
+        }),
+        Err(error) => state.update(|s| {
+            s.pending_skin_pick = false;
+            s.status = error.to_string();
+        }),
+    }
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -1450,10 +1501,10 @@ fn SyncEffect(state: MutableState<WinampState>) {
     // The request key is what the grant comes back to, so a SAF prompt that
     // outlives the activity - or the whole process - is redelivered to this
     // callback. The application marks nothing on disk and polls no inbox.
-    let folder = cranpose_services::rememberWritableFolderLauncher(
-        "cranamp.sync-folder",
-        move |result| receive_sync_folder(state, result),
-    );
+    let folder =
+        cranpose_services::rememberWritableFolderLauncher("cranamp.sync-folder", move |result| {
+            receive_sync_folder(state, result)
+        });
 
     let pending_folder_pick = state.get().pending_sync_folder_pick;
     cranpose_core::LaunchedEffect!(pending_folder_pick, move |_scope| {
@@ -3763,7 +3814,8 @@ fn PlaylistWindow(
     let snapshot = state.get();
     let footer_menu = cranpose_core::rememberMutableStateOf(|| None::<PlaylistFooterMenu>);
     let playlist_scroll_state = cranpose_core::rememberMutableStateOf(|| snapshot.playlist_scroll);
-    let playlist_entries_scroll_state = cranpose_core::rememberMutableStateOf(|| snapshot.playlist_scroll);
+    let playlist_entries_scroll_state =
+        cranpose_core::rememberMutableStateOf(|| snapshot.playlist_scroll);
     let playlist_scroll_dragging = cranpose_core::rememberMutableStateOf(|| false);
     {
         let local_scroll = playlist_scroll_state;
@@ -3781,8 +3833,7 @@ fn PlaylistWindow(
             }
         });
     }
-    let search_field =
-        cranpose_core::remember(|| TextFieldState::new("")).with(|field| field.clone());
+    let search_field = cranpose_core::remember(|| TextFieldState::new("")).with(|field| *field);
     let window_size = window_size.get();
     let skin_scale = scale.max(f32::EPSILON);
     let width = (window_size.width / skin_scale).max(PLAYLIST_WIDTH);
@@ -3895,7 +3946,7 @@ fn PlaylistWindow(
                     palette,
                     state,
                     snapshot.clone(),
-                    search_field.clone(),
+                    search_field,
                     list_width,
                     scale,
                 );
@@ -4235,7 +4286,7 @@ fn PlaylistSearchOverlay(
 
     {
         let state_for_sync = state;
-        let field_for_sync = search_field.clone();
+        let field_for_sync = search_field;
         let snapshot_query = snapshot.playlist_search_query.clone();
         let snapshot_revision = snapshot.playlist_search_revision;
         let query_for_sync = query.clone();
@@ -5144,8 +5195,8 @@ fn visualizer_bitmap(
     let height = VISUALIZER_HEIGHT as u32;
     let bg = viscolor.background();
     let mut pixels = vec![0u8; width as usize * height as usize * 4];
-    for pixel in pixels.chunks_exact_mut(4) {
-        pixel.copy_from_slice(&bg);
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        *pixel = bg;
     }
 
     if !playing {
@@ -7595,7 +7646,7 @@ fn hex_decode(input: &str) -> Option<String> {
     }
 
     let mut output = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         let high = hex_value(pair[0])?;
         let low = hex_value(pair[1])?;
         output.push((high << 4) | low);
@@ -7647,11 +7698,6 @@ fn save_player_state_background(config: SavedPlayerState) {
 pub(crate) fn sync_config_path() -> std::path::PathBuf {
     app_config_dir().join("sync.conf")
 }
-
-
-
-
-
 
 const WINAMP_NATIVE_HOST_OFFSET_X: f32 = 640.0;
 const WINAMP_NATIVE_HOST_OFFSET_Y: f32 = 118.0;
@@ -8205,7 +8251,9 @@ mod tests {
         assert_eq!(bitmap.height(), VISUALIZER_HEIGHT as u32);
         assert!(bitmap
             .pixels()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel[1] > 180 && pixel[3] == 255));
     }
 
@@ -8219,8 +8267,10 @@ mod tests {
 
         assert!(bitmap
             .pixels()
-            .chunks_exact(4)
-            .all(|pixel| pixel == [0, 0, 0, 255]));
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [0, 0, 0, 255]));
     }
 
     #[test]
@@ -8229,8 +8279,10 @@ mod tests {
         let bitmap = visualizer_bitmap(true, [1.0; audio::VISUALIZER_BAND_COUNT], palette);
         assert!(bitmap
             .pixels()
-            .chunks_exact(4)
-            .all(|pixel| pixel == [5, 5, 5, 5]));
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [5, 5, 5, 5]));
     }
 
     #[test]

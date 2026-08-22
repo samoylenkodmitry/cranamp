@@ -176,7 +176,7 @@ fn sample_text_bitmap_color(bitmap: &ImageBitmap) -> Option<[u8; 4]> {
     let mut opaque_pixels = 0usize;
     let mut counts: HashMap<[u8; 3], usize> = HashMap::new();
 
-    for pixel in pixels.chunks_exact(4) {
+    for pixel in pixels.as_chunks::<4>().0 {
         if pixel[3] < 128 {
             continue;
         }

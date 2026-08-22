@@ -62,7 +62,6 @@ impl Track {
     pub fn display_title(&self) -> &str {
         self.title.as_str()
     }
-
 }
 
 pub(crate) fn track_from_title_path(title: impl Into<String>, path: impl Into<String>) -> Track {
@@ -366,7 +365,11 @@ pub fn set_equalizer(enabled: bool, values: [f32; 11]) -> Result<(), String> {
     let settings = cranpose_services::EqualizerSettings {
         enabled,
         preamp_db: equalizer_value_gain_db(values[0]),
-        gains_db: values[1..].iter().copied().map(equalizer_value_gain_db).collect(),
+        gains_db: values[1..]
+            .iter()
+            .copied()
+            .map(equalizer_value_gain_db)
+            .collect(),
     }
     .clamped_to(&bands);
     cranpose_services::set_media_equalizer(settings);
@@ -385,8 +388,10 @@ pub fn probe_track_duration_seconds(path: &std::path::Path) -> Result<Option<f32
         Some(text) if has_uri_scheme(text) => text.to_string(),
         _ => cranpose_services::uri_for_path(path),
     };
-    Ok(cranpose_services::probe_media_duration(&MediaItem::new(uri))
-        .map(|duration| duration.as_secs_f32()))
+    Ok(
+        cranpose_services::probe_media_duration(&MediaItem::new(uri))
+            .map(|duration| duration.as_secs_f32()),
+    )
 }
 
 /// The visualiser's bands, taken from the samples the backend is playing.
@@ -438,7 +443,9 @@ fn analyzer_magnitude_to_level(magnitude: f32, band: usize) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_analyzer_bands, equalizer_value_gain_db, has_uri_scheme, media_item, Track};
+    use super::{
+        compute_analyzer_bands, equalizer_value_gain_db, has_uri_scheme, media_item, Track,
+    };
 
     #[test]
     fn extensions_include_common_winamp_formats() {
@@ -516,7 +523,9 @@ mod tests {
             duration_seconds: None,
         };
         assert_eq!(
-            media_item(&blob).expect("a blob-backed track has a source").uri,
+            media_item(&blob)
+                .expect("a blob-backed track has a source")
+                .uri,
             "blob:https://example.test/9f2c"
         );
 

@@ -514,13 +514,17 @@ mod tests {
     use cranpose_services::{FolderEntry, FolderReader, FolderWriter, WritableFolderStore};
     use std::sync::{Arc, Mutex as StdMutex};
 
+    /// The mock folder's file table: name to bytes, shared between the store
+    /// and whatever writer is currently committing into it.
+    type MockFiles = Arc<StdMutex<Vec<(String, Vec<u8>)>>>;
+
     /// In-memory writable folder so the inner runtime can be exercised without a
     /// real filesystem or the process-global state.
     #[derive(Default)]
     struct MockStore {
         // Shared so a writer handed out by `open_write` can commit into it when
         // it finishes, the way a real provider's writer commits to its folder.
-        files: Arc<StdMutex<Vec<(String, Vec<u8>)>>>,
+        files: MockFiles,
         writable: bool,
     }
 
@@ -542,7 +546,7 @@ mod tests {
     }
 
     struct CollectingWriter {
-        store: Arc<StdMutex<Vec<(String, Vec<u8>)>>>,
+        store: MockFiles,
         name: String,
         buffer: Vec<u8>,
     }
