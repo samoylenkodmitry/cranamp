@@ -5,8 +5,8 @@
     <!--
         Reading the user's own music. Everything the framework needs — the
         network, the media-playback foreground service, the package installer —
-        is contributed by `dev.cranpose:cranpose-android` and the `media` and
-        `update` service modules the build asks for.
+        is contributed by the Cranpose Gradle plugin (`dev.cranpose.android`)
+        and the `media` and `update` service modules the build asks for.
     -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission
@@ -20,9 +20,9 @@
         android:supportsRtl="true">
 
         <!--
-            The activity itself comes from `dev.cranpose:cranpose-android`,
-            label, theme and `android.app.lib_name` included. This says only
-            what is specific to a skinned player window: the freeform size a
+            The activity itself comes from the Cranpose Gradle plugin, label,
+            theme and `android.app.lib_name` included. This says only what is
+            specific to a skinned player window: the freeform size a
             desktop-class window manager opens it at, which is the classic
             skin's own geometry rather than anything the framework knows.
         -->

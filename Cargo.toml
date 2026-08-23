@@ -66,9 +66,10 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-# 0.1.98 is not published yet: it carries cranpose PR #452
-# (PointerEvent::modifiers), which the playlist shift/ctrl-click fix below
-# depends on. This intentionally cannot resolve until that release exists.
+# 0.1.98 carries Cranpose PR #463, which deletes the `android/` Maven module
+# tree and moves the Gradle plugin inside this crate
+# (`android/cranpose-gradle-plugin/`), resolved by `settings.gradle.kts` via
+# `cargo metadata` + `includeBuild` instead of a Maven coordinate/version.
 cranpose = { version = "0.1.98", default-features = false }
 cranpose-core = "0.1.98"
 cranpose-foundation = "0.1.98"
