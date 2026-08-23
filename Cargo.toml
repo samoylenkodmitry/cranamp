@@ -66,12 +66,15 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
-cranpose = { version = "0.1.97", default-features = false }
-cranpose-core = "0.1.97"
-cranpose-foundation = "0.1.97"
-cranpose-services = { version = "0.1.97", default-features = false }
-cranpose-ui = "0.1.97"
-cranpose-ui-graphics = "0.1.97"
+# 0.1.98 is not published yet: it carries cranpose PR #452
+# (PointerEvent::modifiers), which the playlist shift/ctrl-click fix below
+# depends on. This intentionally cannot resolve until that release exists.
+cranpose = { version = "0.1.98", default-features = false }
+cranpose-core = "0.1.98"
+cranpose-foundation = "0.1.98"
+cranpose-services = { version = "0.1.98", default-features = false }
+cranpose-ui = "0.1.98"
+cranpose-ui-graphics = "0.1.98"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }
 log = "0.4"
@@ -80,7 +83,6 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2
 
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))'.dependencies]
 env_logger = { version = "0.11", optional = true }
-x11rb = "0.13.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = { version = "0.1", optional = true }
@@ -93,8 +95,8 @@ wasm-logger = { version = "0.2", optional = true }
 # headlessly (see tests/settings_e2e.rs). Published crates, pinned to the same
 # cranpose release as the runtime dependencies above.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cranpose-app-shell = "0.1.97"
-cranpose-render-common = "0.1.97"
+cranpose-app-shell = "0.1.98"
+cranpose-render-common = "0.1.98"
 
 # Distribution profile: LTO + strip + abort panics keep the binary small
 # (see cranpose README "Binary Size").
