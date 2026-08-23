@@ -69,7 +69,10 @@ anyhow = "1.0"
 # 0.1.98 carries Cranpose PR #463, which deletes the `android/` Maven module
 # tree and moves the Gradle plugin inside this crate
 # (`android/cranpose-gradle-plugin/`), resolved by `settings.gradle.kts` via
-# `cargo metadata` + `includeBuild` instead of a Maven coordinate/version.
+# `cargo metadata` + `includeBuild` instead of a Maven coordinate/version. It
+# also carries cranpose_services::content's shared percent_decode/
+# percent_decode_lossy pair, which src/sync/mod.rs below depends on to drop
+# its own hand-rolled percent-decoder.
 cranpose = { version = "0.1.98", default-features = false }
 cranpose-core = "0.1.98"
 cranpose-foundation = "0.1.98"

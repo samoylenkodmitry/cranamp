@@ -7633,20 +7633,9 @@ fn hex_decode(input: &str) -> Option<String> {
 
     let mut output = Vec::with_capacity(bytes.len() / 2);
     for pair in bytes.as_chunks::<2>().0 {
-        let high = hex_value(pair[0])?;
-        let low = hex_value(pair[1])?;
-        output.push((high << 4) | low);
+        output.push(u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?);
     }
     String::from_utf8(output).ok()
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 /// Where the restored player state lives. One key on every target: the
