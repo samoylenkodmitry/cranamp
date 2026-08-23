@@ -433,30 +433,22 @@ fn normalize(value: &str) -> String {
 /// Extracts a normalized file basename from a filesystem path or a `content://`
 /// URI. URIs encode `/` as `%2F` and may carry a query string, so we
 /// percent-decode, strip any query, then take the trailing path segment.
+///
+/// The basename becomes part of [`TrackFingerprint`], which is an identity
+/// used to match the same file across devices (`Eq`/`Hash`), so this uses the
+/// strict decoder: a URI that cannot be decoded exactly falls back to the raw,
+/// still-encoded segment rather than to a lossy substitution. A lossy decode
+/// would let two different malformed URIs collapse onto the same replacement
+/// character and silently fingerprint as the same track; the raw segment
+/// stays distinct even though it then fails to match its decoded counterpart
+/// on another device.
 fn extract_basename(path: &str) -> String {
-    let decoded = percent_decode(path);
+    let decoded =
+        cranpose_services::content::percent_decode(path).unwrap_or_else(|| path.to_string());
     let no_query = decoded.split(['?', '#']).next().unwrap_or(&decoded);
     let trimmed = no_query.trim_end_matches(['/', '\\']);
     let last = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed);
     normalize(last)
-}
-
-fn percent_decode(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(high), Some(low)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2])) {
-                out.push((high << 4) | low);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Keeps a device id safe as a file-name stem: alphanumerics, dash, underscore.
@@ -495,18 +487,9 @@ fn hex_decode(input: &str) -> Option<String> {
     }
     let mut output = Vec::with_capacity(bytes.len() / 2);
     for pair in bytes.as_chunks::<2>().0 {
-        output.push((hex_value(pair[0])? << 4) | hex_value(pair[1])?);
+        output.push(u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?);
     }
     String::from_utf8(output).ok()
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
@@ -530,6 +513,20 @@ mod tests {
         assert!(desktop.matches(&android));
         // Exact equality also holds once durations round to the same integer.
         assert_eq!(desktop, android);
+    }
+
+    #[test]
+    fn fingerprint_keeps_a_malformed_uri_undecoded_instead_of_substituting() {
+        // basename is an identity key (Eq/Hash), so a URI this decoder cannot
+        // decode exactly must fall back to its raw, still-encoded form rather
+        // than to a lossy substitution -- otherwise two different malformed
+        // URIs could collapse onto the same replacement character and
+        // fingerprint as the same track.
+        let a = TrackFingerprint::from_path("content://x/doc/track%FFone.mp3", None);
+        let b = TrackFingerprint::from_path("content://x/doc/track%FFtwo.mp3", None);
+        assert_eq!(a.basename, "track%ffone.mp3");
+        assert_eq!(b.basename, "track%fftwo.mp3");
+        assert_ne!(a.basename, b.basename);
     }
 
     #[test]
