@@ -1,8 +1,7 @@
-//! Framework-level end-to-end test for the Settings window, driven through
-//! cranpose's real hit-dispatch pipeline (no device/adb). It renders the actual
-//! `WinampSurfaceApp`, synthesizes a pointer click on the logo, and asserts the
-//! Settings panel opens — exercising the same `ClickTarget` → handler path the
-//! user taps on a device.
+//! Framework-level end-to-end tests, driven through cranpose's real
+//! hit-dispatch pipeline (no device/adb): synthesized pointer clicks on the
+//! actual composables, asserting on what a real click dispatch produces
+//! rather than on the underlying state functions directly.
 //!
 //! Uses a `HitGraphRenderer` that builds a real hit graph from the layout tree
 //! (via the published `cranpose-render-common`) so `pointer_pressed`/
@@ -12,13 +11,14 @@
 
 use cranpose_app_shell::AppShell;
 use cranpose_core::location_key;
-use cranpose_foundation::PointerEvent;
+use cranpose_foundation::{Modifiers, PointerEvent};
 use cranpose_render_common::graph::ProjectiveTransform;
 use cranpose_render_common::graph_scene::{ClickAction, HitGeometry, Scene};
 use cranpose_render_common::hit_graph::{collect_hits_from_graph, HitGraphSink};
 use cranpose_render_common::{RenderScene, Renderer};
 use cranpose_ui::{LayoutTree, Size};
 use cranpose_ui_graphics::{Point, RoundedCornerShape};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Default)]
@@ -219,5 +219,86 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
     assert!(
         !contains(&after_close, "SYNC"),
         "settings panel should close after tapping the backdrop; visible={after_close:?}"
+    );
+}
+
+/// Regression test for the bug in PLAN.md: playlist shift/ctrl-click
+/// multi-select used to read keyboard modifiers via a raw `x11rb` connection.
+/// `x11rb::connect` fails on every non-X11 desktop, so on macOS and Windows the
+/// click silently saw "no modifiers held" no matter what was actually pressed.
+///
+/// Modifiers now travel on `PointerEvent` itself -- stamped by
+/// `AppShell::set_modifiers`, the same per-shell state every desktop backend's
+/// event loop already feeds from its native `ModifiersChanged`/DOM event (see
+/// cranpose PR #452) -- so this drives a real click through the real
+/// `pointer_pressed`/`pointer_released` dispatch pipeline (no X11, no platform
+/// keyboard query of any kind) and asserts `PlaylistRowClickTarget` reports
+/// exactly what was set.
+#[test]
+fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
+    let captured: Rc<RefCell<Vec<Modifiers>>> = Rc::new(RefCell::new(Vec::new()));
+    let captured_for_app = Rc::clone(&captured);
+
+    let root_key = location_key(file!(), line!(), column!());
+    let mut shell = AppShell::new(HitGraphRenderer::default(), root_key, move || {
+        let captured = Rc::clone(&captured_for_app);
+        cranamp::winamp::PlaylistRowClickTarget(0.0, 0.0, 100.0, 20.0, 1.0, 0, move |modifiers| {
+            captured.borrow_mut().push(modifiers);
+        });
+    });
+    shell.set_buffer_size(100, 100);
+    shell.set_viewport(100.0, 100.0);
+    pump(&mut shell);
+
+    // Before any platform ever calls `set_modifiers`, a click must read as
+    // "nothing held" -- not silently drop the multi-select gesture.
+    shell.set_cursor(10.0, 10.0);
+    assert!(shell.pointer_pressed(), "press should hit the row target");
+    pump(&mut shell);
+    assert!(
+        shell.pointer_released(),
+        "release should complete the click"
+    );
+    pump(&mut shell);
+
+    // A shift-held click must reach the handler with shift set.
+    shell.set_modifiers(Modifiers {
+        shift: true,
+        ..Modifiers::NONE
+    });
+    shell.set_cursor(10.0, 10.0);
+    assert!(shell.pointer_pressed());
+    pump(&mut shell);
+    assert!(shell.pointer_released());
+    pump(&mut shell);
+
+    // A ctrl-held click must reach the handler with ctrl set, and the earlier
+    // shift must not leak into it.
+    shell.set_modifiers(Modifiers {
+        ctrl: true,
+        ..Modifiers::NONE
+    });
+    shell.set_cursor(10.0, 10.0);
+    assert!(shell.pointer_pressed());
+    pump(&mut shell);
+    assert!(shell.pointer_released());
+    pump(&mut shell);
+
+    let events = captured.borrow();
+    assert_eq!(events.len(), 3, "expected exactly three clicks: {events:?}");
+    assert_eq!(
+        events[0],
+        Modifiers::NONE,
+        "click before set_modifiers was ever called must report no modifiers"
+    );
+    assert!(
+        events[1].shift && !events[1].ctrl,
+        "shift-held click: {:?}",
+        events[1]
+    );
+    assert!(
+        events[2].ctrl && !events[2].shift,
+        "ctrl-held click: {:?}",
+        events[2]
     );
 }

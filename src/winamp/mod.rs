@@ -25,7 +25,7 @@ use cranpose::{
 };
 use cranpose_core::{self, MutableState};
 use cranpose_foundation::text::{TextFieldState, TextRange};
-use cranpose_foundation::PointerButton;
+use cranpose_foundation::{Modifiers, PointerButton};
 use cranpose_ui::text::{FontFamily, ParagraphStyle, TextOverflow, TextUnit};
 use cranpose_ui::{
     composable, current_density, Alignment, BasicText, BasicTextField, Box, BoxSpec, Button,
@@ -346,18 +346,6 @@ struct PressableSpriteLayout {
 struct EqPreset {
     label: &'static str,
     values: [f32; 11],
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct PlaylistClickModifiers {
-    shift: bool,
-    ctrl: bool,
-}
-
-impl PlaylistClickModifiers {
-    fn any(self) -> bool {
-        self.shift || self.ctrl
-    }
 }
 
 const MAIN_TITLE_DRAG_HIT_AREA: SpriteRect = (16.0, 0.0, 228.0, 14.0);
@@ -4216,9 +4204,17 @@ fn PlaylistEntries(
 
                 {
                     let state_click = state;
-                    ClickTarget(0.0, row_offset, list_width, row_height, scale, move || {
-                        handle_playlist_row_click(state_click, row);
-                    });
+                    PlaylistRowClickTarget(
+                        0.0,
+                        row_offset,
+                        list_width,
+                        row_height,
+                        scale,
+                        row,
+                        move |modifiers| {
+                            handle_playlist_row_click(state_click, row, modifiers);
+                        },
+                    );
                 }
             }
         },
@@ -5407,6 +5403,57 @@ fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: im
             .size_points(w, h)
             .absolute_offset(scaled(x, scale), scaled(y, scale))
             .clickable(move |_| on_click()),
+        BoxSpec::default(),
+        || {},
+    );
+}
+
+/// A click target that also reports the keyboard modifiers held at click
+/// time, for shift/ctrl-click multi-select.
+///
+/// `.clickable()` only ever hands back the click's local [`Point`] -- it has
+/// no channel for keyboard state -- so this pairs it with a `.pointer_input()`
+/// that does nothing but remember the most recent [`PointerEvent::modifiers`]
+/// (never consuming, so `.clickable()`'s own press/drag-threshold detection is
+/// untouched). Reading `event.modifiers` is the framework's own answer to "what
+/// is held right now": every desktop platform's event loop stamps it onto each
+/// `PointerEvent` via `AppShell::set_modifiers`, so this needs no platform-
+/// specific keyboard query of its own -- unlike the raw X11 connection this
+/// replaced, which silently reported "nothing held" on every non-X11 desktop.
+///
+/// `row_key` only identifies the pointer-input node (so the tracked modifiers
+/// reset instead of leaking stale state when the same screen position starts
+/// tracking a different playlist row after a scroll); callers that need the
+/// row index in `on_click` capture it themselves.
+#[composable]
+pub fn PlaylistRowClickTarget(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    scale: f32,
+    row_key: usize,
+    on_click: impl Fn(Modifiers) + 'static,
+) {
+    let modifiers = cranpose_core::rememberMutableStateOf(|| Modifiers::NONE);
+    let w = scaled(width, scale);
+    let h = scaled(height, scale);
+
+    Box(
+        Modifier::empty()
+            .size_points(w, h)
+            .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .pointer_input(row_key, move |scope: PointerInputScope| async move {
+                scope
+                    .await_pointer_event_scope(|await_scope| async move {
+                        loop {
+                            let event = await_scope.await_pointer_event().await;
+                            modifiers.set(event.modifiers.unwrap_or(Modifiers::NONE));
+                        }
+                    })
+                    .await;
+            })
+            .clickable(move |_| on_click(modifiers.get())),
         BoxSpec::default(),
         || {},
     );
@@ -7121,9 +7168,8 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
     }
 }
 
-fn handle_playlist_row_click(state: MutableState<WinampState>, index: usize) {
+fn handle_playlist_row_click(state: MutableState<WinampState>, index: usize, modifiers: Modifiers) {
     let now_ms = current_time_ms();
-    let modifiers = current_playlist_click_modifiers();
 
     let should_play =
         state.update(|s| handle_playlist_row_click_in_state(s, index, now_ms, modifiers));
@@ -7136,16 +7182,18 @@ fn handle_playlist_row_click_in_state(
     state: &mut WinampState,
     index: usize,
     now_ms: u64,
-    modifiers: PlaylistClickModifiers,
+    modifiers: Modifiers,
 ) -> bool {
     if index >= state.playlist.len() {
         state.status = "Track Missing".to_string();
         return false;
     }
 
+    // Only shift/ctrl (multi-select) suppress the double-click-to-play
+    // gesture; alt/meta held incidentally must not silently break it.
     let should_play = state.playlist_last_click_index == Some(index)
         && now_ms.saturating_sub(state.playlist_last_click_ms) <= PLAYLIST_DOUBLE_CLICK_MS
-        && !modifiers.any();
+        && !(modifiers.shift || modifiers.ctrl);
     if should_play {
         state.playlist_last_click_index = None;
         state.playlist_last_click_ms = 0;
@@ -7158,11 +7206,7 @@ fn handle_playlist_row_click_in_state(
     false
 }
 
-fn select_playlist_row_in_state(
-    state: &mut WinampState,
-    index: usize,
-    modifiers: PlaylistClickModifiers,
-) {
+fn select_playlist_row_in_state(state: &mut WinampState, index: usize, modifiers: Modifiers) {
     if index >= state.playlist.len() {
         state.status = "Track Missing".to_string();
         return;
@@ -7221,64 +7265,6 @@ fn current_time_ms() -> u64 {
         .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
-}
-
-fn current_playlist_click_modifiers() -> PlaylistClickModifiers {
-    native_playlist_click_modifiers().unwrap_or_default()
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(target_os = "ios")
-))]
-fn native_playlist_click_modifiers() -> Option<PlaylistClickModifiers> {
-    use x11rb::protocol::xproto::ConnectionExt as _;
-
-    let (connection, _) = x11rb::connect(None).ok()?;
-    let modifier_mapping = connection.get_modifier_mapping().ok()?.reply().ok()?;
-    let keymap = connection.query_keymap().ok()?.reply().ok()?;
-    let per_modifier = usize::from(modifier_mapping.keycodes_per_modifier());
-    if per_modifier == 0 {
-        return None;
-    }
-
-    let keycodes = modifier_mapping.keycodes;
-    let key_active = |keycode: u8| -> bool {
-        if keycode == 0 {
-            return false;
-        }
-        let byte = usize::from(keycode / 8);
-        let bit = keycode % 8;
-        keymap
-            .keys
-            .get(byte)
-            .is_some_and(|value| (value & (1 << bit)) != 0)
-    };
-    let group_active = |group: usize| -> bool {
-        let start = group * per_modifier;
-        let end = start + per_modifier;
-        keycodes
-            .get(start..end)
-            .unwrap_or(&[])
-            .iter()
-            .copied()
-            .any(key_active)
-    };
-
-    Some(PlaylistClickModifiers {
-        shift: group_active(0),
-        ctrl: group_active(2),
-    })
-}
-
-#[cfg(not(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(target_os = "ios")
-)))]
-fn native_playlist_click_modifiers() -> Option<PlaylistClickModifiers> {
-    None
 }
 
 fn current_track_status(state: &WinampState, prefix: &str) -> String {
@@ -8432,12 +8418,7 @@ mod tests {
             ..WinampState::default()
         };
 
-        let should_play = handle_playlist_row_click_in_state(
-            &mut state,
-            1,
-            1000,
-            PlaylistClickModifiers::default(),
-        );
+        let should_play = handle_playlist_row_click_in_state(&mut state, 1, 1000, Modifiers::NONE);
 
         assert!(!should_play);
         assert_eq!(state.current_index, Some(0));
@@ -8456,12 +8437,7 @@ mod tests {
             ..WinampState::default()
         };
 
-        let should_play = handle_playlist_row_click_in_state(
-            &mut state,
-            1,
-            1200,
-            PlaylistClickModifiers::default(),
-        );
+        let should_play = handle_playlist_row_click_in_state(&mut state, 1, 1200, Modifiers::NONE);
 
         assert!(should_play);
         assert_eq!(state.playlist_last_click_index, None);
@@ -8485,9 +8461,9 @@ mod tests {
         select_playlist_row_in_state(
             &mut state,
             3,
-            PlaylistClickModifiers {
+            Modifiers {
                 shift: true,
-                ctrl: false,
+                ..Modifiers::NONE
             },
         );
         assert_eq!(state.selected_indices, vec![1, 2, 3]);
@@ -8496,9 +8472,9 @@ mod tests {
         select_playlist_row_in_state(
             &mut state,
             2,
-            PlaylistClickModifiers {
-                shift: false,
+            Modifiers {
                 ctrl: true,
+                ..Modifiers::NONE
             },
         );
         assert_eq!(state.selected_indices, vec![1, 3]);
@@ -8507,9 +8483,9 @@ mod tests {
         select_playlist_row_in_state(
             &mut state,
             0,
-            PlaylistClickModifiers {
-                shift: false,
+            Modifiers {
                 ctrl: true,
+                ..Modifiers::NONE
             },
         );
         assert_eq!(state.selected_indices, vec![0, 1, 3]);
