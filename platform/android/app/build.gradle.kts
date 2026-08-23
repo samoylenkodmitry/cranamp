@@ -36,8 +36,10 @@ val isCiBuild = (System.getenv("CI") ?: "").isNotEmpty() ||
     (System.getenv("GITHUB_ACTIONS") ?: "").isNotEmpty()
 
 cranpose {
-    // The Cargo workspace is two directories up from this Gradle project.
-    workspaceRoot.set("../..")
+    // `workspaceRoot` resolves relative to this Gradle project's own
+    // directory (`platform/android/app`), not the root project's: three
+    // directories up (app -> android -> platform -> repo root).
+    workspaceRoot.set("../../..")
     cargoPackage.set("cranamp")
     features.set(listOf("android", "renderer-wgpu"))
     releaseAbis.set(listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
