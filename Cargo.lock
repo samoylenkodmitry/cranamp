@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "cranamp"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
