@@ -221,6 +221,7 @@ jobs:
             # inside a Terminal window, and an unsealed bundle is reported as
             # "damaged" once downloaded (quarantined). Assemble and ad-hoc sign
             # so the seal is valid.
+            signed_devid=0
             app="$package_dir/Cranamp.app"
             mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
             cp "${{ matrix.binary }}" "$app/Contents/MacOS/Cranamp"
@@ -243,13 +244,38 @@ jobs:
                 "$CRANAMP_SIGN_KEYCHAIN"
               # A Developer ID signature with the hardened runtime and a
               # timestamp is what notarytool accepts.
-              codesign --force --deep --options runtime --timestamp \
-                --keychain "$CRANAMP_SIGN_KEYCHAIN" --sign "$CRANAMP_SIGN_IDENTITY" "$app"
+              #
+              # A release is worth more than a signature. Two runners answer
+              # this job's labels and only one can codesign -- the other runs
+              # under launchd with no GUI login session, where this fails with
+              # `errSecInternalComponent` on a keychain whose chain
+              # `security verify-cert -p codeSign` calls successful. Rather
+              # than let which machine picked the job decide whether the app
+              # ships, fall back to an ad-hoc signature and say so loudly.
+              # Ad-hoc means Gatekeeper blocks a download until the user
+              # clears the quarantine, which is worse than notarized and much
+              # better than no build at all.
+              if codesign --force --deep --options runtime --timestamp \
+                   --keychain "$CRANAMP_SIGN_KEYCHAIN" \
+                   --sign "$CRANAMP_SIGN_IDENTITY" "$app"; then
+                signed_devid=1
+              else
+                echo "::warning::Developer ID signing failed on this runner; falling back to an ad-hoc signature. The .app is NOT notarized and Gatekeeper will block it until the quarantine flag is cleared."
+                echo "- macOS: **ad-hoc signed, not notarized** (Developer ID signing failed on the runner)" >> "$GITHUB_STEP_SUMMARY"
+                codesign --force --deep --sign - "$app"
+              fi
             else
               codesign --force --deep --sign - "$app"
             fi
             codesign --verify --strict --verbose=2 "$app"
-            if [ "${{ steps.devid.outputs.signed }}" = "true" ] && [ -n "$ASC_P8_BASE64" ]; then
+            # A shell variable, NOT `$GITHUB_ENV`: that only reaches later
+            # steps and notarization runs in this one, so it would read empty
+            # here and skip notarizing a perfectly good signature.
+            #
+            # And `signed_devid` rather than `steps.devid.outputs.signed`: the
+            # identity being available is not the same as the signature having
+            # been produced, and notarytool rejects an ad-hoc one.
+            if [ "${signed_devid:-}" = "1" ] && [ -n "$ASC_P8_BASE64" ]; then
               # Notarize, then staple the ticket into the bundle so a download
               # opens with no network check and no warning.
               key="$RUNNER_TEMP/asc.p8"
