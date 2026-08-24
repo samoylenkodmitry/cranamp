@@ -29,7 +29,14 @@ jobs:
             # unwind tables are droppable everywhere except MSVC (SEH).
             extra_rustflags: " -Cforce-unwind-tables=no -Clink-arg=-fuse-ld=lld -Clink-arg=-Wl,--icf=all"
           - os: macos-latest
-            runner: [self-hosted, macOS, ARM64]
+            # `apple-signing`, not just `[self-hosted, macOS, ARM64]`. Two
+            # runners answer the looser set and only one of them can codesign:
+            # the other runs under launchd with no GUI login session, where
+            # codesign fails with `errSecInternalComponent` behind a warning
+            # about the certificate chain -- on a keychain whose chain
+            # `security verify-cert -p codeSign` calls successful. Which
+            # machine picked the job decided whether the release worked.
+            runner: [self-hosted, macOS, ARM64, apple-signing]
             artifact: cranamp-macos
             platform: macos
             target: aarch64-apple-darwin
