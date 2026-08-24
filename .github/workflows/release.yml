@@ -158,6 +158,10 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: assets/cranamp-*
+          # Handoff to the publish job below, which is the only consumer.
+          # The pool this lands in is 500 MB shared across every repository
+          # on the account, so it holds these only as long as the run needs.
+          retention-days: 1
 
   android:
     name: Android APK
@@ -215,6 +219,10 @@ jobs:
         with:
           name: cranamp-android
           path: assets/cranamp-*
+          # Handoff to the publish job below, which is the only consumer.
+          # The pool this lands in is 500 MB shared across every repository
+          # on the account, so it holds these only as long as the run needs.
+          retention-days: 1
 
   web:
     name: Web
@@ -237,6 +245,10 @@ jobs:
         with:
           name: cranamp-web
           path: cranamp-*-web.tar.gz
+          # Handoff to the publish job below, which is the only consumer.
+          # The pool this lands in is 500 MB shared across every repository
+          # on the account, so it holds these only as long as the run needs.
+          retention-days: 1
 
   ios:
     name: iOS
@@ -272,6 +284,10 @@ jobs:
         with:
           name: cranamp-ios
           path: assets/cranamp-*
+          # Handoff to the publish job below, which is the only consumer.
+          # The pool this lands in is 500 MB shared across every repository
+          # on the account, so it holds these only as long as the run needs.
+          retention-days: 1
 
   publish:
     name: Publish GitHub Release
