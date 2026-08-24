@@ -73,7 +73,11 @@ jobs:
           trap 'rm -f "$RUNNER_TEMP/devid.p12"' EXIT
           (umask 177; printf '%s' "$P12_BASE64" | base64 -d > "$RUNNER_TEMP/devid.p12")
           security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          # `-l` (lock on sleep) is deliberately NOT set. This runner is a
+          # laptop, signing happens in a later step minutes after this one, and
+          # a keychain that locks when the lid closes mid-build takes the
+          # release down with `errSecInternalComponent`.
+          security set-keychain-settings -ut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
           security import "$RUNNER_TEMP/devid.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" \
             -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
@@ -129,8 +133,6 @@ jobs:
           echo "== certificates in the signing keychain =="
           security find-certificate -a "$KEYCHAIN" \
             | grep -E '"(labl|issu)"' || echo "(none)"
-          echo "== codesigning identities =="
-          security find-identity -v -p codesigning "$KEYCHAIN" || true
           echo "== chain evaluation for the leaf =="
           security find-certificate -a -c "Developer ID Application" -p "$KEYCHAIN" \
             > "$RUNNER_TEMP/leaf.pem" 2>/dev/null || true
@@ -143,6 +145,12 @@ jobs:
           rm -f "$RUNNER_TEMP/leaf.pem"
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+
+          # AFTER the partition list. Read before it, `find-identity` reports
+          # "0 valid identities found" on a keychain that signs perfectly well
+          # a line later, which is a diagnostic that creates a false lead.
+          echo "== codesigning identities =="
+          security find-identity -v -p codesigning "$KEYCHAIN" || true
           # Record the search list so the cleanup step can put it back, then
           # set it to this keychain plus the entries that still exist.
           #
@@ -177,6 +185,11 @@ jobs:
           [ -n "$identity" ] || { echo "the p12 holds no Developer ID Application certificate" >&2; exit 1; }
           echo "CRANAMP_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
           echo "CRANAMP_SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          # The signing step has to be able to unlock this itself; unlocking
+          # here does not survive the minutes of build between the two steps.
+          # The password is random and lives only as long as this job.
+          echo "::add-mask::$KEYCHAIN_PASS"
+          echo "CRANAMP_SIGN_KEYCHAIN_PASS=$KEYCHAIN_PASS" >> "$GITHUB_ENV"
           echo "signed=true" >> "$GITHUB_OUTPUT"
       # Size-minimized distribution build: abort panics without location
       # strings, no Debug formatting, no unwind tables, size-tuned std
@@ -213,6 +226,21 @@ jobs:
             cp "${{ matrix.binary }}" "$app/Contents/MacOS/Cranamp"
             cp platform/macos/Info.plist "$app/Contents/Info.plist"
             if [ "${{ steps.devid.outputs.signed }}" = "true" ]; then
+              # Unlock HERE, not once at import time. The keychain was unlocked
+              # minutes ago in another step, and everything between then and
+              # now -- a full release build on a laptop that may sleep -- can
+              # relock it. A locked keychain does not report itself as locked:
+              # codesign fails with
+              #
+              #   Warning: unable to build chain to self-signed root for signer ...
+              #   errSecInternalComponent
+              #
+              # which names the certificate chain and cost two wrong fixes.
+              # `security verify-cert -p codeSign` on the very same keychain
+              # answers "certificate verification successful", so the chain is
+              # provably not the fault.
+              security unlock-keychain -p "$CRANAMP_SIGN_KEYCHAIN_PASS" \
+                "$CRANAMP_SIGN_KEYCHAIN"
               # A Developer ID signature with the hardened runtime and a
               # timestamp is what notarytool accepts.
               codesign --force --deep --options runtime --timestamp \
