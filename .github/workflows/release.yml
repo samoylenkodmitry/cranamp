@@ -108,8 +108,39 @@ jobs:
             echo "::error::Developer ID G2 intermediate digest mismatch: got $actual" >&2
             exit 1
           fi
-          security import "$intermediate" -k "$KEYCHAIN" -T /usr/bin/codesign
+          # Idempotent: the p12 may already carry this certificate, and
+          # `security import` treats a duplicate as an error.
+          if ! security import "$intermediate" -k "$KEYCHAIN" -T /usr/bin/codesign \
+               > "$RUNNER_TEMP/import.log" 2>&1; then
+            if grep -q "already exists" "$RUNNER_TEMP/import.log"; then
+              echo "Developer ID G2 intermediate was already in the keychain"
+            else
+              cat "$RUNNER_TEMP/import.log" >&2
+              exit 1
+            fi
+          fi
           rm -f "$intermediate"
+
+          # What the keychain actually holds, and whether the chain evaluates.
+          # Printed unconditionally because the failure this guards against
+          # reports "unable to build chain to self-signed root" without saying
+          # which link is missing, and two wrong diagnoses came out of
+          # inferring it instead of looking.
+          echo "== certificates in the signing keychain =="
+          security find-certificate -a "$KEYCHAIN" \
+            | grep -E '"(labl|issu)"' || echo "(none)"
+          echo "== codesigning identities =="
+          security find-identity -v -p codesigning "$KEYCHAIN" || true
+          echo "== chain evaluation for the leaf =="
+          security find-certificate -a -c "Developer ID Application" -p "$KEYCHAIN" \
+            > "$RUNNER_TEMP/leaf.pem" 2>/dev/null || true
+          if [ -s "$RUNNER_TEMP/leaf.pem" ]; then
+            security verify-cert -c "$RUNNER_TEMP/leaf.pem" -p codeSign \
+              -k "$KEYCHAIN" || echo "verify-cert reported the chain as unusable"
+          else
+            echo "(no Developer ID Application certificate exported)"
+          fi
+          rm -f "$RUNNER_TEMP/leaf.pem"
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
           # Record the search list so the cleanup step can put it back, then
