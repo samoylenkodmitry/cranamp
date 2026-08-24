@@ -79,7 +79,35 @@ jobs:
             -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          # Record the search list so the cleanup step can put it back, then
+          # set it to this keychain plus the entries that still exist.
+          #
+          # Appending the CURRENT list, which is what this did before, re-adds
+          # this very path: `RUNNER_TEMP` is a fixed directory for a given
+          # runner, so the keychain is always
+          # `.../_temp/cranamp-signing.keychain-db`, and the previous run left
+          # that path in the user's search list. The runner then wipes `_temp`
+          # between jobs, so the entry survives as a dangling path pointing at
+          # a keychain that no longer exists. codesign walks the search list to
+          # build the certificate chain, hits the dead entry, and fails with
+          # `errSecInternalComponent` behind the warning "unable to build chain
+          # to self-signed root" -- which reads like a missing intermediate and
+          # is not one. That is why the macOS job failed every other release:
+          # v0.1.37 passed, .38 failed, .39 passed, .40 failed, .41 passed,
+          # .42 failed.
+          #
+          # The search list is USER-level state on a self-hosted runner. It
+          # outlives the job, so a job that changes it has to change it back.
+          security list-keychains -d user | tr -d '"' | sed 's/^[[:space:]]*//' \
+            > "$RUNNER_TEMP/keychains-before.txt"
+          keep=()
+          while IFS= read -r existing; do
+            [ -n "$existing" ] || continue
+            [ "$existing" = "$KEYCHAIN" ] && continue
+            [ -e "$existing" ] || continue
+            keep+=("$existing")
+          done < "$RUNNER_TEMP/keychains-before.txt"
+          security list-keychains -d user -s "$KEYCHAIN" "${keep[@]}"
           rm -f "$RUNNER_TEMP/devid.p12"
           identity="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/{print $2; exit}')"
           [ -n "$identity" ] || { echo "the p12 holds no Developer ID Application certificate" >&2; exit 1; }
@@ -162,6 +190,29 @@ jobs:
           # The pool this lands in is 500 MB shared across every repository
           # on the account, so it holds these only as long as the run needs.
           retention-days: 1
+
+      # `always()`, because the whole point is that a FAILED signing job must
+      # not leave the runner's user keychain search list pointing at a keychain
+      # that is about to be deleted. Without this the next release inherits the
+      # dead entry and fails in codesign for a reason that names neither this
+      # job nor this file.
+      - name: Restore the keychain search list
+        if: always() && matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ -f "$RUNNER_TEMP/keychains-before.txt" ]; then
+            keep=()
+            while IFS= read -r existing; do
+              [ -n "$existing" ] || continue
+              [ -e "$existing" ] || continue
+              keep+=("$existing")
+            done < "$RUNNER_TEMP/keychains-before.txt"
+            if [ ${#keep[@]} -gt 0 ]; then
+              security list-keychains -d user -s "${keep[@]}"
+            fi
+          fi
+          security delete-keychain "$RUNNER_TEMP/cranamp-signing.keychain-db" 2>/dev/null || true
 
   android:
     name: Android APK
