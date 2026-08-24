@@ -77,6 +77,39 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
           security import "$RUNNER_TEMP/devid.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" \
             -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
+
+          # The p12 carries the leaf and its key, not the intermediate that
+          # links it to Apple Root CA. codesign builds the chain out of the
+          # keychains it searches, and this host has no Apple CA in any of
+          # them -- `security find-certificate -c "Developer ID Certification
+          # Authority"` finds it only in SystemRootCertificates, which is the
+          # anchor store and not searched for intermediates. Signing then dies
+          # on
+          #
+          #   Warning: unable to build chain to self-signed root for signer ...
+          #   Cranamp.app: errSecInternalComponent
+          #
+          # which names the chain correctly and gets read as a broken key.
+          # Note `security find-identity -v` still lists the identity as valid,
+          # so the guard below is no protection against this.
+          #
+          # Fetched rather than vendored, and pinned by digest so a swapped
+          # download cannot put an attacker's CA into the keychain we sign
+          # with. G2 is the issuer of current Developer ID leaves and is valid
+          # until 2031-09-17.
+          intermediate="$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          curl --proto '=https' --tlsv1.2 --retry 5 --retry-connrefused \
+            --location --silent --show-error --fail \
+            --output "$intermediate" \
+            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          expected=f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a
+          actual="$(shasum -a 256 "$intermediate" | cut -d' ' -f1)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Developer ID G2 intermediate digest mismatch: got $actual" >&2
+            exit 1
+          fi
+          security import "$intermediate" -k "$KEYCHAIN" -T /usr/bin/codesign
+          rm -f "$intermediate"
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
           # Record the search list so the cleanup step can put it back, then
