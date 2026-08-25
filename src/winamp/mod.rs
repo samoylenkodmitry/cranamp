@@ -1045,13 +1045,13 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
         "cranamp.open-folder.append",
         move |result| receive_folder(state, result, true),
     );
-    let file_replace =
-        cranpose_services::rememberOpenFileLauncher("cranamp.open-file.replace", move |result| {
-            receive_file(state, result, false)
+    let files_replace =
+        cranpose_services::rememberOpenFilesLauncher("cranamp.open-files.replace", move |result| {
+            receive_files(state, result, false)
         });
-    let file_append =
-        cranpose_services::rememberOpenFileLauncher("cranamp.open-file.append", move |result| {
-            receive_file(state, result, true)
+    let files_append =
+        cranpose_services::rememberOpenFilesLauncher("cranamp.open-files.append", move |result| {
+            receive_files(state, result, true)
         });
 
     let pending = state.get().pending_pick;
@@ -1062,13 +1062,13 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
         let options = cranpose::FilePickerOptions::default().with_title(if request.folder {
             "Open folder"
         } else {
-            "Open audio file"
+            "Open audio files"
         });
         match (request.folder, request.append) {
             (true, false) => folder_replace.launch(options),
             (true, true) => folder_append.launch(options),
-            (false, false) => file_replace.launch(options),
-            (false, true) => file_append.launch(options),
+            (false, false) => files_replace.launch(options),
+            (false, true) => files_append.launch(options),
         }
     });
 }
@@ -1098,24 +1098,27 @@ fn receive_folder(
 }
 
 /// Takes a chosen file and loads it into the playlist.
-fn receive_file(
+fn receive_files(
     state: MutableState<WinampState>,
-    result: cranpose_services::LauncherResult<Option<cranpose::ContentHandle>>,
+    result: cranpose_services::LauncherResult<Vec<cranpose::ContentHandle>>,
     append: bool,
 ) {
     match result {
-        Ok(Some(entry)) => {
+        Ok(entries) if entries.is_empty() => state.update(|s| {
+            s.pending_pick = None;
+            s.status = "Open Cancelled".to_string();
+        }),
+        Ok(entries) => {
             state.update(|s| s.status = "Loading selection".to_string());
             cranpose_core::spawn_ui_task(async move {
-                let tracks = audio::tracks_from_picked_entry(entry).await;
+                let mut tracks = Vec::new();
+                for entry in entries {
+                    tracks.extend(audio::tracks_from_picked_entry(entry).await);
+                }
                 state.update(|s| s.pending_pick = None);
                 load_recovered_tracks(state, tracks, append);
             });
         }
-        Ok(None) => state.update(|s| {
-            s.pending_pick = None;
-            s.status = "Open Cancelled".to_string();
-        }),
         Err(error) => state.update(move |s| {
             s.pending_pick = None;
             s.status = error.to_string();
