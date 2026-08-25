@@ -13,7 +13,7 @@ Web widget: https://samoylenkodmitry.github.io/cranamp/
   app-private media files. The release APK does not request
   `SYSTEM_ALERT_WINDOW`; freeform Activity mode is optional desktop/tablet
   windowing, not the true always-on-top overlay path.
-- iOS: single fullscreen Winamp surface on Cranpose's winit-based UIKit backend
+- iOS: the stacked player scaled to the display, on Cranpose's winit-based UIKit backend
   (`CAMetalLayer`, `CADisplayLink`, touch input), inset by the system safe
   area; no Xcode project, the pure-Rust binary owns `UIApplicationMain`.
 - WebAssembly: embeddable canvas widget built with `wasm-pack`; GitHub Pages
