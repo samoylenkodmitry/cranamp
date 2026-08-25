@@ -32,7 +32,6 @@ use cranpose_ui::{
     ButtonSpec, Canvas, Color, Column, ColumnSpec, LinearArrangement, Modifier, Point,
     PointerEventKind, PointerInputScope, Row, RowSpec, Size, SpanStyle, Text, TextStyle,
 };
-#[cfg(target_os = "android")]
 use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 
@@ -290,7 +289,6 @@ fn playlist_scroll_drag_active() -> bool {
 #[derive(Clone, Copy, PartialEq)]
 enum WinampDragTarget {
     Inline(MutableState<Point>),
-    #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
     Fixed(Point),
     #[cfg(target_os = "android")]
     AndroidHost {
@@ -1624,16 +1622,14 @@ fn progress_fraction(elapsed: f32, duration: Option<f32>) -> f32 {
         .unwrap_or(0.0)
 }
 
-#[composable]
-pub fn WinampFullscreenApp() {
-    WinampSurfaceApp();
-}
-
+/// The widget embedded in a page. On the web that is the stacked
+/// presentation; off it, this entry point only exists so the same call
+/// compiles for a native test, where the desktop surface is what there is.
 #[composable]
 pub fn WinampWidgetApp() {
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
     {
-        WinampWebStackedApp();
+        WinampStackedApp();
     }
 
     #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
@@ -1642,9 +1638,16 @@ pub fn WinampWidgetApp() {
     }
 }
 
-#[cfg(target_os = "android")]
+/// Every touch presentation of the player: the three windows stacked, scaled
+/// to fill the surface they were given.
+///
+/// Android, iOS and the web widget all want this and all had their own copy of
+/// it -- except iOS, which had none and fell back to the desktop's floating
+/// windows on a black screen. What genuinely differs between them is two
+/// things, and neither is the stacking: which layout policy applies, and
+/// whether a window can be dragged. Both are named seams below.
 #[composable]
-pub fn WinampAndroidApp() {
+pub fn WinampStackedApp() {
     let tab_state = remember_winamp_tab_state();
     let skin_state = remember_winamp_skin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
@@ -1667,24 +1670,20 @@ pub fn WinampAndroidApp() {
             let display_color = skin.display_text_color;
             BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
                 let snapshot = tab_state.player.get();
-                let layout = if android_floating_overlay_enabled() {
-                    resizable_stacked_layout(
-                        scope.max_width().0,
-                        scope.max_height().0,
-                        0.0,
-                        0.0,
-                        &snapshot,
-                        ui_scale(),
-                    )
-                } else {
-                    fullscreen_stacked_layout(
-                        scope.max_width().0,
-                        scope.max_height().0,
-                        &snapshot,
-                        ui_scale(),
-                    )
-                };
-                WinampStackedStage(skin_for_stack.clone(), tab_state.player, skin_state, layout);
+                let layout = stacked_layout(
+                    scope.max_width().0,
+                    scope.max_height().0,
+                    &snapshot,
+                    ui_scale(),
+                );
+                let drag = stacked_drag(layout, snapshot);
+                WinampStackedStage(
+                    skin_for_stack.clone(),
+                    tab_state.player,
+                    skin_state,
+                    layout,
+                    drag,
+                );
 
                 // SettingsModal must live INSIDE the BoxWithConstraints subcompose
                 // layer: a SubcomposeLayout paints its content over later siblings,
@@ -1697,44 +1696,128 @@ pub fn WinampAndroidApp() {
     );
 }
 
+/// Android alone can float the stack in a host window over other apps, so it
+/// alone has a second layout to choose between.
+#[cfg(target_os = "android")]
+fn stacked_layout(
+    available_width: f32,
+    available_height: f32,
+    snapshot: &WinampState,
+    fallback_scale: f32,
+) -> StackedLayout {
+    if android_floating_overlay_enabled() {
+        resizable_stacked_layout(
+            available_width,
+            available_height,
+            0.0,
+            0.0,
+            snapshot,
+            fallback_scale,
+        )
+    } else {
+        fullscreen_stacked_layout(available_width, available_height, snapshot, fallback_scale)
+    }
+}
+
+/// The web widget is measured by the canvas the page gave it, which is not
+/// what its own constraints describe.
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-#[composable]
-pub fn WinampWebStackedApp() {
-    let tab_state = remember_winamp_tab_state();
-    let skin_state = remember_winamp_skin(tab_state.player);
-    WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
-    let skin = match skin_state.get() {
-        Ok(skin) => skin,
-        Err(error) => {
-            WinampSkinError(error);
-            return;
+fn stacked_layout(
+    _available_width: f32,
+    _available_height: f32,
+    snapshot: &WinampState,
+    _fallback_scale: f32,
+) -> StackedLayout {
+    web_stacked_layout(snapshot)
+}
+
+#[cfg(not(any(target_os = "android", all(feature = "web", target_arch = "wasm32"))))]
+fn stacked_layout(
+    available_width: f32,
+    available_height: f32,
+    snapshot: &WinampState,
+    fallback_scale: f32,
+) -> StackedLayout {
+    fullscreen_stacked_layout(available_width, available_height, snapshot, fallback_scale)
+}
+
+/// How a stacked window answers a drag: nowhere, or by moving the Android host
+/// window it is drawn into.
+#[derive(Clone, Copy, PartialEq)]
+enum StackedDrag {
+    Fixed,
+    #[cfg(target_os = "android")]
+    Host {
+        host_window: AndroidHostWindowState,
+        overlay_position: MutableState<Point>,
+    },
+}
+
+impl StackedDrag {
+    fn target(self, position: Point) -> WinampDragTarget {
+        match self {
+            Self::Fixed => WinampDragTarget::Fixed(position),
+            #[cfg(target_os = "android")]
+            Self::Host {
+                host_window,
+                overlay_position,
+            } => WinampDragTarget::AndroidHost {
+                position,
+                host_window,
+                overlay_position,
+            },
         }
-    };
+    }
+}
 
-    Box(
-        Modifier::empty()
-            .fill_max_size()
-            .clip_to_bounds()
-            .background(Color(0.02, 0.02, 0.03, 1.0)),
-        BoxSpec::default(),
-        move || {
-            let skin_for_stack = skin.clone();
-            let snapshot = tab_state.player.get();
-            WinampStackedStage(
-                skin_for_stack,
-                tab_state.player,
-                skin_state,
-                web_stacked_layout(&snapshot),
-            );
-
-            SettingsModal(
-                tab_state.player,
-                skin_state,
-                skin.display_text_color,
-                ui_scale(),
-            );
-        },
+/// Android also publishes where the stack sits, because its pointer events
+/// arrive in screen space and have to be brought back into the surface.
+#[cfg(target_os = "android")]
+#[composable]
+fn stacked_drag(layout: StackedLayout, snapshot: WinampState) -> StackedDrag {
+    let overlay_enabled = android_floating_overlay_enabled();
+    let overlay_position = cranpose_core::rememberMutableStateOf(|| {
+        Point::new(
+            ANDROID_OVERLAY_INITIAL_X as f32,
+            ANDROID_OVERLAY_INITIAL_Y as f32,
+        )
+    });
+    let host_window_size = Size::new(
+        stacked_surface_width(layout),
+        stacked_surface_height(&snapshot, layout),
     );
+    let host_window =
+        rememberAndroidHostWindowState(host_window_size.width, host_window_size.height);
+    let surface_origin = if overlay_enabled {
+        let position = overlay_position.get();
+        Point::new(
+            position.x + layout.content_left_inset,
+            position.y + layout.content_top_inset,
+        )
+    } else {
+        Point::new(layout.content_left_inset, layout.content_top_inset)
+    };
+    cranpose_core::SideEffect(move || {
+        set_android_winamp_surface_origin(surface_origin);
+        if overlay_enabled && host_window.requested_size_non_reactive() != host_window_size {
+            let _ = host_window.set_size(host_window_size);
+        }
+    });
+
+    if overlay_enabled {
+        StackedDrag::Host {
+            host_window,
+            overlay_position,
+        }
+    } else {
+        StackedDrag::Fixed
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+#[composable]
+fn stacked_drag(_layout: StackedLayout, _snapshot: WinampState) -> StackedDrag {
+    StackedDrag::Fixed
 }
 
 #[composable]
@@ -1857,13 +1940,21 @@ fn WinampInlineStage(
     );
 }
 
-#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
+/// The three windows stacked and scaled, drawn into whatever surface the
+/// platform gave them.
+///
+/// It takes how a window drags rather than deciding it: that decision is the
+/// only thing that ever differed between the platforms here, and writing it as
+/// `cfg` blocks inside this function is what made the function itself
+/// per-platform -- which left iOS, never enumerated, with no stacked stage at
+/// all and the desktop's floating windows on a black screen instead.
 #[composable]
 fn WinampStackedStage(
     skin: WinampSkin,
     state: MutableState<WinampState>,
     skin_state: WinampSkinState,
-    layout: AndroidStackedLayout,
+    layout: StackedLayout,
+    drag: StackedDrag,
 ) {
     let snapshot = state.get();
     let scale = layout.scale;
@@ -1879,66 +1970,9 @@ fn WinampStackedStage(
         y += layout.playlist_height;
     }
 
-    #[cfg(target_os = "android")]
-    let overlay_enabled = android_floating_overlay_enabled();
-    #[cfg(target_os = "android")]
-    let overlay_position = cranpose_core::rememberMutableStateOf(|| {
-        Point::new(
-            ANDROID_OVERLAY_INITIAL_X as f32,
-            ANDROID_OVERLAY_INITIAL_Y as f32,
-        )
-    });
-    #[cfg(target_os = "android")]
-    let host_window_size = Size::new(scaled(MAIN_WIDTH, scale), scaled(y, scale));
-    #[cfg(target_os = "android")]
-    let host_window =
-        rememberAndroidHostWindowState(host_window_size.width, host_window_size.height);
-    #[cfg(target_os = "android")]
-    {
-        let surface_origin = if overlay_enabled {
-            let position = overlay_position.get();
-            Point::new(
-                position.x + layout.content_left_inset,
-                position.y + layout.content_top_inset,
-            )
-        } else {
-            Point::new(layout.content_left_inset, layout.content_top_inset)
-        };
-        cranpose_core::SideEffect(move || {
-            set_android_winamp_surface_origin(surface_origin);
-            if overlay_enabled && host_window.requested_size_non_reactive() != host_window_size {
-                let _ = host_window.set_size(host_window_size);
-            }
-        });
-    }
-
-    #[cfg(target_os = "android")]
-    let main_drag_target = android_stacked_drag_target(
-        Point::new(0.0, main_y),
-        overlay_enabled,
-        host_window,
-        overlay_position,
-    );
-    #[cfg(target_os = "android")]
-    let equalizer_drag_target = android_stacked_drag_target(
-        Point::new(0.0, equalizer_y),
-        overlay_enabled,
-        host_window,
-        overlay_position,
-    );
-    #[cfg(target_os = "android")]
-    let playlist_drag_target = android_stacked_drag_target(
-        Point::new(0.0, playlist_y),
-        overlay_enabled,
-        host_window,
-        overlay_position,
-    );
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
-    let main_drag_target = WinampDragTarget::Fixed(Point::new(0.0, main_y));
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
-    let equalizer_drag_target = WinampDragTarget::Fixed(Point::new(0.0, equalizer_y));
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
-    let playlist_drag_target = WinampDragTarget::Fixed(Point::new(0.0, playlist_y));
+    let main_drag_target = drag.target(Point::new(0.0, main_y));
+    let equalizer_drag_target = drag.target(Point::new(0.0, equalizer_y));
+    let playlist_drag_target = drag.target(Point::new(0.0, playlist_y));
 
     Box(
         Modifier::empty()
@@ -1982,31 +2016,12 @@ fn WinampStackedStage(
     );
 }
 
-#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct AndroidStackedLayout {
+struct StackedLayout {
     scale: f32,
     playlist_height: f32,
     content_left_inset: f32,
     content_top_inset: f32,
-}
-
-#[cfg(target_os = "android")]
-fn android_stacked_drag_target(
-    position: Point,
-    overlay_enabled: bool,
-    host_window: AndroidHostWindowState,
-    overlay_position: MutableState<Point>,
-) -> WinampDragTarget {
-    if overlay_enabled {
-        WinampDragTarget::AndroidHost {
-            position,
-            host_window,
-            overlay_position,
-        }
-    } else {
-        WinampDragTarget::Fixed(position)
-    }
 }
 
 #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
@@ -2017,7 +2032,7 @@ fn resizable_stacked_layout(
     content_bottom_inset: f32,
     snapshot: &WinampState,
     fallback_scale: f32,
-) -> AndroidStackedLayout {
+) -> StackedLayout {
     let width_scale = if available_width.is_finite() && available_width > 0.0 {
         available_width / MAIN_WIDTH
     } else {
@@ -2073,7 +2088,7 @@ fn resizable_stacked_layout(
         PLAYLIST_HEIGHT
     };
 
-    AndroidStackedLayout {
+    StackedLayout {
         scale,
         playlist_height,
         content_left_inset,
@@ -2081,13 +2096,12 @@ fn resizable_stacked_layout(
     }
 }
 
-#[cfg(target_os = "android")]
 fn fullscreen_stacked_layout(
     available_width: f32,
     available_height: f32,
     snapshot: &WinampState,
     fallback_scale: f32,
-) -> AndroidStackedLayout {
+) -> StackedLayout {
     let base_height = MAIN_HEIGHT + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
     let width_scale = if available_width.is_finite() && available_width > 0.0 {
         available_width / MAIN_WIDTH
@@ -2115,7 +2129,7 @@ fn fullscreen_stacked_layout(
         PLAYLIST_HEIGHT
     };
 
-    AndroidStackedLayout {
+    StackedLayout {
         scale,
         playlist_height,
         content_left_inset: 0.0,
@@ -2124,7 +2138,7 @@ fn fullscreen_stacked_layout(
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn web_stacked_layout(snapshot: &WinampState) -> AndroidStackedLayout {
+fn web_stacked_layout(snapshot: &WinampState) -> StackedLayout {
     let fallback_height = stacked_skin_height(snapshot, PLAYLIST_HEIGHT);
     let available =
         web_current_surface_size().unwrap_or_else(|| Size::new(MAIN_WIDTH, fallback_height));
@@ -2148,7 +2162,7 @@ fn web_current_surface_size() -> Option<Size> {
         .then(|| Size::new(size.width, size.height))
 }
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 fn stacked_skin_height(snapshot: &WinampState, playlist_height: f32) -> f32 {
     MAIN_HEIGHT
         + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 }
@@ -2159,13 +2173,13 @@ fn stacked_skin_height(snapshot: &WinampState, playlist_height: f32) -> f32 {
         }
 }
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn stacked_surface_width(layout: AndroidStackedLayout) -> f32 {
+#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
+fn stacked_surface_width(layout: StackedLayout) -> f32 {
     MAIN_WIDTH * layout.scale
 }
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn stacked_surface_height(snapshot: &WinampState, layout: AndroidStackedLayout) -> f32 {
+#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
+fn stacked_surface_height(snapshot: &WinampState, layout: StackedLayout) -> f32 {
     stacked_skin_height(snapshot, layout.playlist_height) * layout.scale
 }
 
@@ -5653,7 +5667,6 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
                 || {},
             );
         }
-        #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
         WinampDragTarget::Fixed(_) => {
             Box(modifier, BoxSpec::default(), || {});
         }
@@ -8025,7 +8038,6 @@ fn winamp_window_modifier(
             let position = position.get();
             modifier.offset(snap_to_pixel(position.x), snap_to_pixel(position.y))
         }
-        #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
         WinampDragTarget::Fixed(position) => {
             modifier.offset(scaled(position.x, scale), scaled(position.y, scale))
         }

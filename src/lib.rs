@@ -61,7 +61,7 @@ fn ios_root() {
             .fill_max_size()
             .safe_area_padding(),
         cranpose::BoxSpec::default(),
-        winamp::WinampSurfaceApp,
+        winamp::WinampStackedApp,
     );
 }
 
@@ -70,7 +70,7 @@ fn ios_root() {
 // `android_activity` for a parameter type.
 cranpose::android_main! {
     launcher: create_android_app(),
-    content: winamp::WinampAndroidApp,
+    content: winamp::WinampStackedApp,
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
