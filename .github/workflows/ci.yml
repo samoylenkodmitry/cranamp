@@ -19,8 +19,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
+      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           cache-bin: false
       - name: Install Linux audio/dialog dependencies
@@ -45,8 +46,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
+      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           cache-bin: false
       - name: Install wasm-pack
@@ -63,8 +65,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios-sim,aarch64-apple-ios
-      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
+      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           cache-bin: false
       - name: Clippy iOS (simulator)
