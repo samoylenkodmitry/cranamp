@@ -50,16 +50,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           components: rust-src
-      # `cache-bin` is left off deliberately. It defaults to on and makes
-      # rust-cache treat `~/.cargo/bin` as its own: it restores that directory
-      # and prunes it on save. On a GitHub-hosted runner that is
-      # `/Users/runner/.cargo/bin`, thrown away with the VM. On a self-hosted
-      # one it is the machine's actual toolchain, and the prune deletes the
-      # real files while leaving the symlinks -- which took `rustup` off two
-      # Macs in one afternoon and left every shim pointing at nothing. Set on
-      # every job, so moving one onto a self-hosted runner cannot quietly
-      # bring it back.
+      # Only where the filesystem is the runner's own. This action treats
+      # `$CARGO_HOME` as its property: on save it prunes what was not there at
+      # restore time. A self-hosted runner shares that directory with every
+      # other runner on the machine -- the signing Mac carries one for cranamp
+      # and one for Cranpose under the same home -- so the save step deletes
+      # crate sources another repository's job is compiling from. It cost a
+      # Cranpose `wasm build` a half-deleted `zerocopy-0.8.48` on 2026-08-25,
+      # one minute before this workflow's iOS cache save finished, and it took
+      # the host's `cargo`, `rustc` and `rustup` proxies the same afternoon,
+      # which is what `cache-bin: false` is for. Nothing is lost by skipping
+      # it: a self-hosted `~/.cargo` already persists between jobs.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           cache-bin: false
       - name: Install Linux audio/dialog dependencies
@@ -356,8 +359,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
+      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           cache-bin: false
       - name: Install Android NDK and cargo-ndk
@@ -415,8 +419,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
+      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           cache-bin: false
       - name: Install wasm-pack
@@ -444,8 +449,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
-      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
+      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
         with:
           cache-bin: false
       - name: Build device .app bundle
