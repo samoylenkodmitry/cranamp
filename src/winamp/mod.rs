@@ -1316,9 +1316,22 @@ fn PlaybackProgressEffect(state: MutableState<WinampState>) {
     let progress = cranpose_services::rememberPlaybackProgress();
     let media_state = cranpose_services::rememberPlaybackState();
     let position = progress.get();
-    let ended = matches!(media_state.get(), cranpose_services::PlaybackState::Ended);
-    cranpose_core::LaunchedEffect!((position, ended), move |_scope| {
-        sync_playback_progress(state, &position, ended);
+    let media = media_state.get();
+    let ended = matches!(media, cranpose_services::PlaybackState::Ended);
+    // A refusal arrives here and nowhere else. Opening an item only submits
+    // the request -- whether the backend can decode the container is settled
+    // later, off this thread -- so the call that started the track returns
+    // `Ok` and has nothing to report.
+    let failure = match &media {
+        cranpose_services::PlaybackState::Failed(error) => Some(error.to_string()),
+        _ => None,
+    };
+    let failure_key = failure.clone();
+    cranpose_core::LaunchedEffect!((position, ended, failure_key), move |_scope| {
+        match failure.as_deref() {
+            Some(error) => sync_playback_failure(state, error),
+            None => sync_playback_progress(state, &position, ended),
+        }
     });
 }
 
@@ -1525,6 +1538,29 @@ fn receive_sync_folder(
         s.pending_sync_folder_pick = false;
         s.status = status.clone();
     });
+}
+
+/// A track the backend would not play, said out loud.
+///
+/// Without this the screen keeps the refused track loaded, its bitrate filled
+/// in and its clock at zero, which is indistinguishable from a player that has
+/// stopped working -- and is how "CranAmp plays no music" was reported.
+fn sync_playback_failure(state: MutableState<WinampState>, error: &str) {
+    state.update(|s| apply_playback_failure_in_state(s, error));
+}
+
+fn apply_playback_failure_in_state(state: &mut WinampState, error: &str) {
+    state.playback = PlaybackState::Stopped;
+    state.elapsed_seconds = 0.0;
+    state.position = 0.0;
+    let title = state
+        .current_index
+        .and_then(|index| state.playlist.get(index))
+        .map(|track| track.title.clone());
+    state.status = match title {
+        Some(title) => format!("Cannot Play {title}: {error}"),
+        None => format!("Cannot Play: {error}"),
+    };
 }
 
 fn sync_playback_progress(
@@ -8691,6 +8727,37 @@ mod tests {
 
         scroll_playlist_by_rows_in_state(&mut state, -99);
         assert_eq!(state.playlist_scroll, 0.0);
+    }
+
+    /// Reported as "CranAmp plays no music": a track the backend refuses left
+    /// the screen showing it loaded, with its bitrate filled in and a clock at
+    /// zero, which reads as a player that has stopped working rather than as a
+    /// file that cannot be decoded.
+    ///
+    /// Nothing on the synchronous path can catch it. Opening an item submits
+    /// the request and returns; whether the container can be decoded is
+    /// settled later and arrives as `PlaybackState::Failed`.
+    #[test]
+    fn a_track_the_backend_refuses_says_so_instead_of_stopping_the_clock() {
+        let mut state = WinampState {
+            playlist: test_playlist(vec![test_track("Glass"), test_track("Ping")]),
+            current_index: Some(0),
+            playback: PlaybackState::Playing,
+            elapsed_seconds: 12.0,
+            position: 0.5,
+            ..WinampState::default()
+        };
+
+        apply_playback_failure_in_state(&mut state, "unsupported source");
+
+        assert_eq!(state.playback, PlaybackState::Stopped);
+        assert_eq!(state.elapsed_seconds, 0.0);
+        assert_eq!(state.position, 0.0);
+        assert!(
+            state.status.contains("Glass") && state.status.contains("unsupported source"),
+            "the refusal must name the track and the reason, got {:?}",
+            state.status
+        );
     }
 
     #[test]

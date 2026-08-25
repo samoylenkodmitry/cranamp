@@ -17,8 +17,8 @@ const APPLICATION_ID: &str = "com.cranamp.app";
 /// What every target's launcher starts from.
 ///
 /// Nothing is registered here: every shell installs its own platform's media
-/// stack - `cranpose/media-desktop` for the desktop decoder and output device,
-/// and the Android, iOS and web hosts for theirs.
+/// stack - `cranpose/media` for the in-process decoder that desktop and Android
+/// share, and the iOS and web hosts for theirs.
 fn launcher() -> AppLauncher {
     AppLauncher::new()
         .with_title(TITLE)
