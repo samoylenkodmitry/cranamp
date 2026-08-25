@@ -25,7 +25,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
       - name: Build widget

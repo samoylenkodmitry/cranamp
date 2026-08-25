@@ -50,7 +50,18 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           components: rust-src
+      # `cache-bin` is left off deliberately. It defaults to on and makes
+      # rust-cache treat `~/.cargo/bin` as its own: it restores that directory
+      # and prunes it on save. On a GitHub-hosted runner that is
+      # `/Users/runner/.cargo/bin`, thrown away with the VM. On a self-hosted
+      # one it is the machine's actual toolchain, and the prune deletes the
+      # real files while leaving the symlinks -- which took `rustup` off two
+      # Macs in one afternoon and left every shim pointing at nothing. Set on
+      # every job, so moving one onto a self-hosted runner cannot quietly
+      # bring it back.
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - name: Install Linux audio/dialog dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config lld
@@ -345,7 +356,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - name: Install Android NDK and cargo-ndk
         shell: bash
         run: |
@@ -401,7 +415,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
       - name: Build widget
@@ -427,7 +444,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      # Never let it manage `~/.cargo/bin` -- see the note in release.yml.
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - name: Build device .app bundle
         run: PROFILE=release platform/ios/build-app.sh aarch64-apple-ios
       - name: Build simulator .app bundle
