@@ -77,6 +77,20 @@ Tags matching `v*` publish GitHub Release assets for Linux, macOS, Windows, Andr
 
 The macOS `.app` is signed with a Developer ID certificate and notarized, so a downloaded build opens on a double click. That needs five repository secrets, which `scripts/export_macos_signing_secrets.sh` sets in one go. Without them the release job falls back to an ad-hoc signature, and then Gatekeeper blocks the first launch after a download (double-clicking appears to do nothing, which is the block, not a crash): approve it once with right-click `Cranamp.app` → **Open** → **Open**, or `xattr -dr com.apple.quarantine Cranamp.app`. The iOS `.ipa` is a device build for sideloading; the separate `…-ios-simulator.app.zip` installs on a Simulator via `xcrun simctl install booted Cranamp.app`.
 
+That `.ipa` carries no signature — CI holds no development identity and does
+not know which iPhones are yours — so putting it on a device is a local step:
+
+```
+./platform/ios/regen-profile.sh                       # once per device, and when the profile expires
+./platform/ios/install-ipa.sh cranamp-<version>-ios.ipa
+```
+
+`regen-profile.sh` builds a stub app through Xcode's automatic signing, which
+registers the attached iPhone with your team and writes a provisioning profile;
+`install-ipa.sh` embeds that profile in the `.app`, re-signs it with your
+`Apple Development` identity and installs it over `devicectl`. Both need an
+Apple ID with the team added in Xcode → Settings → Accounts.
+
 ## Unsafe Policy
 
 Application code denies `unsafe` with crate-level and Cargo lints and contains no unsafe blocks, including on Android: the exported `android_main` entry symbol is written by the Cranpose framework's `android_main!` macro, not by application code, so nothing here carries an `unsafe_code` exception. Third-party dependencies may use unsafe internally where their platform integrations require it.
