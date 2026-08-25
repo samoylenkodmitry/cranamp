@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.42"
+version = "0.1.43"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -30,21 +30,21 @@ renderer-wgpu = ["cranpose/renderer-wgpu"]
 renderer-pixels = ["cranpose/renderer-pixels"]
 desktop = [
     "cranpose/desktop",
-    "cranpose/media-desktop",
+    "cranpose/media",
     "cranpose-services/file-picker-native",
 ]
 # Per-display-server variants for size-critical release builds.
 desktop-x11 = [
     "cranpose/desktop-x11",
-    "cranpose/media-desktop",
+    "cranpose/media",
     "cranpose-services/file-picker-native",
 ]
 desktop-wayland = [
     "cranpose/desktop-wayland",
-    "cranpose/media-desktop",
+    "cranpose/media",
     "cranpose-services/file-picker-native",
 ]
-android = ["cranpose/android"]
+android = ["cranpose/android", "cranpose/media"]
 ios = ["cranpose/ios", "renderer-wgpu"]
 web = [
     "cranpose/web",
@@ -73,12 +73,12 @@ anyhow = "1.0"
 # also carries cranpose_services::content's shared percent_decode/
 # percent_decode_lossy pair, which src/sync/mod.rs below depends on to drop
 # its own hand-rolled percent-decoder.
-cranpose = { version = "0.1.98", default-features = false }
-cranpose-core = "0.1.98"
-cranpose-foundation = "0.1.98"
-cranpose-services = { version = "0.1.98", default-features = false }
-cranpose-ui = "0.1.98"
-cranpose-ui-graphics = "0.1.98"
+cranpose = { version = "0.1.100", default-features = false }
+cranpose-core = "0.1.100"
+cranpose-foundation = "0.1.100"
+cranpose-services = { version = "0.1.100", default-features = false }
+cranpose-ui = "0.1.100"
+cranpose-ui-graphics = "0.1.100"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }
 log = "0.4"
@@ -99,8 +99,8 @@ wasm-logger = { version = "0.2", optional = true }
 # headlessly (see tests/settings_e2e.rs). Published crates, pinned to the same
 # cranpose release as the runtime dependencies above.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cranpose-app-shell = "0.1.98"
-cranpose-render-common = "0.1.98"
+cranpose-app-shell = "0.1.100"
+cranpose-render-common = "0.1.100"
 
 # Distribution profile: LTO + strip + abort panics keep the binary small
 # (see cranpose README "Binary Size").
