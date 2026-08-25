@@ -54,6 +54,24 @@ final class PickerProviders: XCTestCase {
         }
         Thread.sleep(forTimeInterval: 2.0)
 
+        // The picker reopens wherever it was last used, which is a folder
+        // somebody was browsing, not the list of providers. `Browse` is the
+        // tab that shows locations; from there, walking back out of any
+        // remembered subfolder reaches the root, which is the only screen that
+        // names the providers at all.
+        let browse = app.buttons["Browse"]
+        if browse.exists && browse.isHittable {
+            browse.tap()
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        for _ in 0..<6 {
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            guard back.exists, back.isHittable, back.label != "Cancel" else { break }
+            back.tap()
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        Thread.sleep(forTimeInterval: 1.5)
+
         print("=== \(label) PICKER: element tree ===")
         print(app.debugDescription)
 

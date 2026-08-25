@@ -33,10 +33,13 @@ fi
 if [ -z "$device" ]; then
   # By the shape of the identifier rather than by column: the name and the
   # model both contain spaces, so counting fields picks the wrong one.
+  # `grep -m1` rather than a trailing `head -1`: under `pipefail` a `head` that
+  # exits first SIGPIPEs the grep behind it, the substitution fails, and
+  # `set -e` kills this script with no output at all. It is a race, so it only
+  # bites sometimes, which is the worst way for it to bite.
   device="$(xcrun devicectl list devices 2>/dev/null \
     | grep -i available \
-    | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
-    | head -1)"
+    | grep -m1 -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}')"
 fi
 [ -n "$device" ] || {
   echo "No paired device. Pass a UDID, or check 'xcrun devicectl list devices'." >&2
