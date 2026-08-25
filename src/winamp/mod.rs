@@ -876,12 +876,42 @@ fn WinampRuntimeEffects(
     PlaylistDurationHydrationEffect(state);
     DocumentPickerEffect(state);
     CranposePickerEffect(state);
+    LaunchArgPickEffect(state);
     SkinPickerEffect(state, skin_state);
     WebSurfaceSizeEffect(state);
     PlayerStatePersistence(state);
     NativeWindowPersistence(peer_windows);
     #[cfg(not(target_arch = "wasm32"))]
     SyncEffect(state);
+}
+
+/// Opens a picker on startup when the launch arguments ask for one.
+///
+/// Which providers the iOS document picker enables is decided by the content
+/// type the app asks for, and the app cannot read that decision back -- the
+/// picker is a system view and offers no list of what it greyed out. Looking at
+/// the dialog is the only check there is, and a UI test is the only way to look
+/// at it without a person holding the phone. `XCUIApplication`'s
+/// `launchArguments` arrive as process arguments, which is exactly where
+/// `launch_args` reads them from on iOS, so a test can start the app with the
+/// picker already open and assert on what it shows.
+///
+/// Deliberately not gated on `is_debuggable`: the answer only counts for the
+/// build that ships, and a release build is not debuggable. Gating it would
+/// mean checking a different binary from the one on the phone. Nothing is
+/// exposed by leaving it in -- iOS gives no way to pass arguments to an app
+/// launched from the home screen, and the worst a passed argument can do is
+/// open a file picker the user can cancel.
+#[composable]
+fn LaunchArgPickEffect(state: MutableState<WinampState>) {
+    cranpose_core::remember(move || {
+        let args = cranpose::launch_args();
+        match args.string("open-picker") {
+            Some("folder") => request_pick(state, true, true),
+            Some("files") => request_pick(state, false, true),
+            _ => {}
+        }
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2099,6 +2129,11 @@ fn resizable_stacked_layout(
     }
 }
 
+/// The window sized to fill what it was given. Both `stacked_layout` seams
+/// that measure their own space use it; the web one does not, because a canvas
+/// is sized by the page rather than by constraints, so this does not compile
+/// there.
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
 fn fullscreen_stacked_layout(
     available_width: f32,
     available_height: f32,
@@ -4717,7 +4752,7 @@ fn playlist_footer_menu_items(menu: PlaylistFooterMenu) -> Vec<PlaylistMenuItem>
     match menu {
         PlaylistFooterMenu::Add => vec![
             PlaylistMenuItem {
-                label: "ADD FILE",
+                label: "ADD FILES",
                 action: add_audio_files,
             },
             PlaylistMenuItem {

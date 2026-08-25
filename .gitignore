@@ -10,3 +10,6 @@
 # absolute paths on one machine, so it belongs to that machine and not to the
 # repository.
 .cargo/config.toml
+
+# On-device UI test output.
+platform/ios/uitests/results.xcresult/
