@@ -943,7 +943,7 @@ fn DocumentPickerEffect(state: MutableState<WinampState>) {
         });
 
     let pending = state.get().pending_document;
-    cranpose_core::LaunchedEffect!(pending.clone(), move |_scope| {
+    cranpose_core::LaunchedEffect(pending.clone(), move |_scope| {
         match pending {
             None => {}
             Some(PendingDocument::ImportPlaylist) => {
@@ -1085,7 +1085,7 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
         });
 
     let pending = state.get().pending_pick;
-    cranpose_core::LaunchedEffect!(pending, move |_scope| {
+    cranpose_core::LaunchedEffect(pending, move |_scope| {
         let Some(request) = pending else {
             return;
         };
@@ -1267,7 +1267,7 @@ fn SkinPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinStat
         });
 
     let pending = state.get().pending_skin_pick;
-    cranpose_core::LaunchedEffect!(pending, move |_scope| {
+    cranpose_core::LaunchedEffect(pending, move |_scope| {
         if !pending {
             return;
         }
@@ -1358,11 +1358,11 @@ fn PlaybackProgressEffect(state: MutableState<WinampState>) {
         _ => None,
     };
     let failure_key = failure.clone();
-    cranpose_core::LaunchedEffect!((position, ended, failure_key), move |_scope| {
-        match failure.as_deref() {
-            Some(error) => sync_playback_failure(state, error),
-            None => sync_playback_progress(state, &position, ended),
-        }
+    cranpose_core::LaunchedEffect((position, ended, failure_key), move |_scope| match failure
+        .as_deref()
+    {
+        Some(error) => sync_playback_failure(state, error),
+        None => sync_playback_progress(state, &position, ended),
     });
 }
 
@@ -1521,7 +1521,7 @@ fn sync_try_apply_resume(state: MutableState<WinampState>, merged: &crate::sync:
 fn SyncEffect(state: MutableState<WinampState>) {
     cranpose_core::remember(crate::sync::runtime::start_worker);
 
-    cranpose_core::LaunchedEffectAsync!(0u8, move |_scope| {
+    cranpose_core::LaunchedEffectAsync(0u8, move |_scope| {
         Box::pin(async move {
             if let Some(merged) = crate::sync::runtime::first_merged().wait().await {
                 sync_try_apply_resume(state, &merged);
@@ -1538,7 +1538,7 @@ fn SyncEffect(state: MutableState<WinampState>) {
         });
 
     let pending_folder_pick = state.get().pending_sync_folder_pick;
-    cranpose_core::LaunchedEffect!(pending_folder_pick, move |_scope| {
+    cranpose_core::LaunchedEffect(pending_folder_pick, move |_scope| {
         if pending_folder_pick {
             folder.launch(cranpose::FilePickerOptions::default().with_title("Choose sync folder"));
         }
@@ -3363,7 +3363,7 @@ const SYNC_PANEL_REFRESH: Duration = Duration::from_millis(1500);
 #[composable]
 fn SettingsSyncSection(state: MutableState<WinampState>) {
     let refresh = cranpose_core::rememberMutableStateOf(|| 0u64);
-    cranpose_core::LaunchedEffectAsync!(0u8, move |_scope| {
+    cranpose_core::LaunchedEffectAsync(0u8, move |_scope| {
         Box::pin(async move {
             // The timer costs nothing between ticks; counting frames to reach
             // the same cadence would keep the clock awake for as long as the
@@ -5085,7 +5085,7 @@ fn main_display_meta(state: &WinampState) -> String {
 #[composable]
 fn Visualizer(playing: bool, viscolor: VisColor, scale: f32) {
     let refresh_tick = cranpose_core::rememberMutableStateOf(|| 0_u64);
-    cranpose_core::LaunchedEffectAsync!(playing, move |_scope| {
+    cranpose_core::LaunchedEffectAsync(playing, move |_scope| {
         Box::pin(async move {
             if !playing {
                 return;
