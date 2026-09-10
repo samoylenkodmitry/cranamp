@@ -876,6 +876,7 @@ fn WinampRuntimeEffects(
     PlaylistDurationHydrationEffect(state);
     DocumentPickerEffect(state);
     CranposePickerEffect(state);
+    IncomingContentEffect(state);
     LaunchArgPickEffect(state);
     SkinPickerEffect(state, skin_state);
     WebSurfaceSizeEffect(state);
@@ -1034,6 +1035,61 @@ fn receive_playlist_export(
             app.pending_document = None;
             app.status = error.to_string();
         }),
+    }
+}
+
+/// Plays audio another application hands to Cranamp: a file named on the command
+/// line ("Open with" on desktop), a file dropped on the window or the web
+/// canvas, or an Android share. The framework publishes every one of those into
+/// a single inbox and backlogs whatever arrives before a collector exists, so a
+/// file passed at launch is not lost to startup ordering.
+///
+/// Items append rather than replace — a drop onto a running player must not
+/// discard the playlist — and playback starts only when nothing is already
+/// playing, so opening a file while stopped plays it while dropping one
+/// mid-song just queues it.
+#[composable]
+fn IncomingContentEffect(state: MutableState<WinampState>) {
+    let incoming = cranpose_services::rememberIncomingContent();
+    cranpose_core::CollectEvents(incoming, (), move |item| {
+        let name = item.display_name();
+        // A `Uri` item resolves through the content resolver, which returns
+        // nothing if the provider that granted it is already gone.
+        let Some(content) = item.content() else {
+            log::warn!(target: "cranamp::incoming", "no readable content for {name:?}");
+            state.update(|s| s.status = "Cannot Open Item".to_string());
+            return;
+        };
+        cranpose_core::spawn_ui_task(async move {
+            let tracks = audio::tracks_from_picked_entry(content).await;
+            if tracks.is_empty() {
+                log::info!(target: "cranamp::incoming", "{name:?} is not playable audio");
+                state.update(|s| s.status = "No Supported Audio".to_string());
+                return;
+            }
+            receive_incoming_tracks(state, tracks);
+        });
+    });
+}
+
+/// Appends handed-over tracks, starting the first of them when the player is
+/// idle. Unlike [`append_playlist_and_play`], which only starts on an empty
+/// playlist, this also plays into a playlist restored from a previous run —
+/// opening a file and hearing nothing because old tracks were restored is not
+/// what "Open with" means.
+fn receive_incoming_tracks(state: MutableState<WinampState>, tracks: Vec<Track>) {
+    let snapshot = state.get_non_reactive();
+    let idle = snapshot.playback != PlaybackState::Playing;
+    let first_new = snapshot.playlist.len();
+    let added = tracks.len();
+    state.update(|s| {
+        append_playlist_tracks(s, tracks);
+    });
+    hydrate_playlist_durations_background(state);
+    if idle {
+        start_track(state, first_new);
+    } else {
+        state.update(move |s| s.status = format!("Added {added} Track(s)"));
     }
 }
 

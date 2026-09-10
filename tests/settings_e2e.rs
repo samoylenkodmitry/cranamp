@@ -302,3 +302,78 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
         events[2]
     );
 }
+
+/// Audio handed over by another application — a file named on the command line,
+/// a drop on the window or canvas, an Android share — reaches the playlist and
+/// starts playing when the player is idle.
+///
+/// Publishes through `publish_incoming_content`, the same inbox the desktop,
+/// web and Android hosts publish into, so this exercises the real delivery path
+/// rather than calling the playlist helpers directly. Bytes rather than a URI
+/// keep it independent of any platform content resolver.
+#[test]
+fn audio_handed_over_by_another_application_plays() {
+    let root_key = location_key(file!(), line!(), column!());
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        root_key,
+        cranamp::winamp::WinampSurfaceApp,
+    );
+    shell.set_buffer_size(500, 700);
+    shell.set_viewport(500.0, 700.0);
+    pump(&mut shell);
+
+    // A name no bundled demo track carries, so finding it proves it came from
+    // the handover and not from the startup playlist.
+    let name = "handed-over-by-another-app.mp3";
+    let before = visible_texts(&mut shell);
+    assert!(
+        !contains(&before, "handed-over-by-another-app"),
+        "the handed-over track must not already be present; visible={before:?}"
+    );
+
+    let bytes =
+        std::fs::read(demo_track_for_handover()).expect("a bundled demo track to hand over");
+    cranpose_services::publish_incoming_content(
+        cranpose_services::IncomingContent::from_bytes(bytes)
+            .with_name(name)
+            .with_mime_type("audio/mpeg"),
+    );
+    // `pump` stops as soon as nothing wants a redraw, which can be before the
+    // collector's task has even been polled; drive the runtime unconditionally.
+    for _ in 0..80 {
+        shell.update();
+    }
+
+    let after = visible_texts(&mut shell);
+    assert!(
+        contains(&after, "handed-over-by-another-app"),
+        "handed-over audio should appear in the player; visible={after:?}"
+    );
+    // The startup playlist survives: a handover appends, it does not replace.
+    assert!(
+        contains(&after, "Cranamp Demo 01 - Retro Tracker"),
+        "the existing playlist should be kept; visible={after:?}"
+    );
+    // The main display leads the visible text, so the handed-over track showing
+    // there is what "the idle player started playing it" looks like.
+    assert!(
+        after
+            .first()
+            .is_some_and(|current| current.contains("handed-over-by-another-app")),
+        "an idle player should start the handed-over track; visible={after:?}"
+    );
+}
+
+/// Any real audio file in the bundled demo set; the handover carries its bytes
+/// under a different name, so which one it is does not matter.
+fn demo_track_for_handover() -> std::path::PathBuf {
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/demo-music/generated");
+    std::fs::read_dir(&directory)
+        .expect("demo music directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|extension| extension == "mp3"))
+        .expect("at least one bundled demo mp3")
+}
