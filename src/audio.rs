@@ -175,10 +175,10 @@ pub async fn tracks_from_picked_entry(entry: cranpose_services::ContentHandle) -
     tracks
 }
 
-/// Builds a single playable track from one file entry yielded by a streaming
-/// folder pick ([`cranpose_services::FolderStream`]), or `None` if the entry is
-/// not a supported audio file. Callers append discovered tracks incrementally,
-/// so a huge folder on a slow provider starts playing before the walk finishes.
+/// Builds a single playable track from one file yielded by a streaming folder
+/// pick ([`cranpose_services::ContentStream`]), or `None` if it is not a
+/// supported audio file. Callers append discovered tracks incrementally, so a
+/// huge folder on a slow provider starts playing before the walk finishes.
 pub async fn track_from_picked_file(entry: cranpose_services::ContentHandle) -> Option<Track> {
     // A file stream yields files, and the handle's type says so, so the only
     // question left is whether this one is audio.

@@ -1224,12 +1224,11 @@ fn load_recovered_tracks(state: MutableState<WinampState>, tracks: Vec<Track>, a
     }
 }
 
-/// Drains an already-resolved folder [`cranpose::FolderStream`] into the
-/// playlist, frame by frame, until the provider finishes the walk. Shared by the
-/// live folder pick and the recovered one
-/// ([`ResumePickEffect`]), which both receive a stream the same way — one from a
-/// fresh SAF prompt, one re-walked from a grant recovered after the activity was
-/// destroyed mid-pick.
+/// Drains an already-resolved [`cranpose::ContentStream`] into the playlist as
+/// the provider yields files, until the walk finishes. Shared by the live folder
+/// pick and the recovered one, which both receive a stream the same way — one
+/// from a fresh SAF prompt, one re-walked from a grant the framework recovered
+/// after the activity was destroyed mid-pick.
 async fn consume_folder_stream(
     state: MutableState<WinampState>,
     stream: cranpose::ContentStreamRef,
@@ -5557,7 +5556,7 @@ fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: im
 ///
 /// `.clickable()` only ever hands back the click's local [`Point`] -- it has
 /// no channel for keyboard state -- so this pairs it with a `.pointer_input()`
-/// that does nothing but remember the most recent [`PointerEvent::modifiers`]
+/// that does nothing but remember the most recent pointer event's `modifiers`
 /// (never consuming, so `.clickable()`'s own press/drag-threshold detection is
 /// untouched). Reading `event.modifiers` is the framework's own answer to "what
 /// is held right now": every desktop platform's event loop stamps it onto each
