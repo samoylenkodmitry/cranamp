@@ -32,23 +32,27 @@ desktop = [
     "cranpose/desktop",
     "cranpose/media",
     "cranpose-services/file-picker-native",
+    "cranpose-services/http-native",
 ]
 # Per-display-server variants for size-critical release builds.
 desktop-x11 = [
     "cranpose/desktop-x11",
     "cranpose/media",
     "cranpose-services/file-picker-native",
+    "cranpose-services/http-native",
 ]
 desktop-wayland = [
     "cranpose/desktop-wayland",
     "cranpose/media",
     "cranpose-services/file-picker-native",
+    "cranpose-services/http-native",
 ]
-android = ["cranpose/android", "cranpose/media"]
-ios = ["cranpose/ios", "renderer-wgpu"]
+android = ["cranpose/android", "cranpose/media", "cranpose-services/http-native"]
+ios = ["cranpose/ios", "renderer-wgpu", "cranpose-services/http-native"]
 web = [
     "cranpose/web",
     "cranpose-services/file-picker-web",
+    "cranpose-services/web-http",
     "dep:console_error_panic_hook",
     "dep:getrandom_03",
     "dep:wasm-bindgen",

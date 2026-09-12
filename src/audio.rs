@@ -313,7 +313,7 @@ fn media_item(track: &Track) -> Option<MediaItem> {
 
 /// Whether `value` already names a scheme, as `file:`, `content:` and `blob:`
 /// do. A bare Windows drive letter is a path, not a one-letter scheme.
-fn has_uri_scheme(value: &str) -> bool {
+pub(crate) fn has_uri_scheme(value: &str) -> bool {
     match value.split_once(':') {
         Some((scheme, _)) => {
             scheme.len() > 1

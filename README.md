@@ -26,7 +26,7 @@ Web widget: https://samoylenkodmitry.github.io/cranamp/
 - The top-left options control opens an audio folder on desktop.
 - Previous, play, pause, stop, next, repeat, playlist, equalizer, volume, balance, and position controls update Cranamp state and the audio backend where supported.
 - If no user playlist is loaded at startup, Cranamp loads the demo MP3 playlist from the distributable `demo-music/` folder when it is present.
-- The playlist window's LIST menu adds CRANAMP FM next to IMPORT/EXPORT M3U. It replaces the playlist with a streaming trance set served from `https://fm.dmitrysamoylenko.in`; the playlist ships in the binary (`assets/fm-music/`), the tracks stay remote. The set is YuE2-3B output under CC-BY-NC-4.0, so it is for personal, non-commercial listening.
+- The playlist window's LIST menu adds OPEN URL next to IMPORT/EXPORT M3U. Paste any `http(s)` link: a playlist (`.m3u`, `.m3u8`, `.pls`) is fetched and loaded, and a direct audio link is added and played. Cranamp works out which it got from the extension, falling back to the server's `Content-Type` when the URL has none, and says so on the status line when a link is unreachable, blocked by CORS, or not audio. Relative entries in a fetched playlist resolve against that playlist's URL.
 
 ## Build
 

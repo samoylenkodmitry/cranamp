@@ -141,6 +141,8 @@ struct WinampState {
     playlist_search_visible: bool,
     playlist_search_query: String,
     playlist_search_revision: u64,
+    url_input_visible: bool,
+    url_input_revision: u64,
     pending_document: Option<PendingDocument>,
     pending_pick: Option<PendingPick>,
     pending_skin_pick: bool,
@@ -183,6 +185,8 @@ impl PartialEq for WinampState {
             && self.playlist_search_visible == other.playlist_search_visible
             && self.playlist_search_query == other.playlist_search_query
             && self.playlist_search_revision == other.playlist_search_revision
+            && self.url_input_visible == other.url_input_visible
+            && self.url_input_revision == other.url_input_revision
             && self.pending_document == other.pending_document
             && self.pending_pick == other.pending_pick
             && self.pending_skin_pick == other.pending_skin_pick
@@ -239,6 +243,8 @@ impl Default for WinampState {
             playlist_search_visible: false,
             playlist_search_query: String::new(),
             playlist_search_revision: 0,
+            url_input_visible: false,
+            url_input_revision: 0,
             pending_document: None,
             pending_pick: None,
             pending_skin_pick: false,
@@ -975,9 +981,10 @@ fn receive_playlist_import(
     match result {
         Ok(Some(entry)) => {
             cranpose_core::spawn_ui_task(async move {
+                let source = entry.metadata().identifier;
                 match entry.read_all().await {
                     Ok(bytes) => match String::from_utf8(bytes) {
-                        Ok(text) => apply_imported_playlist(state, &text),
+                        Ok(text) => apply_imported_playlist(state, &text, &source),
                         Err(error) => state.update(|app| {
                             app.pending_document = None;
                             app.status = format!("Playlist is not UTF-8: {error}");
@@ -1093,8 +1100,31 @@ fn receive_incoming_tracks(state: MutableState<WinampState>, tracks: Vec<Track>)
     }
 }
 
-fn apply_imported_playlist(state: MutableState<WinampState>, text: &str) {
-    let tracks = parse_m3u_playlist(text, None);
+/// The directory a picked playlist came from, when the provider named one
+/// that exists on this filesystem.
+///
+/// Relative entries can only be resolved when the playlist's own location is a
+/// real directory. A `content://` URI, an iOS security-scoped URL or a browser
+/// blob name is not one, and those deliberately fall back to leaving entries
+/// as written rather than inventing a path that would not open.
+fn playlist_source_directory(source: &str) -> Option<std::path::PathBuf> {
+    let path = std::path::Path::new(source);
+    if !path.is_absolute() {
+        return None;
+    }
+    path.parent()
+        .filter(|parent| parent.is_dir())
+        .map(std::path::Path::to_path_buf)
+}
+
+fn apply_imported_playlist(state: MutableState<WinampState>, text: &str, source: &str) {
+    let base_directory = playlist_source_directory(source);
+    let tracks = parse_m3u_playlist(
+        text,
+        base_directory
+            .as_deref()
+            .map_or(PlaylistBase::None, PlaylistBase::Directory),
+    );
     if tracks.is_empty() {
         state.update(|app| {
             app.pending_document = None;
@@ -3965,6 +3995,7 @@ fn PlaylistWindow(
         });
     }
     let search_field = cranpose_core::remember(|| TextFieldState::new("")).with(|field| *field);
+    let url_field = cranpose_core::remember(|| TextFieldState::new("")).with(|field| *field);
     let window_size = window_size.get();
     let skin_scale = scale.max(f32::EPSILON);
     let width = (window_size.width / skin_scale).max(PLAYLIST_WIDTH);
@@ -4078,6 +4109,16 @@ fn PlaylistWindow(
                     state,
                     snapshot.clone(),
                     search_field,
+                    list_width,
+                    scale,
+                );
+            }
+            if snapshot.url_input_visible {
+                UrlInputOverlay(
+                    palette,
+                    state,
+                    snapshot.clone(),
+                    url_field,
                     list_width,
                     scale,
                 );
@@ -4505,6 +4546,104 @@ fn PlaylistSearchOverlay(
 }
 
 #[composable]
+fn UrlInputOverlay(
+    palette: SkinPalette,
+    state: MutableState<WinampState>,
+    snapshot: WinampState,
+    url_field: TextFieldState,
+    list_width: f32,
+    scale: f32,
+) {
+    let last_revision = cranpose_core::rememberMutableStateOf(|| 0u64);
+    {
+        let field_for_sync = url_field;
+        let revision = snapshot.url_input_revision;
+        cranpose_core::SideEffect(move || {
+            if last_revision.get() != revision {
+                set_text_field_text(&field_for_sync, "");
+                last_revision.set(revision);
+            }
+        });
+    }
+    let x = PLAYLIST_LIST_BG.0 + 14.0;
+    let y = PLAYLIST_LIST_BG.1 + 34.0;
+    let width = (list_width - 28.0).clamp(150.0, 260.0);
+    let height = 40.0;
+
+    FilledRect(x, y, width, height, scale, Color(0.01, 0.015, 0.012, 1.0));
+    FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
+    FilledRect(
+        x,
+        y + height - 1.0,
+        width,
+        1.0,
+        scale,
+        Color(0.12, 0.20, 0.24, 1.0),
+    );
+    SystemWinampText(
+        "URL".to_string(),
+        x + 6.0,
+        y + 5.0,
+        44.0,
+        WINAMP_SYSTEM_LINE_HEIGHT,
+        scale,
+        palette.normal,
+    );
+    SystemWinampText(
+        "OPEN".to_string(),
+        x + width - 68.0,
+        y + 5.0,
+        28.0,
+        WINAMP_SYSTEM_LINE_HEIGHT,
+        scale,
+        palette.normal,
+    );
+    SystemWinampText(
+        "CLOSE".to_string(),
+        x + width - 33.0,
+        y + 5.0,
+        30.0,
+        WINAMP_SYSTEM_LINE_HEIGHT,
+        scale,
+        palette.normal,
+    );
+
+    FilledRect(
+        x + 6.0,
+        y + 18.0,
+        width - 12.0,
+        14.0,
+        scale,
+        Color(0.0, 0.0, 0.0, 1.0),
+    );
+    BasicTextField(
+        url_field,
+        Modifier::empty()
+            .size_points(scaled(width - 16.0, scale), scaled(12.0, scale))
+            .absolute_offset(scaled(x + 8.0, scale), scaled(y + 18.0, scale)),
+        TextStyle::from_span_style(SpanStyle {
+            color: Some(Color(0.72, 0.86, 0.94, 1.0)),
+            font_size: TextUnit::Sp(10.0),
+            ..SpanStyle::default()
+        }),
+    );
+
+    {
+        let state_open = state;
+        let field = url_field;
+        ClickTarget(x + width - 72.0, y, 34.0, 15.0, scale, move || {
+            open_url(state_open, field.text());
+        });
+    }
+    {
+        let state_close = state;
+        ClickTarget(x + width - 38.0, y, 38.0, 15.0, scale, move || {
+            state_close.update(|s| s.url_input_visible = false);
+        });
+    }
+}
+
+#[composable]
 fn PlaylistFooterControls(
     state: MutableState<WinampState>,
     footer_menu: MutableState<Option<PlaylistFooterMenu>>,
@@ -4903,8 +5042,8 @@ fn playlist_footer_menu_items(menu: PlaylistFooterMenu) -> Vec<PlaylistMenuItem>
                 action: export_playlist,
             },
             PlaylistMenuItem {
-                label: "CRANAMP FM",
-                action: load_fm_playlist,
+                label: "OPEN URL",
+                action: open_url_prompt,
             },
         ],
     }
@@ -6733,28 +6872,187 @@ fn import_playlist(state: MutableState<WinampState>) {
     });
 }
 
-/// The streaming set served from the public Cranamp FM host.
-///
-/// The playlist travels with the binary instead of being fetched, so loading it
-/// costs no request and works before the network is reachable; only the tracks
-/// it names are remote. Nothing else needs teaching: the file is extended M3U
-/// with absolute `https://` URLs, [`parse_m3u_playlist`] leaves an absolute URL
-/// alone when there is no base directory, and `audio::media_item` hands any
-/// path that already carries a scheme to the platform player untouched.
-const FM_PLAYLIST_M3U: &str = include_str!("../../assets/fm-music/cranamp-fm-playlist.m3u");
+/// Opens the URL prompt over the playlist.
+fn open_url_prompt(state: MutableState<WinampState>) {
+    state.update(|s| {
+        s.url_input_visible = true;
+        // Bumping the revision empties the field: pasting is how a URL gets
+        // entered, and paste inserts at the caret, so a retained URL would
+        // silently concatenate with the new one.
+        s.url_input_revision = s.url_input_revision.wrapping_add(1);
+        s.status = "Enter A URL".to_string();
+    });
+}
 
-fn load_fm_playlist(state: MutableState<WinampState>) {
-    let tracks = parse_m3u_playlist(FM_PLAYLIST_M3U, None);
-    if tracks.is_empty() {
-        state.update(|s| s.status = "FM Playlist Empty".to_string());
+/// What a pasted URL turned out to address.
+enum UrlContent {
+    Playlist(Vec<Track>),
+    Track(Track),
+}
+
+/// The playlist formats a URL can hand back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlaylistFormat {
+    M3u,
+    Pls,
+}
+
+fn playlist_format_for_extension(extension: &str) -> Option<PlaylistFormat> {
+    match extension {
+        "m3u" | "m3u8" => Some(PlaylistFormat::M3u),
+        "pls" => Some(PlaylistFormat::Pls),
+        _ => None,
+    }
+}
+
+/// The playlist format a `Content-Type` names, ignoring any `; charset=`.
+fn playlist_format_for_content_type(content_type: &str) -> Option<PlaylistFormat> {
+    let value = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match value.as_str() {
+        "audio/x-mpegurl"
+        | "audio/mpegurl"
+        | "application/x-mpegurl"
+        | "application/vnd.apple.mpegurl" => Some(PlaylistFormat::M3u),
+        "audio/x-scpls" | "application/pls+xml" => Some(PlaylistFormat::Pls),
+        _ => None,
+    }
+}
+
+fn parse_playlist(input: &str, format: PlaylistFormat, base: PlaylistBase<'_>) -> Vec<Track> {
+    match format {
+        PlaylistFormat::M3u => parse_m3u_playlist(input, base),
+        PlaylistFormat::Pls => parse_pls_playlist(input, base),
+    }
+}
+
+/// Opens whatever a URL addresses: a playlist is fetched and parsed, a single
+/// audio file is appended and played.
+///
+/// One entry point rather than two menu items, because the user should not
+/// have to classify the link before pasting it.
+fn open_url(state: MutableState<WinampState>, url: String) {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        state.update(|s| s.status = "Enter A URL".to_string());
         return;
     }
-    let _ = audio::stop();
-    state.update(|app| {
-        replace_playlist_tracks(app, tracks);
-        app.playback = PlaybackState::Stopped;
-        app.status = format!("Loaded Cranamp FM ({} Tracks)", app.playlist.len());
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        state.update(|s| s.status = "URL Must Be HTTP(S)".to_string());
+        return;
+    }
+    state.update(|s| {
+        s.url_input_visible = false;
+        s.status = "Opening URL".to_string();
     });
+    cranpose_core::spawn_ui_task(async move {
+        match url_content(&url).await {
+            Ok(UrlContent::Playlist(tracks)) if tracks.is_empty() => {
+                state.update(|s| s.status = "Playlist Has No Tracks".to_string());
+            }
+            Ok(UrlContent::Playlist(tracks)) => {
+                let _ = audio::stop();
+                state.update(move |s| {
+                    replace_playlist_tracks(s, tracks.clone());
+                    s.playback = PlaybackState::Stopped;
+                    s.status = format!("Loaded {} Track(s) From URL", s.playlist.len());
+                });
+            }
+            Ok(UrlContent::Track(track)) => receive_incoming_tracks(state, vec![track]),
+            Err(message) => state.update(move |s| s.status = message.clone()),
+        }
+    });
+}
+
+/// Decides what `url` is and returns it as tracks.
+///
+/// The extension decides when it can, because that costs no request. Only a
+/// URL whose extension says nothing -- a stream endpoint, a redirect, a path
+/// that is all query string -- is asked about over the wire, and a URL that is
+/// still unrecognised after that is reported rather than silently dropped.
+async fn url_content(url: &str) -> Result<UrlContent, String> {
+    if let Some(format) = media_extension(url)
+        .as_deref()
+        .and_then(playlist_format_for_extension)
+    {
+        let text = fetch_text(url).await?;
+        return Ok(UrlContent::Playlist(parse_playlist(
+            &text,
+            format,
+            PlaylistBase::Url(url),
+        )));
+    }
+    if is_supported_playlist_path(url) {
+        return Ok(UrlContent::Track(audio::track_from_title_path(
+            title_from_url(url),
+            url,
+        )));
+    }
+
+    let response = cranpose_services::default_http_client()
+        .send(
+            &cranpose_services::HttpRequest::get(url),
+            cranpose_services::HttpControl::new(),
+        )
+        .await
+        .map_err(describe_http_error)?
+        .error_for_status()
+        .map_err(describe_http_error)?;
+    let content_type = response
+        .header("content-type")
+        .unwrap_or_default()
+        .to_string();
+    if let Some(format) = playlist_format_for_content_type(&content_type) {
+        let text = response.read_text().await.map_err(describe_http_error)?;
+        return Ok(UrlContent::Playlist(parse_playlist(
+            &text,
+            format,
+            PlaylistBase::Url(url),
+        )));
+    }
+    if content_type
+        .split('/')
+        .next()
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("audio"))
+    {
+        return Ok(UrlContent::Track(audio::track_from_title_path(
+            title_from_url(url),
+            url,
+        )));
+    }
+    Err(if content_type.is_empty() {
+        "URL Is Not Audio".to_string()
+    } else {
+        format!("Not Audio: {content_type}")
+    })
+}
+
+async fn fetch_text(url: &str) -> Result<String, String> {
+    cranpose_services::default_http_client()
+        .get_text(url)
+        .await
+        .map_err(describe_http_error)
+}
+
+/// Turns a transport failure into something the status line can say.
+///
+/// A browser reports a cross-origin fetch the server did not allow as an
+/// opaque failure indistinguishable from being offline, so that case names
+/// both possibilities: a host without `Access-Control-Allow-Origin` is the
+/// single most common reason a pasted URL does not load, and the player would
+/// otherwise sit there looking like it had simply done nothing.
+fn describe_http_error(error: cranpose_services::HttpError) -> String {
+    match error {
+        cranpose_services::HttpError::HttpStatus { status, .. } => format!("URL Returned {status}"),
+        cranpose_services::HttpError::RequestFailed { .. } => {
+            "Fetch Failed (CORS Or Offline?)".to_string()
+        }
+        other => format!("URL Error: {other}"),
+    }
 }
 
 fn export_playlist(state: MutableState<WinampState>) {
@@ -6771,7 +7069,7 @@ fn export_playlist(state: MutableState<WinampState>) {
     });
 }
 
-fn parse_m3u_playlist(input: &str, base_dir: Option<&std::path::Path>) -> Vec<Track> {
+fn parse_m3u_playlist(input: &str, base: PlaylistBase<'_>) -> Vec<Track> {
     let mut tracks = Vec::new();
     let mut pending_extinf = None::<(Option<f32>, String)>;
 
@@ -6788,7 +7086,7 @@ fn parse_m3u_playlist(input: &str, base_dir: Option<&std::path::Path>) -> Vec<Tr
             continue;
         }
 
-        let resolved_path = resolve_playlist_path(line, base_dir);
+        let resolved_path = resolve_playlist_path(line, base);
         if !is_supported_playlist_path(&resolved_path) {
             pending_extinf = None;
             continue;
@@ -6820,31 +7118,142 @@ fn parse_extinf(input: &str) -> Option<(Option<f32>, String)> {
     Some((duration_seconds, title.trim().to_string()))
 }
 
-fn resolve_playlist_path(path: &str, base_dir: Option<&std::path::Path>) -> String {
+/// Where a playlist's relative entries are resolved from.
+///
+/// A playlist arrives from three places and each resolves relative lines
+/// differently, which one `Option<&Path>` could not express: joining a remote
+/// playlist's entries onto a local directory produced paths like
+/// `/home/you/https:/host/track.mp3`, which is why the remote case needs the
+/// playlist's own URL rather than a directory.
+#[derive(Clone, Copy, Debug)]
+enum PlaylistBase<'a> {
+    /// Entries stand alone: absolute paths and absolute URLs survive as
+    /// written and a bare relative name is left for the caller to make sense
+    /// of. This is what an imported playlist uses, and it is what keeps the
+    /// absolute URLs in a hand-written playlist intact.
+    None,
+    /// The directory of a playlist file read from disk.
+    Directory(&'a std::path::Path),
+    /// The URL a playlist was fetched from.
+    Url(&'a str),
+}
+
+fn resolve_playlist_path(path: &str, base: PlaylistBase<'_>) -> String {
     let path = path.trim();
-    if path.starts_with("file://") {
-        return path.trim_start_matches("file://").to_string();
+    if let Some(stripped) = path.strip_prefix("file://") {
+        return stripped.to_string();
     }
-    let candidate = std::path::Path::new(path);
-    if candidate.is_absolute() {
+    if audio::has_uri_scheme(path) {
         return path.to_string();
     }
-    base_dir
-        .map(|base| base.join(candidate).to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string())
+    match base {
+        PlaylistBase::Url(base) => join_url(base, path),
+        PlaylistBase::Directory(directory) => {
+            let candidate = std::path::Path::new(path);
+            if candidate.is_absolute() {
+                path.to_string()
+            } else {
+                directory.join(candidate).to_string_lossy().to_string()
+            }
+        }
+        PlaylistBase::None => path.to_string(),
+    }
+}
+
+/// Resolves `relative` against the URL a playlist was fetched from.
+///
+/// As much of RFC 3986 as a playlist needs: an absolute URL wins, a
+/// root-relative path replaces the base's path, and anything else hangs off
+/// the base's directory. The base's own query and fragment never carry over,
+/// because they described the playlist and not its tracks.
+fn join_url(base: &str, relative: &str) -> String {
+    if audio::has_uri_scheme(relative) {
+        return relative.to_string();
+    }
+    let base = base.split(['?', '#']).next().unwrap_or(base);
+    let Some(scheme_end) = base.find("://") else {
+        return relative.to_string();
+    };
+    let after_scheme = scheme_end + 3;
+    let authority_end = base[after_scheme..]
+        .find('/')
+        .map_or(base.len(), |offset| after_scheme + offset);
+    if let Some(stripped) = relative.strip_prefix('/') {
+        return format!("{}/{}", &base[..authority_end], stripped);
+    }
+    let directory_end = base[authority_end..]
+        .rfind('/')
+        .map_or(authority_end, |offset| authority_end + offset);
+    format!("{}/{}", &base[..directory_end], relative)
+}
+
+/// The extension a path or URL addresses, lowercased, with any query string
+/// and fragment removed first.
+///
+/// `Path::extension` alone reads `https://host/track.mp3?token=abc` as the
+/// extension `mp3?token=abc`, so a perfectly playable signed URL was dropped
+/// as an unsupported type.
+fn media_extension(path: &str) -> Option<String> {
+    let trimmed = path.split(['?', '#']).next().unwrap_or(path);
+    std::path::Path::new(trimmed)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
 }
 
 fn is_supported_playlist_path(path: &str) -> bool {
-    std::path::Path::new(path)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| {
-            let extension = extension.to_ascii_lowercase();
-            audio::supported_audio_extensions()
-                .iter()
-                .any(|candidate| *candidate == extension)
+    media_extension(path).is_some_and(|extension| {
+        audio::supported_audio_extensions()
+            .iter()
+            .any(|candidate| *candidate == extension)
+    })
+}
+
+fn title_from_url(url: &str) -> String {
+    playlist_title_from_path(url.split(['?', '#']).next().unwrap_or(url))
+}
+
+/// Parses the Shoutcast `.pls` form: an INI-ish list of `FileN`, `TitleN` and
+/// `LengthN` keys, ordered by their index rather than by line.
+fn parse_pls_playlist(input: &str, base: PlaylistBase<'_>) -> Vec<Track> {
+    type Entry = (Option<String>, Option<String>, Option<f32>);
+    let mut entries: std::collections::BTreeMap<u32, Entry> = std::collections::BTreeMap::new();
+    for line in input.lines() {
+        let Some((key, value)) = line.trim().split_once('=') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let value = value.trim();
+        let index_of = |prefix: &str| {
+            key.strip_prefix(prefix)
+                .and_then(|index| index.parse::<u32>().ok())
+        };
+        if let Some(index) = index_of("file") {
+            entries.entry(index).or_default().0 = Some(value.to_string());
+        } else if let Some(index) = index_of("title") {
+            entries.entry(index).or_default().1 = Some(value.to_string());
+        } else if let Some(index) = index_of("length") {
+            // `-1` is the format's "unknown", and a stream reports it.
+            entries.entry(index).or_default().2 =
+                value.parse::<f32>().ok().filter(|seconds| *seconds > 0.0);
+        }
+    }
+    entries
+        .into_values()
+        .filter_map(|(file, title, duration_seconds)| {
+            let resolved = resolve_playlist_path(&file?, base);
+            if !is_supported_playlist_path(&resolved) {
+                return None;
+            }
+            Some(Track {
+                title: title
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or_else(|| playlist_title_from_path(&resolved)),
+                path: Some(resolved),
+                duration_seconds,
+            })
         })
-        .unwrap_or(false)
+        .collect()
 }
 
 fn playlist_title_from_path(path: &str) -> String {
@@ -8812,7 +9221,10 @@ mod tests {
     #[test]
     fn parse_m3u_playlist_accepts_plain_paths_and_extinf() {
         let input = "#EXTM3U\n#EXTINF:195,Broods - Heartlines\nrelative/song.mp3\n/home/s/Music/Other.flac\n";
-        let tracks = parse_m3u_playlist(input, Some(std::path::Path::new("/tmp/list")));
+        let tracks = parse_m3u_playlist(
+            input,
+            PlaylistBase::Directory(std::path::Path::new("/tmp/list")),
+        );
 
         assert_eq!(tracks.len(), 2);
         assert_eq!(tracks[0].title, "Broods - Heartlines");
@@ -8826,24 +9238,134 @@ mod tests {
     }
 
     #[test]
-    fn fm_playlist_parses_into_remote_https_tracks() {
-        let tracks = parse_m3u_playlist(FM_PLAYLIST_M3U, None);
+    fn remote_m3u_keeps_absolute_urls_and_resolves_relative_entries() {
+        // The shape a fetched playlist actually has: absolute URLs, a
+        // root-relative entry and a directory-relative one.
+        let input = concat!(
+            "#EXTM3U\n",
+            "#EXTINF:206,Artist - Absolute\n",
+            "https://other.example/absolute.mp3\n",
+            "#EXTINF:247,Artist - Root Relative\n",
+            "/top.mp3\n",
+            "#EXTINF:120,Artist - Sibling\n",
+            "sibling.mp3\n",
+        );
+        let tracks = parse_m3u_playlist(
+            input,
+            PlaylistBase::Url("https://host.example/sets/list.m3u?token=abc"),
+        );
 
-        assert!(!tracks.is_empty(), "the shipped FM playlist should parse");
-        for track in &tracks {
-            let path = track.path.as_deref().expect("FM track should carry a URL");
-            // A bare host would be joined onto a base directory or read as a
-            // relative file; only an absolute URL survives to the player.
-            assert!(
-                path.starts_with("https://fm.dmitrysamoylenko.in/"),
-                "FM track should stream over https: {path}"
-            );
-            assert!(
-                track.duration_seconds.is_some_and(|seconds| seconds > 0.0),
-                "FM track should carry an #EXTINF duration: {path}"
-            );
-            assert!(!track.title.is_empty());
-        }
+        assert_eq!(tracks.len(), 3);
+        assert_eq!(
+            tracks[0].path.as_deref(),
+            Some("https://other.example/absolute.mp3")
+        );
+        assert_eq!(
+            tracks[1].path.as_deref(),
+            Some("https://host.example/top.mp3")
+        );
+        assert_eq!(
+            tracks[2].path.as_deref(),
+            Some("https://host.example/sets/sibling.mp3")
+        );
+        assert_eq!(tracks[0].duration_seconds, Some(206.0));
+    }
+
+    #[test]
+    fn importing_a_playlist_leaves_absolute_urls_alone() {
+        // `apply_imported_playlist` parses with no base, which is the only
+        // reason a hand-written playlist of absolute URLs survives import.
+        let input = "#EXTM3U\n#EXTINF:10,A - B\nhttps://host.example/a.mp3\n";
+        let tracks = parse_m3u_playlist(input, PlaylistBase::None);
+
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(
+            tracks[0].path.as_deref(),
+            Some("https://host.example/a.mp3")
+        );
+    }
+
+    #[test]
+    fn a_query_string_does_not_hide_the_extension() {
+        // Path::extension alone reads this as `mp3?token=abc` and drops it.
+        assert!(is_supported_playlist_path(
+            "https://host.example/track.mp3?token=abc"
+        ));
+        assert!(is_supported_playlist_path("https://host.example/track.MP3"));
+        assert!(!is_supported_playlist_path("https://host.example/stream"));
+        assert_eq!(
+            media_extension("https://host.example/a/b.m3u8#x"),
+            Some("m3u8".to_string())
+        );
+    }
+
+    #[test]
+    fn join_url_follows_the_playlist_not_the_query() {
+        let base = "https://host.example/sets/list.m3u?v=2";
+        assert_eq!(join_url(base, "a.mp3"), "https://host.example/sets/a.mp3");
+        assert_eq!(join_url(base, "/a.mp3"), "https://host.example/a.mp3");
+        assert_eq!(
+            join_url(base, "https://elsewhere.example/a.mp3"),
+            "https://elsewhere.example/a.mp3"
+        );
+        // A base with no path at all still yields a usable URL.
+        assert_eq!(
+            join_url("https://host.example", "a.mp3"),
+            "https://host.example/a.mp3"
+        );
+    }
+
+    #[test]
+    fn pls_playlists_are_read_in_index_order() {
+        let input = concat!(
+            "[playlist]\n",
+            "NumberOfEntries=2\n",
+            "File2=https://host.example/second.mp3\n",
+            "Title2=Second\n",
+            "Length2=-1\n",
+            "File1=first.mp3\n",
+            "Title1=First\n",
+            "Length1=90\n",
+        );
+        let tracks =
+            parse_pls_playlist(input, PlaylistBase::Url("https://host.example/x/list.pls"));
+
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].title, "First");
+        assert_eq!(
+            tracks[0].path.as_deref(),
+            Some("https://host.example/x/first.mp3")
+        );
+        assert_eq!(tracks[0].duration_seconds, Some(90.0));
+        assert_eq!(tracks[1].title, "Second");
+        // -1 is the format's "unknown length", not a real duration.
+        assert_eq!(tracks[1].duration_seconds, None);
+    }
+
+    #[test]
+    fn playlist_formats_are_recognised_by_extension_and_content_type() {
+        assert_eq!(
+            playlist_format_for_extension("m3u"),
+            Some(PlaylistFormat::M3u)
+        );
+        assert_eq!(
+            playlist_format_for_extension("m3u8"),
+            Some(PlaylistFormat::M3u)
+        );
+        assert_eq!(
+            playlist_format_for_extension("pls"),
+            Some(PlaylistFormat::Pls)
+        );
+        assert_eq!(playlist_format_for_extension("mp3"), None);
+        assert_eq!(
+            playlist_format_for_content_type("audio/x-mpegurl; charset=utf-8"),
+            Some(PlaylistFormat::M3u)
+        );
+        assert_eq!(
+            playlist_format_for_content_type("audio/x-scpls"),
+            Some(PlaylistFormat::Pls)
+        );
+        assert_eq!(playlist_format_for_content_type("audio/mpeg"), None);
     }
 
     #[test]
