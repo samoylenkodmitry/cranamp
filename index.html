@@ -354,6 +354,26 @@
     applyCanvasSize();
     window.setInterval(() => applyCanvasSize(pipWindow), 250);
 
+    // Cranpose plays through a detached <audio> element that it wires into an
+    // AudioContext the first time the visualiser or the equalizer asks for it.
+    // A cross-origin track fetched without CORS taints that graph, and a
+    // tainted MediaElementAudioSourceNode emits silence rather than failing
+    // loudly - so a remote playlist would look like it is playing while making
+    // no sound. Marking every element anonymous before its src is set keeps
+    // the graph untainted; the host sends Access-Control-Allow-Origin to match.
+    // Same-origin tracks, including the bundled demo-music/ files, are
+    // unaffected.
+    const NativeAudio = window.Audio;
+    window.Audio = function Audio(src) {
+      const element = new NativeAudio();
+      element.crossOrigin = "anonymous";
+      if (src !== undefined) {
+        element.src = src;
+      }
+      return element;
+    };
+    window.Audio.prototype = NativeAudio.prototype;
+
     await init();
     await run_app();
     applyCanvasSize(pipWindow);
