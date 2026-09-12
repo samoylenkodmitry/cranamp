@@ -24,5 +24,9 @@ cp -R pkg dist/pkg
 mkdir -p dist/demo-music
 cp assets/demo-music/generated/*.mp3 dist/demo-music/
 cp assets/demo-music/generated/cranamp-demo-playlist.m3u dist/demo-music/
+# The FM set streams from its own host, so only the playlist is published -
+# the app reads its compiled-in copy, this one is for other players.
+mkdir -p dist/fm-music
+cp assets/fm-music/cranamp-fm-playlist.m3u dist/fm-music/
 
 echo "WASM example written to dist/index.html"

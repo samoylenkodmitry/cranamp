@@ -4902,6 +4902,10 @@ fn playlist_footer_menu_items(menu: PlaylistFooterMenu) -> Vec<PlaylistMenuItem>
                 label: "EXPORT M3U",
                 action: export_playlist,
             },
+            PlaylistMenuItem {
+                label: "CRANAMP FM",
+                action: load_fm_playlist,
+            },
         ],
     }
 }
@@ -6726,6 +6730,30 @@ fn import_playlist(state: MutableState<WinampState>) {
     state.update(|app| {
         app.pending_document = Some(PendingDocument::ImportPlaylist);
         app.status = "Importing Playlist".to_string();
+    });
+}
+
+/// The streaming set served from the public Cranamp FM host.
+///
+/// The playlist travels with the binary instead of being fetched, so loading it
+/// costs no request and works before the network is reachable; only the tracks
+/// it names are remote. Nothing else needs teaching: the file is extended M3U
+/// with absolute `https://` URLs, [`parse_m3u_playlist`] leaves an absolute URL
+/// alone when there is no base directory, and `audio::media_item` hands any
+/// path that already carries a scheme to the platform player untouched.
+const FM_PLAYLIST_M3U: &str = include_str!("../../assets/fm-music/cranamp-fm-playlist.m3u");
+
+fn load_fm_playlist(state: MutableState<WinampState>) {
+    let tracks = parse_m3u_playlist(FM_PLAYLIST_M3U, None);
+    if tracks.is_empty() {
+        state.update(|s| s.status = "FM Playlist Empty".to_string());
+        return;
+    }
+    let _ = audio::stop();
+    state.update(|app| {
+        replace_playlist_tracks(app, tracks);
+        app.playback = PlaybackState::Stopped;
+        app.status = format!("Loaded Cranamp FM ({} Tracks)", app.playlist.len());
     });
 }
 
@@ -8795,6 +8823,27 @@ mod tests {
         );
         assert_eq!(tracks[1].title, "Other");
         assert_eq!(tracks[1].path.as_deref(), Some("/home/s/Music/Other.flac"));
+    }
+
+    #[test]
+    fn fm_playlist_parses_into_remote_https_tracks() {
+        let tracks = parse_m3u_playlist(FM_PLAYLIST_M3U, None);
+
+        assert!(!tracks.is_empty(), "the shipped FM playlist should parse");
+        for track in &tracks {
+            let path = track.path.as_deref().expect("FM track should carry a URL");
+            // A bare host would be joined onto a base directory or read as a
+            // relative file; only an absolute URL survives to the player.
+            assert!(
+                path.starts_with("https://fm.dmitrysamoylenko.in/"),
+                "FM track should stream over https: {path}"
+            );
+            assert!(
+                track.duration_seconds.is_some_and(|seconds| seconds > 0.0),
+                "FM track should carry an #EXTINF duration: {path}"
+            );
+            assert!(!track.title.is_empty());
+        }
     }
 
     #[test]

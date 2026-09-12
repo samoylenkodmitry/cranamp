@@ -309,6 +309,8 @@ jobs:
           cp assets/demo-music/generated/*.mp3 "$package_dir/demo-music/"
           cp assets/demo-music/generated/cranamp-demo-playlist.m3u "$package_dir/demo-music/"
           cp assets/demo-music/README.md assets/demo-music/LICENSES.md "$package_dir/demo-music/"
+          mkdir -p "$package_dir/fm-music"
+          cp assets/fm-music/cranamp-fm-playlist.m3u assets/fm-music/README.md "$package_dir/fm-music/"
           if [ "${{ matrix.archive }}" = "zip" ]; then
             powershell -Command "Compress-Archive -Path '$package_dir/*' -DestinationPath 'assets/cranamp-${version}-${{ matrix.platform }}.zip'"
           else
