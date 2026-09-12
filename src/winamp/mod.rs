@@ -141,6 +141,7 @@ struct WinampState {
     playlist_search_visible: bool,
     playlist_search_query: String,
     playlist_search_revision: u64,
+    default_playlist_pending: bool,
     url_input_visible: bool,
     url_input_revision: u64,
     pending_document: Option<PendingDocument>,
@@ -185,6 +186,7 @@ impl PartialEq for WinampState {
             && self.playlist_search_visible == other.playlist_search_visible
             && self.playlist_search_query == other.playlist_search_query
             && self.playlist_search_revision == other.playlist_search_revision
+            && self.default_playlist_pending == other.default_playlist_pending
             && self.url_input_visible == other.url_input_visible
             && self.url_input_revision == other.url_input_revision
             && self.pending_document == other.pending_document
@@ -243,6 +245,7 @@ impl Default for WinampState {
             playlist_search_visible: false,
             playlist_search_query: String::new(),
             playlist_search_revision: 0,
+            default_playlist_pending: false,
             url_input_visible: false,
             url_input_revision: 0,
             pending_document: None,
@@ -255,9 +258,12 @@ impl Default for WinampState {
 }
 
 fn initial_winamp_state() -> WinampState {
-    let mut state = load_saved_player_state()
-        .map(restore_saved_player_state)
-        .unwrap_or_default();
+    let saved = load_saved_player_state();
+    // Nothing saved at all is what "first run" means. A saved state whose
+    // playlist is empty is someone who cleared theirs on purpose, and that is
+    // not an invitation to fetch anything.
+    let first_run = saved.is_none();
+    let mut state = saved.map(restore_saved_player_state).unwrap_or_default();
     if state.playlist.is_empty() {
         let tracks = audio::demo_playlist_tracks();
         if !tracks.is_empty() {
@@ -267,6 +273,7 @@ fn initial_winamp_state() -> WinampState {
             set_playlist_selection(&mut state, [0]);
         }
     }
+    state.default_playlist_pending = first_run;
     refresh_shuffle_order(&mut state);
     let _ = audio::set_equalizer(state.eq_enabled, state.eq_values);
     state
@@ -872,6 +879,77 @@ fn apply_library_skin(
     }
 }
 
+/// The playlist a first run is offered, fetched rather than compiled in so the
+/// set can change without shipping a new build.
+///
+/// Only the address travels with the app. Everything about what is in the
+/// playlist lives on the host, which is the whole point: a track added there
+/// reaches every client without a release.
+const DEFAULT_PLAYLIST_URL: &str = "https://fm.dmitrysamoylenko.in/cranamp-fm-playlist.m3u";
+
+/// Offers the hosted playlist on a first run, once, and never at the cost of
+/// what is already on screen.
+///
+/// Startup does not wait for this: the bundled demo set is already loaded and
+/// playable before the request is made, and stays if the request fails. That
+/// makes every failure -- offline, DNS, CORS, 404, a truncated file -- the
+/// same quiet non-event rather than an empty playlist that looks like a bug.
+#[composable]
+fn DefaultPlaylistEffect(state: MutableState<WinampState>) {
+    let pending = state.get().default_playlist_pending;
+    cranpose_core::LaunchedEffect(pending, move |_scope| {
+        if !pending {
+            return;
+        }
+        // Cleared before the request, not after, so a slow network cannot let
+        // a recomposition start a second one.
+        let baseline = playlist_track_paths(&state.get_non_reactive());
+        state.update(|s| s.default_playlist_pending = false);
+        cranpose_core::spawn_ui_task(async move {
+            let tracks = match url_content(DEFAULT_PLAYLIST_URL).await {
+                Ok(UrlContent::Playlist(tracks)) if !tracks.is_empty() => tracks,
+                Ok(_) => {
+                    log::debug!("cranamp: the default playlist URL held no tracks");
+                    return;
+                }
+                Err(error) => {
+                    // Deliberately not surfaced: the user has a working player
+                    // with the demo set in it and asked for none of this.
+                    log::debug!("cranamp: the default playlist could not be fetched: {error}");
+                    return;
+                }
+            };
+            state.update(move |s| {
+                // The request is slower than a person, who may have loaded a
+                // playlist or started playing while it was in flight. Only an
+                // untouched demo set gets replaced.
+                if !default_playlist_may_replace(s, &baseline) {
+                    return;
+                }
+                replace_playlist_tracks(s, tracks.clone());
+            });
+        });
+    });
+}
+
+/// Whether the fetched default may take over the playlist.
+///
+/// It may only replace exactly what it was offered against: the untouched
+/// starting set, still stopped. Anything the user did in the meantime -- their
+/// own playlist, a URL they opened, pressing play -- outranks a request they
+/// never asked for.
+fn default_playlist_may_replace(state: &WinampState, baseline: &[Option<String>]) -> bool {
+    state.playback == PlaybackState::Stopped && playlist_track_paths(state) == baseline
+}
+
+fn playlist_track_paths(state: &WinampState) -> Vec<Option<String>> {
+    state
+        .playlist
+        .iter()
+        .map(|track| track.path.clone())
+        .collect()
+}
+
 #[composable]
 fn WinampRuntimeEffects(
     state: MutableState<WinampState>,
@@ -879,6 +957,7 @@ fn WinampRuntimeEffects(
     skin_state: WinampSkinState,
 ) {
     PlaybackProgressEffect(state);
+    DefaultPlaylistEffect(state);
     PlaylistDurationHydrationEffect(state);
     DocumentPickerEffect(state);
     CranposePickerEffect(state);
@@ -9366,6 +9445,58 @@ mod tests {
             Some(PlaylistFormat::Pls)
         );
         assert_eq!(playlist_format_for_content_type("audio/mpeg"), None);
+    }
+
+    #[test]
+    fn a_restored_state_never_asks_for_the_default_playlist() {
+        // Only a first run fetches. Someone with saved state -- including
+        // someone who deliberately emptied their playlist -- must never have
+        // the network reach for them.
+        assert!(!WinampState::default().default_playlist_pending);
+
+        let restored = restore_saved_player_state(SavedPlayerState::default());
+        assert!(
+            !restored.default_playlist_pending,
+            "a restored state is by definition not a first run"
+        );
+    }
+
+    #[test]
+    fn the_default_playlist_only_replaces_what_it_was_offered_against() {
+        let demo = vec![
+            test_track_with_path("Demo 1", "/demo/one.mp3"),
+            test_track_with_path("Demo 2", "/demo/two.mp3"),
+        ];
+        let baseline: Vec<Option<String>> = demo.iter().map(|track| track.path.clone()).collect();
+        let untouched = WinampState {
+            playlist: Rc::new(demo.clone()),
+            playback: PlaybackState::Stopped,
+            ..WinampState::default()
+        };
+        assert!(default_playlist_may_replace(&untouched, &baseline));
+
+        // Playing already: the fetch lost the race and must not interrupt.
+        let playing = WinampState {
+            playback: PlaybackState::Playing,
+            ..untouched.clone()
+        };
+        assert!(!default_playlist_may_replace(&playing, &baseline));
+
+        // The user loaded something else while the request was in flight.
+        let replaced = WinampState {
+            playlist: Rc::new(vec![test_track_with_path("Mine", "/mine/song.mp3")]),
+            ..untouched.clone()
+        };
+        assert!(!default_playlist_may_replace(&replaced, &baseline));
+
+        // Even appending one track counts as touched.
+        let mut appended = demo;
+        appended.push(test_track_with_path("Extra", "/demo/three.mp3"));
+        let grown = WinampState {
+            playlist: Rc::new(appended),
+            ..untouched
+        };
+        assert!(!default_playlist_may_replace(&grown, &baseline));
     }
 
     #[test]
