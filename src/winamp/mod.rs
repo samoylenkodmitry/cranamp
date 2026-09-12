@@ -1939,32 +1939,6 @@ pub fn WinampSurfaceApp() {
     );
 }
 
-/// Isolated skin review surface using the production main, EQ and playlist
-/// composables. Integer scaling and no saved-state effects make comparisons
-/// reproducible without changing the user's player configuration.
-#[composable]
-pub fn WinampSkinPreview(bytes: Vec<u8>, scale: u32) {
-    let state = cranpose_core::rememberMutableStateOf(WinampState::default);
-    let skin_state = cranpose_core::rememberMutableStateOf(move || {
-        load_skin(&bytes).map_err(|error| format!("{error:#}"))
-    });
-    match skin_state.get() {
-        Ok(skin) => WinampStackedStage(
-            skin,
-            state,
-            skin_state,
-            StackedLayout {
-                scale: scale.clamp(1, 4) as f32,
-                playlist_height: 193.0,
-                content_left_inset: 0.0,
-                content_top_inset: 0.0,
-            },
-            StackedDrag::Fixed,
-        ),
-        Err(error) => WinampSkinError(error),
-    }
-}
-
 #[composable]
 fn WinampSkinError(error: String) {
     Column(
