@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.58"
+version = "0.1.59"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
@@ -70,6 +70,12 @@ redundant_locals = "deny"
 
 [dependencies]
 anyhow = "1.0"
+# 0.1.124 is the first release that plays a remote `https:` track anywhere but
+# the browser (Cranpose PR #669). Every native backend used to resolve a URI to
+# a filesystem path and refuse what it could not find there, so the hosted
+# playlist played on the web build and nowhere else; iOS now streams through
+# `AVPlayer` and desktop/Android read HTTP byte ranges.
+#
 # 0.1.98 carries Cranpose PR #463, which deletes the `android/` Maven module
 # tree and moves the Gradle plugin inside this crate
 # (`android/cranpose-gradle-plugin/`), resolved by `settings.gradle.kts` via
@@ -77,12 +83,12 @@ anyhow = "1.0"
 # also carries cranpose_services::content's shared percent_decode/
 # percent_decode_lossy pair, which src/sync/mod.rs below depends on to drop
 # its own hand-rolled percent-decoder.
-cranpose = { version = "0.1.118", default-features = false }
-cranpose-core = "0.1.118"
-cranpose-foundation = "0.1.118"
-cranpose-services = { version = "0.1.118", default-features = false }
-cranpose-ui = "0.1.118"
-cranpose-ui-graphics = "0.1.118"
+cranpose = { version = "0.1.124", default-features = false }
+cranpose-core = "0.1.124"
+cranpose-foundation = "0.1.124"
+cranpose-services = { version = "0.1.124", default-features = false }
+cranpose-ui = "0.1.124"
+cranpose-ui-graphics = "0.1.124"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }
 log = "0.4"
@@ -103,8 +109,8 @@ wasm-logger = { version = "0.2", optional = true }
 # headlessly (see tests/settings_e2e.rs). Published crates, pinned to the same
 # cranpose release as the runtime dependencies above.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cranpose-app-shell = "0.1.118"
-cranpose-render-common = "0.1.118"
+cranpose-app-shell = "0.1.124"
+cranpose-render-common = "0.1.124"
 
 # Distribution profile: LTO + strip + abort panics keep the binary small
 # (see cranpose README "Binary Size").
