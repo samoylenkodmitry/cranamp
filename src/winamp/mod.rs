@@ -141,7 +141,6 @@ struct WinampState {
     playlist_search_visible: bool,
     playlist_search_query: String,
     playlist_search_revision: u64,
-    default_playlist_pending: bool,
     url_input_visible: bool,
     url_input_revision: u64,
     pending_document: Option<PendingDocument>,
@@ -186,7 +185,6 @@ impl PartialEq for WinampState {
             && self.playlist_search_visible == other.playlist_search_visible
             && self.playlist_search_query == other.playlist_search_query
             && self.playlist_search_revision == other.playlist_search_revision
-            && self.default_playlist_pending == other.default_playlist_pending
             && self.url_input_visible == other.url_input_visible
             && self.url_input_revision == other.url_input_revision
             && self.pending_document == other.pending_document
@@ -245,7 +243,6 @@ impl Default for WinampState {
             playlist_search_visible: false,
             playlist_search_query: String::new(),
             playlist_search_revision: 0,
-            default_playlist_pending: false,
             url_input_visible: false,
             url_input_revision: 0,
             pending_document: None,
@@ -258,22 +255,23 @@ impl Default for WinampState {
 }
 
 fn initial_winamp_state() -> WinampState {
-    let saved = load_saved_player_state();
-    // Nothing saved at all is what "first run" means. A saved state whose
-    // playlist is empty is someone who cleared theirs on purpose, and that is
-    // not an invitation to fetch anything.
-    let first_run = saved.is_none();
-    let mut state = saved.map(restore_saved_player_state).unwrap_or_default();
+    let mut state = load_saved_player_state()
+        .map(restore_saved_player_state)
+        .unwrap_or_default();
     if state.playlist.is_empty() {
-        let tracks = audio::demo_playlist_tracks();
-        if !tracks.is_empty() {
-            state.current_index = Some(0);
-            state.status = format!("Loaded {} Demo Track(s)", tracks.len());
-            set_playlist_tracks(&mut state, tracks);
-            set_playlist_selection(&mut state, [0]);
-        }
+        // The bundled demo files, plus the station as one more entry. Startup
+        // touches the network for neither: the station is an address that is
+        // resolved if and when it is played.
+        let mut tracks = audio::demo_playlist_tracks();
+        tracks.push(audio::track_from_title_path(
+            DEFAULT_STATION_TITLE,
+            DEFAULT_STATION_URL,
+        ));
+        state.current_index = Some(0);
+        state.status = format!("Loaded {} Track(s)", tracks.len());
+        set_playlist_tracks(&mut state, tracks);
+        set_playlist_selection(&mut state, [0]);
     }
-    state.default_playlist_pending = first_run;
     refresh_shuffle_order(&mut state);
     let _ = audio::set_equalizer(state.eq_enabled, state.eq_values);
     state
@@ -879,76 +877,13 @@ fn apply_library_skin(
     }
 }
 
-/// The playlist a first run is offered, fetched rather than compiled in so the
-/// set can change without shipping a new build.
+/// The station Cranamp offers out of the box.
 ///
-/// Only the address travels with the app. Everything about what is in the
-/// playlist lives on the host, which is the whole point: a track added there
-/// reaches every client without a release.
-const DEFAULT_PLAYLIST_URL: &str = "https://fm.dmitrysamoylenko.in/cranamp-fm-playlist.m3u";
-
-/// Offers the hosted playlist on a first run, once, and never at the cost of
-/// what is already on screen.
-///
-/// Startup does not wait for this: the bundled demo set is already loaded and
-/// playable before the request is made, and stays if the request fails. That
-/// makes every failure -- offline, DNS, CORS, 404, a truncated file -- the
-/// same quiet non-event rather than an empty playlist that looks like a bug.
-#[composable]
-fn DefaultPlaylistEffect(state: MutableState<WinampState>) {
-    let pending = state.get().default_playlist_pending;
-    cranpose_core::LaunchedEffect(pending, move |_scope| {
-        if !pending {
-            return;
-        }
-        // Cleared before the request, not after, so a slow network cannot let
-        // a recomposition start a second one.
-        let baseline = playlist_track_paths(&state.get_non_reactive());
-        state.update(|s| s.default_playlist_pending = false);
-        cranpose_core::spawn_ui_task(async move {
-            let tracks = match url_content(DEFAULT_PLAYLIST_URL).await {
-                Ok(UrlContent::Playlist(tracks)) if !tracks.is_empty() => tracks,
-                Ok(_) => {
-                    log::debug!("cranamp: the default playlist URL held no tracks");
-                    return;
-                }
-                Err(error) => {
-                    // Deliberately not surfaced: the user has a working player
-                    // with the demo set in it and asked for none of this.
-                    log::debug!("cranamp: the default playlist could not be fetched: {error}");
-                    return;
-                }
-            };
-            state.update(move |s| {
-                // The request is slower than a person, who may have loaded a
-                // playlist or started playing while it was in flight. Only an
-                // untouched demo set gets replaced.
-                if !default_playlist_may_replace(s, &baseline) {
-                    return;
-                }
-                replace_playlist_tracks(s, tracks.clone());
-            });
-        });
-    });
-}
-
-/// Whether the fetched default may take over the playlist.
-///
-/// It may only replace exactly what it was offered against: the untouched
-/// starting set, still stopped. Anything the user did in the meantime -- their
-/// own playlist, a URL they opened, pressing play -- outranks a request they
-/// never asked for.
-fn default_playlist_may_replace(state: &WinampState, baseline: &[Option<String>]) -> bool {
-    state.playback == PlaybackState::Stopped && playlist_track_paths(state) == baseline
-}
-
-fn playlist_track_paths(state: &WinampState) -> Vec<Option<String>> {
-    state
-        .playlist
-        .iter()
-        .map(|track| track.path.clone())
-        .collect()
-}
+/// It is a playlist *entry*, not playlist *content*: only this address ships,
+/// and nothing is fetched until someone presses play on it. A track added on
+/// the host therefore reaches every client with no build and no release.
+const DEFAULT_STATION_URL: &str = "https://fm.dmitrysamoylenko.in/cranamp-fm-playlist.m3u";
+const DEFAULT_STATION_TITLE: &str = "Cranamp FM";
 
 #[composable]
 fn WinampRuntimeEffects(
@@ -957,7 +892,6 @@ fn WinampRuntimeEffects(
     skin_state: WinampSkinState,
 ) {
     PlaybackProgressEffect(state);
-    DefaultPlaylistEffect(state);
     PlaylistDurationHydrationEffect(state);
     DocumentPickerEffect(state);
     CranposePickerEffect(state);
@@ -7716,6 +7650,87 @@ fn finish_playlist(state: MutableState<WinampState>) {
     });
 }
 
+/// The URL an entry addresses when that URL names a playlist rather than a
+/// track, which is the one case that has to be fetched before it can play.
+///
+/// Extension only: an entry cannot be classified without a request otherwise,
+/// and a bare stream URL is handed to the audio backend, which is exactly what
+/// should happen to an Icecast or SHOUTcast endpoint.
+fn playlist_entry_url(track: &Track) -> Option<&str> {
+    let path = track.path.as_deref()?;
+    if !(path.starts_with("http://") || path.starts_with("https://")) {
+        return None;
+    }
+    media_extension(path)
+        .as_deref()
+        .and_then(playlist_format_for_extension)
+        .map(|_| path)
+}
+
+/// Fetches a playlist entry and expands it in place, then plays the first
+/// track it yielded.
+///
+/// Nothing is remembered about the attempt. A failure leaves the entry exactly
+/// where it was with the reason on the status line, so pressing play again
+/// retries, and being offline at the wrong moment costs nothing permanently.
+fn resolve_playlist_entry(state: MutableState<WinampState>, index: usize, url: String) {
+    state.update(|s| s.status = "Connecting".to_string());
+    cranpose_core::spawn_ui_task(async move {
+        let tracks = match url_content(&url).await {
+            Ok(UrlContent::Playlist(tracks)) if !tracks.is_empty() => tracks,
+            Ok(_) => {
+                fail_playlist_entry(state, index, &url, "Playlist Has No Tracks");
+                return;
+            }
+            Err(message) => {
+                fail_playlist_entry(state, index, &url, &message);
+                return;
+            }
+        };
+        // The playlist can move under a slow fetch, so the entry is found by
+        // its URL rather than by the index it had when the request started.
+        let Some(at) = playlist_entry_index(&state.get_non_reactive(), &url) else {
+            state.update(|s| s.status = "Entry Removed".to_string());
+            return;
+        };
+        let added = tracks.len();
+        state.update(move |s| {
+            if playlist_entry_index(s, &url) != Some(at) {
+                return;
+            }
+            playlist_tracks_mut(s).splice(at..=at, tracks.iter().cloned());
+            refresh_shuffle_order(s);
+            s.status = format!("Loaded {added} Track(s)");
+        });
+        start_track(state, at);
+    });
+}
+
+/// Reports a resolution that did not work, the same way a track that would not
+/// play is reported: the entry stays put, selected and stopped, with the reason
+/// on the status line. Nothing is recorded, so pressing play again just tries
+/// again.
+fn fail_playlist_entry(state: MutableState<WinampState>, index: usize, url: &str, message: &str) {
+    let url = url.to_string();
+    let message = message.to_string();
+    state.update(move |s| {
+        let at = playlist_entry_index(s, &url).unwrap_or(index);
+        s.current_index = Some(at);
+        set_playlist_selection(s, [at]);
+        scroll_playlist_to_track(s, at);
+        s.playback = PlaybackState::Stopped;
+        s.title_marquee_phase = 0.0;
+        s.status = message.clone();
+    });
+}
+
+fn playlist_entry_index(state: &WinampState, url: &str) -> Option<usize> {
+    state
+        .playlist
+        .iter()
+        .position(|track| track.path.as_deref() == Some(url))
+}
+
 fn start_track(state: MutableState<WinampState>, index: usize) {
     // A pending resume cue only applies to its own track; playing anything else
     // cancels it.
@@ -7731,6 +7746,15 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         state.update(|s| s.status = "Track Missing".to_string());
         return;
     };
+
+    // A playlist URL is an address, not audio. Resolve it now -- the way
+    // Winamp connected when you pressed play rather than when you added the
+    // entry -- so a station that was unreachable a minute ago is simply
+    // playable the next time it is pressed.
+    if let Some(url) = playlist_entry_url(&track) {
+        resolve_playlist_entry(state, index, url.to_string());
+        return;
+    }
 
     #[cfg(target_arch = "wasm32")]
     if track.path.is_none() {
@@ -8081,8 +8105,10 @@ fn restore_saved_track(track: SavedTrack) -> Option<Track> {
         return None;
     }
 
+    // A URL is a perfectly good entry that no filesystem will vouch for, so
+    // only real paths are checked for existence.
     #[cfg(not(target_arch = "wasm32"))]
-    if !std::path::Path::new(&track.path).is_file() {
+    if !audio::has_uri_scheme(&track.path) && !std::path::Path::new(&track.path).is_file() {
         return None;
     }
 
@@ -9448,55 +9474,78 @@ mod tests {
     }
 
     #[test]
-    fn a_restored_state_never_asks_for_the_default_playlist() {
-        // Only a first run fetches. Someone with saved state -- including
-        // someone who deliberately emptied their playlist -- must never have
-        // the network reach for them.
-        assert!(!WinampState::default().default_playlist_pending);
+    fn only_playlist_urls_are_resolved_before_playing() {
+        // These have to be fetched and expanded before anything can play.
+        for url in [
+            "https://host.example/list.m3u",
+            "http://host.example/list.m3u8",
+            "https://host.example/list.pls",
+            "https://host.example/list.M3U",
+            "https://host.example/list.m3u?token=abc",
+        ] {
+            let track = test_track_with_path("Station", url);
+            assert_eq!(
+                playlist_entry_url(&track),
+                Some(url),
+                "should resolve before playing: {url}"
+            );
+        }
 
-        let restored = restore_saved_player_state(SavedPlayerState::default());
-        assert!(
-            !restored.default_playlist_pending,
-            "a restored state is by definition not a first run"
+        // These go straight to the audio backend. A bare stream endpoint is
+        // the Icecast/SHOUTcast case and must not be fetched as a playlist.
+        for url in [
+            "https://host.example/track.mp3",
+            "https://host.example/stream",
+            "https://host.example/stream?fmt=mp3",
+            "/home/someone/Music/list.m3u",
+            "file:///home/someone/list.m3u",
+        ] {
+            let track = test_track_with_path("Thing", url);
+            assert_eq!(
+                playlist_entry_url(&track),
+                None,
+                "should play directly: {url}"
+            );
+        }
+
+        assert_eq!(
+            playlist_entry_url(&Track {
+                title: "No Path".to_string(),
+                path: None,
+                duration_seconds: None,
+            }),
+            None
         );
     }
 
     #[test]
-    fn the_default_playlist_only_replaces_what_it_was_offered_against() {
-        let demo = vec![
-            test_track_with_path("Demo 1", "/demo/one.mp3"),
-            test_track_with_path("Demo 2", "/demo/two.mp3"),
-        ];
-        let baseline: Vec<Option<String>> = demo.iter().map(|track| track.path.clone()).collect();
-        let untouched = WinampState {
-            playlist: Rc::new(demo.clone()),
-            playback: PlaybackState::Stopped,
-            ..WinampState::default()
-        };
-        assert!(default_playlist_may_replace(&untouched, &baseline));
+    fn the_shipped_station_is_an_entry_that_resolves_on_play() {
+        // Guards the constant itself: a station URL that did not look like a
+        // playlist would be handed to the audio backend and never expand.
+        let station = audio::track_from_title_path(DEFAULT_STATION_TITLE, DEFAULT_STATION_URL);
+        assert_eq!(playlist_entry_url(&station), Some(DEFAULT_STATION_URL));
+    }
 
-        // Playing already: the fetch lost the race and must not interrupt.
-        let playing = WinampState {
-            playback: PlaybackState::Playing,
-            ..untouched.clone()
-        };
-        assert!(!default_playlist_may_replace(&playing, &baseline));
+    #[test]
+    fn a_saved_url_entry_survives_a_restart() {
+        // Restoring used to require an existing file, which silently dropped
+        // every URL entry from a saved playlist on desktop.
+        let restored = restore_saved_track(SavedTrack {
+            title: "Cranamp FM".to_string(),
+            path: DEFAULT_STATION_URL.to_string(),
+            duration_seconds: None,
+        })
+        .expect("a URL entry should survive being saved and restored");
+        assert_eq!(restored.path.as_deref(), Some(DEFAULT_STATION_URL));
+        assert_eq!(restored.title, "Cranamp FM");
 
-        // The user loaded something else while the request was in flight.
-        let replaced = WinampState {
-            playlist: Rc::new(vec![test_track_with_path("Mine", "/mine/song.mp3")]),
-            ..untouched.clone()
-        };
-        assert!(!default_playlist_may_replace(&replaced, &baseline));
-
-        // Even appending one track counts as touched.
-        let mut appended = demo;
-        appended.push(test_track_with_path("Extra", "/demo/three.mp3"));
-        let grown = WinampState {
-            playlist: Rc::new(appended),
-            ..untouched
-        };
-        assert!(!default_playlist_may_replace(&grown, &baseline));
+        // A local path that no longer exists is still dropped.
+        assert!(restore_saved_track(SavedTrack {
+            title: "Gone".to_string(),
+            path: "/definitely/not/here/song.mp3".to_string(),
+            duration_seconds: None,
+        })
+        .is_none());
     }
 
     #[test]
