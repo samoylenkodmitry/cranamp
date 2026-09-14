@@ -150,18 +150,26 @@ class SurfacePlan:
     skipped: list
     aliases: list
     readonly: list
+    repeats: str = 'error'
 
     def parts(self,operations):
         """Clipped native patch parts; preserves fractional curves/palette axes."""
+        missing = [p for p in self.skipped if p['label'] != 'playlist.list']
+        if self.repeats == 'error' and missing:
+            raise ValueError('Ownership crosses shared playlist tiles/rails: '
+                             + ', '.join(p['label'] for p in missing)
+                             + '. No patch produced. Use repeats="shared" for one source copy, '
+                             'or explicitly repeats="skip" to omit these regions. Inspect plan.aliases.')
         if not self.targets:raise ValueError('No static surface selected; inspect plan.skipped/readonly')
         return bridge(operations,self.targets)
 
 
-def surface_map(rect, *, playlist_height=145, titles='both', repeats='skip',
+def surface_map(rect, *, playlist_height=145, titles='both', repeats='error',
                 preserve_runtime=True, exclude=()):
     """Map static main/EQ backgrounds, title variants and playlist chrome.
 
-    repeats='skip' omits shared PL tiles/rails (reported in skipped).
+    repeats='error' prevents producing partial patches across shared PL tiles/rails.
+    repeats='skip' explicitly omits them (reported in skipped).
     repeats='shared' maps selected copies; rejects overlapping source ownership.
     A shared source change appears in ALL copies, including outside rect.
     Dynamic controls and classic PL list fill are never added. No WSZ extensions.
@@ -171,7 +179,7 @@ def surface_map(rect, *, playlist_height=145, titles='both', repeats='skip',
     if _intersection(rect,[0,0,275,232+playlist_height])!=rect:
         raise ValueError('Rectangle exceeds the native 275×(232+playlist_height) canvas')
     if titles not in ('both','active','inactive','none'):raise ValueError('titles: both/active/inactive/none')
-    if repeats not in ('skip','shared'):raise ValueError('repeats: skip/shared')
+    if repeats not in ('error','skip','shared'):raise ValueError('repeats: error/skip/shared')
     if not isinstance(preserve_runtime,bool):raise ValueError('preserve_runtime must be boolean')
     cuts=[_rect(r) for r in exclude]+(runtime_rects(playlist_height) if preserve_runtime else [])
     targets=[];skipped=[];aliases=[]
@@ -179,7 +187,7 @@ def surface_map(rect, *, playlist_height=145, titles='both', repeats='skip',
     def add(label,sheet,src,dest,shared=False):
         intersection=_intersection(rect,[*dest,*src[2:]])
         if intersection is None:return
-        if shared and repeats=='skip':
+        if shared and repeats in ('error','skip'):
             skipped.append({'label':label,'rect':intersection,'reason':'shared source; use repeats="shared" for one selected copy'})
             return
         fragments=[intersection]
@@ -224,7 +232,7 @@ def surface_map(rect, *, playlist_height=145, titles='both', repeats='skip',
     list_cut=_intersection(rect,[12,252,243,interior])
     if list_cut:skipped.append({'label':'playlist.list','rect':list_cut,'reason':'Classic playlist fill/text has no static bitmap source; use PLEDIT.TXT colors'})
     if len(targets)>64:raise ValueError('Masks produce more than 64 source parts; split the drawing into smaller regions')
-    return SurfacePlan(targets,skipped,aliases,[r for c in cuts if (r:=_intersection(c,rect))])
+    return SurfacePlan(targets,skipped,aliases,[r for c in cuts if (r:=_intersection(c,rect))],repeats)
 
 
 def surface_parts(operations,rect,**options):

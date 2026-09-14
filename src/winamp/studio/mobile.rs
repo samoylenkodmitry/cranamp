@@ -548,7 +548,7 @@ pub fn MobileSkinStudio(
                                 });
                                 for brush in [
                                     "pencil", "line", "curve", "tuft", "rect", "ellipse", "lift",
-                                    "stamp",
+                                    "stamp", "glass",
                                 ] {
                                     let c = d.clone();
                                     TouchButton(brush.into(), w, view.brush == brush, move || {

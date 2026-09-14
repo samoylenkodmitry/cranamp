@@ -416,6 +416,27 @@ class ConnectedCanvasTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'multiple canvas copies'):
             surface_map([25,232,50,20],repeats='shared')
 
+    def test_join_patch_cannot_silently_lose_playlist_rail(self):
+        p=CanvasPen();p.line([[6,248],[6,256]],'#abcdef')
+        # Previously this succeeded with only the title half of the stroke.
+        with self.assertRaisesRegex(ValueError,'No patch produced'):
+            p.parts([4,248,5,9])
+        parts=p.parts([4,248,5,9],repeats='shared')
+        self.assertTrue(any(t['label'].startswith('playlist.left.rail') for t in parts))
+        self.assertTrue(any(t['label'].startswith('playlist.top.left') for t in parts))
+        omitted=p.parts([4,248,5,9],repeats='skip')
+        self.assertFalse(any('rail' in t['label'] for t in omitted))
+
+    def test_footer_join_requires_explicit_shared_mapping_at_all_heights(self):
+        for height in [145,146,261,384,522]:
+            y=232+height-38
+            p=CanvasPen();p.rect(4,y-3,3,6,'#abcdef')
+            with self.assertRaisesRegex(ValueError,'No patch produced'):
+                p.parts([4,y-3,3,6],playlist_height=height)
+            parts=p.parts([4,y-3,3,6],playlist_height=height,repeats='shared')
+            self.assertTrue(any('rail' in t['label'] for t in parts))
+            self.assertTrue(any('bottom' in t['label'] for t in parts))
+
     def test_rails_repeat_native_period29_and_crop(self):
         first=surface_map([0,252,5,4],repeats='shared')
         second=surface_map([0,281,5,4],repeats='shared')

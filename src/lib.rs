@@ -65,24 +65,12 @@ fn ios_root() {
     );
 }
 
-#[cfg(target_os = "android")]
-#[cranpose::composable]
-fn android_root() {
-    cranpose::Box(
-        cranpose::Modifier::empty()
-            .fill_max_size()
-            .safe_area_padding(),
-        cranpose::BoxSpec::default(),
-        winamp::WinampStackedApp,
-    );
-}
-
 // The exported `android_main` symbol `NativeActivity` looks up. The framework
 // writes it, so this crate keeps its `deny(unsafe_code)` and never names
 // `android_activity` for a parameter type.
 cranpose::android_main! {
     launcher: create_android_app(),
-    content: android_root,
+    content: winamp::WinampStackedApp,
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

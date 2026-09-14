@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod join_tests;
 mod patch;
 use super::mapping::{self, Layer};
 use anyhow::{bail, Context, Result};

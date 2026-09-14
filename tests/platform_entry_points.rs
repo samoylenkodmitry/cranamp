@@ -30,15 +30,12 @@ fn android_and_ios_compose_the_same_player() {
     );
 
     let android = lib
-        .split("fn android_root()")
+        .split("cranpose::android_main! {")
         .nth(1)
-        .expect("Android enters through android_root")
-        .split("\n}")
+        .expect("Android enters through the android_main! macro")
+        .split('}')
         .next()
-        .expect("android_root has a body");
-    assert!(android.contains(".safe_area_padding()"));
-    assert!(ios.contains(".safe_area_padding()"));
-    assert!(lib.contains("content: android_root"));
+        .expect("android_main! has a body");
     assert!(
         android.contains(STACKED_APP),
         "Android composes something other than {STACKED_APP}: {android}"

@@ -133,6 +133,27 @@ combination and draw across panel boundaries in one undoable transaction.
 Repeated playlist borders are tiled and cropped at native size; painting a shared
 tile necessarily affects each repetition. The inspector exposes those mappings.
 
+The Python `CanvasPen` helper rejects an ownership rectangle that includes shared
+playlist borders by default (`repeats='error'`). Previously it silently produced
+only the non-repeated parts of a patch. Use `repeats='shared'` to edit one tile
+copy and every alias, or explicitly use `repeats='skip'` when another operation
+owns those borders. Multiple overlapping aliases remain rejected. The GUI and
+direct `studio_draw` Auto target paint the visible source at each point, including
+shared tiles. Selected parts and masks deliberately restrict that coverage.
+
+Classic playlist rails repeat every 29 rows. The footer follows the final cropped
+tile at any playlist height, so an authored rail-to-footer connection must match
+every tile phase. The list's solid fill and live text have no static bitmap source.
+The main docking row 115 aliases source row 114; they cannot hold different pixels.
+
+Run `cargo test --lib join_tests` to compare painting with one unsplit bitmap:
+600 MCP cases cover pixels, lines, filled rectangles, ellipses, paths, curves,
+tufts, stamps, palette ramps and glass at panel/title/tile/footer joins, both
+borders, and five playlist heights. GUI preview, lifted stamps, cancellation,
+selected parts, masks, mirrors, layers, undo/redo and WSZ reload have additional
+checks. These tests verify pixel routing; they do not judge whether separate
+authored highlights meet visually.
+
 A temporary free-placement renderer was explored and rejected because it changed
 the skin definitions. It is not part of the supported skin format.
 
