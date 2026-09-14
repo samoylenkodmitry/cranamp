@@ -1,7 +1,8 @@
 # Cranamp Skin Studio
 
-Open **Settings → Open Skin Studio** in the desktop player. The editor opens in
-a separate native window while playback continues. It edits the selected skin;
+Open **Settings → Open Skin Studio** on desktop or Android. On desktop the editor
+opens in a separate native window. Android opens the editor inside the activity.
+Playback continues in both cases. It edits the selected skin;
 with the bundled default selected, it opens Catamp Silverplay with seven painting
 layers and no output path. Choose an export destination to save your copy.
 Add the exported `.wsz` through the player's Settings to apply it.
@@ -15,8 +16,8 @@ cargo run -- --skin-studio '/absolute/path/project.cstudio'
 Catamp Silverplay uses the original thirteen Winamp bitmap sheets plus
 `pledit.txt` and `viscolor.txt`. The player and editor embed the same artwork.
 Studio uses Cranpose for the GUI; mouse strokes and MCP commands modify the same
-document and share undo/redo history. The editor is available on desktop;
-the bundled skin is also available on Android, iOS and web.
+document and share undo/redo history. The editor is available on desktop and
+Android; the bundled skin is also available on iOS and web.
 
 The whole-canvas drawing helper is documented in
 [connected-canvas-api.md](../../tools/skin-studio/connected-canvas-api.md).
@@ -26,6 +27,52 @@ standard library. Run helper unit tests with:
 ```sh
 python3 -m unittest discover -s tools/skin-studio -p 'test_*.py'
 ```
+
+The bundled Silverplay 22 artwork has continuous sidewall profiles across main,
+EQ, playlist header, repeated rails and footer. Its seven native painting planes
+separate the case, main illustration, small cats and four control groups. The
+hand-authored `atelier22_*` recipes use opaque palette clusters without raster
+scaling or blur. `catamp_silverplay_refine22.py` replays them through Studio from
+the preserved Silverplay 21 WSZ; it requires clean work, applies seven layers,
+and captures the result for review before export.
+
+`check_catamp22_continuity.py` checks all 29 playlist tile phases and three taller
+sizes in four focus/pressed states, including actual GPU checks at short and tall
+sizes. `check_native_frames.py --output target/catamp22/frames` captures all 112
+control states; `check_silverplay_art.py --frames target/catamp22/frames` compares
+all 1,680 complete moving-control regions with the exported source sheets.
+
+## Android controls
+
+- **Draw / Pan** switches a drag between painting and moving the canvas.
+- **−/+ zoom** changes the integer number of screen pixels per skin pixel.
+- **Layers** selects, adds, locks or hides painting planes. **Parts** selects any
+  combination of sprite targets, shows their rectangles, and enables all-state edits.
+- **Tools** selects brushes, width, fill, preset colors or an exact HEX color.
+- **States** previews pressed/inactive controls and all slider frames, and lists history.
+- **Files** opens WSZ/CSTUDIO files through Android's picker, exports either format,
+  saves/restores a layered draft, or applies the edited skin to the player.
+- **Player** or Android Back saves a recoverable draft and returns to playback.
+  Documents and undo history remain alive when switching between player and Studio.
+
+MCP uses the same active document on Android. For a USB/emulator connection:
+`adb -s DEVICE_SERIAL forward tcp:18766 tcp:18765`, then POST MCP requests to
+`http://127.0.0.1:18766/mcp`. The server binds only to device loopback. GPU screenshot
+capture is currently provided by the desktop preview; Android supports the native
+editor image, atlas inspection and drawing commands.
+
+## Reproduce phone scaling on desktop
+
+```sh
+cargo run -- --touch-preview
+cargo run -- --touch-preview --studio
+```
+
+The handset-sized preview uses the real stacked player, Settings and touch editor.
+Check it as well as the integer-zoom desktop Studio: physical sprite edges must be
+snapped from their absolute native coordinates, with widths derived from the snapped
+endpoints. Rounding positions and widths independently leaves gaps at fractional
+phone scales. The stacked panels share the same pixel-grid origin.
 
 ## Sprite rectangles and painting layers
 
@@ -99,6 +146,30 @@ combination and draw across panel boundaries in one undoable transaction.
 `preview_playlist_height` determines the assembled playlist height (145–522).
 Repeated playlist borders are tiled and cropped at native size; painting a shared
 tile necessarily affects each repetition. The inspector exposes those mappings.
+
+The Python `CanvasPen` helper rejects an ownership rectangle that includes shared
+playlist borders by default (`repeats='error'`). Previously it silently produced
+only the non-repeated parts of a patch. Use `repeats='shared'` to edit one tile
+copy and every alias, or explicitly use `repeats='skip'` when another operation
+owns those borders. Multiple overlapping aliases remain rejected. The GUI and
+direct `studio_draw` Auto target paint the visible source at each point, including
+shared tiles. Selected parts and masks deliberately restrict that coverage.
+
+Classic playlist rails repeat every 29 rows. The footer follows the final cropped
+tile at any playlist height, so an authored rail-to-footer connection must match
+every tile phase. The list's solid fill and live text have no static bitmap source.
+Auto drawing reports attempted pixels in those holes: the GUI shows a status
+message; `studio_draw` returns `unmapped_pixels` and up to eight coordinates in
+`unmapped_sample`. Intentional part selection and paint masks are not holes.
+The main docking row 115 aliases source row 114; they cannot hold different pixels.
+
+Run `cargo test --lib join_tests` to compare painting with one unsplit bitmap:
+600 MCP cases cover pixels, lines, filled rectangles, ellipses, paths, curves,
+tufts, stamps, palette ramps and glass at panel/title/tile/footer joins, both
+borders, and five playlist heights. GUI preview, lifted stamps, cancellation,
+selected parts, masks, mirrors, layers, undo/redo and WSZ reload have additional
+checks. These tests verify pixel routing; they do not judge whether separate
+authored highlights meet visually.
 
 A temporary free-placement renderer was explored and rejected because it changed
 the skin definitions. It is not part of the supported skin format.

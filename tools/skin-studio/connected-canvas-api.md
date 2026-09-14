@@ -22,12 +22,18 @@ apply(patch)                          # one painting plane + one undo
 | Titles | `titles='both'` default; `'active'`, `'inactive'`, `'none'` |
 | Runtime | `preserve_runtime=True`: excludes timer cells, spectrum, song/bitrate/rate, EQ curve, PL text/times |
 | Mask | `exclude=[[x,y,w,h], ...]`; subtracts exact native rectangles |
-| Shared PL tiles/rails | `repeats='skip'` default; listed in `plan.skipped` |
+| Shared PL tiles/rails | `repeats='error'` default: plan lists omissions; parts/prepare reject partial patches. `repeats='skip'` explicitly permits omission |
 | Shared-source edit | `repeats='shared'`: select ONE copy; repeats outside ownership rect too; listed in `plan.aliases` |
 | Ambiguous repetition | Multiple copies with overlapping atlas ownership raise `ValueError`; narrow `rect`/mask |
 | Dock row | Canvas y115 aliases main y114. Drawing y114 controls both; a y115-only crop maps to114 |
 | Classic PL list area | No static bitmap; reported in `plan.skipped`; PLEDIT.TXT controls fill/text |
 | Rasterization | Studio native geometry only. No scaling, bitmap generation, antialias filtering, or blur |
+
+Runtime protection masks the *static paint beneath* live readouts. When rebuilding
+an entire background illustration, use `preserve_runtime=False` to replace old
+background fragments there too. This does not edit the separate glyph/control
+atlases or disable live text/visualizers. Inspect the actual player afterward;
+retaining an old rectangular background mask can visibly cut a new curved shape.
 
 ## Inspect the repair and its surrounding pixels
 

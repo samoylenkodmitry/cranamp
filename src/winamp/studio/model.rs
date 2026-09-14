@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod join_tests;
 mod patch;
 use super::mapping::{self, Layer};
 use anyhow::{bail, Context, Result};
@@ -124,6 +126,8 @@ pub struct Document {
     discarded_history: usize,
     pub selection: Option<[u32; 4]>,
     pub cluster: Option<RgbaImage>,
+    /// Attempted Auto pixels with no bitmap source (for example classic list fill).
+    unmapped_pixels: BTreeSet<[i32; 2]>,
 }
 impl Document {
     /// A new classic atlas set with zero inherited artwork or metadata.
@@ -172,6 +176,7 @@ impl Document {
             discarded_history: 0,
             selection: None,
             cluster: None,
+            unmapped_pixels: BTreeSet::new(),
         }
     }
     pub fn open(bytes: &[u8], path: Option<String>) -> Result<Self> {
@@ -209,7 +214,7 @@ impl Document {
             planes: vec![],
             view: View::default(),
             revision: 0,
-            message: "Draw on the assembled skin. Every pixel maps back to its atlas.".into(),
+            message: "Draw on assembled bitmap surfaces. Shared tiles repeat; classic list fill has no bitmap source.".into(),
             path,
             dirty: false,
             saved: Snapshot {
@@ -220,6 +225,7 @@ impl Document {
             discarded_history: 0,
             selection: None,
             cluster: None,
+            unmapped_pixels: BTreeSet::new(),
             stroke: None,
             images,
             files,
@@ -281,6 +287,7 @@ impl Document {
     }
     pub fn checkpoint(&mut self) {
         self.finish_stroke();
+        self.unmapped_pixels.clear();
         self.stroke = Some(self.snapshot());
     }
     pub fn finish_stroke(&mut self) {
@@ -302,6 +309,13 @@ impl Document {
                     "Human",
                 );
                 self.message = format!("{} · {} · {target}", self.view.brush, self.view.panel);
+                self.revision += 1;
+            }
+            if !self.unmapped_pixels.is_empty() {
+                self.message = format!(
+                    "{} pixels have no bitmap source; classic playlist fill cannot store strokes",
+                    self.unmapped_pixels.len()
+                );
                 self.revision += 1;
             }
         }
@@ -942,6 +956,7 @@ impl Document {
         Ok(count)
     }
     pub fn shape_stroke(&mut self, from: [i32; 2], to: [i32; 2]) -> Result<usize> {
+        self.unmapped_pixels.clear();
         if self.view.brush == "lift" {
             let (w, h) = self.canvas_size();
             let x = from[0].min(to[0]).clamp(0, w as i32 - 1) as u32;
@@ -1056,6 +1071,9 @@ impl Document {
                     .filter(|l| selection.contains(&l.id) && l.map(x as u32, y as u32).is_some())
                     .collect()
             };
+            if selection.is_empty() && hits.is_empty() {
+                self.unmapped_pixels.insert([x, y]);
+            }
             // Shared source pixels may be reached through multiple selected instances.
             let mut written = BTreeSet::new();
             for l in hits {
@@ -1141,6 +1159,7 @@ impl Document {
             parse_color(c)?;
         }
         let previous_mask = std::mem::replace(&mut self.view.mask_colors, mask);
+        let previous_unmapped = std::mem::take(&mut self.unmapped_pixels);
         let previous_selection = std::mem::replace(&mut self.view.layers, selected.clone());
         let paint_layers = self.layers();
         let mut count = 0;
@@ -1212,6 +1231,7 @@ impl Document {
             self.restore(before);
             self.revision = before_revision;
             self.dirty = before_dirty;
+            self.unmapped_pixels = previous_unmapped;
             return Err(error);
         }
         if before != self.snapshot() {
@@ -1240,7 +1260,18 @@ impl Document {
             "Painted {count} atlas pixels{}",
             if all { " across all variants" } else { "" }
         );
-        Ok(json!({"pixels_written":count,"revision":self.revision}))
+        if !self.unmapped_pixels.is_empty() {
+            self.message.push_str(&format!(
+                "; {} pixels have no bitmap source (classic playlist fill)",
+                self.unmapped_pixels.len()
+            ));
+            if before_revision == self.revision {
+                self.revision += 1;
+            }
+        }
+        Ok(json!({"pixels_written":count,"revision":self.revision,
+            "unmapped_pixels":self.unmapped_pixels.len(),
+            "unmapped_sample":self.unmapped_pixels.iter().take(8).collect::<Vec<_>>()}))
     }
     pub fn recolor(&mut self, args: &Value) -> Result<Value> {
         self.finish_stroke();
