@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "cranamp"
-version = "0.1.59"
+version = "0.1.60"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -852,6 +852,8 @@ dependencies = [
  "getrandom 0.4.3",
  "image",
  "log",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",

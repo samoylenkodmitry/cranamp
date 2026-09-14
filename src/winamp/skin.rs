@@ -21,10 +21,53 @@ pub struct WinampSkin {
     pub numbers: ImageBitmap,
     pub eqmain: ImageBitmap,
     pub pledit: ImageBitmap,
+    /// Optional native-size playlist glass, tiled and cropped rather than stretched.
+    pub playlist_background: Option<ImageBitmap>,
+    /// Eleven independent 14 × 25 native EQ handles, normal above pressed.
+    pub eq_handles: Option<ImageBitmap>,
+    /// Optional native selection row, including its left-hand track marker.
+    pub playlist_selection: Option<ImageBitmap>,
     pub text: ImageBitmap,
     pub display_text_color: [u8; 4],
     pub palette: SkinPalette,
     pub viscolor: VisColor,
+    pub layout: SkinLayout,
+}
+
+/// Optional Cranamp layout data; ordinary WSZ files retain classic placement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SkinLayout {
+    pub footer: FooterLayout,
+    /// Native travel within the 63-pixel track; reserve the remainder for artwork.
+    pub eq_travel: u8,
+    /// Let native artwork show through unlit visualizer pixels.
+    pub visualizer_glass: bool,
+}
+impl Default for SkinLayout {
+    fn default() -> Self {
+        Self {
+            footer: FooterLayout::Classic,
+            eq_travel: 52,
+            visualizer_glass: false,
+        }
+    }
+}
+impl SkinLayout {
+    pub fn validate(&self) -> Result<()> {
+        anyhow::ensure!(
+            (1..=52).contains(&self.eq_travel),
+            "eq_travel must be 1..52 native pixels"
+        );
+        Ok(())
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FooterLayout {
+    #[default]
+    Classic,
+    TimeTotal,
 }
 
 /// Colors parsed from `PLEDIT.TXT`. Defaults match the bundled skin so missing
@@ -134,6 +177,50 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
     let display_text_color =
         sample_text_bitmap_color(&text).unwrap_or_else(|| default_display_text_color(viscolor));
 
+    let layout: SkinLayout = files
+        .get("cranamp.json")
+        .map(|data| serde_json::from_slice(data))
+        .transpose()
+        .context("invalid cranamp.json layout")?
+        .unwrap_or_default();
+    layout.validate()?;
+    let playlist_background = files
+        .get("plbg.bmp")
+        .map(|bytes| {
+            let image = decode_bmp(bytes).context("failed to decode plbg.bmp")?;
+            anyhow::ensure!(
+                image.width() == 243 && image.height() == 203,
+                "plbg.bmp must be 243 × 203 native pixels"
+            );
+            Ok::<_, anyhow::Error>(image)
+        })
+        .transpose()?;
+    let eq_handles = files
+        .get("eqhandles.bmp")
+        .map(|bytes| {
+            let image = decode_bmp(bytes).context("failed to decode eqhandles.bmp")?;
+            anyhow::ensure!(
+                image.width() == 154 && image.height() == 50,
+                "eqhandles.bmp must be 154 × 50 native pixels"
+            );
+            anyhow::ensure!(
+                layout.eq_travel <= 38,
+                "independent EQ handles need eq_travel <= 38"
+            );
+            Ok::<_, anyhow::Error>(image)
+        })
+        .transpose()?;
+    let playlist_selection = files
+        .get("plselection.bmp")
+        .map(|bytes| {
+            let image = decode_bmp(bytes).context("failed to decode plselection.bmp")?;
+            anyhow::ensure!(
+                image.width() == 243 && image.height() == 11,
+                "plselection.bmp must be 243 × 11 native pixels"
+            );
+            Ok::<_, anyhow::Error>(image)
+        })
+        .transpose()?;
     Ok(WinampSkin {
         main: decode("main.bmp")?,
         titlebar: decode("titlebar.bmp")?,
@@ -147,10 +234,14 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
         numbers: decode("numbers.bmp")?,
         eqmain: decode("eqmain.bmp")?,
         pledit: decode("pledit.bmp")?,
+        playlist_background,
+        eq_handles,
+        playlist_selection,
         text,
         display_text_color,
         palette,
         viscolor,
+        layout,
     })
 }
 
@@ -209,7 +300,7 @@ fn quantize_color_channel(channel: u8) -> u8 {
     (channel & 0xf8).saturating_add(4)
 }
 
-fn parse_pledit_txt(bytes: &[u8]) -> SkinPalette {
+pub(super) fn parse_pledit_txt(bytes: &[u8]) -> SkinPalette {
     let text = decode_text(bytes);
     let mut palette = SkinPalette::default();
     let mut in_text_section = true; // tolerate files without an explicit header

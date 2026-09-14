@@ -306,6 +306,8 @@ jobs:
             cp "${{ matrix.binary }}" "$package_dir/"
           fi
           cp README.md LICENSE "$package_dir/"
+          mkdir -p "$package_dir/skins"
+          cp "assets/skins/Catamp Silverplay.wsz" "assets/skins/Catamp Silverplay.cstudio" "$package_dir/skins/"
           cp assets/demo-music/generated/*.mp3 "$package_dir/demo-music/"
           cp assets/demo-music/generated/cranamp-demo-playlist.m3u "$package_dir/demo-music/"
           cp assets/demo-music/README.md assets/demo-music/LICENSES.md "$package_dir/demo-music/"

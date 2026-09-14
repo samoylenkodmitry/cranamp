@@ -120,23 +120,25 @@ fn pump(shell: &mut AppShell<HitGraphRenderer>) {
     }
 }
 
-fn collect_texts(node: &cranpose_ui::LayoutBox, out: &mut Vec<String>) {
-    if let Some(text) = node.node_data.modifier_slices().text_content() {
-        out.push(text.to_string());
-    }
-    for child in &node.children {
-        collect_texts(child, out);
-    }
-}
-
+// Native pixel labels are images with text descriptions. Read the semantic
+// tree so the same checks cover those labels and Unicode/system text.
 fn visible_texts(shell: &mut AppShell<HitGraphRenderer>) -> Vec<String> {
-    shell.with_layout_tree(|tree| {
-        let mut texts = Vec::new();
-        if let Some(tree) = tree {
-            collect_texts(tree.root(), &mut texts);
+    fn collect(node: &cranpose_ui::SemanticsNode, out: &mut Vec<String>) {
+        if let cranpose_ui::SemanticsRole::Text { value } = &node.role {
+            out.push(value.clone());
+        } else if let Some(description) = &node.description {
+            out.push(description.clone());
         }
-        texts
-    })
+        for child in &node.children {
+            collect(child, out);
+        }
+    }
+    shell.set_semantics_enabled(true);
+    let mut texts = Vec::new();
+    if let Some(tree) = shell.semantics_tree() {
+        collect(tree.root(), &mut texts);
+    }
+    texts
 }
 
 fn contains(texts: &[String], needle: &str) -> bool {
@@ -190,7 +192,7 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         "skins section should appear; visible={after:?}"
     );
     assert!(
-        contains(&after, "Bundled"),
+        contains(&after, "Catamp Silverplay (Bundled)"),
         "bundled skin row should be listed; visible={after:?}"
     );
     assert!(
@@ -200,6 +202,11 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
     assert!(
         contains(&after, "UPDATES"),
         "updates section should appear; visible={after:?}"
+    );
+
+    assert!(
+        contains(&after, "Open Skin Studio"),
+        "desktop settings should expose Skin Studio; visible={after:?}"
     );
 
     // Tapping outside the centered panel hits the dim backdrop, which dismisses

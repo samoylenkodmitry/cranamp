@@ -28,6 +28,20 @@ Web widget: https://samoylenkodmitry.github.io/cranamp/
 - If no user playlist is loaded at startup, Cranamp loads the demo MP3 playlist from the distributable `demo-music/` folder when it is present.
 - The playlist window's LIST menu adds OPEN URL next to IMPORT/EXPORT M3U. Paste any `http(s)` link: a playlist (`.m3u`, `.m3u8`, `.pls`) is fetched and loaded, and a direct audio link is added and played. Cranamp works out which it got from the extension, falling back to the server's `Content-Type` when the URL has none, and says so on the status line when a link is unreachable, blocked by CORS, or not audio. Relative entries in a fetched playlist resolve against that playlist's URL.
 
+## Catamp and Skin Studio
+
+Catamp Silverplay is the bundled default skin on desktop, Android, iOS and web.
+An existing custom skin selection is preserved. Select **Catamp Silverplay
+(Bundled)** in Settings to switch back to it.
+
+On desktop, open **Settings → Open Skin Studio** to edit the selected skin in a
+separate Cranpose window while playback continues. The bundled Catamp opens with
+seven editable painting layers. Studio supports native pixel drawing, sprite
+state previews, layer masks, undo/redo, and a local MCP interface. Export a `.wsz`
+and add it through Settings to use your edits in the player.
+
+See [Skin Studio](docs/skin-studio/README.md) for the GUI and MCP workflow.
+
 ## Build
 
 ```bash
