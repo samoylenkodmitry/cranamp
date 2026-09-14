@@ -341,7 +341,7 @@ pub(super) fn parse_pledit_txt(bytes: &[u8]) -> SkinPalette {
     palette
 }
 
-fn parse_viscolor_txt(bytes: &[u8]) -> VisColor {
+pub(super) fn parse_viscolor_txt(bytes: &[u8]) -> VisColor {
     let text = decode_text(bytes);
     let mut palette = VisColor::default().0;
     let mut idx = 0;

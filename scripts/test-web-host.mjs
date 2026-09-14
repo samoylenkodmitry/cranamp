@@ -17,6 +17,10 @@ async function host(supported = true) {
       this.handlers.set(name, (this.handlers.get(name) || []).filter(h => h !== handler));
     },
     async fire(name) { for (const handler of this.handlers.get(name) || []) await handler({ type: name }); },
+    dispatchEvent(event) {
+      for (const handler of this.handlers.get(event.type) || []) handler(event);
+      return true;
+    },
   });
   const element = () => ({ ...events(), style: {}, disabled: true,
     appendChild(child) { child.parentElement = this; },
@@ -34,10 +38,10 @@ async function host(supported = true) {
     getElementById: () => floatingHost,
   } };
   let requests = 0;
-  const win = { ...events(), setInterval() {}, Audio: function() {} };
+  const win = { ...events(), setInterval() {}, setTimeout() {}, Audio: function() {} };
   if (supported) win.documentPictureInPicture = { async requestWindow() { requests++; return pip; } };
   await runInNewContext(`(async () => {${script}})()`, {
-    window: win, document: doc, console, init: async () => {}, run_app: async () => {},
+    window: win, document: doc, console, Event, init: async () => {}, run_app: async () => {},
   });
   return { win, canvas, main, button, pip, floatingHost, requests: () => requests };
 }

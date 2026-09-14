@@ -14,7 +14,7 @@ mod pixel_grid;
 mod pixel_text;
 mod skin;
 mod sprites;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+#[cfg(not(target_os = "ios"))]
 pub mod studio;
 
 use std::cell::Cell;
@@ -1460,22 +1460,14 @@ fn receive_skin_pick(
     }
 }
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-#[composable]
-fn WebSurfaceSizeEffect(state: MutableState<WinampState>) {
-    let snapshot = state.get();
-    cranpose_core::SideEffect(move || {
-        let layout = web_stacked_layout(&snapshot);
-        // A host with no resize facility refuses, which is the answer everywhere
-        // the stacked window layout is not the browser's.
-        let _ = cranpose_services::request_host_surface_size(
-            stacked_surface_width(layout),
-            stacked_surface_height(&snapshot, layout),
-        );
-    });
-}
-
-#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+/// The browser page is the stage, not a frame drawn around the player.
+///
+/// This used to ask the host to shrink its surface to the stacked player's
+/// exact size. That is what kept the web build a 275-pixel column: the canvas
+/// was resized to the artwork, so there was nowhere for a window to be moved
+/// to, and any page CSS that grew the canvas afterwards only stretched the
+/// smaller surface across it. The browser now keeps the whole viewport and the
+/// player floats on it, exactly as it does on the desktop.
 #[composable]
 fn WebSurfaceSizeEffect(_state: MutableState<WinampState>) {}
 
@@ -1804,7 +1796,7 @@ fn progress_fraction(elapsed: f32, duration: Option<f32>) -> f32 {
 pub fn WinampWidgetApp() {
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
     {
-        WinampStackedApp();
+        WinampSurfaceApp();
     }
 
     #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
@@ -1821,62 +1813,79 @@ pub fn WinampWidgetApp() {
 /// windows on a black screen. What genuinely differs between them is two
 /// things, and neither is the stacking: which layout policy applies, and
 /// whether a window can be dragged. Both are named seams below.
+/// The in-app editor, for the surfaces that cannot open a second window:
+/// Android, the browser, and the desktop touch preview. Composes nothing unless
+/// the player asked for it, but is always called so the session map below keeps
+/// its identity across trips back to playback.
+#[cfg(not(target_os = "ios"))]
 #[composable]
-pub fn WinampStackedApp() {
-    let tab_state = remember_winamp_tab_state();
-    let skin_state = remember_winamp_skin(tab_state.player);
-    WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
-    {
-        // Keep editable documents and their undo stacks alive while the player
-        // is visible. Opening another selected skin gets its own session.
-        let sessions = cranpose_core::remember(|| {
-            std::collections::BTreeMap::<Option<String>, studio::SharedDocument>::new()
-        });
-        let snapshot = tab_state.player.get();
-        if snapshot.studio_open {
-            let key = snapshot.skin_path.clone();
-            let cached = sessions.with(|all| all.get(&key).cloned());
-            let opened = cached
-                .map(Ok)
-                .unwrap_or_else(|| studio::new_mobile_document(key.as_deref()));
-            match opened {
-                Ok(document) => {
-                    sessions.update(|all| {
-                        all.insert(key, document.clone());
-                    });
-                    let applied_document = document.clone();
-                    studio::MobileSkinStudio(
-                        document,
-                        move || {
-                            tab_state.player.update(|s| s.studio_open = false);
-                        },
-                        move |bytes, path| match load_skin(&bytes) {
+fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+    // Keep editable documents and their undo stacks alive while the player
+    // is visible. Opening another selected skin gets its own session.
+    let sessions = cranpose_core::remember(|| {
+        std::collections::BTreeMap::<Option<String>, studio::SharedDocument>::new()
+    });
+    let snapshot = state.get();
+    if !snapshot.studio_open {
+        return;
+    }
+    let key = snapshot.skin_path.clone();
+    let cached = sessions.with(|all| all.get(&key).cloned());
+    let opened = cached
+        .map(Ok)
+        .unwrap_or_else(|| studio::new_mobile_document(key.as_deref()));
+    match opened {
+        Ok(document) => {
+            sessions.update(|all| {
+                all.insert(key, document.clone());
+            });
+            let applied_document = document.clone();
+            studio::AdaptiveSkinStudio(
+                document,
+                studio::StudioHost {
+                    close: Rc::new(move || {
+                        state.update(|s| s.studio_open = false);
+                    }),
+                    apply: Rc::new(
+                        move |bytes: Vec<u8>, path: String| match load_skin(&bytes) {
                             Ok(skin) => {
                                 sessions.update(|all| {
                                     all.insert(Some(path.clone()), applied_document.clone());
                                 });
                                 skin_state.set(Ok(skin));
-                                tab_state.player.update(|s| {
+                                state.update(|s| {
                                     s.skin_path = Some(path);
                                     s.status = "Applied Studio skin".into();
                                 });
                             }
-                            Err(error) => tab_state.player.update(|s| s.status = error.to_string()),
+                            Err(error) => state.update(|s| s.status = error.to_string()),
                         },
-                    );
-                }
-                Err(error) => {
-                    let message = error.to_string();
-                    cranpose_core::SideEffect(move || {
-                        tab_state.player.update(|s| {
-                            s.studio_open = false;
-                            s.status = format!("Skin Studio: {message}");
-                            s.settings_open = true;
-                        })
-                    });
-                }
-            }
+                    ),
+                },
+            );
+        }
+        Err(error) => {
+            let message = error.to_string();
+            cranpose_core::SideEffect(move || {
+                state.update(|s| {
+                    s.studio_open = false;
+                    s.status = format!("Skin Studio: {message}");
+                    s.settings_open = true;
+                })
+            });
+        }
+    }
+}
+
+#[composable]
+pub fn WinampStackedApp() {
+    let tab_state = remember_winamp_tab_state();
+    let skin_state = remember_winamp_skin(tab_state.player);
+    WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
+    #[cfg(not(target_os = "ios"))]
+    {
+        WinampStudioSurface(tab_state.player, skin_state);
+        if tab_state.player.get().studio_open {
             return;
         }
     }
@@ -2054,6 +2063,13 @@ pub fn WinampSurfaceApp() {
     let tab_state = remember_winamp_tab_state();
     let skin_state = remember_winamp_skin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
+    #[cfg(not(target_os = "ios"))]
+    {
+        WinampStudioSurface(tab_state.player, skin_state);
+        if tab_state.player.get().studio_open {
+            return;
+        }
+    }
     let skin = match skin_state.get() {
         Ok(skin) => skin,
         Err(error) => {
@@ -2417,12 +2433,12 @@ fn stacked_skin_height(snapshot: &WinampState, playlist_height: f32) -> f32 {
         }
 }
 
-#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
+#[cfg(target_os = "android")]
 fn stacked_surface_width(layout: StackedLayout) -> f32 {
     MAIN_WIDTH * layout.scale
 }
 
-#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
+#[cfg(target_os = "android")]
 fn stacked_surface_height(snapshot: &WinampState, layout: StackedLayout) -> f32 {
     stacked_skin_height(snapshot, layout.playlist_height) * layout.scale
 }
@@ -4090,7 +4106,7 @@ fn SettingsPanel(
                             }
                         },
                     );
-                    #[cfg(target_os = "android")]
+                    #[cfg(any(target_os = "android", target_arch = "wasm32"))]
                     SettingsActionButton("Open Skin Studio".into(), SETTINGS_CARD, move || {
                         state.update(|s| {
                             s.settings_open = false;

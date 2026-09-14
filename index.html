@@ -24,22 +24,29 @@
     }
 
     body {
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 18px;
+      height: 100vh;
+      overflow: hidden;
     }
 
+    /* The canvas is the page. Cranamp floats its own windows inside it, so the
+       host must not crop the surface down to the player's size. */
     .stage {
-      display: grid;
-      gap: 8px;
-      justify-items: end;
+      position: relative;
+      width: 100vw;
+      height: 100vh;
     }
 
     main {
-      width: 275px;
-      height: 493px;
+      width: 100%;
+      height: 100%;
       background: #090b10;
+    }
+
+    .pip-button {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 1;
     }
 
     .pip-button {
@@ -93,13 +100,15 @@
       <span class="pip-icon" aria-hidden="true"></span>
     </button>
     <main id="cranamp-host">
-      <canvas id="cranamp-canvas" width="275" height="493"></canvas>
+      <canvas id="cranamp-canvas"></canvas>
     </main>
   </div>
 
   <script type="module">
     import init, { run_app } from "./pkg/cranamp.js";
 
+    /// The player's own size. It is the floating window's minimum, never the
+    /// embedded canvas' size -- embedded, the canvas is the whole viewport.
     const DEFAULT_SURFACE_SIZE = { width: 275, height: 493 };
     const host = document.getElementById("cranamp-host");
     const canvas = document.getElementById("cranamp-canvas");
@@ -142,10 +151,10 @@
       canvas.style.touchAction = "none";
 
       if (!targetWindow || targetWindow.closed) {
-        canvas.style.width = `${width}px`;
-        canvas.style.height = `${height}px`;
-        host.style.width = `${width}px`;
-        host.style.height = `${height}px`;
+        // Embedded: fill the viewport and let Cranamp place its windows. The
+        // host element is sized by the stylesheet, not from the player size.
+        canvas.style.width = "100%";
+        canvas.style.height = "100%";
         return;
       }
 
@@ -315,8 +324,33 @@
 
     window.cranampCurrentSurfaceSize = measuredCanvasSize;
 
+    // The renderer measures the canvas once at startup and then only when the
+    // page reports a resize. Give it the real box before it starts, and tell it
+    // whenever the box changes -- otherwise a canvas that grows from its
+    // intrinsic size to the viewport keeps rendering a small scene stretched
+    // across the whole page.
+    function syncSurfaceToBox() {
+      const { width, height } = measuredCanvasSize();
+      const ratio = window.devicePixelRatio || 1;
+      const buffer = {
+        width: Math.max(1, Math.round(width * ratio)),
+        height: Math.max(1, Math.round(height * ratio)),
+      };
+      if (canvas.width !== buffer.width || canvas.height !== buffer.height) {
+        canvas.width = buffer.width;
+        canvas.height = buffer.height;
+      }
+    }
+
     applyCanvasSize();
+    syncSurfaceToBox();
     window.setInterval(() => applyCanvasSize(pipWindow), 250);
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(() => {
+        syncSurfaceToBox();
+        window.dispatchEvent(new Event("resize"));
+      }).observe(host);
+    }
 
     // Cranpose plays through a detached <audio> element that it wires into an
     // AudioContext the first time the visualiser or the equalizer asks for it.
@@ -341,6 +375,7 @@
     await init();
     await run_app();
     applyCanvasSize(pipWindow);
+    syncSurfaceToBox();
     enablePiPButton();
   </script>
 </body>

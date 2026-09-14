@@ -8,6 +8,7 @@ mod mcp;
 mod mobile;
 mod model;
 pub(crate) use mobile::new_mobile_document;
+use mobile::publish;
 pub use mobile::MobileSkinStudio;
 mod study;
 use cranpose_core;
@@ -22,17 +23,45 @@ use cranpose_ui_graphics::Rect;
 use model::{parse_color, Document};
 use serde_json::json;
 use std::{
+    rc::Rc,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::Duration,
 };
+
+/// How the editor hands work back to a player it is living inside.
+///
+/// `None` on the desktop, where the editor is its own window and the player is
+/// another process entirely. `Some` on Android and the web, where the editor
+/// borrows the player's single surface and has to be able to give it back.
+#[derive(Clone)]
+pub struct StudioHost {
+    pub close: Rc<dyn Fn()>,
+    pub apply: Rc<dyn Fn(Vec<u8>, String)>,
+}
+
+/// Two hosts are the same host when they carry the same callbacks, which is
+/// what the composer needs in order to decide the editor has not changed.
+impl PartialEq for StudioHost {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.close, &other.close) && Rc::ptr_eq(&self.apply, &other.apply)
+    }
+}
 #[derive(Clone)]
 pub struct SharedDocument(Arc<Mutex<Document>>);
 impl PartialEq for SharedDocument {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl SharedDocument {
+    /// The colour a viewer actually sees at a canvas pixel, so the framework
+    /// tests can assert on the picture rather than on the atlases behind it.
+    pub fn rendered_pixel(&self, x: u32, y: u32) -> Option<[u8; 4]> {
+        let doc = self.0.lock().ok()?;
+        doc.render().get_pixel_checked(x, y).map(|p| p.0)
     }
 }
 impl std::ops::Deref for SharedDocument {
@@ -43,9 +72,139 @@ impl std::ops::Deref for SharedDocument {
 }
 const BG: Color = Color(0.065, 0.077, 0.10, 1.);
 const CARD: Color = Color(0.105, 0.125, 0.16, 1.);
+/// The sidebar and the tool column. A shade under `CARD` so that a button
+/// resting on one is visibly a button: both were `CARD`, which left every
+/// unlit control on them reading as a line of text.
+const PANEL_BACK: Color = Color(0.079, 0.094, 0.122, 1.);
 const FG: Color = Color(0.89, 0.93, 0.98, 1.);
 const DIM: Color = Color(0.55, 0.63, 0.73, 1.);
 const ACCENT: Color = Color(0.13, 0.40, 0.53, 1.);
+/// Reserved for the two buttons that can discard unexported work.
+const DANGER: Color = Color(0.38, 0.14, 0.16, 1.);
+/// A switch that is on: lit enough to read across the window, but never
+/// mistakable for the solid `ACCENT` of an open drawer.
+const CARD_ON: Color = Color(0.10, 0.19, 0.24, 1.);
+const ACCENT_LIT: Color = Color(0.36, 0.72, 0.88, 1.);
+const PIP_OFF: Color = Color(0.22, 0.26, 0.32, 1.);
+/// The status line when it is carrying a refusal or a failure.
+const ALERT: Color = Color(0.98, 0.62, 0.55, 1.);
+
+// The desktop editor is an absolutely positioned scene: a fixed sidebar and
+// toolbars, and a canvas that takes everything left over. `Scene` is the one
+// place that knows the window size, so the drawing hit test and the drawer can
+// agree on exactly which strip of canvas is covered at any window size.
+/// The canvas starts under two toolbar rows and the canvas' own header line.
+/// The skin is a 275x377 portrait document, so every point of chrome above it
+/// is a point of zoom it cannot reach: at 2x it needs 754, which only fits in
+/// a window this shallow above and below the canvas.
+const CANVAS_ORIGIN: (f32, f32) = (230., 128.);
+/// The size the scene was drawn for. A smaller window keeps this layout and
+/// clips, rather than collapsing every absolute coordinate on top of itself.
+const SCENE_MIN: (f32, f32) = (1160., 850.);
+/// The docked tool column. Wider than the drawer was when it covered the
+/// canvas, because it no longer has to be grudging about the room it takes.
+const DRAWER_WIDTH: f32 = 380.;
+const DRAWER_MAX: f32 = 480.;
+/// Below this the canvas is not worth splitting, and the drawer goes back to
+/// covering it.
+const CANVAS_MIN: f32 = 320.;
+/// Room under the canvas for the sprite-state row, the frame slider and the
+/// status line.
+const CANVAS_BOTTOM_RESERVE: f32 = 102.;
+/// Width of the scrollbars along the canvas' right and bottom edges.
+const SCROLLBAR: f32 = 14.;
+/// The two toolbar rows: what the document does, then what the drawers show.
+const ACTION_ROW: f32 = 40.;
+const PANEL_ROW: f32 = 78.;
+
+#[derive(Clone, Copy, PartialEq)]
+struct Scene {
+    width: f32,
+    height: f32,
+}
+
+impl Scene {
+    fn new(width: f32, height: f32) -> Self {
+        Self {
+            width: width.max(SCENE_MIN.0),
+            height: height.max(SCENE_MIN.1),
+        }
+    }
+    /// Distance in from the right edge, for controls that track the window.
+    fn right(&self, inset_at_min_width: f32) -> f32 {
+        self.width - (SCENE_MIN.0 - inset_at_min_width)
+    }
+    fn canvas(&self) -> (f32, f32, f32, f32) {
+        (
+            CANVAS_ORIGIN.0,
+            CANVAS_ORIGIN.1,
+            self.width - CANVAS_ORIGIN.0 - 30.,
+            self.height - CANVAS_ORIGIN.1 - CANVAS_BOTTOM_RESERVE,
+        )
+    }
+    fn drawer(&self) -> (f32, f32, f32, f32) {
+        let (x, y, w, h) = self.canvas();
+        (x + w - DRAWER_WIDTH, y, DRAWER_WIDTH, h)
+    }
+    /// How the canvas panel and the docked tool column divide the room left
+    /// over beside the sidebar. A 275-wide document in a 1200-wide panel is
+    /// mostly empty panel; the room is worth more as tools that are always on
+    /// screen than as margin.
+    fn split(&self) -> (f32, f32) {
+        let area = self.canvas().2;
+        if area - DRAWER_WIDTH - 12. < CANVAS_MIN {
+            return (area, 0.);
+        }
+        let drawer = (area * 0.36).clamp(DRAWER_WIDTH, DRAWER_MAX);
+        (area - drawer - 12., drawer)
+    }
+    fn state_y(&self) -> f32 {
+        self.height - 96.
+    }
+    fn slider_y(&self) -> f32 {
+        self.height - 58.
+    }
+    fn message_y(&self) -> f32 {
+        self.height - 28.
+    }
+}
+
+/// The largest whole-pixel zoom at which the whole skin fits the canvas. Never
+/// fractional: a classic skin is native pixels, and half a pixel is a lie.
+fn fit_zoom(canvas: (f32, f32), document: (u32, u32)) -> u8 {
+    (1..=8u8)
+        .rev()
+        .find(|z| {
+            document.0 as f32 * *z as f32 <= canvas.0 && document.1 as f32 * *z as f32 <= canvas.1
+        })
+        .unwrap_or(1)
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::{fit_zoom, Scene, CANVAS_MIN, DRAWER_WIDTH};
+
+    /// The window the editor opens at has to reach 2x on the joined skin, or
+    /// the default zoom is a compromise nobody asked for.
+    #[test]
+    fn the_default_window_fits_the_whole_skin_at_two_times() {
+        let scene = Scene::new(1280., 1000.);
+        let (canvas_w, drawer_w) = scene.split();
+        let canvas_h = scene.canvas().3;
+        assert!(drawer_w >= DRAWER_WIDTH, "the tool column stays docked");
+        assert_eq!(fit_zoom((canvas_w, canvas_h), (275, 377)), 2);
+    }
+
+    /// A window too small to hold both goes back to one full-width canvas
+    /// rather than a canvas too narrow to draw in.
+    #[test]
+    fn a_narrow_window_keeps_the_canvas_whole() {
+        let scene = Scene::new(0., 0.);
+        let (canvas_w, drawer_w) = scene.split();
+        assert!(canvas_w >= CANVAS_MIN);
+        assert!(drawer_w == 0. || canvas_w >= CANVAS_MIN);
+    }
+}
 
 fn presentation_origin(scene: [f32; 2], player: [f32; 2]) -> [f32; 2] {
     // Keep native pixels on the logical pixel grid, including scale-1 GPU
@@ -98,13 +257,25 @@ mod presentation_tests {
     }
 }
 
-#[cfg(all(feature = "renderer-wgpu", not(target_os = "android")))]
+#[cfg(all(
+    feature = "renderer-wgpu",
+    not(target_os = "android"),
+    not(target_arch = "wasm32")
+))]
 static CAPTURE: std::sync::OnceLock<Mutex<cranpose::Robot>> = std::sync::OnceLock::new();
 
 static COMPOSED_REVISION: AtomicU64 = AtomicU64::new(0);
+/// The document revision whose status line is a failure rather than a report.
+/// Errors and stroke reports share one line, so the line has to be able to
+/// look different when it is carrying bad news.
+static ALERT_REVISION: AtomicU64 = AtomicU64::new(u64::MAX);
 
 pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
-    #[cfg(all(feature = "renderer-wgpu", not(target_os = "android")))]
+    #[cfg(all(
+        feature = "renderer-wgpu",
+        not(target_os = "android"),
+        not(target_arch = "wasm32")
+    ))]
     {
         let robot = CAPTURE
             .get()
@@ -133,15 +304,19 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
         image::RgbaImage::from_raw(shot.width, shot.height, shot.pixels)
             .ok_or_else(|| anyhow::anyhow!("Invalid captured pixel buffer"))
     }
-    #[cfg(any(not(feature = "renderer-wgpu"), target_os = "android"))]
+    #[cfg(any(
+        not(feature = "renderer-wgpu"),
+        target_os = "android",
+        target_arch = "wasm32"
+    ))]
     {
         let _ = revision;
-        anyhow::bail!("Scene capture requires the WGPU renderer")
+        anyhow::bail!("Scene capture requires the WGPU renderer on a native window")
     }
 }
 
 /// Open the editor in its own native window without interrupting playback.
-#[cfg(not(target_os = "android"))]
+#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 pub fn launch(path: Option<&str>) -> std::io::Result<()> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command.arg("--skin-studio");
@@ -156,6 +331,30 @@ pub fn launch(path: Option<&str>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The editor always works on the whole skin: main, equalizer and playlist
+/// joined into one surface, so a stroke can cross a window boundary and each
+/// pixel is routed to whichever sheet is under it. The individual panels remain
+/// as MCP addressing, not as editing modes.
+fn open_on_whole_skin(doc: &mut Document) {
+    doc.view.panel = "canvas".into();
+    doc.view.layer = "auto".into();
+    doc.view.layers.clear();
+    doc.view.zoom = doc.view.zoom.clamp(1, 4);
+    // Paint onto the top of the picture, not underneath it. A layered project
+    // composites its painting planes over the base atlases, so a document that
+    // arrives with planes and no selection would take every stroke into the
+    // atlases below them -- landing correctly, recorded in history, and visible
+    // only in the gaps where no plane covers the artwork.
+    if doc.view.paint_layer.is_none() {
+        doc.view.paint_layer = doc
+            .planes
+            .iter()
+            .rev()
+            .find(|plane| plane.visible && !plane.locked)
+            .map(|plane| plane.id.clone());
+    }
+}
+
 fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
     let Some(path) = path else {
         let mut doc = Document::open_project(include_bytes!(
@@ -165,9 +364,15 @@ fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
         doc.path = None;
         doc.view = model::View::default();
         doc.message = "Catamp Silverplay · editable copy".into();
+        doc.view.zoom = 2;
+        open_on_whole_skin(&mut doc);
         return Ok(doc);
     };
+    #[cfg(not(target_arch = "wasm32"))]
     let bytes = std::fs::read(path)?;
+    #[cfg(target_arch = "wasm32")]
+    let bytes = super::browser_skins::load(cranpose_services::preferences().as_ref(), path)
+        .map_err(anyhow::Error::msg)?;
     if std::path::Path::new(path)
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("cstudio"))
@@ -179,13 +384,53 @@ fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
                 .to_string_lossy()
                 .into_owned(),
         );
+        open_on_whole_skin(&mut doc);
         Ok(doc)
     } else {
-        Document::open(&bytes, Some(path.into()))
+        let mut doc = Document::open(&bytes, Some(path.into()))?;
+        open_on_whole_skin(&mut doc);
+        Ok(doc)
     }
 }
 
-#[cfg(not(target_os = "android"))]
+/// The desktop layout is an absolutely positioned scene built for the editor
+/// window. Below this it does not fit, and the touch layout is the honest
+/// answer; at or above it the full editor is simply better, so a browser on a
+/// laptop gets the same tools a desktop window does.
+pub const DESKTOP_LAYOUT_MIN: (f32, f32) = (1140., 820.);
+
+/// The editor sized to the surface it was given.
+///
+/// The two layouts are the same document, brushes and history -- only the
+/// chrome differs, so this can switch on a window resize without losing work.
+#[composable]
+pub fn AdaptiveSkinStudio(shared: SharedDocument, host: StudioHost) {
+    BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
+        let constraints = scope.constraints();
+        let roomy = constraints.max_width >= DESKTOP_LAYOUT_MIN.0
+            && constraints.max_height >= DESKTOP_LAYOUT_MIN.1;
+        if roomy {
+            SkinStudio(shared.clone(), Some(host.clone()));
+        } else {
+            let close = host.close.clone();
+            let apply = host.apply.clone();
+            MobileSkinStudio(
+                shared.clone(),
+                move || close(),
+                move |bytes, path| apply(bytes, path),
+            );
+        }
+    });
+}
+
+/// A shared editor document for `path`, or the bundled editable copy. Lets the
+/// framework-level tests mount the real `SkinStudio` against a real document.
+pub fn open_document(path: Option<&str>) -> anyhow::Result<SharedDocument> {
+    let document = initial_document(path)?;
+    Ok(SharedDocument(Arc::new(Mutex::new(document))))
+}
+
+#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 pub fn run(path: Option<&str>) {
     let doc = initial_document(path).unwrap_or_else(|e| panic!("Open skin: {e:#}"));
     let shared = SharedDocument(Arc::new(Mutex::new(doc)));
@@ -194,17 +439,20 @@ pub fn run(path: Option<&str>) {
     }
     let launcher = crate::create_surface_app()
         .with_title("Cranamp · Skin Studio")
-        .with_size(1160, 850);
+        // The joined skin is a 275x377 portrait document, so the window is
+        // shaped for height rather than width: this is the smallest window in
+        // which the whole skin fits at 2x, with the tool column beside it.
+        .with_size(1280, 1000);
     #[cfg(all(feature = "renderer-wgpu", not(target_os = "android")))]
     let launcher = launcher
         .with_frame_pacing_mode(cranpose::FramePacingMode::Vsync)
         .with_test_driver(|robot| {
             let _ = CAPTURE.set(Mutex::new(robot));
         });
-    launcher.run(move || SkinStudio(shared.clone()));
+    launcher.run(move || SkinStudio(shared.clone(), None));
 }
 /// A handset-sized native preview for testing fractional scaling and touch UI.
-#[cfg(not(target_os = "android"))]
+#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 pub fn run_touch_preview(editor: bool) {
     let document = new_mobile_document(None).expect("Bundled Studio document");
     if let Err(e) = mcp::start(document.clone()) {
@@ -244,13 +492,56 @@ fn Label(text: String, x: f32, y: f32, w: f32, size: f32, color: Color) {
         text_style(size, color),
     );
 }
+/// The editor's button vocabulary.
+///
+/// Every control belongs to exactly one of five classes, and each class has a
+/// shape of its own, so a button says what kind of thing it does before it is
+/// pressed: a plain slab runs once, a red slab runs once and can lose work, a
+/// slab with a left tab opens the drawer named on it, a pill is one value out
+/// of a set, and a slab with a pip on the right is an on/off switch.
+///
+/// Only a drawer button and a chosen value are ever filled with `ACCENT`, and
+/// those two can never be confused because one is a slab and one is a pill.
+/// A momentary action: it happens once, and the button looks the same after.
 #[composable]
-fn Action(label: String, x: f32, y: f32, w: f32, selected: bool, click: impl Fn() + 'static) {
+fn Action(label: String, x: f32, y: f32, w: f32, click: impl Fn() + 'static) {
+    Slab(label, x, y, w, CARD, click);
+}
+/// The same, drawn as unavailable and inert when there is nothing for it to do.
+#[composable]
+fn MaybeAction(label: String, x: f32, y: f32, w: f32, enabled: bool, click: impl Fn() + 'static) {
+    if enabled {
+        Slab(label, x, y, w, CARD, click);
+        return;
+    }
+    Box(
+        Modifier::empty()
+            .absolute_offset(x, y)
+            .size_points(w, 30.)
+            .background(PANEL_BACK)
+            .rounded_corners(5.),
+        BoxSpec::default(),
+        move || {
+            Text(
+                label.clone(),
+                Modifier::empty().padding(6.),
+                text_style(12., PIP_OFF),
+            );
+        },
+    );
+}
+/// A momentary action that can destroy unexported work.
+#[composable]
+fn Danger(label: String, x: f32, y: f32, w: f32, click: impl Fn() + 'static) {
+    Slab(label, x, y, w, DANGER, click);
+}
+#[composable]
+fn Slab(label: String, x: f32, y: f32, w: f32, fill: Color, click: impl Fn() + 'static) {
     Button(
         Modifier::empty()
             .absolute_offset(x, y)
             .size_points(w, 30.)
-            .background(if selected { ACCENT } else { CARD })
+            .background(fill)
             .rounded_corners(5.),
         ButtonSpec::default(),
         click,
@@ -263,26 +554,399 @@ fn Action(label: String, x: f32, y: f32, w: f32, selected: bool, click: impl Fn(
         },
     );
 }
+/// Opens the drawer named on it, and stays lit for as long as that drawer is
+/// open. The tab on the left edge is what tells a closed drawer button apart
+/// from an action that would run immediately.
+#[composable]
+fn Panel(label: String, x: f32, y: f32, w: f32, open: bool, click: impl Fn() + 'static) {
+    Button(
+        Modifier::empty()
+            .absolute_offset(x, y)
+            .size_points(w, 30.)
+            .background(if open { ACCENT } else { CARD })
+            .rounded_corners(5.),
+        ButtonSpec::default(),
+        click,
+        move || {
+            Text(
+                label.clone(),
+                Modifier::empty().padding(6.),
+                text_style(12., FG),
+            );
+        },
+    );
+    // The rule is drawn over the button rather than inside it: a `Box` in a
+    // button's content is laid out in the content flow, not positioned, and a
+    // label with room made for it beside it no longer fits a 30pt button.
+    Box(
+        Modifier::empty()
+            .absolute_offset(x + 7., y + 24.)
+            .size_points(w - 14., 2.)
+            .background(if open { FG } else { DIM })
+            .rounded_corners(1.),
+        BoxSpec::default(),
+        || {},
+    );
+}
+/// One value out of a set -- a zoom step, which slider the frame scrubber
+/// drives. Lit when it is the value in force. A pill, never a slab, so a lit
+/// value cannot be mistaken for an open drawer.
+/// A switch that is a row in a list. Same rules as `Toggle`, but the label sits
+/// against the left edge: a long list is read down one column, and a centred
+/// label turns that into a ragged search.
+#[composable]
+fn ListToggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() + 'static) {
+    Button(
+        Modifier::empty()
+            .absolute_offset(x, y)
+            .size_points(w, 30.)
+            .background(if on { CARD_ON } else { CARD })
+            .rounded_corners(5.),
+        ButtonSpec::default(),
+        click,
+        move || {
+            Text(
+                label.clone(),
+                Modifier::empty().width(w - 34.),
+                text_style(12., FG),
+            );
+        },
+    );
+    Box(
+        Modifier::empty()
+            .absolute_offset(x + w - 17., y + 11.)
+            .size_points(8., 8.)
+            .background(if on { ACCENT_LIT } else { PIP_OFF })
+            .rounded_corners(4.),
+        BoxSpec::default(),
+        || {},
+    );
+}
+/// The same, for a row that selects rather than switches.
+#[composable]
+fn ListChoice(label: String, x: f32, y: f32, w: f32, current: bool, click: impl Fn() + 'static) {
+    Button(
+        Modifier::empty()
+            .absolute_offset(x, y)
+            .size_points(w, 30.)
+            .background(if current { ACCENT } else { CARD })
+            .rounded_corners(15.),
+        ButtonSpec::default(),
+        click,
+        move || {
+            Text(
+                label.clone(),
+                Modifier::empty().width(w - 28.),
+                text_style(12., FG),
+            );
+        },
+    );
+}
+#[composable]
+fn Choice(label: String, x: f32, y: f32, w: f32, current: bool, click: impl Fn() + 'static) {
+    Button(
+        Modifier::empty()
+            .absolute_offset(x, y)
+            .size_points(w, 30.)
+            .background(if current { ACCENT } else { CARD })
+            .rounded_corners(15.),
+        ButtonSpec::default(),
+        click,
+        move || {
+            Text(
+                label.clone(),
+                Modifier::empty().padding(6.),
+                text_style(12., FG),
+            );
+        },
+    );
+}
+/// An on/off switch. The label always names the state the editor is in right
+/// now, never the state pressing it would move to, and the pip repeats that,
+/// so a switch can be read without pressing it to find out which way round it
+/// is. Every switch in the editor follows this rule.
+#[composable]
+fn Toggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() + 'static) {
+    Button(
+        Modifier::empty()
+            .absolute_offset(x, y)
+            .size_points(w, 30.)
+            .background(if on { CARD_ON } else { CARD })
+            .rounded_corners(5.),
+        ButtonSpec::default(),
+        click,
+        move || {
+            Text(
+                label.clone(),
+                Modifier::empty().padding(6.),
+                text_style(12., FG),
+            );
+        },
+    );
+    // Over the button, for the same reason as the drawer tab above.
+    Box(
+        Modifier::empty()
+            .absolute_offset(x + w - 17., y + 11.)
+            .size_points(8., 8.)
+            .background(if on { ACCENT_LIT } else { PIP_OFF })
+            .rounded_corners(4.),
+        BoxSpec::default(),
+        || {},
+    );
+}
+/// A scrollbar for the canvas: a track the whole length of an edge, and a thumb
+/// sized to the fraction of the skin on screen. Dragging anywhere on the track
+/// moves the thumb there, so it doubles as jump-to-position.
+#[composable]
+fn CanvasScrollbar(
+    vertical: bool,
+    rect: (f32, f32, f32, f32),
+    visible: f32,
+    span: f32,
+    value: i32,
+    max: i32,
+    set: impl Fn(i32) + 'static,
+) {
+    let set = Rc::new(set);
+    let (x, y, w, h) = rect;
+    let length = if vertical { h } else { w };
+    let fraction = (visible / span.max(1.)).clamp(0.08, 1.);
+    let thumb = (length * fraction).max(24.).min(length);
+    let travel = (length - thumb).max(0.);
+    let offset = if max > 0 {
+        travel * (value.clamp(0, max) as f32 / max as f32)
+    } else {
+        0.
+    };
+    Box(
+        Modifier::empty()
+            .absolute_offset(x, y)
+            .size_points(w, h)
+            .background(CARD)
+            .rounded_corners(SCROLLBAR / 2.)
+            // Same reason as the canvas: the track geometry is baked into the
+            // handler, so it has to be rebuilt when the track moves or resizes.
+            .pointer_input(
+                (max, vertical, thumb.to_bits(), travel.to_bits()),
+                move |scope: PointerInputScope| {
+                    let set = set.clone();
+                    async move {
+                        scope
+                            .await_pointer_event_scope(|events| async move {
+                                loop {
+                                    let event = events.await_pointer_event().await;
+                                    let moving = event.kind == PointerEventKind::Down
+                                        || (event.kind == PointerEventKind::Move
+                                            && event.buttons.contains(PointerButton::Primary));
+                                    if !moving || max <= 0 || travel <= 0. {
+                                        continue;
+                                    }
+                                    let along = if vertical {
+                                        event.position.y
+                                    } else {
+                                        event.position.x
+                                    };
+                                    let t = ((along - thumb / 2.) / travel).clamp(0., 1.);
+                                    set((t * max as f32).round() as i32);
+                                    event.consume();
+                                }
+                            })
+                            .await;
+                    }
+                },
+            ),
+        BoxSpec::default(),
+        move || {
+            Box(
+                Modifier::empty()
+                    .absolute_offset(
+                        if vertical { 0. } else { offset },
+                        if vertical { offset } else { 0. },
+                    )
+                    .size_points(
+                        if vertical { w } else { thumb },
+                        if vertical { thumb } else { h },
+                    )
+                    .background(ACCENT_LIT)
+                    .rounded_corners(SCROLLBAR / 2.),
+                BoxSpec::default(),
+                || {},
+            );
+        },
+    );
+}
+
+/// Put a sentence in the editor's status line. Everything the editor has to
+/// say goes through here, so there is one place to change when it should be
+/// said somewhere louder.
+fn note(shared: &SharedDocument, message: String) {
+    let mut d = shared.lock().unwrap();
+    d.message = message;
+    d.revision += 1;
+    ALERT_REVISION.store(d.revision, Ordering::Release);
+}
+/// The pixel under the pointer, in the skin's own coordinates.
+///
+/// Its own composable, reading the hover state itself, so that moving the mouse
+/// invalidates this one line and nothing else. `SkinStudio` rebuilds the whole
+/// canvas bitmap from the document every time it recomposes, which at pointer
+/// rate would cost far more than the readout is worth.
+#[composable]
+fn CursorReadout(hover: cranpose_core::MutableState<Option<[i32; 2]>>, x: f32, y: f32) {
+    Label(
+        hover
+            .get()
+            .map(|p| format!("pointer  {} , {}", p[0], p[1]))
+            .unwrap_or_default(),
+        x,
+        y,
+        190.,
+        11.,
+        DIM,
+    );
+}
+/// The sprite rectangle under the pointer, outlined over the canvas and named.
+///
+/// Only the one being pointed at. Outlining all hundred of them at once -- and
+/// in the artwork's own pixels, so the hairlines grew with the zoom -- buried
+/// the artwork under the hints that were meant to point at it.
+#[composable]
+fn GuideHint(
+    hover: cranpose_core::MutableState<Option<[i32; 2]>>,
+    rects: Rc<Vec<(String, [u32; 4])>>,
+    zoom: f32,
+    ox: f32,
+    oy: f32,
+    label_at: (f32, f32),
+) {
+    let Some(point) = hover.get() else { return };
+    if point[0] < 0 || point[1] < 0 {
+        return;
+    }
+    let (at, id) = {
+        let (x, y) = (point[0] as u32, point[1] as u32);
+        // The smallest rectangle containing the pointer: sprites nest, and the
+        // innermost one is the one being pointed at.
+        let mut best: Option<(&str, [u32; 4])> = None;
+        for (id, r) in rects.iter() {
+            if x >= r[0] && y >= r[1] && x < r[0] + r[2] && y < r[1] + r[3] {
+                let area = r[2] as u64 * r[3] as u64;
+                if best.is_none_or(|(_, b)| area < b[2] as u64 * b[3] as u64) {
+                    best = Some((id, *r));
+                }
+            }
+        }
+        match best {
+            Some((id, r)) => (r, id.to_string()),
+            None => return,
+        }
+    };
+    let x = ox + at[0] as f32 * zoom;
+    let y = oy + at[1] as f32 * zoom;
+    let (w, h) = (at[2] as f32 * zoom, at[3] as f32 * zoom);
+    for (dx, dy, bw, bh) in [
+        (0., 0., w, 1.),
+        (0., h - 1., w, 1.),
+        (0., 0., 1., h),
+        (w - 1., 0., 1., h),
+    ] {
+        Box(
+            Modifier::empty()
+                .absolute_offset(x + dx, y + dy)
+                .size_points(bw, bh)
+                .background(Color(0.22, 0.89, 0.87, 0.85)),
+            BoxSpec::default(),
+            || {},
+        );
+    }
+    Label(
+        format!("{id}   {} × {}", at[2], at[3]),
+        label_at.0,
+        label_at.1,
+        300.,
+        11.,
+        Color(0.22, 0.89, 0.87, 1.),
+    );
+}
+/// An outline around the pixel the brush would hit, scaled to the stroke width.
+/// Same reasoning as `CursorReadout`: it reads the hover state itself so the
+/// canvas underneath is not re-rendered to move a four-line box.
+#[composable]
+fn BrushCursor(
+    hover: cranpose_core::MutableState<Option<[i32; 2]>>,
+    zoom: f32,
+    size: u32,
+    ox: f32,
+    oy: f32,
+) {
+    let Some(point) = hover.get() else { return };
+    let half = (size.max(1) - 1) / 2;
+    let x = ox + (point[0] - half as i32) as f32 * zoom;
+    let y = oy + (point[1] - half as i32) as f32 * zoom;
+    let side = size.max(1) as f32 * zoom;
+    for (dx, dy, w, h) in [
+        (0., 0., side, 1.),
+        (0., side - 1., side, 1.),
+        (0., 0., 1., side),
+        (side - 1., 0., 1., side),
+    ] {
+        Box(
+            Modifier::empty()
+                .absolute_offset(x + dx, y + dy)
+                .size_points(w, h)
+                .background(Color(1., 1., 1., 0.75)),
+            BoxSpec::default(),
+            || {},
+        );
+    }
+}
+/// Panels that only mean anything while the canvas is being painted. Leaving
+/// the canvas closes one rather than leaving a live, inert set of brushes in
+/// the tool column.
+fn close_painting_drawer(drawer: cranpose_core::MutableState<u8>) {
+    if matches!(drawer.get_non_reactive(), 4..=8) {
+        drawer.set(0);
+    }
+}
 fn state(shared: &SharedDocument, patch: serde_json::Value) {
     let mut d = shared.lock().unwrap();
     if let Err(e) = d.state(patch) {
         d.message = format!("{e:#}");
         d.revision += 1;
+        ALERT_REVISION.store(d.revision, Ordering::Release);
     }
 }
 #[composable]
-pub fn SkinStudio(shared: SharedDocument) {
+pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let tick = cranpose_core::rememberMutableStateOf(|| 0u64);
     let live = cranpose_core::rememberMutableStateOf(|| false);
     let review = cranpose_core::rememberMutableStateOf(|| false);
-    let drawer = cranpose_core::rememberMutableStateOf(|| 0u8);
+    // The tool column is docked, not laid over the canvas, so it costs nothing
+    // to start with the drawing tools already in it. An editor that opens with
+    // its brushes on screen does not have to be searched for them.
+    let drawer = cranpose_core::rememberMutableStateOf(|| 4u8);
     let picker = cranpose_core::rememberMutableStateOf(|| false);
+    // Armed by the first press of a button that would discard unexported work.
+    let confirm = cranpose_core::rememberMutableStateOf(|| false);
+    // The skin pixel under the pointer. Only the readout and the brush outline
+    // read it, so a mouse move never rebuilds the canvas.
+    let hover = cranpose_core::rememberMutableStateOf(|| None::<[i32; 2]>);
+    // Where the pointer last was, kept after it leaves the canvas: the study
+    // panel is read by moving the pointer onto it, which would otherwise clear
+    // the very thing it is showing.
+    let studied = cranpose_core::rememberMutableStateOf(|| None::<[i32; 2]>);
     let pan = cranpose_core::rememberMutableStateOf(|| [0i32; 2]);
     let frame_kind = cranpose_core::rememberMutableStateOf(|| "volume".to_string());
+    // The window is not a composition input, so it is polled alongside the
+    // document: the canvas is sized from it, and a resize has to recompose.
+    let scene_state = cranpose_core::rememberMutableStateOf(|| Scene::new(0., 0.));
     let poll = shared.clone();
     cranpose_core::LaunchedEffectAsync(0u8, move |_| {
         Box::pin(async move {
-            cranpose_core::interval(Duration::from_millis(100), move || {
+            // Only a lock and a compare: this recomposes when the document has
+            // actually changed, so polling it at frame rate costs nothing and
+            // makes every control answer immediately.
+            cranpose_core::interval(Duration::from_millis(16), move || {
                 let revision = poll.lock().unwrap().revision;
                 if tick.get_non_reactive() != revision {
                     tick.set(revision);
@@ -292,19 +956,70 @@ pub fn SkinStudio(shared: SharedDocument) {
         })
     });
     let _ = tick.get();
-    let (view, message, revision, im, path, dirty) = {
+    let scene = scene_state.get();
+    // The canvas is a drawing surface only in its own mode; preview and the
+    // state sheet are pictures of the skin, not places to paint.
+    let drawing = !live.get() && !review.get();
+    let (canvas_x, canvas_y, canvas_full_w, canvas_h) = scene.canvas();
+    // The tool column is docked beside the canvas rather than laid over it, and
+    // the canvas gives up the width it was only using as margin. Covering the
+    // drawing surface with the panel that holds the brush was a concession to a
+    // narrow window; a window wide enough gets both at once.
+    let (split_w, split_drawer) = scene.split();
+    let docked = split_drawer > 0.;
+    let canvas_w = if docked { split_w } else { canvas_full_w };
+    let (drawer_x, drawer_y, drawer_w, drawer_h) = if docked {
+        (canvas_x + canvas_w + 12., canvas_y, split_drawer, canvas_h)
+    } else {
+        scene.drawer()
+    };
+    // Nothing to exclude from the brush once the drawer is out of the way.
+    let drawer_canvas_x = if docked {
+        f32::INFINITY
+    } else {
+        canvas_w - DRAWER_WIDTH
+    };
+    let (
+        view,
+        message,
+        revision,
+        im,
+        path,
+        dirty,
+        sheet_subject,
+        sheet_refusal,
+        sheet_variants,
+        undone,
+        redoable,
+    ) = {
         let d = shared.lock().unwrap();
+        // A state sheet is one sprite's variants, so it can refuse: the editor
+        // shows the refusal in place of the canvas rather than a wrong sprite.
+        let sheet = review.get().then(|| d.state_sheet());
+        let (undone, redoable) = d.history_depth();
+        let target = d.state_sheet_layer();
+        let variants = target.as_ref().map(|l| l.variants.len()).unwrap_or(0);
+        let subject = target.map(|l| l.id);
+        let refusal = match &sheet {
+            Some(Err(e)) => Some(format!("{e:#}")),
+            _ => None,
+        };
         (
             d.view.clone(),
             d.message.clone(),
             d.revision,
-            if review.get() {
-                d.state_sheet()
-            } else {
-                d.editor_render()
+            match sheet {
+                Some(Ok(sheet)) => sheet,
+                Some(Err(_)) => image::RgbaImage::new(1, 1),
+                None => d.editor_render(),
             },
             d.path.clone(),
             d.dirty,
+            subject,
+            refusal,
+            variants,
+            undone,
+            redoable,
         )
     };
     let export_path = path
@@ -335,13 +1050,104 @@ pub fn SkinStudio(shared: SharedDocument) {
         });
         path_field.set_text(destination);
     });
-    let color_field = cranpose_core::remember(|| TextFieldState::new("#ffffff")).with(|f| *f);
+    let pending_export = cranpose_core::rememberMutableStateOf(|| None::<Vec<u8>>);
+    let opened = shared.clone();
+    let open_launcher =
+        cranpose_services::rememberOpenFileLauncher("cranamp.studio.desktop.open", move |result| {
+            let d = opened.clone();
+            match result {
+                Ok(Some(entry)) => {
+                    cranpose_core::spawn_ui_task(async move {
+                        let loaded = async {
+                            let bytes = entry.read_all().await?;
+                            let mut doc = if entry
+                                .metadata()
+                                .name
+                                .to_ascii_lowercase()
+                                .ends_with(".cstudio")
+                            {
+                                Document::open_project(&bytes)?
+                            } else {
+                                Document::open(&bytes, None)?
+                            };
+                            doc.path = None;
+                            open_on_whole_skin(&mut doc);
+                            Ok::<_, anyhow::Error>(doc)
+                        }
+                        .await;
+                        let mut old = d.lock().unwrap();
+                        match loaded {
+                            Ok(mut doc) => {
+                                doc.revision = old.revision + 1;
+                                *old = doc;
+                            }
+                            Err(e) => {
+                                old.message = format!("Open: {e:#}");
+                                old.revision += 1;
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    let mut doc = d.lock().unwrap();
+                    doc.message = format!("Open: {e:#}");
+                    doc.revision += 1;
+                }
+                _ => {}
+            }
+        });
+    let saved = shared.clone();
+    let export_launcher = cranpose_services::rememberSaveDocumentLauncher(
+        "cranamp.studio.desktop.export",
+        move |result| {
+            let d = saved.clone();
+            match result {
+                Ok(Some(sink)) => {
+                    if let Some(bytes) = pending_export.get_non_reactive() {
+                        cranpose_core::spawn_ui_task(async move {
+                            let outcome = cranpose::write_all(&sink, bytes).await;
+                            let mut doc = d.lock().unwrap();
+                            doc.message = match outcome {
+                                Ok(()) => "Exported skin".into(),
+                                Err(e) => format!("Export: {e:#}"),
+                            };
+                            doc.revision += 1;
+                            pending_export.set(None);
+                        });
+                    }
+                }
+                Err(e) => {
+                    let mut doc = d.lock().unwrap();
+                    doc.message = format!("Export: {e:#}");
+                    doc.revision += 1;
+                    pending_export.set(None);
+                }
+                _ => pending_export.set(None),
+            }
+        },
+    );
     let (w, h) = (im.width(), im.height());
     let bitmap =
         ImageBitmap::from_rgba8(im.width(), im.height(), im.into_raw()).expect("studio bitmap");
     let panel = view.panel.clone();
+    // Which window the canvas is scrolled over. It only decides which window's
+    // own controls to offer -- there is no per-window view to switch into, and
+    // the drawing surface is always the whole skin. The atlas panel keeps its
+    // own identity so its per-sheet controls still apply.
+    let section = if panel == "canvas" {
+        // Taken from the middle of the view rather than its top edge: at 6x the
+        // top row is nowhere near where the eye is.
+        let rows = ((canvas_h - SCROLLBAR) / view.zoom.max(1) as f32) as i32;
+        match pan.get()[1] + rows / 2 {
+            y if y >= 232 => "playlist".to_string(),
+            y if y >= 116 => "equalizer".to_string(),
+            _ => "main".to_string(),
+        }
+    } else {
+        panel.clone()
+    };
     let zoom = if review.get() {
-        ((900 / w).min(540 / h)).clamp(1, 3) as f32
+        fit_zoom((canvas_w - 24., canvas_h - 24.), (w, h)).min(4) as f32
     } else {
         view.zoom as f32
     };
@@ -350,10 +1156,33 @@ pub fn SkinStudio(shared: SharedDocument) {
     let preview_size = (275, 232 + preview_playlist_height);
     let (viewport_w, viewport_h) = if live.get() { preview_size } else { (w, h) };
     let pan_value = pan.get();
-    let px = pan_value[0].clamp(0, (viewport_w as f32 - 900. / zoom).ceil().max(0.) as i32) as f32
-        * zoom;
-    let py = pan_value[1].clamp(0, (viewport_h as f32 - 540. / zoom).ceil().max(0.) as i32) as f32
-        * zoom;
+    // How far the canvas can scroll, in source pixels, for this window.
+    let pan_max = [
+        (viewport_w as f32 - (canvas_w - SCROLLBAR) / zoom)
+            .ceil()
+            .max(0.) as i32,
+        (viewport_h as f32 - (canvas_h - SCROLLBAR) / zoom)
+            .ceil()
+            .max(0.) as i32,
+    ];
+    let px = pan_value[0].clamp(0, pan_max[0]) as f32 * zoom;
+    let py = pan_value[1].clamp(0, pan_max[1]) as f32 * zoom;
+    // Centre the skin in whatever room the canvas has. A tall skin in a wide
+    // window otherwise sits jammed against the left edge with the workspace
+    // empty beside it.
+    let ox = ((canvas_w - SCROLLBAR - viewport_w as f32 * zoom) / 2.).max(0.) - px;
+    let oy = ((canvas_h - SCROLLBAR - viewport_h as f32 * zoom) / 2.).max(0.) - py;
+    let guide_rects = Rc::new(if view.guides && drawing {
+        shared
+            .lock()
+            .unwrap()
+            .guides()
+            .into_iter()
+            .map(|g| (g.id, g.rect))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    });
     let layers = { shared.lock().unwrap().layers() };
     let layer_info = layers
         .iter()
@@ -367,12 +1196,7 @@ pub fn SkinStudio(shared: SharedDocument) {
                 if l.stretched() { " · shared tile" } else { "" }
             )
         })
-        .unwrap_or_else(|| {
-            "Auto picks the topmost sprite.\nEyedropper shows its atlas pixel.".into()
-        });
-    let skin_layout = shared.lock().unwrap().layout();
-    let footer_layout = skin_layout.footer;
-    let playlist_background = shared.lock().unwrap().has_playlist_background();
+        .unwrap_or_else(|| "Control art and background\nalike, in one stroke.".into());
     if !view.presentation && !live.get() {
         cranpose_core::SideEffect(move || {
             COMPOSED_REVISION.fetch_max(revision, Ordering::Release);
@@ -383,6 +1207,18 @@ pub fn SkinStudio(shared: SharedDocument) {
         Modifier::empty().fill_max_size().background(BG),
         BoxSpec::default(),
         move || {
+            // Measures the window for `Scene`. The editor is an absolutely
+            // positioned scene, so nothing else here would ever ask how much
+            // room it actually has.
+            BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
+                let measured = Scene::new(
+                    scope.constraints().max_width,
+                    scope.constraints().max_height,
+                );
+                if scene_state.get_non_reactive() != measured {
+                    cranpose_core::SideEffect(move || scene_state.set(measured));
+                }
+            });
             if view.presentation {
                 let d = document.clone();
                 let presentation_zoom = view.zoom.min((800 / preview_size.1).clamp(1, 2)) as f32;
@@ -413,529 +1249,799 @@ pub fn SkinStudio(shared: SharedDocument) {
                     );
                 });
                 let d = document.clone();
-                Action(
-                    "Exit presentation".into(),
-                    20.,
-                    18.,
-                    170.,
-                    false,
-                    move || state(&d, json!({"presentation":false})),
-                );
+                Action("Exit presentation".into(), 20., 18., 170., move || {
+                    state(&d, json!({"presentation":false}))
+                });
                 return;
             }
-            Label("CRANAMP  /  SKIN STUDIO".into(), 22., 18., 650., 20., FG);
-            Label(
-                "Native pixels. One canvas. Every sprite state.".into(),
-                22.,
-                49.,
-                700.,
-                12.,
-                DIM,
-            );
+            Label("CRANAMP  /  SKIN STUDIO".into(), 22., 12., 300., 18., FG);
             Label(
                 format!(
                     "{}{}",
                     path.clone().unwrap_or_else(|| "Untitled skin".into()),
-                    if dirty { "  • edited" } else { "" }
+                    if dirty { "   • unexported edits" } else { "" }
                 ),
-                610.,
-                23.,
-                525.,
+                336.,
+                17.,
+                scene.width - 380.,
                 11.,
-                DIM,
+                if dirty { ACCENT_LIT } else { DIM },
             );
+            // Row one is what happens to the document; row two is what the tool
+            // column shows. Both are anchored from the left so the row stays one
+            // row at any window width, with only the file group tracking the
+            // right edge.
             {
                 let d = document.clone();
-                Action("New blank".into(), 1040., 44., 84., false, move || {
-                    if let Err(e) = mcp::call("studio_new", json!({}), &d) {
-                        let mut doc = d.lock().unwrap();
-                        doc.message = format!("New: {e:#}");
-                        doc.revision += 1;
+                MaybeAction(
+                    if undone > 0 {
+                        format!("Undo {undone}")
                     } else {
-                        live.set(false);
-                        review.set(false);
-                        pan.set([0, 0]);
-                        drawer.set(0);
-                    }
-                });
-            }
-            Action(
-                "Painting layers".into(),
-                394.,
-                44.,
-                140.,
-                drawer.get() == 7,
-                move || drawer.set(if drawer.get_non_reactive() == 7 { 0 } else { 7 }),
-            );
-            {
-                let d = document.clone();
-                Action(
-                    "Part rectangles".into(),
-                    542.,
-                    44.,
-                    145.,
-                    drawer.get() == 6,
-                    move || {
-                        state(&d, json!({"guides":true}));
-                        drawer.set(if drawer.get_non_reactive() == 6 { 0 } else { 6 });
+                        "Undo".into()
                     },
-                );
-            }
-            Action(
-                "Brush tools".into(),
-                696.,
-                44.,
-                112.,
-                drawer.get() == 4,
-                move || drawer.set(if drawer.get_non_reactive() == 4 { 0 } else { 4 }),
-            );
-            {
-                let d = document.clone();
-                Action(
-                    "Whole skin".into(),
-                    816.,
-                    44.,
-                    112.,
-                    panel == "canvas",
+                    20.,
+                    ACTION_ROW,
+                    76.,
+                    undone > 0,
                     move || {
-                        let mut doc = d.lock().unwrap();
-                        let _ = doc.state(
-                            json!({"panel":"canvas","layer":"auto","zoom":1,"presentation":false}),
-                        );
-                        live.set(false);
-                        review.set(false);
-                        pan.set([0, 0]);
-                    },
-                );
-            }
-            Action(
-                "Atlases".into(),
-                936.,
-                44.,
-                96.,
-                drawer.get() == 3,
-                move || {
-                    drawer.set(if drawer.get_non_reactive() == 3 { 0 } else { 3 });
-                },
-            );
-            Box(
-                Modifier::empty()
-                    .absolute_offset(20., 82.)
-                    .size_points(1118., 54.)
-                    .background(CARD)
-                    .rounded_corners(6.),
-                BoxSpec::default(),
-                || {},
-            );
-            for (i, (name, title)) in [
-                ("main", "Main player"),
-                ("equalizer", "Equalizer"),
-                ("playlist", "Playlist"),
-            ]
-            .iter()
-            .enumerate()
-            {
-                let d = document.clone();
-                let name = name.to_string();
-                Action(
-                    title.to_string(),
-                    30. + i as f32 * 120.,
-                    94.,
-                    112.,
-                    panel == name,
-                    move || {
-                        state(
-                            &d,
-                            json!({"panel":name,"layer":"auto","zoom":if name=="playlist"{2}else{3}}),
-                        );
+                        d.lock().unwrap().undo();
                     },
                 );
             }
             {
                 let d = document.clone();
-                Action("Undo".into(), 410., 94., 65., false, move || {
-                    d.lock().unwrap().undo();
-                });
+                MaybeAction(
+                    if redoable > 0 {
+                        format!("Redo {redoable}")
+                    } else {
+                        "Redo".into()
+                    },
+                    102.,
+                    ACTION_ROW,
+                    76.,
+                    redoable > 0,
+                    move || {
+                        d.lock().unwrap().redo();
+                    },
+                );
             }
-            {
-                let d = document.clone();
-                Action("Redo".into(), 483., 94., 65., false, move || {
-                    d.lock().unwrap().redo();
-                });
-            }
-            Action(
+            Toggle(
                 if live.get() {
-                    "Edit canvas"
-                } else {
                     "Player preview"
+                } else {
+                    "Canvas editing"
                 }
                 .into(),
-                568.,
-                94.,
-                135.,
+                186.,
+                ACTION_ROW,
+                140.,
                 live.get(),
                 move || {
-                    live.set(!live.get_non_reactive());
+                    let on = !live.get_non_reactive();
+                    live.set(on);
                     pan.set([0, 0]);
                     review.set(false);
+                    if on {
+                        close_painting_drawer(drawer);
+                    }
                 },
             );
-            Label("WSZ".into(), 724., 100., 32., 11., DIM);
-            cranpose_ui::BasicTextField(
-                path_field,
-                Modifier::empty()
-                    .absolute_offset(758., 98.)
-                    .size_points(190., 24.)
-                    .background(BG),
-                text_style(12., FG),
-            );
-            {
-                let d = document.clone();
-                Action("Open".into(), 960., 94., 72., false, move || {
-                    let p = path_field.text();
-                    let result = mcp::call("studio_open", json!({"path":p}), &d);
-                    if let Err(e) = result {
-                        let mut doc = d.lock().unwrap();
-                        doc.message = format!("Open: {e:#}");
-                        doc.revision += 1;
+            let sheet_doc = document.clone();
+            let has_subject = sheet_subject.is_some();
+            Toggle(
+                if review.get() {
+                    "Sprite state sheet"
+                } else {
+                    "Canvas"
+                }
+                .into(),
+                334.,
+                ACTION_ROW,
+                150.,
+                review.get(),
+                move || {
+                    let on = !review.get_non_reactive();
+                    if on && !has_subject {
+                        // A state sheet is one sprite's variants, so entering
+                        // the mode with nothing chosen used to show an
+                        // arbitrary sprite. Ask for one instead.
+                        note(
+                            &sheet_doc,
+                            "Choose one sprite in Sprite targets: a state sheet shows one \
+                             sprite's variants."
+                                .into(),
+                        );
+                        drawer.set(1);
+                        return;
                     }
-                });
+                    review.set(on);
+                    live.set(false);
+                    if on {
+                        close_painting_drawer(drawer);
+                    }
+                },
+            );
+            if let Some(host) = host.clone() {
+                let back = host.close.clone();
+                Action(
+                    "Player".into(),
+                    scene.right(640.),
+                    ACTION_ROW,
+                    90.,
+                    move || back(),
+                );
+                let d = document.clone();
+                let apply = host.apply.clone();
+                Action(
+                    "Apply to player".into(),
+                    scene.right(738.),
+                    ACTION_ROW,
+                    126.,
+                    move || match publish(&d) {
+                        Ok((bytes, path)) => apply(bytes, path),
+                        Err(e) => note(&d, format!("Apply: {e:#}")),
+                    },
+                );
+                // A hosted editor has no filesystem path to type into, so both
+                // file actions go through the platform's own picker.
+                let open = open_launcher.clone();
+                Action(
+                    "Open…".into(),
+                    scene.right(872.),
+                    ACTION_ROW,
+                    70.,
+                    move || {
+                        open.launch(cranpose::FilePickerOptions::default().with_filter(
+                            cranpose::FileFilter::new("Skin/project", &["wsz", "zip", "cstudio"]),
+                        ))
+                    },
+                );
+                let d = document.clone();
+                let export = export_launcher.clone();
+                Action(
+                    "Export…".into(),
+                    scene.right(950.),
+                    ACTION_ROW,
+                    88.,
+                    move || match d.lock().unwrap().archive() {
+                        Ok(bytes) => {
+                            pending_export.set(Some(bytes));
+                            export.launch(cranpose::SaveDocumentRequest::new(
+                                "Catamp edited.wsz",
+                                "application/zip",
+                            ));
+                        }
+                        Err(e) => note(&d, format!("Export: {e:#}")),
+                    },
+                );
+            } else {
+                Label("WSZ".into(), 644., ACTION_ROW + 6., 32., 11., DIM);
+                cranpose_ui::BasicTextField(
+                    path_field,
+                    Modifier::empty()
+                        .absolute_offset(676., ACTION_ROW + 3.)
+                        .size_points(190., 24.)
+                        .background(BG),
+                    text_style(12., FG),
+                );
+                let d = document.clone();
+                Action(
+                    "Open".into(),
+                    scene.right(872.),
+                    ACTION_ROW,
+                    70.,
+                    move || {
+                        let p = path_field.text();
+                        let result = mcp::call("studio_open", json!({"path":p}), &d);
+                        let mut doc = d.lock().unwrap();
+                        if let Err(e) = result {
+                            doc.message = format!("Open: {e:#}");
+                        } else {
+                            // A replaced document arrives on the library's own
+                            // per-window default; the editor has no such view.
+                            open_on_whole_skin(&mut doc);
+                        }
+                        doc.revision += 1;
+                    },
+                );
+                let d = document.clone();
+                Action(
+                    "Export".into(),
+                    scene.right(950.),
+                    ACTION_ROW,
+                    88.,
+                    move || {
+                        let path = path_field.text();
+                        let mut doc = d.lock().unwrap();
+                        if let Err(e) = doc.export(std::path::Path::new(&path)) {
+                            doc.message = format!("Export: {e:#}");
+                            doc.revision += 1;
+                        }
+                    },
+                );
             }
             {
+                // The one button that can throw away unexported work. It refuses
+                // while there is any, and says so where the eye already is --
+                // next to the button, not in the status line at the far bottom.
                 let d = document.clone();
-                Action("Export".into(), 1040., 94., 84., false, move || {
-                    let path = path_field.text();
-                    let mut doc = d.lock().unwrap();
-                    if let Err(e) = doc.export(std::path::Path::new(&path)) {
-                        doc.message = format!("Export: {e:#}");
-                        doc.revision += 1;
-                    }
-                });
+                let armed = confirm.get();
+                let label = if armed {
+                    "Discard & start blank"
+                } else {
+                    "New blank"
+                };
+                Danger(
+                    label.into(),
+                    scene.right(1046.),
+                    ACTION_ROW,
+                    94.,
+                    move || {
+                        let unsaved = d.lock().unwrap().dirty;
+                        if unsaved && !armed {
+                            confirm.set(true);
+                            note(
+                                &d,
+                                "This skin has edits that are not exported. Press again to \
+                                 discard them and start blank."
+                                    .into(),
+                            );
+                            return;
+                        }
+                        confirm.set(false);
+                        let call = mcp::call("studio_new", json!({"discard":true}), &d);
+                        if let Err(e) = call {
+                            note(&d, format!("New: {e:#}"));
+                        } else {
+                            // A replaced document arrives on the library's own
+                            // per-window default. The editor has no per-window
+                            // view, so put it back on the whole skin.
+                            {
+                                let mut doc = d.lock().unwrap();
+                                open_on_whole_skin(&mut doc);
+                                doc.revision += 1;
+                            }
+                            live.set(false);
+                            review.set(false);
+                            pan.set([0, 0]);
+                        }
+                    },
+                );
+                if armed {
+                    Action(
+                        "Keep editing".into(),
+                        scene.right(940.),
+                        ACTION_ROW,
+                        100.,
+                        move || confirm.set(false),
+                    );
+                }
+            }
+            // Row two: every drawer the editor has, in one row, each button
+            // named exactly as the panel it opens.
+            {
+                let mut x = 20.;
+                let mut panel_button = |id: u8, label: &str, width: f32| {
+                    let at = x;
+                    x += width + 8.;
+                    (at, id, label.to_string(), width)
+                };
+                // Every button is named exactly as the panel it opens, and the
+                // whole row fits the narrowest window the editor accepts.
+                let buttons: Vec<(f32, u8, String, f32)> = if !drawing {
+                    vec![
+                        panel_button(1, "Sprite targets", 120.),
+                        panel_button(9, "Skin options", 116.),
+                        panel_button(3, "Skin atlases", 116.),
+                        panel_button(2, "Edit history", 108.),
+                    ]
+                } else {
+                    vec![
+                        panel_button(4, "Drawing tools", 118.),
+                        panel_button(7, "Painting layers", 128.),
+                        panel_button(1, "Sprite targets", 120.),
+                        panel_button(6, "Sprite rectangles", 142.),
+                        panel_button(3, "Skin atlases", 116.),
+                        panel_button(2, "Edit history", 108.),
+                        panel_button(5, "Pixel study", 104.),
+                        panel_button(9, "Skin options", 116.),
+                    ]
+                };
+                for (at, id, label, width) in buttons {
+                    let d = document.clone();
+                    Panel(label, at, PANEL_ROW, width, drawer.get() == id, move || {
+                        // Part rectangles are only worth a panel when they are
+                        // drawn, so opening that one turns them on.
+                        if id == 6 {
+                            state(&d, json!({"guides":true}));
+                        }
+                        drawer.set(if drawer.get_non_reactive() == id {
+                            0
+                        } else {
+                            id
+                        });
+                    });
+                }
+                if live.get() {
+                    let d = document.clone();
+                    Action("Presentation".into(), x, PANEL_ROW, 130., move || {
+                        state(&d, json!({"presentation":true}))
+                    });
+                    let d = document.clone();
+                    Toggle(
+                        if preview_playlist_height == 145 {
+                            "Compact playlist"
+                        } else {
+                            "Tall playlist"
+                        }
+                        .into(),
+                        x + 138.,
+                        PANEL_ROW,
+                        160.,
+                        preview_playlist_height != 145,
+                        move || {
+                            state(
+                                &d,
+                                json!({"preview_playlist_height": if preview_playlist_height == 145 { 261 } else { 145 }}),
+                            );
+                            pan.set([0, 0]);
+                        },
+                    );
+                }
             }
             Box(
                 Modifier::empty()
-                    .absolute_offset(20., 153.)
-                    .size_points(190., 655.)
-                    .background(CARD)
+                    .absolute_offset(20., CANVAS_ORIGIN.1)
+                    .size_points(190., canvas_h)
+                    .background(PANEL_BACK)
                     .rounded_corners(6.),
                 BoxSpec::default(),
                 || {},
             );
-            Label("DRAW".into(), 32., 166., 160., 12., DIM);
-            {
-                let d = document.clone();
-                Action(
-                    view.brush.clone(),
-                    30.,
-                    190.,
-                    78.,
-                    !picker.get(),
+            // Painting controls only while the canvas is the drawing surface.
+            // Preview and the state sheet used to leave a full sidebar of live,
+            // completely inert brushes, colours and targets on screen with one
+            // 11pt line of grey text as the only sign they did nothing.
+            if drawing {
+                Label("DRAW".into(), 32., 142., 160., 11., DIM);
+                {
+                    let d = document.clone();
+                    Choice(
+                        view.brush.clone(),
+                        30.,
+                        158.,
+                        78.,
+                        !picker.get(),
+                        move || {
+                            picker.set(false);
+                            state(&d, json!({"brush":"pencil"}));
+                        },
+                    );
+                }
+                Choice(
+                    "Pick pixel".into(),
+                    115.,
+                    158.,
+                    84.,
+                    picker.get(),
                     move || {
-                        picker.set(false);
-                        state(&d, json!({"brush":"pencil"}));
+                        picker.set(true);
                     },
                 );
-            }
-            Action(
-                "Pick pixel".into(),
-                115.,
-                190.,
-                84.,
-                picker.get(),
-                move || {
-                    picker.set(true);
-                },
-            );
-            for (i, c) in [
-                "#ffffff", "#d5f2fa", "#8fcae2", "#4382a4", "#15354a", "#09121d", "#ee99b2",
-                "#ff00ff",
-            ]
-            .iter()
-            .enumerate()
-            {
-                let d = document.clone();
-                let c = c.to_string();
-                let rgba = parse_color(&c).unwrap();
-                Box(
-                    Modifier::empty()
-                        .absolute_offset(32. + (i % 4) as f32 * 41., 232. + (i / 4) as f32 * 34.)
-                        .size_points(32., 25.)
-                        .background(Color::from_rgba_u8(rgba[0], rgba[1], rgba[2], 255))
-                        .rounded_corners(3.)
-                        .clickable(move |_| state(&d, json!({"color":c}))),
-                    BoxSpec::default(),
-                    || {},
-                );
-            }
-            Label(format!("Brush {}", view.color), 32., 303., 165., 12., FG);
-            cranpose_ui::BasicTextField(
-                color_field,
-                Modifier::empty()
-                    .absolute_offset(32., 328.)
-                    .size_points(100., 24.)
-                    .background(BG),
-                text_style(12., FG),
-            );
-            {
-                let d = document.clone();
-                Action("Set".into(), 139., 324., 58., false, move || {
-                    state(&d, json!({"color":color_field.text()}));
-                });
-            }
-            Label("EDIT SCOPE".into(), 32., 373., 160., 11., DIM);
-            {
-                let d = document.clone();
-                let all = view.all_states;
-                Action(
-                    if all {
-                        "All sprite states"
+                Label(
+                    if picker.get() {
+                        "Click a pixel to take its colour.".into()
                     } else {
-                        "Current state only"
+                        "Drag to paint · right-click\nsamples the colour under it".into()
+                    },
+                    32.,
+                    192.,
+                    175.,
+                    11.,
+                    DIM,
+                );
+                // Stroke width is the parameter a painter reaches for most, so it
+                // lives in the sidebar rather than behind a panel across the window.
+                Label("STROKE WIDTH".into(), 32., 226., 110., 11., DIM);
+                Label(format!("{} px", view.brush_size), 150., 225., 50., 12., FG);
+                for (i, (label, delta)) in [("− Thinner", -1i32), ("+ Thicker", 1)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let d = document.clone();
+                    let size = view.brush_size as i32;
+                    Action(label.into(), 30. + i as f32 * 86., 242., 78., move || {
+                        state(&d, json!({"brush_size":(size + delta).clamp(1, 32)}))
+                    });
+                }
+                Label("COLOUR".into(), 32., 282., 160., 11., DIM);
+                for (i, c) in [
+                    "#ffffff", "#d5f2fa", "#8fcae2", "#4382a4", "#15354a", "#09121d", "#ee99b2",
+                    "#ff00ff",
+                ]
+                .iter()
+                .enumerate()
+                {
+                    let d = document.clone();
+                    let c = c.to_string();
+                    let rgba = parse_color(&c).unwrap();
+                    Box(
+                        Modifier::empty()
+                            .absolute_offset(
+                                32. + (i % 4) as f32 * 41.,
+                                298. + (i / 4) as f32 * 34.,
+                            )
+                            .size_points(32., 25.)
+                            .background(Color::from_rgba_u8(rgba[0], rgba[1], rgba[2], 255))
+                            .rounded_corners(3.)
+                            .clickable(move |_| state(&d, json!({"color":c}))),
+                        BoxSpec::default(),
+                        || {},
+                    );
+                }
+                Panel(
+                    "Colour picker…".into(),
+                    30.,
+                    364.,
+                    168.,
+                    drawer.get() == 8,
+                    move || drawer.set(if drawer.get_non_reactive() == 8 { 0 } else { 8 }),
+                );
+                // The colour in force, as a swatch rather than only as hex.
+                // Typing an exact value now lives in the picker, beside the
+                // field and the palette it belongs with.
+                {
+                    let rgba = parse_color(&view.color).unwrap_or([255, 255, 255, 255]);
+                    Box(
+                        Modifier::empty()
+                            .absolute_offset(32., 402.)
+                            .size_points(30., 20.)
+                            .background(Color::from_rgba_u8(rgba[0], rgba[1], rgba[2], 255))
+                            .rounded_corners(3.),
+                        BoxSpec::default(),
+                        || {},
+                    );
+                }
+                Label(format!("Brush {}", view.color), 70., 405., 130., 11., FG);
+                Label("EDIT SCOPE".into(), 32., 440., 160., 11., DIM);
+                {
+                    let d = document.clone();
+                    let all = view.all_states;
+                    Toggle(
+                        if all {
+                            "All sprite states"
+                        } else {
+                            "Current state only"
+                        }
+                        .into(),
+                        30.,
+                        456.,
+                        168.,
+                        all,
+                        move || state(&d, json!({"all_states":!all})),
+                    );
+                }
+                // "Sprite targets" everywhere: these are the sprites a stroke is
+                // routed into. The independent stack of artwork planes over the
+                // atlases is "painting layers", and never shares the word.
+                // Read-only: the panel that changes this is one row up in the
+                // toolbar, and a second button here was only a duplicate.
+                Label("SPRITE TARGETS".into(), 32., 494., 165., 11., DIM);
+                Label(
+                    if view.layers.is_empty() {
+                        "Auto · everything beneath".into()
+                    } else {
+                        format!("{} chosen by hand", view.layers.len())
+                    },
+                    32.,
+                    510.,
+                    165.,
+                    11.,
+                    FG,
+                );
+                Label(layer_info.clone(), 32., 530., 165., 10., DIM);
+            } else {
+                Label(
+                    if live.get() {
+                        "PLAYER PREVIEW"
+                    } else {
+                        "SPRITE STATE SHEET"
                     }
                     .into(),
-                    30.,
-                    395.,
+                    32.,
+                    142.,
+                    165.,
+                    11.,
+                    DIM,
+                );
+                Label(
+                    if live.get() {
+                        "The skin as the player draws it,\nwith live text and a real\nplaylist. Nothing here paints."
+                    } else {
+                        "Every variant of one sprite,\nnumbered. Read-only: pick the\nsprite in Sprite targets."
+                    }
+                    .into(),
+                    32.,
+                    164.,
                     168.,
-                    all,
-                    move || state(&d, json!({"all_states":!all})),
+                    11.,
+                    DIM,
                 );
+                Action("Back to the canvas".into(), 30., 230., 168., move || {
+                    live.set(false);
+                    review.set(false);
+                });
             }
-            Label("TARGET LAYERS".into(), 32., 446., 165., 11., DIM);
-            Label(
-                if view.layers.is_empty() {
-                    "Auto · topmost".into()
-                } else {
-                    format!("{} selected", view.layers.len())
-                },
-                32.,
-                468.,
-                165.,
-                12.,
-                FG,
-            );
-            Action(
-                "Select layers…".into(),
-                30.,
-                495.,
-                168.,
-                drawer.get() == 1,
-                move || drawer.set(if drawer.get_non_reactive() == 1 { 0 } else { 1 }),
-            );
-            Label(layer_info.clone(), 32., 542., 165., 11., DIM);
-            {
-                let d = document.clone();
-                let time_total = footer_layout == super::skin::FooterLayout::TimeTotal;
-                Action(
-                    if time_total { "Time/Total" } else { "Classic" }.into(),
-                    30.,
-                    589.,
-                    81.,
-                    time_total,
-                    move || {
-                        let _ = d.lock().unwrap().set_layout(
-                            &json!({"footer":if time_total {"classic"} else {"time-total"}}),
-                            "Human",
-                        );
-                    },
-                );
-            }
-            {
-                let d = document.clone();
-                Action(
-                    "List canvas".into(),
-                    117.,
-                    589.,
-                    81.,
-                    playlist_background,
-                    move || {
-                        d.lock()
-                            .unwrap()
-                            .set_playlist_background(!playlist_background, "Human");
-                    },
-                );
-            }
-            if panel == "equalizer" {
-                let d = document.clone();
-                let independent = d
-                    .lock()
-                    .unwrap()
-                    .sheets()
-                    .iter()
-                    .any(|(n, _, _)| n == "eqhandles.bmp");
-                Action(
-                    "Unique EQ art".into(),
-                    742.,
-                    151.,
-                    180.,
-                    independent,
-                    move || {
-                        let mut doc = d.lock().unwrap();
-                        if let Err(error) = doc.set_eq_handles(!independent, "Human") {
-                            doc.message = error.to_string();
-                        }
-                    },
-                );
-            }
-            if panel == "main" {
-                let d = document.clone();
-                Action(
-                    "Glass visualizer".into(),
-                    742.,
-                    151.,
-                    180.,
-                    skin_layout.visualizer_glass,
-                    move || {
-                        let mut doc = d.lock().unwrap();
-                        if let Err(error) = doc.set_layout(
-                            &json!({"visualizer_glass":!skin_layout.visualizer_glass}),
-                            "Human",
-                        ) {
-                            doc.message = error.to_string();
-                        }
-                    },
-                );
-            }
-            if panel == "playlist" {
-                let d = document.clone();
-                let selection = d
-                    .lock()
-                    .unwrap()
-                    .sheets()
-                    .iter()
-                    .any(|(n, _, _)| n == "plselection.bmp");
-                Action(
-                    "Selection artwork".into(),
-                    742.,
-                    151.,
-                    180.,
-                    selection,
-                    move || {
-                        d.lock()
-                            .unwrap()
-                            .set_playlist_selection(!selection, "Human");
-                    },
-                );
-            }
-            Label("ZOOM · INTEGER ONLY".into(), 32., 629., 165., 11., DIM);
+            Label("ZOOM · WHOLE PIXELS".into(), 32., 578., 165., 11., DIM);
             for (i, z) in [1, 2, 3, 4, 6, 8].into_iter().enumerate() {
                 let d = document.clone();
-                Action(
+                Choice(
                     format!("{z}×"),
                     30. + (i % 3) as f32 * 57.,
-                    654. + (i / 3) as f32 * 34.,
+                    594. + (i / 3) as f32 * 34.,
                     51.,
                     view.zoom == z,
                     move || state(&d, json!({"zoom":z})),
                 );
             }
-            for (i, (label, dx, dy)) in [("←", -24, 0), ("→", 24, 0), ("↑", 0, -24), ("↓", 0, 24)]
-                .into_iter()
-                .enumerate()
             {
-                Action(
-                    label.into(),
-                    30. + i as f32 * 43.,
-                    725.,
-                    38.,
-                    false,
-                    move || {
-                        pan.update(|p| {
-                            p[0] = (p[0] + dx).clamp(0, 275);
-                            p[1] = (p[1] + dy).clamp(0, 493);
-                        })
-                    },
-                );
+                let d = document.clone();
+                let room = (canvas_w - SCROLLBAR - 8., canvas_h - SCROLLBAR - 8.);
+                Action("Fit whole skin".into(), 30., 666., 168., move || {
+                    let mut doc = d.lock().unwrap();
+                    doc.view.panel = "canvas".into();
+                    let best = fit_zoom(room, doc.canvas_size());
+                    let _ = doc.state(
+                        json!({"panel":"canvas","layer":"auto","zoom":best,"presentation":false}),
+                    );
+                    live.set(false);
+                    review.set(false);
+                    pan.set([0, 0]);
+                });
             }
             Label(
-                "MCP • 127.0.0.1:18765\n--skin-studio-mcp".into(),
+                "Wheel scrolls the canvas, alt+wheel\nsideways, ctrl+wheel zooms at the\n\
+                 pointer. Drag with the middle button\nto pan."
+                    .into(),
                 32.,
-                767.,
-                167.,
+                706.,
+                168.,
                 10.,
                 DIM,
             );
             Label(
                 if live.get() {
-                    "CRANAMP PLAYER RENDER".into()
+                    "CRANAMP PLAYER RENDER  ·  drawing is off".into()
+                } else if review.get() {
+                    format!(
+                        "SPRITE STATE SHEET  ·  {}  ·  {} variants  ·  drawing is off",
+                        sheet_subject.clone().unwrap_or_else(|| "no sprite".into()),
+                        sheet_variants
+                    )
                 } else {
                     format!(
-                        "{}  ·  {} × {} source pixels  ·  {}×",
-                        panel.to_uppercase(),
+                        "{}  ·  {} × {} source pixels  ·  {}×  ·  centre: {}",
+                        if panel == "canvas" {
+                            "WHOLE SKIN".into()
+                        } else if panel == "atlas" {
+                            format!("ATLAS  {}", view.sheet)
+                        } else {
+                            panel.to_uppercase()
+                        },
                         w,
                         h,
-                        view.zoom
+                        view.zoom,
+                        section
                     )
                 },
                 230.,
-                155.,
-                790.,
-                12.,
+                108.,
+                420.,
+                11.,
                 DIM,
             );
-            Action(
-                if review.get() { "Canvas" } else { "States" }.into(),
-                1040.,
-                151.,
-                88.,
-                review.get(),
-                move || {
-                    review.set(!review.get_non_reactive());
-                    live.set(false);
-                },
-            );
-            if !live.get() {
-                Action(
-                    "Study".into(),
-                    624.,
-                    151.,
-                    110.,
-                    drawer.get() == 5,
-                    move || drawer.set(if drawer.get_non_reactive() == 5 { 0 } else { 5 }),
+            // Where the brush is, in the skin's own pixels. Its own composable,
+            // so a mouse move repaints this line and the brush outline and
+            // nothing else -- the canvas bitmap is rebuilt only when the
+            // picture changes.
+            CursorReadout(hover, canvas_x + canvas_w - 200., 108.);
+            if let Some(refusal) = sheet_refusal.clone() {
+                Label(
+                    refusal,
+                    canvas_x + 40.,
+                    canvas_y + 60.,
+                    canvas_w - 80.,
+                    13.,
+                    DIM,
                 );
-            }
-            Action(
-                "History".into(),
-                936.,
-                151.,
-                96.,
-                drawer.get() == 2,
-                move || drawer.set(if drawer.get_non_reactive() == 2 { 0 } else { 2 }),
-            );
-            if live.get() {
                 let d = document.clone();
-                Action("Presentation".into(), 624., 151., 132., false, move || {
-                    state(&d, json!({"presentation":true}))
-                });
-                let d = document.clone();
-                Action(
-                    if preview_playlist_height == 145 {
-                        "Tall playlist"
-                    } else {
-                        "Compact playlist"
-                    }
-                    .into(),
-                    765.,
-                    151.,
-                    160.,
-                    false,
+                Panel(
+                    "Sprite targets".into(),
+                    canvas_x + 40.,
+                    canvas_y + 120.,
+                    150.,
+                    drawer.get() == 1,
                     move || {
-                        state(
-                            &d,
-                            json!({"preview_playlist_height": if preview_playlist_height == 145 { 261 } else { 145 }}),
-                        );
-                        pan.set([0, 0]);
+                        let _ = &d;
+                        drawer.set(1)
                     },
                 );
             }
             let canvas_doc = document.clone();
             let canvas_bitmap = bitmap.clone();
             let canvas_panel = panel.clone();
+            let canvas_guides = guide_rects.clone();
+            let nav_doc = document.clone();
             Box(
                 Modifier::empty()
-                    .absolute_offset(230., 188.)
-                    .size_points(900., 540.)
+                    .absolute_offset(canvas_x, canvas_y)
+                    .size_points(canvas_w, canvas_h)
                     .clip_to_bounds()
-                    .background(Color(0.04, 0.05, 0.07, 1.)),
+                    .background(Color(0.04, 0.05, 0.07, 1.))
+                    // Navigation sits on the canvas panel, under the drawing
+                    // surface, so it works over the artwork and over the margin
+                    // around it alike: the brush consumes presses and drags, and
+                    // everything it does not consume arrives here.
+                    //
+                    // cranpose delivers key events only to a focused text field,
+                    // so there is no Cmd+Z, no bracket keys and no space-to-pan
+                    // to be had; every gesture the editor offers has to be one
+                    // the pointer alone can make.
+                    .pointer_input(
+                        (
+                            view.zoom,
+                            canvas_w.to_bits(),
+                            canvas_h.to_bits(),
+                            ox.to_bits(),
+                            oy.to_bits(),
+                        ),
+                        move |scope: PointerInputScope| {
+                            let d = nav_doc.clone();
+                            async move {
+                                scope
+                                    .await_pointer_event_scope(|events| async move {
+                                        let mut grab: Option<([f32; 2], [i32; 2])> = None;
+                                        // Panning is in source pixels, and the
+                                        // skin is never larger than its own
+                                        // canvas, so these are the only bounds
+                                        // either axis can need.
+                                        let limit = [viewport_w as i32, viewport_h as i32];
+                                        loop {
+                                            let event = events.await_pointer_event().await;
+                                            match event.kind {
+                                                PointerEventKind::Zoom => {
+                                                    // ctrl+wheel reaches a
+                                                    // handler as a zoom gesture,
+                                                    // not as a scroll with a
+                                                    // modifier: the shell's
+                                                    // wheel policy converts it
+                                                    // before dispatch.
+                                                    let step: i32 =
+                                                        if event.zoom_delta > 1. { 1 } else { -1 };
+                                                    let next = (view.zoom as i32 + step).clamp(1, 8)
+                                                        as f32;
+                                                    if next != zoom {
+                                                        // Zoom about the pointer:
+                                                        // the pixel under it stays
+                                                        // under it, so magnifying
+                                                        // does not also lose the
+                                                        // reader's place.
+                                                        // Panning is in whole
+                                                        // source pixels, so the
+                                                        // anchor is the pixel the
+                                                        // pointer names rather than
+                                                        // the exact point under it:
+                                                        // the smallest pan that
+                                                        // keeps that same pixel
+                                                        // under the pointer is the
+                                                        // ceiling, not the nearest.
+                                                        let anchor = |along: f32,
+                                                                      origin: f32,
+                                                                      room: f32,
+                                                                      span: f32| {
+                                                            let pixel = ((along - origin) / zoom)
+                                                                .floor();
+                                                            let centre = ((room
+                                                                - SCROLLBAR
+                                                                - span * next)
+                                                                / 2.)
+                                                                .max(0.);
+                                                            (pixel - (along - centre) / next).ceil()
+                                                        };
+                                                        pan.set([
+                                                            anchor(
+                                                                event.position.x,
+                                                                ox,
+                                                                canvas_w,
+                                                                viewport_w as f32,
+                                                            )
+                                                            .clamp(0., limit[0] as f32)
+                                                                as i32,
+                                                            anchor(
+                                                                event.position.y,
+                                                                oy,
+                                                                canvas_h,
+                                                                viewport_h as f32,
+                                                            )
+                                                            .clamp(0., limit[1] as f32)
+                                                                as i32,
+                                                        ]);
+                                                        state(&d, json!({ "zoom": next as u8 }));
+                                                    }
+                                                    event.consume();
+                                                }
+                                                PointerEventKind::Scroll => {
+                                                    // The shell has already applied
+                                                    // its wheel policy, alt-held
+                                                    // axis swap included, so both
+                                                    // axes are used as they arrive.
+                                                    pan.update(|p| {
+                                                        for axis in 0..2 {
+                                                            let delta = if axis == 0 {
+                                                                event.scroll_delta.x
+                                                            } else {
+                                                                event.scroll_delta.y
+                                                            };
+                                                            p[axis] = (p[axis]
+                                                                - (delta / zoom).round() as i32)
+                                                                .clamp(0, limit[axis]);
+                                                        }
+                                                    });
+                                                    event.consume();
+                                                }
+                                                PointerEventKind::Down => {
+                                                    // The middle button pans. It is
+                                                    // the one grab gesture available
+                                                    // without a spacebar.
+                                                    if event.buttons.contains(PointerButton::Middle)
+                                                    {
+                                                        grab = Some((
+                                                            [event.position.x, event.position.y],
+                                                            pan.get_non_reactive(),
+                                                        ));
+                                                        event.consume();
+                                                    }
+                                                }
+                                                PointerEventKind::Move => {
+                                                    if let Some((from, base)) = grab {
+                                                        if event
+                                                            .buttons
+                                                            .contains(PointerButton::Middle)
+                                                        {
+                                                            let travel = [
+                                                                event.position.x - from[0],
+                                                                event.position.y - from[1],
+                                                            ];
+                                                            pan.set([
+                                                                (base[0]
+                                                                    - (travel[0] / zoom).round()
+                                                                        as i32)
+                                                                    .clamp(0, limit[0]),
+                                                                (base[1]
+                                                                    - (travel[1] / zoom).round()
+                                                                        as i32)
+                                                                    .clamp(0, limit[1]),
+                                                            ]);
+                                                            event.consume();
+                                                        } else {
+                                                            grab = None;
+                                                        }
+                                                    }
+                                                }
+                                                PointerEventKind::Up
+                                                | PointerEventKind::Cancel
+                                                | PointerEventKind::Exit => {
+                                                    grab = None;
+                                                    hover.set(None);
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    })
+                                    .await;
+                            }
+                        },
+                    ),
                 BoxSpec::default(),
                 move || {
                     if live.get() {
@@ -943,7 +2049,7 @@ pub fn SkinStudio(shared: SharedDocument) {
                             for x in 0..w {
                                 Box(
                                     Modifier::empty()
-                                        .absolute_offset(x as f32 * zoom - px, -py)
+                                        .absolute_offset(x as f32 * zoom + ox, oy)
                                         .size_points(1., h as f32 * zoom)
                                         .background(Color(0.05, 0.07, 0.10, 0.28)),
                                     BoxSpec::default(),
@@ -953,7 +2059,7 @@ pub fn SkinStudio(shared: SharedDocument) {
                             for y in 0..h {
                                 Box(
                                     Modifier::empty()
-                                        .absolute_offset(-px, y as f32 * zoom - py)
+                                        .absolute_offset(ox, y as f32 * zoom + oy)
                                         .size_points(w as f32 * zoom, 1.)
                                         .background(Color(0.05, 0.07, 0.10, 0.28)),
                                     BoxSpec::default(),
@@ -963,7 +2069,7 @@ pub fn SkinStudio(shared: SharedDocument) {
                         }
                         let d = canvas_doc.clone();
                         Box(
-                            Modifier::empty().absolute_offset(-px, -py).required_size(
+                            Modifier::empty().absolute_offset(ox, oy).required_size(
                                 cranpose_ui::Size::new(275. * zoom, viewport_h as f32 * zoom),
                             ),
                             BoxSpec::default(),
@@ -989,7 +2095,7 @@ pub fn SkinStudio(shared: SharedDocument) {
                                 cranpose_ui::ImageSampling::Nearest,
                             ),
                             None,
-                            Modifier::empty().absolute_offset(-px, -py).required_size(
+                            Modifier::empty().absolute_offset(ox, oy).required_size(
                                 cranpose_ui::Size::new(w as f32 * zoom, h as f32 * zoom),
                             ),
                             Alignment::TOP_START,
@@ -1001,7 +2107,7 @@ pub fn SkinStudio(shared: SharedDocument) {
                             for x in 0..w {
                                 Box(
                                     Modifier::empty()
-                                        .absolute_offset(x as f32 * zoom - px, -py)
+                                        .absolute_offset(x as f32 * zoom + ox, oy)
                                         .size_points(1., h as f32 * zoom)
                                         .background(Color(0.05, 0.07, 0.10, 0.28)),
                                     BoxSpec::default(),
@@ -1011,7 +2117,7 @@ pub fn SkinStudio(shared: SharedDocument) {
                             for y in 0..h {
                                 Box(
                                     Modifier::empty()
-                                        .absolute_offset(-px, y as f32 * zoom - py)
+                                        .absolute_offset(ox, y as f32 * zoom + oy)
                                         .size_points(w as f32 * zoom, 1.)
                                         .background(Color(0.05, 0.07, 0.10, 0.28)),
                                     BoxSpec::default(),
@@ -1020,13 +2126,26 @@ pub fn SkinStudio(shared: SharedDocument) {
                             }
                         }
                         let d = canvas_doc.clone();
-                        if !review.get() && drawer.get() == 0 {
+                        if !review.get() {
                             Box(
                                 Modifier::empty()
-                                    .absolute_offset(-px, -py)
+                                    .absolute_offset(ox, oy)
                                     .required_size(cranpose_ui::Size::new(w as f32 * zoom, h as f32 * zoom))
                                     .pointer_input(
-                                        (canvas_panel.clone(), view.zoom),
+                                        // The mapping from a pointer to a skin
+                                        // pixel is built from the canvas
+                                        // geometry, so the handler has to be
+                                        // rebuilt whenever that geometry moves:
+                                        // a drawer opening or a window resize
+                                        // shifts the image, and a stale handler
+                                        // then paints somewhere else entirely.
+                                        (
+                                            canvas_panel.clone(),
+                                            view.zoom,
+                                            ox.to_bits(),
+                                            oy.to_bits(),
+                                            drawer_canvas_x.to_bits(),
+                                        ),
                                         move |scope: PointerInputScope| {
                                             let d = d.clone();
                                             async move {
@@ -1047,16 +2166,65 @@ pub fn SkinStudio(shared: SharedDocument) {
                                                                         .floor()
                                                                         as i32,
                                                                 ];
-                                                                if drawer.get_non_reactive() != 0 {
+                                                                if drawer.get_non_reactive()
+                                                                    != 0
+                                                                    && ox + event.position.x
+                                                                        >= drawer_canvas_x
+                                                                {
+                                                                    // Under the open panel: end
+                                                                    // any stroke rather than
+                                                                    // painting out of sight.
+                                                                    if origin.take().is_some() {
+                                                                        d.lock()
+                                                                            .unwrap()
+                                                                            .finish_stroke();
+                                                                    }
                                                                     last = None;
+                                                                    hover.set(None);
                                                                     continue;
                                                                 }
                                                                 match event.kind {
+                                                                    PointerEventKind::Move
+                                                                    | PointerEventKind::Enter => {
+                                                                        hover.set(Some(point));
+                                                                        studied.set(Some(point));
+                                                                    }
+                                                                    PointerEventKind::Exit => {
+                                                                        hover.set(None);
+                                                                    }
+                                                                    _ => {}
+                                                                }
+                                                                match event.kind {
                                                                     PointerEventKind::Down => {
+                                                                        // Only the two buttons
+                                                                        // that mean something
+                                                                        // here. A middle press
+                                                                        // belongs to the panel
+                                                                        // underneath, which pans
+                                                                        // with it; consuming it
+                                                                        // as a stroke meant
+                                                                        // middle-drag painted
+                                                                        // over the artwork and
+                                                                        // panned only over the
+                                                                        // margin around it.
+                                                                        let sampling = picker
+                                                                            .get_non_reactive()
+                                                                            || event.buttons.contains(
+                                                                                PointerButton::Secondary,
+                                                                            );
+                                                                        if !sampling
+                                                                            && !event.buttons.contains(
+                                                                                PointerButton::Primary,
+                                                                            )
+                                                                        {
+                                                                            continue;
+                                                                        }
                                                                         let mut doc =
                                                                             d.lock().unwrap();
-                                                                        if picker.get_non_reactive()
-                                                                        {
+                                                                        // The right button
+                                                                        // samples with no mode
+                                                                        // to enter and leave.
+                                                                        if sampling {
                                                                             let info = doc.inspect(
                                                                                 point[0].max(0)
                                                                                     as u32,
@@ -1081,6 +2249,7 @@ pub fn SkinStudio(shared: SharedDocument) {
                                                                             doc.message =
                                                                                 info.to_string();
                                                                             doc.revision += 1;
+                                                                            picker.set(false);
                                                                         } else {
                                                                             doc.checkpoint();
                                                                             let v =
@@ -1161,18 +2330,67 @@ pub fn SkinStudio(shared: SharedDocument) {
                                 || {},
                             );
                         }
+                        // Where the next stroke would land, sized to the
+                        // stroke width. Drawn over the artwork rather than
+                        // into it, so following the pointer costs one outline
+                        // and not a re-render of the whole skin.
+                        if !review.get() {
+                            GuideHint(
+                                hover,
+                                canvas_guides.clone(),
+                                zoom,
+                                ox,
+                                oy,
+                                (8., canvas_h - 24.),
+                            );
+                            BrushCursor(hover, zoom, view.brush_size, ox, oy);
+                        }
                     }
                 },
             );
-            let state_y = 744.;
+            if panel != "canvas" && drawing {
+                // One atlas at a time is a detour, and the way back has to be
+                // on the canvas rather than only inside a panel.
+                let d = document.clone();
+                Action(
+                    "← The whole skin".into(),
+                    canvas_x + 8.,
+                    canvas_y + canvas_h - 40.,
+                    150.,
+                    move || {
+                        let mut doc = d.lock().unwrap();
+                        open_on_whole_skin(&mut doc);
+                        doc.revision += 1;
+                        drop(doc);
+                        pan.set([0, 0]);
+                    },
+                );
+            }
+            let state_y = scene.state_y();
+            // The most consequential strip in the editor had no name at all: it
+            // decides which variant of every sprite the canvas is drawing.
+            Label("SPRITE STATE".into(), 24., state_y - 2., 180., 11., DIM);
+            Label(
+                "the variant the canvas draws".into(),
+                24.,
+                state_y + 14.,
+                190.,
+                10.,
+                DIM,
+            );
             {
                 let d = document.clone();
                 let pressed = view.pressed;
-                Action(
-                    if pressed { "Pressed" } else { "Released" }.into(),
+                Toggle(
+                    if pressed {
+                        "Buttons pressed"
+                    } else {
+                        "Buttons released"
+                    }
+                    .into(),
                     230.,
                     state_y,
-                    110.,
+                    136.,
                     pressed,
                     move || state(&d, json!({"pressed":!pressed})),
                 );
@@ -1180,59 +2398,38 @@ pub fn SkinStudio(shared: SharedDocument) {
             {
                 let d = document.clone();
                 let active = view.active;
-                Action(
+                Toggle(
                     if active {
-                        "On / active"
+                        "Window focused"
                     } else {
-                        "Off / inactive"
+                        "Window behind"
                     }
                     .into(),
-                    350.,
+                    374.,
                     state_y,
-                    120.,
+                    128.,
                     active,
                     move || state(&d, json!({"active":!active})),
                 );
             }
-            let kind = if panel == "equalizer" {
-                "eq".to_string()
-            } else if panel == "playlist" {
-                "scroll".to_string()
-            } else {
-                frame_kind.get()
-            };
-            if panel == "main" {
-                for (i, k) in ["volume", "balance", "position"].iter().enumerate() {
-                    let k = k.to_string();
-                    Action(
-                        k.clone(),
-                        488. + i as f32 * 84.,
-                        state_y,
-                        78.,
-                        kind == k,
-                        move || frame_kind.set(k.clone()),
-                    );
-                }
-            }
-            if panel == "equalizer" {
-                Label(
-                    format!("Travel: {} px", skin_layout.eq_travel),
-                    490.,
-                    state_y + 6.,
-                    145.,
-                    12.,
-                    FG,
+            // Every slider the skin has, always. Which of them this row offered
+            // used to depend on where the canvas happened to be scrolled, so
+            // the playlist scrollbar's frames could only be reached by already
+            // knowing to scroll to the playlist.
+            let kind = frame_kind.get();
+            for (i, k) in ["volume", "balance", "position", "eq", "scroll"]
+                .iter()
+                .enumerate()
+            {
+                let k = k.to_string();
+                Choice(
+                    k.clone(),
+                    510. + i as f32 * 62.,
+                    state_y,
+                    58.,
+                    kind == k,
+                    move || frame_kind.set(k.clone()),
                 );
-                for (x, delta, label) in [(640., -1_i16, "−"), (692., 1, "+")] {
-                    let d = document.clone();
-                    Action(label.into(), x, state_y, 40., false, move || {
-                        let value = (skin_layout.eq_travel as i16 + delta).clamp(1, 52);
-                        let mut doc = d.lock().unwrap();
-                        if let Err(error) = doc.set_layout(&json!({"eq_travel":value}), "Human") {
-                            doc.message = error.to_string();
-                        }
-                    });
-                }
             }
             let value = match kind.as_str() {
                 "eq" => view.eq[0],
@@ -1242,17 +2439,17 @@ pub fn SkinStudio(shared: SharedDocument) {
                 _ => view.volume,
             };
             Label(
-                format!("{}  {value:02}/27", kind),
-                760.,
+                format!("{kind}  {value:02}/27"),
+                828.,
                 state_y + 6.,
                 150.,
                 12.,
                 FG,
             );
-            for (delta, label, x) in [(-1, "−", 922.), (1, "+", 975.)] {
+            for (delta, label, x) in [(-1, "−", 920.), (1, "+", 968.)] {
                 let d = document.clone();
                 let kind = kind.clone();
-                Action(label.into(), x, state_y, 46., false, move || {
+                Action(label.into(), x, state_y, 46., move || {
                     let n = (value as i32 + delta).clamp(0, 27) as u8;
                     let patch = if kind == "eq" {
                         json!({"eq":vec![n;11]})
@@ -1264,18 +2461,24 @@ pub fn SkinStudio(shared: SharedDocument) {
             }
             {
                 let d = document.clone();
-                Action("Sliders +".into(), 1032., state_y, 96., false, move || {
-                    let mut doc = d.lock().unwrap();
-                    let next = (doc.view.volume + 1) % 28;
-                    let _=doc.state(json!({"volume":next,"balance":next,"position":next,"scroll":next,"eq":vec![next;11]}));
-                });
+                Action(
+                    "Advance every slider".into(),
+                    1022.,
+                    state_y,
+                    118.,
+                    move || {
+                        let mut doc = d.lock().unwrap();
+                        let next = (doc.view.volume + 1) % 28;
+                        let _=doc.state(json!({"volume":next,"balance":next,"position":next,"scroll":next,"eq":vec![next;11]}));
+                    },
+                );
             }
             {
                 let d = document.clone();
                 let kind = kind.clone();
                 cranpose_ui::Slider(
                     Modifier::empty()
-                        .absolute_offset(230., 786.)
+                        .absolute_offset(230., scene.slider_y())
                         .size_points(500., 22.),
                     value as f32 / 27.,
                     move |v| {
@@ -1314,39 +2517,91 @@ pub fn SkinStudio(shared: SharedDocument) {
             }
             Label(
                 "Scrub all 28 native frame positions".into(),
-                746.,
-                790.,
+                scene.right(746.),
+                scene.slider_y() + 4.,
                 370.,
                 11.,
                 DIM,
             );
-            Label(message.clone(), 230., 824., 895., 11., DIM);
+            // Scrollbars sit over the canvas' own edges, after it, so they take
+            // the pointer there instead of the brush.
+            if !review.get() && !live.get() && pan_max[1] > 0 {
+                CanvasScrollbar(
+                    true,
+                    (
+                        canvas_x + canvas_w - SCROLLBAR,
+                        canvas_y,
+                        SCROLLBAR,
+                        canvas_h - SCROLLBAR,
+                    ),
+                    (canvas_h - SCROLLBAR) / zoom,
+                    viewport_h as f32,
+                    pan_value[1],
+                    pan_max[1],
+                    move |v| pan.update(|p| p[1] = v),
+                );
+            }
+            if !review.get() && !live.get() && pan_max[0] > 0 {
+                CanvasScrollbar(
+                    false,
+                    (
+                        canvas_x,
+                        canvas_y + canvas_h - SCROLLBAR,
+                        canvas_w - SCROLLBAR,
+                        SCROLLBAR,
+                    ),
+                    (canvas_w - SCROLLBAR) / zoom,
+                    viewport_w as f32,
+                    pan_value[0],
+                    pan_max[0],
+                    move |v| pan.update(|p| p[0] = v),
+                );
+            }
+            Label(
+                message.clone(),
+                230.,
+                scene.message_y(),
+                scene.width - 265.,
+                12.,
+                if ALERT_REVISION.load(Ordering::Acquire) == revision {
+                    ALERT
+                } else {
+                    DIM
+                },
+            );
             if drawer.get() != 0 {
                 let d = document.clone();
                 Box(
                     Modifier::empty()
-                        .absolute_offset(750., 188.)
-                        .size_points(380., 540.)
-                        .background(CARD),
+                        .absolute_offset(drawer_x, drawer_y)
+                        .size_points(drawer_w, drawer_h)
+                        .background(PANEL_BACK)
+                        .rounded_corners(6.),
                     BoxSpec::default(),
                     move || {
-                        Action("Close".into(), 290., 10., 78., false, move || drawer.set(0));
+                        Action("Close".into(), 290., 10., 78., move || drawer.set(0));
+                        let room = (drawer_w - 24., drawer_h);
                         if drawer.get() == 1 {
-                            LayerChooser(d.clone(), revision);
+                            LayerChooser(d.clone(), revision, room);
                         } else if drawer.get() == 2 {
-                            HistoryChooser(d.clone(), revision);
+                            HistoryChooser(d.clone(), revision, room);
                         } else if drawer.get() == 6 {
-                            GuideChooser(d.clone(), revision);
+                            GuideChooser(d.clone(), revision, room);
                         } else if drawer.get() == 7 {
-                            PaintChooser(d.clone(), revision);
+                            PaintChooser(d.clone(), revision, room);
                         } else if drawer.get() == 5 {
-                            StudyChooser(d.clone(), revision);
+                            StudyChooser(d.clone(), revision, room, studied);
                         } else if drawer.get() == 4 {
                             BrushChooser(d.clone(), revision);
+                        } else if drawer.get() == 8 {
+                            ColorChooser(d.clone(), revision, room);
+                        } else if drawer.get() == 9 {
+                            SkinOptionsChooser(d.clone(), revision, room);
                         } else {
-                            Label("NATIVE ATLASES".into(), 12., 17., 260., 14., FG);
+                            Label("SKIN ATLASES".into(), 12., 17., 260., 14., FG);
                             Label(
-                                "Same pencil, pixel picker and undo history.".into(),
+                                "One BMP at a time, at native coordinates. Same\npencil, pixel picker and undo history."
+                                    .into(),
                                 12.,
                                 51.,
                                 355.,
@@ -1354,14 +2609,40 @@ pub fn SkinStudio(shared: SharedDocument) {
                                 DIM,
                             );
                             let sheets = d.lock().unwrap().sheets();
+                            let (current_panel, current_sheet) = {
+                                let doc = d.lock().unwrap();
+                                (doc.view.panel.clone(), doc.view.sheet.clone())
+                            };
+                            {
+                                let target = d.clone();
+                                ListChoice(
+                                    "The whole skin".into(),
+                                    12.,
+                                    84.,
+                                    drawer_w - 24.,
+                                    current_panel == "canvas",
+                                    move || {
+                                        let mut doc = target.lock().unwrap();
+                                        let _ = doc.state(json!({"panel":"canvas","layer":"auto","presentation":false}));
+                                        open_on_whole_skin(&mut doc);
+                                        doc.revision += 1;
+                                        drop(doc);
+                                        live.set(false);
+                                        review.set(false);
+                                        pan.set([0, 0]);
+                                    },
+                                );
+                            }
                             for (i, (name, w, h)) in sheets.into_iter().enumerate() {
                                 let target = d.clone();
-                                Action(
-                                    format!("{name}  {w}×{h}"),
-                                    12. + (i % 2) as f32 * 178.,
-                                    82. + (i / 2) as f32 * 47.,
-                                    170.,
-                                    false,
+                                let on = current_panel == "atlas" && current_sheet == name;
+                                let caption = format!("{name}      {w} × {h}");
+                                ListChoice(
+                                    caption,
+                                    12.,
+                                    130. + i as f32 * 38.,
+                                    drawer_w - 24.,
+                                    on,
                                     move || {
                                         state(
                                             &target,
@@ -1370,7 +2651,6 @@ pub fn SkinStudio(shared: SharedDocument) {
                                         live.set(false);
                                         review.set(false);
                                         pan.set([0, 0]);
-                                        drawer.set(0);
                                     },
                                 );
                             }
@@ -1384,7 +2664,7 @@ pub fn SkinStudio(shared: SharedDocument) {
 #[composable]
 fn BrushChooser(shared: SharedDocument, _revision: u64) {
     let v = shared.lock().unwrap().view.clone();
-    Label("PIXEL DRAWING TOOLS".into(), 12., 17., 270., 14., FG);
+    Label("DRAWING TOOLS".into(), 12., 17., 270., 14., FG);
     Label(
         "Solid native pixels. One shared undo history.".into(),
         12.,
@@ -1408,7 +2688,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
     .enumerate()
     {
         let d = shared.clone();
-        Action(
+        Choice(
             label.into(),
             12. + (i % 3) as f32 * 118.,
             82. + (i / 3) as f32 * 45.,
@@ -1420,7 +2700,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
     Label("STROKE WIDTH".into(), 12., 210., 172., 12., DIM);
     for (i, size) in [1, 2, 3, 4, 8, 16].into_iter().enumerate() {
         let d = shared.clone();
-        Action(
+        Choice(
             format!("{size}px"),
             12. + i as f32 * 59.,
             232.,
@@ -1433,7 +2713,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
         for (x, delta, label) in [(12., -10, "− Bend"), (248., 10, "+ Bend")] {
             let d = shared.clone();
             let bend = v.curve_bend;
-            Action(label.into(), x, 271., 110., false, move || {
+            Action(label.into(), x, 271., 110., move || {
                 state(&d, json!({"curve_bend":(bend+delta).clamp(-100,100)}))
             });
         }
@@ -1458,7 +2738,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
     .enumerate()
     {
         let d = shared.clone();
-        Action(
+        Toggle(
             label.into(),
             12. + (i % 2) as f32 * 178.,
             316. + (i / 2) as f32 * 48.,
@@ -1470,7 +2750,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
     let d = shared.clone();
     let mask_on = !v.mask_colors.is_empty();
     let picked = v.color.clone();
-    Action(
+    Toggle(
         if mask_on {
             "Clear color mask".into()
         } else {
@@ -1496,38 +2776,346 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
         DIM,
     );
 }
+/// Everything about the skin itself rather than about painting it.
+///
+/// These used to be buttons in the toolbar that appeared and disappeared as the
+/// canvas scrolled past the window they belonged to: a control nobody could
+/// find, because finding it meant already knowing to scroll to the playlist.
+/// They are all here, all of the time.
 #[composable]
-fn LayerChooser(shared: SharedDocument, _revision: u64) {
-    let (layers, selected) = {
+fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
+    // Taller than the column on a small window, so the whole block scrolls
+    // rather than losing the visualizer palette off the bottom edge.
+    let scroll = cranpose_ui::rememberScrollState!(0.0);
+    let shared = shared.clone();
+    cranpose_ui::Column(
+        Modifier::empty()
+            .absolute_offset(0., 0.)
+            .size_points(room.0 + 24., room.1)
+            .clip_to_bounds()
+            .vertical_scroll(scroll, false),
+        cranpose_ui::ColumnSpec::default(),
+        move || {
+            let shared = shared.clone();
+            Box(
+                Modifier::empty().size_points(room.0 + 24., 780.),
+                BoxSpec::default(),
+                move || {
+                    let (layout, playlist_background, eq_handles, selection) = {
+                        let d = shared.lock().unwrap();
+                        let sheets = d.sheets();
+                        (
+                            d.layout(),
+                            d.has_playlist_background(),
+                            sheets.iter().any(|(n, _, _)| n == "eqhandles.bmp"),
+                            sheets.iter().any(|(n, _, _)| n == "plselection.bmp"),
+                        )
+                    };
+                    Label("SKIN OPTIONS".into(), 12., 17., 270., 14., FG);
+                    Label(
+                "What the skin is, rather than how it is painted. Turning\none on adds the sheet it needs; turning it off removes it."
+                    .into(),
+                12.,
+                41.,
+                355.,
+                11.,
+                DIM,
+            );
+                    Label("TIME READOUT".into(), 12., 86., 200., 11., DIM);
+                    for (i, (caption, value, current)) in [
+                        (
+                            "Classic",
+                            "classic",
+                            layout.footer == super::skin::FooterLayout::Classic,
+                        ),
+                        (
+                            "Time / total",
+                            "time-total",
+                            layout.footer == super::skin::FooterLayout::TimeTotal,
+                        ),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let d = shared.clone();
+                        Choice(
+                            caption.into(),
+                            12. + i as f32 * 130.,
+                            104.,
+                            122.,
+                            current,
+                            move || {
+                                let mut doc = d.lock().unwrap();
+                                if let Err(error) =
+                                    doc.set_layout(&json!({ "footer": value }), "Human")
+                                {
+                                    doc.message = error.to_string();
+                                }
+                            },
+                        );
+                    }
+                    Label("EQUALIZER SLIDER TRAVEL".into(), 12., 154., 260., 11., DIM);
+                    Label(format!("{} px", layout.eq_travel), 12., 174., 60., 12., FG);
+                    for (i, (label, delta)) in [("− Shorter", -1_i16), ("+ Longer", 1)]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let d = shared.clone();
+                        let travel = layout.eq_travel;
+                        Action(label.into(), 76. + i as f32 * 96., 168., 90., move || {
+                            let value = (travel as i16 + delta).clamp(1, 52);
+                            let mut doc = d.lock().unwrap();
+                            if let Err(error) =
+                                doc.set_layout(&json!({ "eq_travel": value }), "Human")
+                            {
+                                doc.message = error.to_string();
+                            }
+                        });
+                    }
+                    Label("EXTRA ARTWORK".into(), 12., 222., 200., 11., DIM);
+                    {
+                        let d = shared.clone();
+                        Toggle(
+                            if playlist_background {
+                                "Playlist has its own background"
+                            } else {
+                                "Playlist reuses the main background"
+                            }
+                            .into(),
+                            12.,
+                            240.,
+                            348.,
+                            playlist_background,
+                            move || {
+                                d.lock()
+                                    .unwrap()
+                                    .set_playlist_background(!playlist_background, "Human");
+                            },
+                        );
+                    }
+                    {
+                        let d = shared.clone();
+                        Toggle(
+                            if eq_handles {
+                                "Equalizer sliders have their own art"
+                            } else {
+                                "Equalizer sliders reuse the main art"
+                            }
+                            .into(),
+                            12.,
+                            278.,
+                            348.,
+                            eq_handles,
+                            move || {
+                                let mut doc = d.lock().unwrap();
+                                if let Err(error) = doc.set_eq_handles(!eq_handles, "Human") {
+                                    doc.message = error.to_string();
+                                }
+                            },
+                        );
+                    }
+                    {
+                        let d = shared.clone();
+                        Toggle(
+                            if selection {
+                                "Playlist selection has its own art"
+                            } else {
+                                "Playlist selection is a flat colour"
+                            }
+                            .into(),
+                            12.,
+                            316.,
+                            348.,
+                            selection,
+                            move || {
+                                d.lock()
+                                    .unwrap()
+                                    .set_playlist_selection(!selection, "Human");
+                            },
+                        );
+                    }
+                    {
+                        let d = shared.clone();
+                        let glass = layout.visualizer_glass;
+                        Toggle(
+                            if glass {
+                                "Visualizer is drawn under glass"
+                            } else {
+                                "Visualizer is drawn flat"
+                            }
+                            .into(),
+                            12.,
+                            354.,
+                            348.,
+                            glass,
+                            move || {
+                                let mut doc = d.lock().unwrap();
+                                if let Err(error) =
+                                    doc.set_layout(&json!({ "visualizer_glass": !glass }), "Human")
+                                {
+                                    doc.message = error.to_string();
+                                }
+                            },
+                        );
+                    }
+                    // The two palettes a classic skin carries outside its bitmaps. They were
+                    // reachable only over MCP, which made them invisible to anyone painting by
+                    // hand -- and the playlist's own colours are not a detail.
+                    let (playlist_colours, visualizer_colours) =
+                        { shared.lock().unwrap().text_palettes() };
+                    let brush = { shared.lock().unwrap().view.color.clone() };
+                    Label(
+                        "PLAYLIST TEXT  ·  PLEDIT.TXT".into(),
+                        12.,
+                        408.,
+                        300.,
+                        11.,
+                        DIM,
+                    );
+                    Label(
+                        format!("Click a slot to set it to the brush colour, {brush}."),
+                        12.,
+                        426.,
+                        340.,
+                        10.,
+                        DIM,
+                    );
+                    for (i, (key, value)) in playlist_colours.iter().enumerate() {
+                        let rgba = parse_color(value).unwrap_or([0, 0, 0, 255]);
+                        let d = shared.clone();
+                        let key = *key;
+                        let brush = brush.clone();
+                        Box(
+                            Modifier::empty()
+                                .absolute_offset(
+                                    12. + (i % 3) as f32 * 118.,
+                                    448. + (i / 3) as f32 * 44.,
+                                )
+                                .size_points(110., 22.)
+                                .background(Color::from_rgba_u8(rgba[0], rgba[1], rgba[2], 255))
+                                .rounded_corners(3.)
+                                .clickable(move |_| {
+                                    let mut doc = d.lock().unwrap();
+                                    if let Err(e) = doc.set_palette(&json!({ key: brush.clone() }))
+                                    {
+                                        doc.message = e.to_string();
+                                        doc.revision += 1;
+                                    }
+                                }),
+                            BoxSpec::default(),
+                            || {},
+                        );
+                        Label(
+                            key.to_string(),
+                            12. + (i % 3) as f32 * 118.,
+                            472. + (i / 3) as f32 * 44.,
+                            110.,
+                            10.,
+                            DIM,
+                        );
+                    }
+                    Label(
+                        "VISUALIZER  ·  VISCOLOR.TXT".into(),
+                        12.,
+                        542.,
+                        300.,
+                        11.,
+                        DIM,
+                    );
+                    Label(
+                "24 slots: 0 background, 1-16 the bars, 17 the peak,\n18-23 the oscilloscope.".into(),
+                12.,
+                560.,
+                340.,
+                10.,
+                DIM,
+            );
+                    for (i, value) in visualizer_colours.iter().enumerate() {
+                        let rgba = parse_color(value).unwrap_or([0, 0, 0, 255]);
+                        let d = shared.clone();
+                        let brush = brush.clone();
+                        let mut next = visualizer_colours.clone();
+                        next[i] = brush;
+                        Box(
+                            Modifier::empty()
+                                .absolute_offset(
+                                    12. + (i % 8) as f32 * 43.,
+                                    592. + (i / 8) as f32 * 30.,
+                                )
+                                .size_points(38., 24.)
+                                .background(Color::from_rgba_u8(rgba[0], rgba[1], rgba[2], 255))
+                                .rounded_corners(3.)
+                                .clickable(move |_| {
+                                    let mut doc = d.lock().unwrap();
+                                    if let Err(e) =
+                                        doc.visualizer_palette(&json!({ "colors": next.clone() }))
+                                    {
+                                        doc.message = e.to_string();
+                                        doc.revision += 1;
+                                    }
+                                }),
+                            BoxSpec::default(),
+                            || {},
+                        );
+                    }
+                    Label("AUTOMATION".into(), 12., 694., 200., 11., DIM);
+                    Label(
+                "This editor is also an MCP server, so an agent can paint\ninto the same document and share its undo history.\n\n  127.0.0.1:18765\n  cranamp --skin-studio-mcp"
+                    .into(),
+                12.,
+                712.,
+                350.,
+                11.,
+                DIM,
+            );
+                },
+            );
+        },
+    );
+}
+
+#[composable]
+fn LayerChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
+    let (width, height) = room;
+    let filter = cranpose_core::remember(|| TextFieldState::new("")).with(|f| *f);
+    let needle = filter.text().to_ascii_lowercase();
+    let (layers, selected, total) = {
         let d = shared.lock().unwrap();
         let mut seen = std::collections::BTreeSet::new();
-        (
-            d.layers()
-                .into_iter()
-                .filter(|l| seen.insert(l.id.clone()))
-                .collect::<Vec<_>>(),
-            d.view.layers.clone(),
-        )
+        let all: Vec<_> = d
+            .layers()
+            .into_iter()
+            .filter(|l| seen.insert(l.id.clone()))
+            .collect();
+        let total = all.len();
+        let shown = all
+            .into_iter()
+            .filter(|l| needle.is_empty() || l.id.to_ascii_lowercase().contains(&needle))
+            .collect::<Vec<_>>();
+        (shown, d.view.layers.clone(), total)
     };
-    Label("PENCIL LAYERS".into(), 12., 17., 260., 14., FG);
+    Label("SPRITE TARGETS".into(), 12., 17., 260., 14., FG);
     Label(
-        "Select any combination. Solo isolates one.".into(),
+        "Which sprites a stroke paints into.\nAny combination; Solo isolates one.".into(),
         12.,
-        51.,
-        355.,
+        43.,
+        width,
         11.,
         DIM,
     );
-    for (i, (label, all)) in [("Auto / clear", false), ("Select all", true)]
-        .into_iter()
-        .enumerate()
+    for (i, (label, all)) in [
+        ("Auto · every sprite", false),
+        ("Every sprite listed", true),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let d = shared.clone();
-        Action(
+        Choice(
             label.into(),
-            12. + i as f32 * 142.,
-            75.,
-            134.,
+            12. + i as f32 * (width / 2. + 4.),
+            84.,
+            width / 2. - 4.,
             !all && selected.is_empty(),
             move || {
                 let ids = if all {
@@ -1544,11 +3132,33 @@ fn LayerChooser(shared: SharedDocument, _revision: u64) {
             },
         );
     }
+    // A classic skin has around sixty named sprites. Scrolling to one by eye is
+    // the slowest way to reach it.
+    cranpose_ui::BasicTextField(
+        filter,
+        Modifier::empty()
+            .absolute_offset(12., 124.)
+            .size_points(width - 140., 26.)
+            .background(BG),
+        text_style(12., FG),
+    );
+    Label(
+        if needle.is_empty() {
+            format!("type to filter {total}")
+        } else {
+            format!("{} of {total}", layers.len())
+        },
+        width - 130.,
+        130.,
+        140.,
+        11.,
+        DIM,
+    );
     let scroll = cranpose_ui::rememberScrollState!(0.0);
     cranpose_ui::Column(
         Modifier::empty()
-            .absolute_offset(10., 116.)
-            .size_points(360., 412.)
+            .absolute_offset(10., 162.)
+            .size_points(width + 4., (height - 178.).max(60.))
             .clip_to_bounds()
             .vertical_scroll(scroll, false),
         cranpose_ui::ColumnSpec::default(),
@@ -1559,7 +3169,7 @@ fn LayerChooser(shared: SharedDocument, _revision: u64) {
                 let d = shared.clone();
                 let solo_doc = shared.clone();
                 let solo_id = id.clone();
-                let caption = format!("{} {}", if checked { "[x]" } else { "[ ]" }, id);
+                let caption = id.clone();
                 let info = format!(
                     "{} · {} states{}",
                     layer.sheet,
@@ -1571,12 +3181,14 @@ fn LayerChooser(shared: SharedDocument, _revision: u64) {
                     }
                 );
                 Box(
-                    Modifier::empty().size_points(350., 60.),
+                    Modifier::empty().size_points(width, 52.),
                     BoxSpec::default(),
                     move || {
                         let d = d.clone();
                         let id = id.clone();
-                        Action(caption.clone(), 0., 0., 267., checked, move || {
+                        // The pip carries the state; the "[ ]" the caption used
+                        // to carry said the same thing a second time.
+                        ListToggle(caption.clone(), 2., 0., width - 74., checked, move || {
                             let mut ids = d.lock().unwrap().view.layers.clone();
                             if ids.contains(&id) {
                                 ids.retain(|v| v != &id);
@@ -1587,10 +3199,10 @@ fn LayerChooser(shared: SharedDocument, _revision: u64) {
                         });
                         let d = solo_doc.clone();
                         let id = solo_id.clone();
-                        Action("Solo".into(), 274., 0., 66., false, move || {
+                        Action("Solo".into(), width - 66., 0., 64., move || {
                             state(&d, json!({"layers":[id]}))
                         });
-                        Label(info.clone(), 6., 34., 338., 10., DIM);
+                        Label(info.clone(), 8., 32., width - 16., 10., DIM);
                     },
                 );
             }
@@ -1598,7 +3210,7 @@ fn LayerChooser(shared: SharedDocument, _revision: u64) {
     );
 }
 #[composable]
-fn HistoryChooser(shared: SharedDocument, _revision: u64) {
+fn HistoryChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
     let history = shared.lock().unwrap().history();
     let entries = history["entries"].as_array().unwrap().clone();
     Label("EDIT HISTORY".into(), 12., 17., 260., 14., FG);
@@ -1622,7 +3234,7 @@ fn HistoryChooser(shared: SharedDocument, _revision: u64) {
     cranpose_ui::Column(
         Modifier::empty()
             .absolute_offset(10., 106.)
-            .size_points(360., 422.)
+            .size_points(room.0 + 4., (room.1 - 122.).max(60.))
             .clip_to_bounds()
             .vertical_scroll(scroll, false),
         cranpose_ui::ColumnSpec::default(),
@@ -1650,14 +3262,14 @@ fn HistoryChooser(shared: SharedDocument, _revision: u64) {
                 let source = entry["source"].as_str().unwrap().to_string();
                 let d = shared.clone();
                 Box(
-                    Modifier::empty().size_points(350., 62.),
+                    Modifier::empty().size_points(room.0, 54.),
                     BoxSpec::default(),
                     move || {
                         let d = d.clone();
-                        Action(caption.clone(), 0., 0., 340., current, move || {
+                        ListChoice(caption.clone(), 2., 0., room.0 - 4., current, move || {
                             let _ = d.lock().unwrap().history_goto(cursor);
                         });
-                        Label(source.clone(), 8., 35., 330., 10., DIM);
+                        Label(source.clone(), 10., 33., room.0 - 20., 10., DIM);
                     },
                 );
             }
@@ -1814,52 +3426,384 @@ mod integration_tests {
         mcp::call("studio_undo", json!({}), &shared).unwrap();
         assert_eq!(shared.lock().unwrap().archive().unwrap(), original);
     }
+    /// A state sheet is one sprite's variants, and the editor has to be told
+    /// which sprite. Falling back to an arbitrary one meant the first press of
+    /// the button always showed something nobody had asked for.
     #[test]
-    fn frame_review_contains_every_variant() {
+    fn a_state_sheet_needs_a_sprite_and_shows_every_variant_of_it() {
         let mut d = Document::open(include_bytes!("../../../assets/winamp.wsz"), None).unwrap();
+        d.state(json!({"layer":"auto"})).unwrap();
+        assert!(
+            d.state_sheet().is_err(),
+            "with no sprite chosen there is nothing to lay out"
+        );
+
         d.state(json!({"layer":"volume.track"})).unwrap();
-        let sheet = d.state_sheet();
-        assert_eq!(sheet.dimensions(), (532, 84));
+        let sheet = d.state_sheet().expect("a chosen sprite has a sheet");
+        assert_eq!(sheet.dimensions(), (546, 124));
+        // The classic transparency key is not a colour. Copying it verbatim
+        // turned sprites like the volume track into flat magenta tiles.
+        assert!(
+            sheet.pixels().all(|p| p.0[..3] != [255, 0, 255]),
+            "the transparency key must not be painted as a colour"
+        );
         d.state(json!({"panel":"equalizer","layer":"band1.track"}))
             .unwrap();
-        assert_eq!(d.state_sheet().dimensions(), (154, 284));
+        assert_eq!(
+            d.state_sheet().unwrap().dimensions(),
+            (168, 324),
+            "every variant, numbered, in a grid"
+        );
     }
 }
 
+/// Hue 0..1, saturation 0..1, value 0..1 to 8-bit RGB.
+fn hsv_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
+    let h = (h.rem_euclid(1.)) * 6.;
+    let c = v * s;
+    let x = c * (1. - ((h % 2.) - 1.).abs());
+    let (r, g, b) = match h as u32 {
+        0 => (c, x, 0.),
+        1 => (x, c, 0.),
+        2 => (0., c, x),
+        3 => (0., x, c),
+        4 => (x, 0., c),
+        _ => (c, 0., x),
+    };
+    let m = v - c;
+    [
+        ((r + m) * 255.).round().clamp(0., 255.) as u8,
+        ((g + m) * 255.).round().clamp(0., 255.) as u8,
+        ((b + m) * 255.).round().clamp(0., 255.) as u8,
+    ]
+}
+
+fn rgb_hsv(c: [u8; 3]) -> (f32, f32, f32) {
+    let (r, g, b) = (c[0] as f32 / 255., c[1] as f32 / 255., c[2] as f32 / 255.);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    let h = if d <= f32::EPSILON {
+        0.
+    } else if max == r {
+        ((g - b) / d).rem_euclid(6.)
+    } else if max == g {
+        (b - r) / d + 2.
+    } else {
+        (r - g) / d + 4.
+    } / 6.;
+    (h, if max > 0. { d / max } else { 0. }, max)
+}
+
+/// A real colour picker: a saturation/value field for the chosen hue, a hue
+/// strip under it, and the palette already in the skin. Eight preset swatches
+/// and a hex box are fine for touching up someone else's artwork and hopeless
+/// for choosing a colour.
 #[composable]
-fn StudyChooser(shared: SharedDocument, _revision: u64) {
-    Label("NATIVE PIXEL STUDY".into(), 12., 17., 270., 14., FG);
+fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
+    Label("COLOUR PICKER".into(), 12., 17., 270., 14., FG);
+    let current = { shared.lock().unwrap().view.color.clone() };
+    let rgb = parse_color(&current).unwrap_or([255, 255, 255, 255]);
+    let (h0, s0, v0) = rgb_hsv([rgb[0], rgb[1], rgb[2]]);
+    // Hue is kept aside: at zero saturation or zero value every hue is the same
+    // colour, and reading it back from RGB would snap the strip to red.
+    let hue = cranpose_core::rememberMutableStateOf(|| h0);
+    if s0 > 0.02 && v0 > 0.02 {
+        let h = h0;
+        if (hue.get_non_reactive() - h).abs() > 0.001 {
+            cranpose_core::SideEffect(move || hue.set(h));
+        }
+    }
+    let h = hue.get();
+    // The colour in force, the size of a real swatch, next to the box that
+    // types one exactly. Both used to be elsewhere: the only sign of the
+    // current colour inside the picker was 11pt of grey hex at the top.
+    Box(
+        Modifier::empty()
+            .absolute_offset(12., 40.)
+            .size_points(58., 28.)
+            .background(Color::from_rgba_u8(rgb[0], rgb[1], rgb[2], 255))
+            .rounded_corners(4.),
+        BoxSpec::default(),
+        || {},
+    );
+    let hex = cranpose_core::remember(|| TextFieldState::new("")).with(|f| *f);
+    let showing = current.clone();
+    cranpose_core::LaunchedEffect(showing.clone(), move |_| {
+        hex.set_text(showing.clone());
+    });
+    cranpose_ui::BasicTextField(
+        hex,
+        Modifier::empty()
+            .absolute_offset(78., 41.)
+            .size_points(110., 26.)
+            .background(BG),
+        text_style(12., FG),
+    );
+    {
+        let d = shared.clone();
+        Action("Set".into(), 196., 39., 62., move || {
+            state(&d, json!({ "color": hex.text() }))
+        });
+    }
+    Label(
+        "drag the field,\nthen the hue strip".into(),
+        268.,
+        42.,
+        room.0 - 258.,
+        10.,
+        DIM,
+    );
+
+    let field_size: (f32, f32) = (room.0, 196.);
+    const STRIP_H: f32 = 22.;
+    let field = {
+        let (fw, fh) = (68u32, 40u32);
+        let mut im = image::RgbaImage::new(fw, fh);
+        for y in 0..fh {
+            for x in 0..fw {
+                let c = hsv_rgb(
+                    h,
+                    x as f32 / (fw - 1) as f32,
+                    1. - y as f32 / (fh - 1) as f32,
+                );
+                im.put_pixel(x, y, image::Rgba([c[0], c[1], c[2], 255]));
+            }
+        }
+        ImageBitmap::from_rgba8(fw, fh, im.into_raw()).expect("sv field")
+    };
+    let strip = {
+        let sw = 120u32;
+        let mut im = image::RgbaImage::new(sw, 1);
+        for x in 0..sw {
+            let c = hsv_rgb(x as f32 / (sw - 1) as f32, 1., 1.);
+            im.put_pixel(x, 0, image::Rgba([c[0], c[1], c[2], 255]));
+        }
+        ImageBitmap::from_rgba8(sw, 1, im.into_raw()).expect("hue strip")
+    };
+
+    let d = shared.clone();
+    Box(
+        Modifier::empty()
+            .absolute_offset(12., 82.)
+            .size_points(field_size.0, field_size.1)
+            .pointer_input(h.to_bits(), move |scope: PointerInputScope| {
+                let d = d.clone();
+                async move {
+                    scope
+                        .await_pointer_event_scope(|events| async move {
+                            loop {
+                                let event = events.await_pointer_event().await;
+                                let holding = event.kind == PointerEventKind::Down
+                                    || (event.kind == PointerEventKind::Move
+                                        && event.buttons.contains(PointerButton::Primary));
+                                if !holding {
+                                    continue;
+                                }
+                                let s = (event.position.x / field_size.0).clamp(0., 1.);
+                                let v = 1. - (event.position.y / field_size.1).clamp(0., 1.);
+                                let c = hsv_rgb(h, s, v);
+                                state(
+                                    &d,
+                                    json!({"color":format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])}),
+                                );
+                                event.consume();
+                            }
+                        })
+                        .await;
+                }
+            }),
+        BoxSpec::default(),
+        move || {
+            cranpose_ui::Image(
+                cranpose_ui::BitmapPainter(field.clone()),
+                None,
+                Modifier::empty()
+                    .required_size(cranpose_ui::Size::new(field_size.0, field_size.1)),
+                Alignment::TOP_START,
+                cranpose_ui::ContentScale::FillBounds,
+                1.,
+                None,
+            );
+            Box(
+                Modifier::empty()
+                    .absolute_offset((s0 * field_size.0 - 4.).clamp(0., field_size.0 - 8.), ((1. - v0) * field_size.1 - 4.).clamp(0., field_size.1 - 8.))
+                    .size_points(8., 8.)
+                    .background(if v0 > 0.55 { BG } else { FG })
+                    .rounded_corners(4.),
+                BoxSpec::default(),
+                || {},
+            );
+        },
+    );
+
+    let d = shared.clone();
+    Box(
+        Modifier::empty()
+            .absolute_offset(12., 82. + field_size.1 + 10.)
+            .size_points(field_size.0, STRIP_H)
+            .pointer_input((), move |scope: PointerInputScope| {
+                let d = d.clone();
+                async move {
+                    scope
+                        .await_pointer_event_scope(|events| async move {
+                            loop {
+                                let event = events.await_pointer_event().await;
+                                let holding = event.kind == PointerEventKind::Down
+                                    || (event.kind == PointerEventKind::Move
+                                        && event.buttons.contains(PointerButton::Primary));
+                                if !holding {
+                                    continue;
+                                }
+                                let next = (event.position.x / field_size.0).clamp(0., 1.);
+                                hue.set(next);
+                                let (_, s, v) = {
+                                    let doc = d.lock().unwrap();
+                                    let c = parse_color(&doc.view.color).unwrap_or([255; 4]);
+                                    rgb_hsv([c[0], c[1], c[2]])
+                                };
+                                let c = hsv_rgb(next, if s < 0.02 { 1. } else { s }, if v < 0.02 { 1. } else { v });
+                                state(
+                                    &d,
+                                    json!({"color":format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])}),
+                                );
+                                event.consume();
+                            }
+                        })
+                        .await;
+                }
+            }),
+        BoxSpec::default(),
+        move || {
+            cranpose_ui::Image(
+                cranpose_ui::BitmapPainter(strip.clone()),
+                None,
+                Modifier::empty().required_size(cranpose_ui::Size::new(field_size.0, STRIP_H)),
+                Alignment::TOP_START,
+                cranpose_ui::ContentScale::FillBounds,
+                1.,
+                None,
+            );
+            Box(
+                Modifier::empty()
+                    .absolute_offset((h * field_size.0 - 2.).clamp(0., field_size.0 - 4.), 0.)
+                    .size_points(4., STRIP_H)
+                    .background(FG),
+                BoxSpec::default(),
+                || {},
+            );
+        },
+    );
+
+    Label(
+        "IN THIS SKIN".into(),
+        12.,
+        82. + field_size.1 + 46.,
+        200.,
+        11.,
+        DIM,
+    );
+    // Scanned once when the picker opens: every pixel of every sheet is too much
+    // work to repeat on each recomposition.
+    let sampled = shared.clone();
+    let palette = cranpose_core::remember(move || sampled.lock().unwrap().palette_sample(24))
+        .with(|p| p.clone());
+    for (i, colour) in palette.iter().enumerate() {
+        let d = shared.clone();
+        let c = colour.clone();
+        let pick = c.clone();
+        Box(
+            Modifier::empty()
+                .absolute_offset(
+                    12. + (i % 8) as f32 * 43.,
+                    82. + field_size.1 + 66. + (i / 8) as f32 * 32.,
+                )
+                .size_points(38., 26.)
+                .background({
+                    let v = parse_color(&c).unwrap_or([0, 0, 0, 255]);
+                    Color::from_rgba_u8(v[0], v[1], v[2], 255)
+                })
+                .rounded_corners(3.)
+                .clickable(move |_| state(&d, json!({"color":pick.clone()}))),
+            BoxSpec::default(),
+            || {},
+        );
+    }
+    let d = shared.clone();
+    Choice(
+        "Transparent (#ff00ff)".into(),
+        12.,
+        82. + field_size.1 + 172.,
+        200.,
+        current.eq_ignore_ascii_case("#ff00ff"),
+        move || state(&d, json!({"color":"#ff00ff"})),
+    );
+}
+
+#[composable]
+fn StudyChooser(
+    shared: SharedDocument,
+    _revision: u64,
+    room: (f32, f32),
+    hover: cranpose_core::MutableState<Option<[i32; 2]>>,
+) {
+    Label("PIXEL STUDY".into(), 12., 17., 270., 14., FG);
     let values = cranpose_core::rememberMutableStateOf(|| false);
-    let (im, rect) = {
+    // A magnifier that has to be aimed by picking a brush and dragging a box is
+    // a magnifier nobody reaches for. With nothing lifted it simply follows the
+    // pointer, quantised so it re-crops every sixteen pixels rather than every
+    // one.
+    let at = hover.get().map(|p| {
+        [
+            (p[0].max(0) / 16 * 16) as u32,
+            (p[1].max(0) / 16 * 16) as u32,
+        ]
+    });
+    let (im, rect, chosen) = {
         let d = shared.lock().unwrap();
-        let r = d.selection.unwrap_or([0, 0, 80, 60]);
+        let chosen = d.selection.is_some() || d.cluster.is_some();
+        let r = d.selection.unwrap_or_else(|| match at {
+            Some([x, y]) => [x.saturating_sub(40), y.saturating_sub(30), 80, 60],
+            None => [0, 0, 80, 60],
+        });
         (
             d.cluster
                 .clone()
                 .or_else(|| study::crop(&d.selected_image(), r).ok()),
             r,
+            chosen,
         )
     };
     Label(
-        format!(
-            "Source {},{} · clipboard {}×{}",
-            rect[0],
-            rect[1],
-            im.as_ref().map_or(rect[2], |i| i.width()),
-            im.as_ref().map_or(rect[3], |i| i.height())
-        ),
+        if chosen {
+            format!(
+                "Source {},{} · {}×{} enlarged with no resampling",
+                rect[0],
+                rect[1],
+                im.as_ref().map_or(rect[2], |i| i.width()),
+                im.as_ref().map_or(rect[3], |i| i.height())
+            )
+        } else if at.is_some() {
+            format!(
+                "Following the pointer at {},{}. Lift a region with the\nLift pixels brush to pin it here instead.",
+                rect[0], rect[1]
+            )
+        } else {
+            "Read-only magnifier. Move the pointer over the canvas\nand it follows; lift a region to pin it here instead."
+                .into()
+        },
         12.,
-        52.,
-        350.,
+        46.,
+        room.0,
         11.,
         DIM,
     );
     for (i, label) in ["Color", "Values"].into_iter().enumerate() {
-        Action(
+        Choice(
             label.into(),
-            12. + i as f32 * 176.,
-            78.,
-            168.,
+            12. + i as f32 * (room.0 / 2. + 4.),
+            96.,
+            room.0 / 2. - 4.,
             values.get() == (i == 1),
             move || values.set(i == 1),
         );
@@ -1871,14 +3815,19 @@ fn StudyChooser(shared: SharedDocument, _revision: u64) {
             im
         };
         let (w, h) = im.dimensions();
-        let z = (348 / w).min(260 / h).clamp(1, 4);
+        // The magnified view fits the column rather than a fixed 348 points,
+        // which used to run the picture off the right-hand edge of the panel.
+        let detail_h = (room.1 - 350.).max(140.);
+        let z = ((room.0 as u32 - 8) / w)
+            .min(detail_h as u32 / h)
+            .clamp(1, 6);
         let bitmap = ImageBitmap::from_rgba8(w, h, im.into_raw()).unwrap();
-        for (scale, y, available_h) in [(1, 124, 76), (z, 210, 260)] {
+        for (scale, y, available_h) in [(1, 140., 76.), (z, 226., detail_h)] {
             let bitmap = bitmap.clone();
             Box(
                 Modifier::empty()
-                    .absolute_offset(12., y as f32)
-                    .size_points(348., available_h as f32)
+                    .absolute_offset(12., y)
+                    .size_points(room.0, available_h)
                     .clip_to_bounds(),
                 BoxSpec::default(),
                 move || {
@@ -1907,14 +3856,27 @@ fn StudyChooser(shared: SharedDocument, _revision: u64) {
             );
         }
     }
+    // The study itself is read-only; these three change the lifted clipboard,
+    // so they are named and separated as what they are.
+    let transforms = room.1 - 96.;
+    Label(
+        "CLIPBOARD  ·  NOT THE STUDY".into(),
+        12.,
+        transforms - 20.,
+        300.,
+        11.,
+        DIM,
+    );
+    let third = (room.0 - 16.) / 3.;
+    let has_clipboard = { shared.lock().unwrap().cluster.is_some() };
     for (i, label) in ["Flip H", "Flip V", "Turn 90°"].into_iter().enumerate() {
         let d = shared.clone();
-        Action(
+        MaybeAction(
             label.into(),
-            12. + i as f32 * 118.,
-            485.,
-            110.,
-            false,
+            12. + i as f32 * (third + 8.),
+            transforms,
+            third,
+            has_clipboard,
             move || {
                 let mut doc = d.lock().unwrap();
                 if let Err(e) = doc.transform_cluster(i == 0, i == 1, u32::from(i == 2)) {
@@ -1924,11 +3886,23 @@ fn StudyChooser(shared: SharedDocument, _revision: u64) {
             },
         );
     }
-    Label("Lift pixels to choose a region. Clipboard transforms\nare exact; use Stamp to paint into selected layers.".into(),12.,527.,350.,10.,DIM);
+    Label(
+        if has_clipboard {
+            "Transforms are exact; paint the result with the Stamp brush."
+        } else {
+            "Lift a region with the Lift pixels brush to fill the clipboard."
+        }
+        .into(),
+        12.,
+        transforms + 38.,
+        room.0,
+        10.,
+        DIM,
+    );
 }
 
 #[composable]
-fn GuideChooser(shared: SharedDocument, _revision: u64) {
+fn GuideChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
     let filter = cranpose_core::rememberMutableStateOf(|| false);
     let doc = shared.lock().unwrap();
     let selected = doc.selection;
@@ -1940,53 +3914,72 @@ fn GuideChooser(shared: SharedDocument, _revision: u64) {
         }
     }
     drop(doc);
+    let outlining = { shared.lock().unwrap().view.guides };
     Label("SPRITE RECTANGLES".into(), 12., 17., 270., 14., FG);
+    Label(
+        "Where each sprite lives in the joined skin. The editor\noutlines the one under the pointer; it never draws into\nthe artwork."
+            .into(),
+        12.,
+        40.,
+        room.0,
+        11.,
+        DIM,
+    );
     {
         let d = shared.clone();
-        Action("Hide guides".into(), 12., 54., 165., false, move || {
-            state(&d, json!({"guides":false}))
-        });
+        Toggle(
+            if outlining {
+                "Outlining the sprite under the pointer"
+            } else {
+                "Outline is off"
+            }
+            .into(),
+            12.,
+            94.,
+            room.0 / 2. + 20.,
+            outlining,
+            move || state(&d, json!({ "guides": !outlining })),
+        );
     }
     {
         let d = shared.clone();
         Action(
             "Clear paint clip".into(),
-            190.,
-            54.,
-            165.,
-            false,
+            room.0 / 2. + 40.,
+            94.,
+            room.0 / 2. - 28.,
             move || state(&d, json!({"clip":null})),
         );
     }
-    Action(
+    Toggle(
         if filter.get() {
-            "Show all parts".into()
+            "Only the parts in the lifted region".into()
         } else {
-            "Parts in lifted region".into()
+            "Every part".into()
         },
         12.,
-        94.,
-        348.,
+        132.,
+        room.0,
         filter.get(),
         move || filter.set(!filter.get()),
     );
     Label(
         if selected.is_some() {
-            "Pink regions include live text and timer digits.".into()
+            "Pink regions carry live text and timer digits.".into()
         } else {
-            "Lift a native region to filter its source parts.".into()
+            "Lift a region to narrow this to its own parts.".into()
         },
         12.,
-        132.,
-        350.,
+        170.,
+        room.0,
         10.,
         DIM,
     );
     let scroll = cranpose_ui::rememberScrollState!(0.0);
     cranpose_ui::Column(
         Modifier::empty()
-            .absolute_offset(12., 156.)
-            .size_points(354., 376.)
+            .absolute_offset(12., 192.)
+            .size_points(room.0, (room.1 - 208.).max(60.))
             .clip_to_bounds()
             .vertical_scroll(scroll, false),
         cranpose_ui::ColumnSpec::default(),
@@ -1997,15 +3990,15 @@ fn GuideChooser(shared: SharedDocument, _revision: u64) {
                 let text = format!("{} · {:?}", g.sheet, g.source);
                 let name = format!("{} · {}", index + 1, g.id);
                 Box(
-                    Modifier::empty().size_points(348., 60.),
+                    Modifier::empty().size_points(room.0, 52.),
                     BoxSpec::default(),
                     move || {
                         let d = d.clone();
                         let id = id.clone();
-                        Action(name.clone(), 0., 0., 342., false, move || {
+                        ListChoice(name.clone(), 0., 0., room.0 - 6., false, move || {
                             let _ = d.lock().unwrap().select_guide(&id);
                         });
-                        Label(text.clone(), 3., 36., 340., 10., DIM);
+                        Label(text.clone(), 8., 32., room.0 - 16., 10., DIM);
                     },
                 );
             }
@@ -2020,39 +4013,50 @@ fn plane_action(d: &SharedDocument, args: serde_json::Value) {
     }
 }
 #[composable]
-fn PaintChooser(shared: SharedDocument, _revision: u64) {
+fn PaintChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
+    let (width, height) = room;
     let info = shared.lock().unwrap().paint_layer_info();
     let planes = info["layers"].as_array().unwrap().clone();
     let active = info["active"].as_str().map(str::to_owned);
+    // Armed by the first press of Delete, like New blank: a plane is artwork,
+    // and it used to go on one click while starting a blank skin asked twice.
+    let armed = cranpose_core::rememberMutableStateOf(|| false);
     Label("PAINTING LAYERS".into(), 12., 17., 270., 14., FG);
+    let third = (width - 16.) / 3.;
     {
         let d = shared.clone();
-        Action("+ New layer".into(), 12., 53., 108., false, move || {
+        Action("+ New layer".into(), 12., 50., third, move || {
             plane_action(&d, json!({"action":"add"}))
         });
     }
     {
         let d = shared.clone();
-        Action(
+        Choice(
             "Base atlases".into(),
-            130.,
-            53.,
-            108.,
+            12. + third + 8.,
+            50.,
+            third,
             active.is_none(),
             move || plane_action(&d, json!({"action":"select","id":"base"})),
         );
     }
     {
         let d = shared.clone();
-        Action("Save project".into(), 248., 53., 108., false, move || {
-            let mut doc = d.lock().unwrap();
-            let p = std::path::PathBuf::from(doc.path.as_deref().unwrap_or("Untitled.wsz"))
-                .with_extension("cstudio");
-            if let Err(e) = doc.save_project(&p) {
-                doc.message = e.to_string();
-                doc.revision += 1;
-            }
-        });
+        Action(
+            "Save project".into(),
+            12. + (third + 8.) * 2.,
+            50.,
+            third,
+            move || {
+                let mut doc = d.lock().unwrap();
+                let p = std::path::PathBuf::from(doc.path.as_deref().unwrap_or("Untitled.wsz"))
+                    .with_extension("cstudio");
+                if let Err(e) = doc.save_project(&p) {
+                    doc.message = e.to_string();
+                    doc.revision += 1;
+                }
+            },
+        );
     }
     let initial = active
         .as_ref()
@@ -2073,23 +4077,28 @@ fn PaintChooser(shared: SharedDocument, _revision: u64) {
     cranpose_ui::BasicTextField(
         field,
         Modifier::empty()
-            .absolute_offset(12., 99.)
-            .size_points(240., 24.)
+            .absolute_offset(12., 94.)
+            .size_points(width - 104., 26.)
             .background(BG),
         text_style(12., FG),
     );
     {
         let d = shared.clone();
-        Action("Rename".into(), 264., 94., 92., false, move || {
+        Action("Rename".into(), width - 84., 92., 96., move || {
             plane_action(&d, json!({"action":"set","name":field.text()}))
         });
     }
+    // The controls for the chosen plane sit at the foot of the column and the
+    // list fills everything between. Pinning them at a fixed offset cut the
+    // list to four rows in a seven-plane document, with nothing to say the
+    // other three were there.
+    let controls = height - 168.;
     let layer_doc = shared.clone();
     let scroll = cranpose_ui::rememberScrollState!(0.0);
     cranpose_ui::Column(
         Modifier::empty()
-            .absolute_offset(12., 130.)
-            .size_points(354., 298.)
+            .absolute_offset(12., 132.)
+            .size_points(width, (controls - 144.).max(60.))
             .clip_to_bounds()
             .vertical_scroll(scroll, false),
         cranpose_ui::ColumnSpec::default(),
@@ -2101,25 +4110,34 @@ fn PaintChooser(shared: SharedDocument, _revision: u64) {
                 let visible = p["visible"] == true;
                 let locked = p["locked"] == true;
                 let name = p["name"].as_str().unwrap().to_owned();
+                // One line per row: a name long enough to wrap made its row
+                // taller than its neighbours and the list lost its pitch.
+                let name = if name.chars().count() > 22 {
+                    format!("{}…", name.chars().take(21).collect::<String>())
+                } else {
+                    name
+                };
                 Box(
-                    Modifier::empty().size_points(348., 79.),
+                    Modifier::empty().size_points(width, 38.),
                     BoxSpec::default(),
                     move || {
+                        // One row per plane. A full-width switch pair under
+                        // every name meant four planes filled the panel.
                         {
                             let d = d.clone();
                             let id = id.clone();
-                            Action(name.clone(), 0., 0., 340., on, move || {
+                            ListChoice(name.clone(), 0., 0., width - 192., on, move || {
                                 plane_action(&d, json!({"action":"select","id":id}))
                             });
                         }
                         {
                             let d = d.clone();
                             let id = id.clone();
-                            Action(
-                                if visible { "Visible" } else { "Hidden" }.into(),
+                            Toggle(
+                                if visible { "Shown" } else { "Hidden" }.into(),
+                                width - 186.,
                                 0.,
-                                38.,
-                                162.,
+                                90.,
                                 visible,
                                 move || {
                                     plane_action(
@@ -2132,11 +4150,11 @@ fn PaintChooser(shared: SharedDocument, _revision: u64) {
                         {
                             let d = d.clone();
                             let id = id.clone();
-                            Action(
-                                if locked { "Locked" } else { "Unlocked" }.into(),
-                                172.,
-                                38.,
-                                168.,
+                            Toggle(
+                                if locked { "Locked" } else { "Free" }.into(),
+                                width - 90.,
+                                0.,
+                                88.,
                                 locked,
                                 move || {
                                     plane_action(
@@ -2151,105 +4169,149 @@ fn PaintChooser(shared: SharedDocument, _revision: u64) {
             }
         },
     );
-    if let Some(id) = info["active"].as_str() {
-        let id = id.to_owned();
-        let index = info["layers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .position(|p| p["id"] == id)
-            .unwrap();
-        let opacity = info["layers"][index]["opacity"].as_u64().unwrap();
-        for (i, label) in ["Down", "Up", "Merge", "Delete"].into_iter().enumerate() {
-            let d = shared.clone();
-            let id = id.clone();
-            let n = info["layers"].as_array().unwrap().len();
-            Action(
-                label.into(),
-                12. + i as f32 * 88.,
-                435.,
-                82.,
-                false,
-                move || {
-                    plane_action(
-                        &d,
-                        match i {
-                            0 => json!({"action":"move","id":id,"index":index.saturating_sub(1)}),
-                            1 => json!({"action":"move","id":id,"index":(index+1).min(n-1)}),
-                            2 => json!({"action":"merge_down","id":id}),
-                            _ => json!({"action":"delete","id":id}),
-                        },
-                    )
-                },
-            );
-        }
-        let d = shared.clone();
-        let target = id.clone();
-        let end_doc = shared.clone();
-        cranpose_ui::Slider(
-            Modifier::empty()
-                .absolute_offset(12., 484.)
-                .size_points(330., 22.),
-            opacity as f32 / 255.,
-            move |v| {
-                let _ = d
-                    .lock()
-                    .unwrap()
-                    .opacity_stroke(&target, (v * 255.).round() as u8);
-            },
-            move || {
-                end_doc.lock().unwrap().finish_opacity_stroke();
-            },
-            cranpose_ui::SliderSpec::new().thumb_extent(12.),
-            |scope| {
-                Box(
-                    Modifier::empty()
-                        .absolute_offset(0., 9.)
-                        .size_points(330., 3.)
-                        .background(BG),
-                    BoxSpec::default(),
-                    || {},
-                );
-                Box(
-                    Modifier::empty()
-                        .absolute_offset(scope.thumb_offset(), 3.)
-                        .size_points(12., 16.)
-                        .background(ACCENT),
-                    BoxSpec::default(),
-                    || {},
-                );
-            },
-        );
-        {
-            let d = shared.clone();
-            let clipped = info["layers"][index]["clip_below"] == true;
-            let target = id.clone();
-            Action(
-                if clipped {
-                    "Clipped to layer below"
-                } else {
-                    "Clip to layer below"
-                }
-                .into(),
-                174.,
-                508.,
-                182.,
-                clipped,
-                move || {
-                    plane_action(
-                        &d,
-                        json!({"action":"set","id":target,"clip_below":!clipped}),
-                    );
-                },
-            );
-        }
+    let Some(id) = info["active"].as_str().map(str::to_owned) else {
         Label(
-            format!("Opacity {}%", opacity * 100 / 255),
+            "Painting planes sit over the original atlases, and a skin exports\nas the picture they make together. Choose one to rename,\nreorder or fade it."
+                .into(),
             12.,
-            513.,
-            150.,
-            10.,
+            controls + 8.,
+            width,
+            11.,
             DIM,
         );
+        return;
+    };
+    let index = info["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|p| p["id"] == id)
+        .unwrap();
+    let opacity = info["layers"][index]["opacity"].as_u64().unwrap();
+    let quarter = (width - 24.) / 4.;
+    for (i, label) in ["Down", "Up", "Merge", "Delete"].into_iter().enumerate() {
+        let d = shared.clone();
+        let id = id.clone();
+        let n = info["layers"].as_array().unwrap().len();
+        let x = 12. + i as f32 * (quarter + 8.);
+        let act = move || {
+            plane_action(
+                &d,
+                match i {
+                    0 => json!({"action":"move","id":id,"index":index.saturating_sub(1)}),
+                    1 => json!({"action":"move","id":id,"index":(index+1).min(n-1)}),
+                    2 => json!({"action":"merge_down","id":id}),
+                    _ => json!({"action":"delete","id":id}),
+                },
+            )
+        };
+        // Delete throws a whole plane of artwork away, so it asks once first;
+        // the other three are reversible rearrangements.
+        if i == 3 {
+            let armed_now = armed.get();
+            Danger(
+                if armed_now { "Discard it" } else { "Delete" }.into(),
+                x,
+                controls,
+                quarter,
+                move || {
+                    if armed_now {
+                        armed.set(false);
+                        act();
+                    } else {
+                        armed.set(true);
+                    }
+                },
+            );
+        } else {
+            Action(label.into(), x, controls, quarter, act);
+        }
     }
+    if armed.get() {
+        Label(
+            "Delete discards this plane's artwork. Press it again, or:".into(),
+            12.,
+            controls + 44.,
+            width,
+            11.,
+            ALERT,
+        );
+        Action(
+            "Keep the layer".into(),
+            12.,
+            controls + 62.,
+            140.,
+            move || armed.set(false),
+        );
+        return;
+    }
+    Label(
+        format!("OPACITY  ·  {}%", opacity * 100 / 255),
+        12.,
+        controls + 44.,
+        160.,
+        11.,
+        DIM,
+    );
+    let d = shared.clone();
+    let target = id.clone();
+    let end_doc = shared.clone();
+    let track = width - 24.;
+    cranpose_ui::Slider(
+        Modifier::empty()
+            .absolute_offset(12., controls + 62.)
+            .size_points(track, 22.),
+        opacity as f32 / 255.,
+        move |v| {
+            let _ = d
+                .lock()
+                .unwrap()
+                .opacity_stroke(&target, (v * 255.).round() as u8);
+        },
+        move || {
+            end_doc.lock().unwrap().finish_opacity_stroke();
+        },
+        cranpose_ui::SliderSpec::new().thumb_extent(14.),
+        move |scope| {
+            Box(
+                Modifier::empty()
+                    .absolute_offset(0., 8.)
+                    .size_points(track, 6.)
+                    .background(CARD)
+                    .rounded_corners(3.),
+                BoxSpec::default(),
+                || {},
+            );
+            Box(
+                Modifier::empty()
+                    .absolute_offset(scope.thumb_offset(), 2.)
+                    .size_points(14., 18.)
+                    .background(ACCENT_LIT)
+                    .rounded_corners(3.),
+                BoxSpec::default(),
+                || {},
+            );
+        },
+    );
+    let d = shared.clone();
+    let clipped = info["layers"][index]["clip_below"] == true;
+    let target = id.clone();
+    Toggle(
+        if clipped {
+            "Clipped to the layer below"
+        } else {
+            "Independent of the layer below"
+        }
+        .into(),
+        12.,
+        controls + 98.,
+        width,
+        clipped,
+        move || {
+            plane_action(
+                &d,
+                json!({"action":"set","id":target,"clip_below":!clipped}),
+            );
+        },
+    );
 }

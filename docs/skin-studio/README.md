@@ -1,8 +1,10 @@
 # Cranamp Skin Studio
 
-Open **Settings → Open Skin Studio** on desktop or Android. On desktop the editor
-opens in a separate native window. Android opens the editor inside the activity.
-Playback continues in both cases. It edits the selected skin;
+Open **Settings → Open Skin Studio** on desktop, Android or the web. On desktop
+the editor opens in a separate native window. Android and the browser open the
+editor inside the running player; in the browser that is the whole page, because
+the canvas is the viewport and the player floats on it. Playback continues in
+every case. It edits the selected skin;
 with the bundled default selected, it opens Catamp Silverplay with seven painting
 layers and no output path. Choose an export destination to save your copy.
 Add the exported `.wsz` through the player's Settings to apply it.
@@ -13,11 +15,120 @@ cargo run -- --skin-studio '/absolute/path/skin.wsz'
 cargo run -- --skin-studio '/absolute/path/project.cstudio'
 ```
 
+## Getting around
+
+cranpose delivers key events only to a focused text field, so the editor has no
+keyboard shortcuts -- no Cmd+Z, no bracket keys, no space-to-pan. Every way of
+moving around the canvas is a gesture the pointer alone can make:
+
+| Gesture | Effect |
+| --- | --- |
+| Wheel | Scrolls the canvas |
+| Alt + wheel | Scrolls it sideways |
+| Ctrl + wheel | Zooms a whole step, keeping the pixel under the pointer in place |
+| Middle-button drag | Pans |
+| Right-click on the canvas | Samples the colour under the pointer, without leaving the pencil |
+| Scrollbars on the canvas' own edges | Scroll, and jump when clicked |
+
+The line above the canvas names the pixel under the pointer, and an outline the
+width of the current stroke marks where it would land.
+
+## Reading the editor
+
+Every control belongs to one of five classes, and each class has a shape of its
+own, so a button says what kind of thing it does before it is pressed:
+
+| Shape | Class | Example |
+| --- | --- | --- |
+| Plain slab | Runs once | **Undo**, **Export**, **Fit whole skin** |
+| Red slab | Runs once and can lose work | **New blank**, **Delete** |
+| Slab with a rule under the label | Opens the panel named on it | **Drawing tools**, **Skin options** |
+| Pill | One value out of a set | `2x`, **volume**, **Pencil** |
+| Slab with a pip on the right | On/off switch | **Current state only**, **Fill shapes** |
+
+Every switch names the state the editor is in **now**, never the state that
+pressing it would move to, and the pip repeats it. Every drawer button is named
+exactly as the panel it opens.
+
+Two buttons can destroy work, and both ask first. **New blank** pressed with
+edits outstanding refuses, says so, and changes to **Discard & start blank** with
+**Keep editing** beside it. **Delete** in **Painting layers** changes to **Discard
+it**, with **Keep the layer** beside it. The second press is the one that acts.
+Failures and refusals are coloured in the status line, so a refusal does not read
+as a report.
+
+**Undo** and **Redo** count the steps they have (`Undo 3`) and are drawn as
+unavailable when they have none.
+
+## Drawing
+
+The editor opens on the **whole skin**: main, equalizer and playlist joined into
+one canvas, and that is the only drawing surface -- there is no per-window view
+to switch into. A stroke can run across a window boundary and each pixel is still
+routed to whichever BMP sheet owns it.
+
+The canvas takes the room the skin needs and the tool column takes the rest, so
+opening a panel never shrinks the canvas and no panel is ever laid over it. The
+editor's window opens at the size where the whole skin fits at 2x with the column
+beside it; **Fit whole skin** picks the largest whole-pixel zoom that still fits
+whatever the window is now.
+
+There is no separate canvas to open and no shape to commit: **drag on the skin
+itself**, with the brush, colour and width shown in the left sidebar. Each
+completed stroke is one undo step named in the status line at the bottom.
+
+A layered project composites its painting planes over the base atlases, so the
+editor selects the topmost visible plane when it opens one. Strokes then land on
+top of the picture. Choosing **Base atlases** in **Painting layers** paints
+underneath the planes instead, which is only visible where no plane covers the
+artwork.
+
+**Colour picker…** in the sidebar opens a saturation/value field with a hue strip
+and the colours already most used in this skin; the hex box beside it still takes
+an exact value.
+
+Two colours behave specially: `#ff00ff` is the classic transparency key, so
+painting with it erases rather than draws, and a stroke in a colour close to the
+artwork under it can be invisible even though it landed. The status line names
+every stroke and counts the pixels it changed, which is the reliable signal.
+
+With no explicit target, a stroke paints **every sprite the brush covers**, not
+just the one drawn on top -- a control and the window background beneath it are
+both artwork the stroke crosses, and painting only the top one breaks the
+illustration apart as soon as that control changes state or is drawn elsewhere
+from the same shared source. **SPRITE TARGETS → Sprite targets…** narrows that to
+named sprites when you want it. The sprites a stroke is routed into are always
+"sprite targets"; the independent stack of artwork over the atlases is always
+"painting layers", and the two never share a word.
+
+A 1px white stroke on pale artwork is easy to make and easy to miss, so trust the
+status line under the canvas rather than your eyes: it names every stroke
+(`pencil · canvas · Auto`), and says so when a stroke changed nothing because the
+colour was already there or the target layer is hidden or locked. The pixel grid
+is on by default and appears from 4x up, so zoom in with the ZOOM column when you
+need to aim at individual pixels.
+**Pick pixel** samples the colour under the pointer instead of painting, and
+hands the pencil back after one sample rather than staying armed.
+
+Two switches show the skin but are not drawing surfaces, and both say so in the
+line above the canvas: **Player preview** and **Sprite state sheet**. Each reads
+**Canvas editing** / **Canvas** while it is off. Both put the drawing tools away
+while they are on, rather than leaving a sidebar of brushes that cannot paint.
+
+A state sheet is **one sprite's** variants, numbered, so it asks for a sprite
+before it will show one: pressed with the target on Auto it says so and opens
+**Sprite targets** instead of picking a sprite of its own.
+
+The tool column is docked beside the canvas rather than laid over it, so no open
+panel can swallow a stroke: pick a brush and keep painting without closing
+anything. The column holds one panel at a time and opens on **Drawing tools**, so
+the brushes are on screen before anything is pressed.
+
 Catamp Silverplay uses the original thirteen Winamp bitmap sheets plus
 `pledit.txt` and `viscolor.txt`. The player and editor embed the same artwork.
 Studio uses Cranpose for the GUI; mouse strokes and MCP commands modify the same
-document and share undo/redo history. The editor is available on desktop and
-Android; the bundled skin is also available on iOS and web.
+document and share undo/redo history. The editor is available on desktop, Android
+and the web; the bundled skin is also available on iOS.
 
 The whole-canvas drawing helper is documented in
 [connected-canvas-api.md](../../tools/skin-studio/connected-canvas-api.md).
@@ -42,7 +153,84 @@ sizes. `check_native_frames.py --output target/catamp22/frames` captures all 112
 control states; `check_silverplay_art.py --frames target/catamp22/frames` compares
 all 1,680 complete moving-control regions with the exported source sheets.
 
-## Android controls
+**Pixel study** magnifies native pixels, read-only, with an optional grayscale
+value view. It **follows the pointer** over the canvas and keeps the last place it
+was, so it can be read by looking at it. Lift a region with **Lift pixels** to pin
+it there instead. The clipboard transforms under it are greyed out until
+something is lifted.
+
+**Sprite rectangles** says where each sprite lives in the joined skin. The editor
+outlines the **one under the pointer** and names it beside the canvas; it never
+draws into the artwork. Outlining every cell at once, in the artwork's own
+pixels, buried the picture the hints were meant to point at -- and the hairlines
+grew with the zoom, because they were pixels.
+
+**Skin atlases** edits one BMP on its own, at native coordinates, with the same
+pencil and undo history. **The whole skin** sits at the top of that list, and the
+canvas carries a **← The whole skin** button while a single atlas is open, so the
+detour always has a way back.
+
+**Sprite targets** lists all sixty-odd named sprites with a filter box; the row's
+pip says whether it is targeted, and **Solo** narrows to one.
+
+**Painting layers** is one row per plane -- name, shown/hidden, locked/free --
+with the chosen plane's controls at the foot of the column, so the list always
+shows every plane the document has.
+
+**Skin options** holds everything about the skin rather than about painting it --
+the time readout, the equalizer's slider travel, whether the playlist, the
+equalizer sliders, the playlist selection and the visualizer carry their own
+artwork, the six `PLEDIT.TXT` playlist text colours and the 24 `VISCOLOR.TXT`
+visualizer colours. The two palettes are grids of swatches: click a slot to set it
+to the brush colour. They used to be reachable only over MCP, which made them
+invisible to anyone painting by hand. These used to appear and disappear from the toolbar as the canvas
+scrolled past the window they belonged to; they are all in one panel now,
+whatever the canvas is showing. The sprite-state row under the canvas is the
+same: it offers all five sliders -- volume, balance, position, eq, scroll --
+whatever the canvas is scrolled over.
+
+## MCP
+
+The editor is also an MCP server, and an agent works it the way a person does:
+one tool per panel, named for it.
+
+| Tool | The panel it is |
+| --- | --- |
+| `studio_canvas` | The joined skin, the only drawing surface; reads it as an image and sets zoom, brush, colour, width and sprite state |
+| `studio_draw` | A stroke on that canvas, routed to whichever sheets it crosses |
+| `studio_atlas` | The one-BMP detour, and the way back |
+| `studio_targets` | Sprite targets: list, choose, solo, or auto |
+| `studio_rectangles` | Sprite rectangles |
+| `studio_states` | One sprite's variants |
+| `studio_layers` | Painting layers |
+| `studio_options` | Everything outside the sheets, both palettes included |
+| `studio_pixel`, `studio_study`, `studio_cluster` | What is under a pixel, the magnifier, the clipboard |
+| `studio_history`, `studio_undo`, `studio_redo` | The shared history |
+| `studio_status`, `studio_new`, `studio_open`, `studio_project`, `studio_export`, `studio_screenshot` | The document and the window |
+
+The older tools -- `studio_state`, `studio_render`, `studio_guides`,
+`studio_paint_layers`, `studio_layout`, `studio_patch`, `studio_inspect_region`,
+the one-off skin switches and the palette pair -- still answer, so existing
+scripts keep working, but they are no longer offered: they address single windows
+and an isolated patch handoff, which is not how this editor edits.
+
+## Layouts
+
+The editor picks its layout from the surface it is given. At 1140x820 logical
+points or more it uses the full desktop layout -- the same sidebar, drawers and
+whole-skin canvas a desktop window gets -- so a browser on a laptop is not
+reduced to the touch UI. Below that it uses the touch layout, whose canvas fits
+the skin to the width it has on the first frame.
+
+Hosted inside a player (Android, the web), the desktop layout swaps the WSZ path
+field for **Player** and **Apply to player**, and its **Open…**/**Export…** go
+through the platform's file picker rather than a typed path.
+
+Below the desktop minimum the canvas is not worth splitting, so the tool column
+goes back to covering the right of it; the canvas it leaves visible stays
+drawable.
+
+## Touch controls (Android and web)
 
 - **Draw / Pan** switches a drag between painting and moving the canvas.
 - **−/+ zoom** changes the integer number of screen pixels per skin pixel.
@@ -54,6 +242,14 @@ all 1,680 complete moving-control regions with the exported source sheets.
   saves/restores a layered draft, or applies the edited skin to the player.
 - **Player** or Android Back saves a recoverable draft and returns to playback.
   Documents and undo history remain alive when switching between player and Studio.
+
+The browser has no filesystem, so the web build keeps the same two things in the
+scoped `localStorage` the player already uses: the layered draft under
+`cranamp.studio.draft.v1`, and **Apply to player** under
+`cranamp.skin.v1/Studio edited.wsz`, where it joins the Settings skin list and
+survives a reload. Browser storage is finite; **Export Winamp skin…** downloads a
+real `.wsz` when you want the work off the machine. MCP is desktop and Android
+only -- the browser cannot open a listening socket.
 
 MCP uses the same active document on Android. For a USB/emulator connection:
 `adb -s DEVICE_SERIAL forward tcp:18766 tcp:18765`, then POST MCP requests to
@@ -76,7 +272,7 @@ phone scales. The stacked panels share the same pixel-grid origin.
 
 ## Sprite rectangles and painting layers
 
-**Part rectangles** marks each source cell directly on the editor image and lists
+**Sprite rectangles** marks each source cell directly on the editor image and lists
 its sheet, native rectangle and state ID. Cyan outlines are sprite cells; gold
 identifies the selected paint clip; pink marks runtime text/graph/spectrum areas.
 Numbers on the canvas match the list. Select a cell to clip atlas painting to it.
@@ -93,7 +289,7 @@ illustrations can be placed around the player-drawn content.
 intersecting parts, source overlaps for the current sprite states, and live
 reservations (whose source overlap is null). It includes underlying parts;
 it is not a visible-pixel mask and does not mutate the document or view.
-In the GUI, lift a region and select **Part rectangles → Parts in lifted
+In the GUI, lift a region and select **Sprite rectangles → Parts in lifted
 region** to filter the list. **Show all parts** restores it. Pink guides now
 include the four exact timer digit cells as well as other live readouts.
 
@@ -212,7 +408,7 @@ All these operations share human/MCP history and survive WSZ export.
 2. Choose Pencil or Pick pixel, and a swatch or `#RRGGBB` brush color.
 3. Draw directly on the assembled canvas at integer zoom. The editor resolves
    each stroke to the underlying BMP and source rectangle.
-4. Auto targets the topmost sprite footprint. **Select layers…** opens a native multi-select list. Toggle any combination
+4. Auto targets the topmost sprite footprint. **Sprite targets…** opens a native multi-select list. Toggle any combination
    of backgrounds and controls, including occluded pixels. **Solo** selects just
    one layer; **Select all** includes every layer; **Auto / clear** returns to
    topmost targeting. The pencil writes to every selected footprint it crosses.
@@ -224,7 +420,7 @@ All these operations share human/MCP history and survive WSZ export.
    source variants side by side; Auto uses the panel's primary slider.
 7. **Player preview** runs the actual Cranamp main/EQ/playlist composables
    against the current document. Integer zoom and pan work here too. Use 1×
-   for the whole stack. **Tall playlist / Compact playlist** switches the live preview between 261 and 145 native pixels. MCP `studio_state` accepts `preview_playlist_height` from 145 to 522. **Presentation** shows the entire live stack at the largest fitting integer zoom (up to 2×). MCP can toggle it with `presentation: true/false`. Return to Edit canvas to paint.
+   for the whole stack. **Tall playlist / Compact playlist** switches the live preview between 261 and 145 native pixels. MCP `studio_state` accepts `preview_playlist_height` from 145 to 522. **Presentation** shows the entire live stack at the largest fitting integer zoom (up to 2×). MCP can toggle it with `presentation: true/false`. Return to Canvas editing to paint.
 8. **List canvas** enables an editable `list.background` layer. It exports a
    native 243×203 `plbg.bmp`, cropped/tiled by the player without stretching.
    **Travel** on the Equalizer tab reserves space for larger fader artwork;
@@ -350,7 +546,7 @@ against the current Silverplay WSZ, including transparent source pixels and all
 
 ## Pixel craft tools and material studies
 
-**Brush tools** now includes native pencil, line, rectangle and ellipse brushes,
+**Drawing tools** now includes native pencil, line, rectangle and ellipse brushes,
 solid widths, filled shapes and reflection about the canvas axes. Shapes preview
 while dragging and commit one shared Human history transaction when released.
 Cancel restores the original pixels. MCP paths support line, quadratic and cubic
@@ -497,7 +693,7 @@ and actual player across all four on/off and pressed/released combinations.
 
 ### Thin contour cleanup
 
-Brush tools → **Clean 1px corners** is shared with MCP `studio_state` and
+Drawing tools → **Clean 1px corners** is shared with MCP `studio_state` and
 `studio_draw` through `clean_corners`. Open one-pixel paths and curves remove
 redundant right-angle elbows while retaining endpoints and connectivity.
 Filled/closed shapes, ellipses and broad strokes are unchanged. An individual

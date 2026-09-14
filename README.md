@@ -22,7 +22,7 @@ A Winamp-style music player in Rust, powered by [Cranpose](https://github.com/sa
 - **Floating web player** — Open PiP explicitly in supported Chromium browsers.
 - **Sync** — Share listening progress and play counts through a chosen folder on native platforms.
 - **Android updates** — Check for and install new releases from Settings.
-- **Skin Studio** — Open the editor from Settings on desktop and Android.
+- **Skin Studio** — Open the editor from Settings on desktop, Android and the web.
 - **Drawing** — Pencil, lines, curves, shapes, pixel stamps, fur strokes and glass tools.
 - **Layers** — Edit painting layers, masks and selected skin parts with undo/redo.
 - **Connected canvas** — Draw across main, equalizer and playlist with source-part guides.

@@ -1,7 +1,7 @@
 //! Touch layout for the same native document, brushes and history as desktop.
 use super::*;
 use cranpose_ui::{Column, ColumnSpec, Row, RowSpec};
-use std::{path::PathBuf, rc::Rc};
+use std::rc::Rc;
 
 pub(crate) fn new_mobile_document(path: Option<&str>) -> anyhow::Result<SharedDocument> {
     let mut doc = initial_document(path)?;
@@ -11,19 +11,100 @@ pub(crate) fn new_mobile_document(path: Option<&str>) -> anyhow::Result<SharedDo
     Ok(shared)
 }
 
-fn output_path() -> PathBuf {
-    super::super::skins_library_dir().join("Studio edited.wsz")
-}
-fn draft_path() -> PathBuf {
+/// Name the applied skin keeps in the player's library, on disk or in the
+/// browser's scoped storage.
+const APPLIED: &str = "Studio edited.wsz";
+
+// Draft and applied-skin storage. Native keeps real files; the browser has no
+// filesystem, so both go through the same scoped preferences the player already
+// uses for its skin library.
+#[cfg(not(target_arch = "wasm32"))]
+fn draft_path() -> std::path::PathBuf {
     super::super::app_config_dir().join("skin-studio/draft.cstudio")
 }
+#[cfg(not(target_arch = "wasm32"))]
+fn store_draft(bytes: &[u8], previous: bool) -> anyhow::Result<()> {
+    let path = draft_path();
+    let path = if previous {
+        path.with_file_name("previous.cstudio")
+    } else {
+        path
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temp = path.with_extension("cstudio.tmp");
+    std::fs::write(&temp, bytes)?;
+    std::fs::rename(temp, path)?;
+    Ok(())
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn load_draft() -> anyhow::Result<Vec<u8>> {
+    Ok(std::fs::read(draft_path())?)
+}
+
+#[cfg(target_arch = "wasm32")]
+const DRAFT_KEY: &str = "cranamp.studio.draft.v1";
+#[cfg(target_arch = "wasm32")]
+fn store_draft(bytes: &[u8], previous: bool) -> anyhow::Result<()> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let key = if previous {
+        format!("{DRAFT_KEY}.previous")
+    } else {
+        DRAFT_KEY.to_string()
+    };
+    cranpose_services::preferences()
+        .set(&key, &STANDARD.encode(bytes))
+        .map_err(|e| anyhow::anyhow!("Browser storage is full or blocked: {e}"))
+}
+#[cfg(target_arch = "wasm32")]
+fn load_draft() -> anyhow::Result<Vec<u8>> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let encoded = cranpose_services::preferences()
+        .get(DRAFT_KEY)
+        .ok_or_else(|| anyhow::anyhow!("No saved draft in this browser yet"))?;
+    Ok(STANDARD.decode(encoded)?)
+}
+
+/// Persist the edited skin where the player can find it again, returning the
+/// bytes to apply now and the path (or browser key) to remember.
+pub(super) fn publish(shared: &SharedDocument) -> anyhow::Result<(Vec<u8>, String)> {
+    let mut doc = shared.lock().unwrap();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let path = super::super::skins_library_dir().join(APPLIED);
+        doc.export(&path)?;
+        Ok((doc.archive()?, path.to_string_lossy().into_owned()))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        doc.finish_stroke();
+        let bytes = doc.archive()?;
+        // Validate before writing, exactly as the native export does: a broken
+        // archive must not replace the entry the player already has.
+        super::super::skin::load_skin(&bytes)?;
+        let key = super::super::browser_skins::save(
+            cranpose_services::preferences().as_ref(),
+            APPLIED,
+            &bytes,
+        )
+        .map_err(anyhow::Error::msg)?;
+        doc.path = Some(key.clone());
+        doc.mark_project_saved(format!("Applied {APPLIED}"));
+        Ok((bytes, key))
+    }
+}
+
 fn message(shared: &SharedDocument, text: impl ToString) {
     let mut doc = shared.lock().unwrap();
     doc.message = text.to_string();
     doc.revision += 1;
 }
 fn save_draft(shared: &SharedDocument) -> anyhow::Result<()> {
-    shared.lock().unwrap().save_project(&draft_path())?;
+    let mut doc = shared.lock().unwrap();
+    let bytes = doc.project_bytes()?;
+    store_draft(&bytes, false)?;
+    doc.mark_project_saved("Saved draft".into());
     Ok(())
 }
 
@@ -63,6 +144,8 @@ pub fn MobileSkinStudio(
     let tick = cranpose_core::rememberMutableStateOf(|| 0u64);
     let drawer = cranpose_core::rememberMutableStateOf(|| "".to_string());
     let pan_mode = cranpose_core::rememberMutableStateOf(|| false);
+    // The opening zoom fits the skin to whatever surface this is, once.
+    let fitted = cranpose_core::rememberMutableStateOf(|| false);
     let color_field = cranpose_core::remember(|| TextFieldState::new("#ffffff")).with(|f| *f);
     let pan = cranpose_core::rememberMutableStateOf(|| [0f32; 2]);
     let pending_export = cranpose_core::rememberMutableStateOf(|| None::<Vec<u8>>);
@@ -187,6 +270,16 @@ pub fn MobileSkinStudio(
             let shared = shared.clone();
             let close = close.clone();
             let apply = apply.clone();
+            if !fitted.get() {
+                let fit = (((w - 8.) / size[0]).floor().max(1.) as u32).min(8);
+                let d = shared.clone();
+                cranpose_core::SideEffect(move || {
+                    fitted.set(true);
+                    if fit != d.lock().unwrap().view.zoom {
+                        state(&d, json!({"zoom": fit}));
+                    }
+                });
+            }
             Column(Modifier::empty().fill_max_width(), ColumnSpec::default(), {
                 let d = shared.clone();
                 move || {
@@ -279,7 +372,12 @@ pub fn MobileSkinStudio(
                 }
             });
             if drawer.get().is_empty() {
-                let scale = view.zoom as f32 / cranpose_ui::current_density().max(1.);
+                // Logical points per skin pixel, the same meaning `zoom` has in
+                // the desktop layout. It used to be divided by the display
+                // density, which quietly made the canvas a 1:1 postage stamp in
+                // the corner of any high-density surface bigger than a phone --
+                // and only that stamp accepted a stroke.
+                let scale = view.zoom as f32;
                 let limits = [
                     (size[0] - w / scale).max(0.),
                     (size[1] - body_h / scale).max(0.),
@@ -461,8 +559,7 @@ pub fn MobileSkinStudio(
                                         false,
                                         move || {
                                             let data = if project {
-                                                save_draft(&d)
-                                                    .and_then(|()| Ok(std::fs::read(draft_path())?))
+                                                d.lock().unwrap().project_bytes()
                                             } else {
                                                 d.lock().unwrap().archive()
                                             };
@@ -488,16 +585,7 @@ pub fn MobileSkinStudio(
                                 let c = d.clone();
                                 let apply = apply.clone();
                                 TouchButton("Apply to player".into(), w, false, move || {
-                                    let result = (|| {
-                                        let mut doc = c.lock().unwrap();
-                                        let path = output_path();
-                                        doc.export(&path)?;
-                                        Ok::<_, anyhow::Error>((
-                                            doc.archive()?,
-                                            path.to_string_lossy().into_owned(),
-                                        ))
-                                    })();
-                                    match result {
+                                    match publish(&c) {
                                         Ok((bytes, path)) => apply(bytes, path),
                                         Err(e) => message(&c, e),
                                     }
@@ -505,16 +593,15 @@ pub fn MobileSkinStudio(
                                 let c = d.clone();
                                 TouchButton("Restore last draft".into(), w, false, move || {
                                     let result = (|| {
-                                        let bytes = std::fs::read(draft_path())?;
+                                        let bytes = load_draft()?;
                                         let mut restored = Document::open_project(&bytes)?;
                                         restored.path = None;
                                         restored.view.panel = "canvas".into();
                                         let mut doc = c.lock().unwrap();
                                         // Capture the outgoing work before replacing it; the restored
                                         // bytes above are already owned, so this cannot erase them.
-                                        doc.save_project(
-                                            &draft_path().with_file_name("previous.cstudio"),
-                                        )?;
+                                        let outgoing = doc.project_bytes()?;
+                                        store_draft(&outgoing, true)?;
                                         restored.revision = doc.revision + 1;
                                         *doc = restored;
                                         Ok::<_, anyhow::Error>(())

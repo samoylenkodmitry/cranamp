@@ -69,7 +69,7 @@ impl Default for View {
             filled: false,
             mirror_x: false,
             mirror_y: false,
-            grid: false,
+            grid: true,
             alpha_lock: false,
             mask_colors: vec![],
             all_states: false,
@@ -128,6 +128,11 @@ pub struct Document {
     pub cluster: Option<RgbaImage>,
     /// Attempted Auto pixels with no bitmap source (for example classic list fill).
     unmapped_pixels: BTreeSet<[i32; 2]>,
+    /// Atlas pixels the stroke in progress has changed. Reported when it ends,
+    /// because a stroke can be entirely correct and entirely invisible -- white
+    /// on pale artwork, or the magenta transparency key -- and silence then
+    /// reads as a broken editor.
+    stroke_pixels: usize,
 }
 impl Document {
     /// A new classic atlas set with zero inherited artwork or metadata.
@@ -177,6 +182,7 @@ impl Document {
             selection: None,
             cluster: None,
             unmapped_pixels: BTreeSet::new(),
+            stroke_pixels: 0,
         }
     }
     pub fn open(bytes: &[u8], path: Option<String>) -> Result<Self> {
@@ -226,6 +232,7 @@ impl Document {
             selection: None,
             cluster: None,
             unmapped_pixels: BTreeSet::new(),
+            stroke_pixels: 0,
             stroke: None,
             images,
             files,
@@ -288,6 +295,7 @@ impl Document {
     pub fn checkpoint(&mut self) {
         self.finish_stroke();
         self.unmapped_pixels.clear();
+        self.stroke_pixels = 0;
         self.stroke = Some(self.snapshot());
     }
     pub fn finish_stroke(&mut self) {
@@ -308,12 +316,26 @@ impl Document {
                     format!("{} · {} · {target}", self.view.brush, self.view.panel),
                     "Human",
                 );
-                self.message = format!("{} · {} · {target}", self.view.brush, self.view.panel);
+                self.message = format!(
+                    "{} · {} · {target} · {} px",
+                    self.view.brush, self.view.panel, self.stroke_pixels
+                );
+                self.revision += 1;
+            } else {
+                let target = match self.view.layers.len() {
+                    0 => "Auto".into(),
+                    1 => self.view.layers[0].clone(),
+                    n => format!("{n} layers"),
+                };
+                self.message = format!(
+                    "{} · {} · {target} changed no pixels — that colour is already there, or the layer is hidden or locked",
+                    self.view.brush, self.view.panel
+                );
                 self.revision += 1;
             }
             if !self.unmapped_pixels.is_empty() {
                 self.message = format!(
-                    "{} pixels have no bitmap source; classic playlist fill cannot store strokes",
+                    "{} pixels have no bitmap source; the classic playlist fill is a palette colour, not artwork — turn on “List canvas” to paint there",
                     self.unmapped_pixels.len()
                 );
                 self.revision += 1;
@@ -349,6 +371,12 @@ impl Document {
         } else {
             false
         }
+    }
+    /// How many steps back and forward there are. The editor greys its Undo
+    /// and Redo out when there are none, and says how many there are, rather
+    /// than offering two buttons that look identical whether or not they work.
+    pub(super) fn history_depth(&self) -> (usize, usize) {
+        (self.undo.len(), self.redo.len())
     }
     pub fn history(&self) -> Value {
         let mut entries = vec![
@@ -547,7 +575,7 @@ impl Document {
             .map(|(n, im)| (n.clone(), im.width(), im.height()))
             .collect()
     }
-    fn canvas_size(&self) -> (u32, u32) {
+    pub(super) fn canvas_size(&self) -> (u32, u32) {
         if self.view.panel == "canvas" {
             (275, 232 + self.view.preview_playlist_height)
         } else if self.view.panel == "atlas" {
@@ -724,53 +752,11 @@ impl Document {
     }
     pub fn editor_render(&self) -> RgbaImage {
         let mut im = self.render();
-        if self.view.guides {
-            for (i, g) in self.guides().iter().enumerate() {
-                let [x, y, w, h] = g.rect;
-                let color = if g.runtime {
-                    [255, 126, 145, 255]
-                } else if self.view.clip == Some(g.rect) {
-                    [255, 220, 110, 255]
-                } else {
-                    [56, 226, 223, 255]
-                };
-                for yy in y..y.saturating_add(h).min(im.height()) {
-                    for xx in x..x.saturating_add(w).min(im.width()) {
-                        if xx == x || yy == y || xx == x + w - 1 || yy == y + h - 1 {
-                            im.put_pixel(xx, yy, Rgba(color));
-                        }
-                    }
-                }
-                if w >= 10 && h >= 9 {
-                    let label = (i + 1).to_string();
-                    for (k, ch) in label.chars().enumerate() {
-                        if let Some(rows) = crate::winamp::pixel_text::glyph(ch) {
-                            for (yy, bits) in rows.iter().enumerate() {
-                                for xx in 0..5 {
-                                    let px = x + 2 + k as u32 * 6 + xx;
-                                    let py = y + 2 + yy as u32;
-                                    if px < x + w - 1
-                                        && py < y + h - 1
-                                        && px < im.width()
-                                        && py < im.height()
-                                    {
-                                        im.put_pixel(
-                                            px,
-                                            py,
-                                            Rgba(if bits & (1 << (4 - xx)) != 0 {
-                                                color
-                                            } else {
-                                                [17, 27, 40, 255]
-                                            }),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Sprite rectangles are no longer drawn into the picture. Outlining
+        // every cell in the artwork's own pixels buried the artwork under the
+        // hints that were supposed to point at it, and the outlines scaled with
+        // the zoom because they were pixels. The editor draws the one under the
+        // pointer as an overlay instead; see `GuideHint`.
         if self.view.brush == "lift" {
             if let Some([x, y, w, h]) = self.selection {
                 for yy in y..y + h {
@@ -801,45 +787,79 @@ impl Document {
         json!({"canvas_pixel":[x,y],"hits":hits})
     }
 
-    pub fn state_sheet(&self) -> RgbaImage {
-        let fallback = match self.view.panel.as_str() {
-            "atlas" => "sheet",
-            "canvas" => "main.volume.track",
-            "equalizer" => "band1.track",
-            "playlist" => "scroll.thumb",
-            _ => "volume.track",
-        };
+    /// The sprite a state sheet would show, or `None` when nothing names one.
+    ///
+    /// There is no such thing as the state sheet of "every sprite under the
+    /// brush", and the arbitrary sprite this used to fall back to meant the
+    /// first press of the button always showed something nobody asked for.
+    pub(super) fn state_sheet_layer(&self) -> Option<Layer> {
         let layers = self.layers();
-        let layer = layers
-            .iter()
-            .find(|l| l.id == self.view.layer)
-            .or_else(|| layers.iter().find(|l| l.id == fallback))
-            .unwrap();
-        let columns = layer.variants.len().min(7) as u32;
-        let cw = layer.source[2] + 8;
-        let ch = layer.source[3] + 8;
-        let mut image = RgbaImage::from_pixel(
-            columns * cw,
-            (layer.variants.len() as u32).div_ceil(columns) * ch,
-            Rgba([25, 29, 36, 255]),
-        );
+        // One sprite picked by hand is a target as much as a named one is.
+        if self.view.layers.len() == 1 {
+            let wanted = &self.view.layers[0];
+            return layers.into_iter().find(|l| &l.id == wanted);
+        }
+        if self.view.layer == "auto" || self.view.layer.is_empty() {
+            return None;
+        }
+        let wanted = &self.view.layer;
+        layers.into_iter().find(|l| &l.id == wanted)
+    }
+    /// Every variant of one sprite, laid out in a grid and numbered.
+    pub fn state_sheet(&self) -> Result<RgbaImage> {
+        let layer = self.state_sheet_layer().context(
+            "Choose one sprite in Sprite targets first: a state sheet is one sprite's variants",
+        )?;
+        let columns = layer.variants.len().clamp(1, 7) as u32;
+        // A band above each cell for its number, and a margin so neighbouring
+        // sprites do not read as one piece of artwork.
+        const BAND: u32 = 12;
+        let cw = layer.source[2] + 10;
+        let ch = layer.source[3] + BAND + 6;
+        let rows = (layer.variants.len() as u32).div_ceil(columns);
+        let mut image = RgbaImage::from_pixel(columns * cw, rows * ch, Rgba([20, 24, 30, 255]));
         let composite = self.composite_images();
         let source = &composite[&layer.sheet];
         for (i, r) in layer.variants.iter().enumerate() {
+            let ox = (i as u32 % columns) * cw;
+            let oy = (i as u32 / columns) * ch;
+            // A cell ground a shade off the board, so a sprite that is mostly
+            // transparent still shows where its bounds are.
+            for y in 1..ch - 1 {
+                for x in 1..cw - 1 {
+                    image.put_pixel(ox + x, oy + y, Rgba([34, 40, 50, 255]));
+                }
+            }
+            for (k, digit) in (i + 1).to_string().chars().enumerate() {
+                let Some(glyph) = crate::winamp::pixel_text::glyph(digit) else {
+                    continue;
+                };
+                for (row, bits) in glyph.iter().enumerate() {
+                    for column in 0..5 {
+                        if bits & (1 << (4 - column)) == 0 {
+                            continue;
+                        }
+                        let px = ox + 3 + k as u32 * 6 + column;
+                        let py = oy + 3 + row as u32;
+                        if px < ox + cw - 1 && py < oy + ch - 1 {
+                            image.put_pixel(px, py, Rgba([120, 146, 170, 255]));
+                        }
+                    }
+                }
+            }
             for y in 0..r[3] {
                 for x in 0..r[2] {
-                    let p = source.get_pixel(r[0] + x, r[1] + y);
-                    if p.0[3] != 0 {
-                        image.put_pixel(
-                            (i as u32 % columns) * cw + 4 + x,
-                            (i as u32 / columns) * ch + 4 + y,
-                            *p,
-                        );
+                    let pixel = source.get_pixel(r[0] + x, r[1] + y);
+                    // The same rule the player renders by: the classic
+                    // transparency key is not a colour. Copying it verbatim
+                    // turned sheets like the volume track into flat magenta.
+                    if pixel.0[3] > 0 && pixel.0[..3] != [255, 0, 255] {
+                        image.put_pixel(ox + 5 + x, oy + BAND + 3 + y, *pixel);
                     }
                 }
             }
         }
-        image
+        Ok(image)
     }
     pub fn paint_line(
         &mut self,
@@ -1059,11 +1079,16 @@ impl Document {
                 vec![layer.to_string()]
             };
             let hits: Vec<&Layer> = if selection.is_empty() {
+                // Every sprite the brush is over, not just the one on top. The
+                // joined canvas stacks a control over the window background it
+                // sits on, and both are artwork the stroke is crossing: paint
+                // only the top one and the illustration breaks apart the moment
+                // that control moves, changes state, or is drawn somewhere else
+                // from the same shared source. Selecting targets explicitly in
+                // TARGET LAYERS still narrows this.
                 layers
                     .iter()
-                    .rev()
-                    .find(|l| l.map(x as u32, y as u32).is_some())
-                    .into_iter()
+                    .filter(|l| l.map(x as u32, y as u32).is_some())
                     .collect()
             } else {
                 layers
@@ -1107,6 +1132,7 @@ impl Document {
                             if p.0 != color {
                                 *p = Rgba(color);
                                 count += 1;
+                                self.stroke_pixels += 1;
                             }
                         }
                     }
@@ -1323,6 +1349,26 @@ impl Document {
         self.changed();
         Ok(json!({"pixels_changed":n}))
     }
+    /// The most-used opaque colours in the skin, most used first: a palette hint
+    /// for the picker, not the exhaustive list `palette` returns.
+    pub fn palette_sample(&self, limit: usize) -> Vec<String> {
+        let mut counts: BTreeMap<[u8; 4], usize> = BTreeMap::new();
+        for image in self.composite_images().values() {
+            for p in image.pixels() {
+                if p.0[3] == 0 || p.0[..3] == [255, 0, 255] {
+                    continue;
+                }
+                *counts.entry(p.0).or_insert(0) += 1;
+            }
+        }
+        let mut ranked: Vec<_> = counts.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        ranked
+            .into_iter()
+            .take(limit)
+            .map(|(c, _)| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]))
+            .collect()
+    }
     pub fn palette(&self) -> Value {
         let mut colors = BTreeSet::new();
         for image in self.composite_images().values() {
@@ -1445,6 +1491,32 @@ impl Document {
             self.changed();
         }
         Ok(json!({"layout":layout,"revision":self.revision}))
+    }
+    /// The six PLEDIT.TXT colours and the 24 VISCOLOR.TXT colours, as hex.
+    /// Skin options edits both, so it has to be able to read them first.
+    pub(super) fn text_palettes(&self) -> (Vec<(&'static str, String)>, Vec<String>) {
+        let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+        let playlist = self
+            .files
+            .get("pledit.txt")
+            .map(|b| crate::winamp::skin::parse_pledit_txt(b))
+            .unwrap_or_default();
+        let visualizer = self
+            .files
+            .get("viscolor.txt")
+            .map(|b| crate::winamp::skin::parse_viscolor_txt(b))
+            .unwrap_or_default();
+        (
+            vec![
+                ("Normal", hex(playlist.normal)),
+                ("Current", hex(playlist.current)),
+                ("NormalBG", hex(playlist.normal_bg)),
+                ("SelectedBG", hex(playlist.selected_bg)),
+                ("MbFG", hex(playlist.marquee_fg)),
+                ("MbBG", hex(playlist.marquee_bg)),
+            ],
+            visualizer.0.iter().map(|c| hex(*c)).collect(),
+        )
     }
     pub fn set_palette(&mut self, args: &Value) -> Result<Value> {
         self.finish_stroke();
@@ -1906,7 +1978,9 @@ impl Document {
         self.changed();
         Ok(())
     }
-    pub fn save_project(&mut self, path: &Path) -> Result<Value> {
+    /// Serialize the layered project. `save_project` writes these bytes to disk;
+    /// the browser build has no filesystem and stores the same bytes itself.
+    pub fn project_bytes(&mut self) -> Result<Vec<u8>> {
         self.finish_stroke();
         let mut bytes = Cursor::new(Vec::new());
         {
@@ -1928,17 +2002,25 @@ impl Document {
             }
             z.finish()?;
         }
+        Ok(bytes.into_inner())
+    }
+    /// Record that the document as it stands has been persisted as `label`.
+    pub fn mark_project_saved(&mut self, label: String) {
+        self.saved = self.snapshot();
+        self.dirty = false;
+        self.message = label;
+        self.revision += 1;
+    }
+    pub fn save_project(&mut self, path: &Path) -> Result<Value> {
+        let bytes = self.project_bytes()?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let temp = path.with_extension("cstudio.tmp");
-        std::fs::write(&temp, bytes.get_ref())?;
+        std::fs::write(&temp, &bytes)?;
         std::fs::rename(temp, path)?;
-        self.saved = self.snapshot();
-        self.dirty = false;
-        self.message = format!("Saved layered project {}", path.display());
-        self.revision += 1;
-        Ok(json!({"path":path,"layers":self.planes.len(),"bytes":bytes.get_ref().len()}))
+        self.mark_project_saved(format!("Saved layered project {}", path.display()));
+        Ok(json!({"path":path,"layers":self.planes.len(),"bytes":bytes.len()}))
     }
     pub fn open_project(bytes: &[u8]) -> Result<Self> {
         let mut z = zip::ZipArchive::new(Cursor::new(bytes))?;
@@ -2284,6 +2366,65 @@ mod tests {
         assert_eq!(d.images, restored.images);
     }
     #[test]
+    fn a_stroke_shows_on_every_pixel_of_the_joined_canvas() {
+        // The editor's own promise: drag anywhere on the whole skin and the
+        // pixel under the brush changes. Asserted on `render` -- what the user
+        // is looking at -- not on the atlases, because a write can be perfectly
+        // correct and still invisible.
+        let mut d = document();
+        d.state(json!({"panel":"canvas","layer":"auto","zoom":1}))
+            .unwrap();
+        let (w, h) = d.canvas_size();
+        // Not #ff00ff: that is the classic transparency key and the renderer
+        // drops it on purpose.
+        let ink = [18, 255, 52, 255];
+        for y in 0..h {
+            d.checkpoint();
+            let _ = d.paint_line(
+                [0, y as i32],
+                [w as i32 - 1, y as i32],
+                ink,
+                "selection",
+                false,
+            );
+            d.finish_stroke();
+        }
+        let im = d.render();
+        // The playlist interior is a palette colour in the classic format, not
+        // artwork, so only its frame can hold a stroke until "List canvas" is on.
+        let list_fill = 252..(h - 38);
+        for y in 0..h {
+            let seen = (0..w).filter(|&x| im.get_pixel(x, y).0 == ink).count();
+            if list_fill.contains(&y) {
+                assert!(seen > 0, "row {y} of the playlist frame took nothing");
+            } else {
+                assert_eq!(seen, w as usize, "row {y} did not take a full-width stroke");
+            }
+        }
+    }
+
+    #[test]
+    fn auto_paints_every_sprite_under_the_brush_not_only_the_top_one() {
+        let mut d = document();
+        let original = d.snapshot();
+        assert!(d.view.layers.is_empty(), "no explicit target means Auto");
+        d.checkpoint();
+        d.paint_line([40, 90], [40, 90], [4, 5, 6, 255], "selection", false)
+            .unwrap();
+        // The control the brush is over, and the window background underneath
+        // it: one stroke on the joined canvas is one stroke on the artwork, so
+        // it cannot stop at whichever sprite happens to be drawn last.
+        assert_eq!(d.images["cbuttons.bmp"].get_pixel(24, 2).0, [4, 5, 6, 255]);
+        assert_eq!(d.images["main.bmp"].get_pixel(40, 90).0, [4, 5, 6, 255]);
+        assert_ne!(
+            original.images["main.bmp"].get_pixel(40, 90).0,
+            [4, 5, 6, 255]
+        );
+        d.undo();
+        assert_eq!(d.images["main.bmp"], original.images["main.bmp"]);
+        assert_eq!(d.images["cbuttons.bmp"], original.images["cbuttons.bmp"]);
+    }
+    #[test]
     fn selected_layers_paint_occluded_background_and_both_control_states() {
         let mut d = document();
         let original = d.snapshot();
@@ -2439,7 +2580,7 @@ mod tests {
         assert!(!d.has_playlist_background());
         assert_eq!(original, d.archive().unwrap());
         // A selected optional layer disappearing through undo must remain safe.
-        d.state_sheet();
+        let _ = d.state_sheet();
         d.state(json!({"pressed":true})).unwrap();
         d.redo();
         d.redo();
@@ -3037,10 +3178,13 @@ mod tests {
         assert_eq!(play.rect, [23, 18, 23, 18]);
         let artwork = d.render();
         d.state(json!({"guides":true})).unwrap();
-        assert_ne!(
+        // Rectangles are an overlay the editor draws over the canvas, never
+        // pixels in it: outlining every cell in the artwork's own pixels buried
+        // the artwork under the hints meant to point at it.
+        assert_eq!(
             d.editor_render(),
             artwork,
-            "guides must be visible in the editor"
+            "rectangles must not be painted into the picture"
         );
         assert_eq!(d.render(), artwork, "guides must not enter the artwork");
         assert_eq!(d.archive().unwrap(), before);
