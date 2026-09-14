@@ -55,6 +55,8 @@ jobs:
           cache-bin: false
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
+      - name: Web host interaction tests
+        run: node --test scripts/test-web-host.mjs
       - name: Build wasm widget
         run: ./build-web.sh
 

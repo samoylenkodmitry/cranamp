@@ -8,6 +8,8 @@
 // initializers below; desktop Clippy still checks these same declarations.
 #![cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod browser_skins;
 mod pixel_grid;
 mod pixel_text;
 mod skin;
@@ -671,6 +673,22 @@ fn remember_winamp_skin(_state: MutableState<WinampState>) -> WinampSkinState {
             }
         });
     }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let skin_path = _state.get_non_reactive().skin_path;
+        cranpose_core::remember(move || {
+            if let Some(path) = skin_path {
+                apply_library_skin(
+                    _state,
+                    skin_state,
+                    &LibrarySkin {
+                        label: path.rsplit('/').next().unwrap_or("Saved skin").to_string(),
+                        path: Some(path.into()),
+                    },
+                );
+            }
+        });
+    }
     skin_state
 }
 
@@ -722,13 +740,11 @@ fn load_skin_file(path: &std::path::Path) -> Result<WinampSkin, String> {
     load_skin(&bytes).map_err(|err| format!("{err:#}"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 const BUNDLED_SKIN_LABEL: &str = "Catamp Silverplay (Bundled)";
 
 /// A skin entry shown in the Settings skin list. `path` is `None` for the
 /// built-in bundled skin and `Some` for a `.wsz`/`.zip` file copied into the
 /// library directory.
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, PartialEq)]
 struct LibrarySkin {
     label: String,
@@ -752,12 +768,12 @@ fn ensure_skins_library_dir() -> std::io::Result<std::path::PathBuf> {
 
 /// Lists every applyable skin: the bundled skin first, then each `.wsz`/`.zip`
 /// in the library directory sorted by file name.
-#[cfg(not(target_arch = "wasm32"))]
 fn list_library_skins() -> Vec<LibrarySkin> {
     let mut skins = vec![LibrarySkin {
         label: BUNDLED_SKIN_LABEL.to_string(),
         path: None,
     }];
+    #[cfg(not(target_arch = "wasm32"))]
     if let Ok(entries) = std::fs::read_dir(skins_library_dir()) {
         let mut files: Vec<std::path::PathBuf> = entries
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
@@ -776,6 +792,15 @@ fn list_library_skins() -> Vec<LibrarySkin> {
             });
         }
     }
+    #[cfg(target_arch = "wasm32")]
+    skins.extend(
+        browser_skins::list(cranpose_services::preferences().as_ref())
+            .into_iter()
+            .map(|(label, key)| LibrarySkin {
+                label,
+                path: Some(key.into()),
+            }),
+    );
     skins
 }
 
@@ -790,22 +815,17 @@ fn is_skin_archive(path: &std::path::Path) -> bool {
     )
 }
 
-/// Keeps picked skin bytes in the library so the skin survives a restart and
-/// shows up in Settings, and answers with where it was kept.
-///
-/// `None` where there is no library to keep it in - the browser has no
-/// directory, so a skin picked there lasts the session.
-fn store_skin_in_library(bytes: &[u8], file_name: &str) -> Option<String> {
+/// Keeps a validated archive in the platform library; persistence errors are visible.
+fn store_skin_in_library(bytes: &[u8], file_name: &str) -> Result<String, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         copy_into_library(bytes, file_name)
-            .ok()
             .map(|path| path.to_string_lossy().to_string())
+            .map_err(|error| error.to_string())
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (bytes, file_name);
-        None
+        browser_skins::save(cranpose_services::preferences().as_ref(), file_name, bytes)
     }
 }
 
@@ -821,7 +841,6 @@ fn copy_into_library(bytes: &[u8], file_name: &str) -> std::io::Result<std::path
 
 /// Strips any directory components from a picked skin name and forces a
 /// `.wsz`/`.zip` extension so the copy lands as a single library file.
-#[cfg(not(target_arch = "wasm32"))]
 fn sanitize_skin_file_name(file_name: &str) -> String {
     let base = file_name
         .rsplit(['/', '\\'])
@@ -843,7 +862,6 @@ fn sanitize_skin_file_name(file_name: &str) -> String {
 
 /// Applies a library skin: loads the file in the background (and persists its
 /// path) for a real skin, or restores the bundled skin for the `None` entry.
-#[cfg(not(target_arch = "wasm32"))]
 fn apply_library_skin(
     state: MutableState<WinampState>,
     skin_state: WinampSkinState,
@@ -851,15 +869,28 @@ fn apply_library_skin(
 ) {
     match &skin.path {
         Some(path) => {
-            let label = skin.label.clone();
-            load_skin_file_background(
-                state,
-                skin_state,
-                path.clone(),
-                true,
-                Some(format!("Loaded Skin {label}")),
-                true,
-            );
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let label = skin.label.clone();
+                load_skin_file_background(
+                    state,
+                    skin_state,
+                    path.clone(),
+                    true,
+                    Some(format!("Loaded Skin {label}")),
+                    true,
+                );
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let key = path.to_string_lossy().to_string();
+                match browser_skins::load(cranpose_services::preferences().as_ref(), &key) {
+                    Ok(bytes) => {
+                        apply_loaded_skin(state, skin_state, &bytes, &skin.label, Some(key))
+                    }
+                    Err(error) => state.update(|s| s.status = format!("Skin Load Failed: {error}")),
+                }
+            }
         }
         None => match bundled_skin() {
             Ok(loaded) => {
@@ -1384,18 +1415,32 @@ fn receive_skin_pick(
     match result {
         Ok(Some(entry)) => {
             let label = entry.metadata().name;
-            let display_path = entry.metadata().identifier;
             cranpose_core::spawn_ui_task(async move {
                 match entry.read_all().await {
                     Ok(bytes) => {
                         state.update(|s| s.pending_skin_pick = false);
-                        // Persist the picked skin into the library so it
-                        // survives restarts and shows up in Settings. Fall
-                        // back to the picker's display path if the copy
-                        // fails (e.g. read-only config dir).
-                        let stored_path =
-                            store_skin_in_library(&bytes, &label).unwrap_or(display_path);
-                        apply_loaded_skin(state, skin_state, &bytes, &label, Some(stored_path));
+                        // Validate before writing: a bad import must never overwrite a good skin.
+                        if let Err(error) = load_skin(&bytes) {
+                            state.update(|s| s.status = format!("Skin Load Failed: {error:#}"));
+                            return;
+                        }
+                        match store_skin_in_library(&bytes, &label) {
+                            Ok(path) => {
+                                apply_loaded_skin(state, skin_state, &bytes, &label, Some(path))
+                            }
+                            Err(error) => {
+                                apply_loaded_skin(
+                                    state,
+                                    skin_state,
+                                    &bytes,
+                                    &label,
+                                    Some("session:skin".into()),
+                                );
+                                state.update(|s| s.status = format!(
+                                    "Skin loaded for this session only; could not save to library: {error}"
+                                ));
+                            }
+                        }
                     }
                     Err(error) => state.update(|s| {
                         s.pending_skin_pick = false;
@@ -3493,11 +3538,7 @@ const SETTINGS_HEIGHT: f32 = 500.0;
 // panel is a clean flat-design surface built from cranpose-ui widgets.
 const SETTINGS_BG: Color = Color(0.07, 0.08, 0.11, 1.0);
 const SETTINGS_CARD: Color = Color(0.13, 0.15, 0.19, 1.0);
-// Accent/status colors are only referenced by the native sections (skins cards,
-// sync status, action buttons); the web build renders static section text.
-#[cfg(not(target_arch = "wasm32"))]
 const SETTINGS_CARD_ACTIVE: Color = Color(0.16, 0.31, 0.54, 1.0);
-#[cfg(not(target_arch = "wasm32"))]
 const SETTINGS_ACCENT: Color = Color(0.24, 0.50, 0.95, 1.0);
 #[cfg(not(target_arch = "wasm32"))]
 const SETTINGS_GOOD: Color = Color(0.30, 0.70, 0.46, 1.0);
@@ -3518,7 +3559,6 @@ fn settings_text_style(size_sp: f32, color: Color) -> TextStyle {
 }
 
 /// A full-width pill button used across the Settings sections.
-#[cfg(not(target_arch = "wasm32"))]
 #[composable]
 fn SettingsActionButton(label: String, fill: Color, on_click: impl Fn() + 'static) {
     Button(
@@ -3723,13 +3763,10 @@ fn sync_pick_folder(state: MutableState<WinampState>) {
 
 /// Skins section: the bundled skin plus every library file as tappable cards,
 /// with an "Add skin" button that routes through the existing native picker.
-#[cfg(not(target_arch = "wasm32"))]
 #[composable]
 fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkinState) {
-    const MAX_SKIN_ROWS: usize = 4;
     let active_path = state.get().skin_path.clone();
     let skins = list_library_skins();
-    let shown = skins.len().min(MAX_SKIN_ROWS);
 
     Column(
         Modifier::empty().fill_max_width(),
@@ -3741,7 +3778,7 @@ fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkin
                 settings_text_style(11.0, SETTINGS_TEXT_DIM),
             );
 
-            for skin in skins.iter().take(shown) {
+            for skin in &skins {
                 let is_active = match &skin.path {
                     Some(path) => active_path.as_deref() == Some(path.to_string_lossy().as_ref()),
                     None => active_path.is_none(),
@@ -3773,12 +3810,27 @@ fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkin
                 );
             }
 
-            if skins.len() > shown {
-                Text(
-                    format!("+{} more in your skins folder", skins.len() - shown),
-                    Modifier::empty(),
-                    settings_text_style(10.0, SETTINGS_TEXT_DIM),
-                );
+            #[cfg(target_arch = "wasm32")]
+            if let Some(path) = active_path
+                .as_ref()
+                .filter(|p| p.starts_with("cranamp.skin.v1/"))
+            {
+                let key = path.clone();
+                SettingsActionButton("Remove selected skin".into(), SETTINGS_CARD, move || {
+                    match browser_skins::remove(cranpose_services::preferences().as_ref(), &key) {
+                        Ok(()) => apply_library_skin(
+                            state,
+                            skin_state,
+                            &LibrarySkin {
+                                label: BUNDLED_SKIN_LABEL.into(),
+                                path: None,
+                            },
+                        ),
+                        Err(error) => {
+                            state.update(|s| s.status = format!("Skin removal failed: {error}"))
+                        }
+                    }
+                });
             }
 
             let state_add = state;
@@ -3786,27 +3838,6 @@ fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkin
             SettingsActionButton("+ Add skin…".to_string(), SETTINGS_ACCENT, move || {
                 open_skin_file(state_add, skin_add)
             });
-        },
-    );
-}
-
-#[cfg(target_arch = "wasm32")]
-#[composable]
-fn SettingsSkinsSection(_state: MutableState<WinampState>, _skin_state: WinampSkinState) {
-    Column(
-        Modifier::empty().fill_max_width(),
-        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(4.0)),
-        || {
-            Text(
-                "SKINS",
-                Modifier::empty(),
-                settings_text_style(11.0, SETTINGS_TEXT_DIM),
-            );
-            Text(
-                "The skin library is available on the desktop and mobile builds.",
-                Modifier::empty(),
-                settings_text_style(11.0, SETTINGS_TEXT_DIM),
-            );
         },
     );
 }
@@ -4066,7 +4097,7 @@ fn SettingsPanel(
                             s.studio_open = true;
                         });
                     });
-                    if state.get().status.starts_with("Skin Studio:") {
+                    if state.get().status.to_ascii_lowercase().contains("skin") {
                         Text(
                             state.get().status,
                             Modifier::empty(),
@@ -8471,7 +8502,9 @@ fn valid_saved_skin_path(path: Option<String>) -> Option<String> {
 
     #[cfg(target_arch = "wasm32")]
     {
-        Some(path)
+        browser_skins::load(cranpose_services::preferences().as_ref(), &path)
+            .ok()
+            .map(|_| path)
     }
 }
 

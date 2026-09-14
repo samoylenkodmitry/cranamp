@@ -109,7 +109,6 @@
     let cranampSize = { ...DEFAULT_SURFACE_SIZE };
     let lastPipWindowSize = null;
     let openingPiP = false;
-    let autoFloatArmed = false;
 
     function validSurfaceSize(size) {
       const width = Number(size?.width);
@@ -297,41 +296,6 @@
       }
     }
 
-    function removeAutoFloatListeners() {
-      if (!autoFloatArmed) {
-        return;
-      }
-      autoFloatArmed = false;
-      window.removeEventListener("pointerdown", handleAutoFloatActivation, true);
-      window.removeEventListener("keydown", handleAutoFloatActivation, true);
-      window.removeEventListener("touchstart", handleAutoFloatActivation, true);
-    }
-
-    async function handleAutoFloatActivation() {
-      removeAutoFloatListeners();
-      await openFloatingMiniPlayer();
-    }
-
-    function armAutoFloatOnActivation() {
-      if (!supportsFloatingMiniPlayer() || autoFloatArmed || (pipWindow && !pipWindow.closed)) {
-        return;
-      }
-      autoFloatArmed = true;
-      window.addEventListener("pointerdown", handleAutoFloatActivation, true);
-      window.addEventListener("keydown", handleAutoFloatActivation, true);
-      window.addEventListener("touchstart", handleAutoFloatActivation, true);
-    }
-
-    async function autoOpenFloatingMiniPlayer() {
-      if (!supportsFloatingMiniPlayer()) {
-        return;
-      }
-      const opened = await openFloatingMiniPlayer({ suppressWarning: true });
-      if (!opened) {
-        armAutoFloatOnActivation();
-      }
-    }
-
     if (!supportsFloatingMiniPlayer()) {
       pipButton.disabled = true;
       pipButton.title = "Floating Cranamp is not supported by this browser";
@@ -378,7 +342,6 @@
     await run_app();
     applyCanvasSize(pipWindow);
     enablePiPButton();
-    await autoOpenFloatingMiniPlayer();
   </script>
 </body>
 </html>

@@ -838,6 +838,7 @@ name = "cranamp"
 version = "0.1.61"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "console_error_panic_hook",
  "cranpose",
  "cranpose-app-shell",
