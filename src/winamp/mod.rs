@@ -707,9 +707,10 @@ fn load_skin_file_background(
     );
 }
 
+const BUNDLED_SKIN: &[u8] = include_bytes!("../../assets/skins/Catamp Silverplay.wsz");
+
 fn bundled_skin() -> Result<WinampSkin, String> {
-    let wsz = include_bytes!("../../assets/winamp.wsz");
-    load_skin(wsz).map_err(|err| format!("{err:#}"))
+    load_skin(BUNDLED_SKIN).map_err(|err| format!("{err:#}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -719,7 +720,7 @@ fn load_skin_file(path: &std::path::Path) -> Result<WinampSkin, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const BUNDLED_SKIN_LABEL: &str = "Bundled (Cranamp)";
+const BUNDLED_SKIN_LABEL: &str = "Catamp Silverplay (Bundled)";
 
 /// A skin entry shown in the Settings skin list. `path` is `None` for the
 /// built-in bundled skin and `Some` for a `.wsz`/`.zip` file copied into the
@@ -2706,6 +2707,7 @@ fn MainWindow(
             }
 
             let title = main_display_title(&snapshot);
+            let title_description = title.clone();
             let title = if snapshot.playback == PlaybackState::Playing {
                 marquee_system_text(title, MAIN_TRACK_TEXT_WIDTH, snapshot.title_marquee_phase)
             } else {
@@ -2722,14 +2724,18 @@ fn MainWindow(
                     title
                 }
             };
-            SystemWinampText(
+            StyledSystemWinampText(
                 title,
-                POS_MAIN_TRACK_TEXT.0,
-                POS_MAIN_TRACK_TEXT.1,
-                MAIN_TRACK_TEXT_WIDTH,
-                WINAMP_SYSTEM_LINE_HEIGHT,
-                scale,
+                title_description,
+                SystemTextBox {
+                    x: POS_MAIN_TRACK_TEXT.0,
+                    y: POS_MAIN_TRACK_TEXT.1,
+                    width: MAIN_TRACK_TEXT_WIDTH,
+                    height: WINAMP_SYSTEM_LINE_HEIGHT,
+                    scale,
+                },
                 skin.display_text_color,
+                WINAMP_SYSTEM_TEXT_METRICS,
             );
             MainMetaReadouts(snapshot.clone(), scale, skin.display_text_color);
 
@@ -3940,6 +3946,7 @@ fn SettingsPanel(
     scale: f32,
 ) {
     let _ = text_color;
+    let scroll = cranpose_ui::rememberScrollState!(0.0);
     Box(
         Modifier::empty()
             .fill_max_size()
@@ -3955,7 +3962,10 @@ fn SettingsPanel(
                 );
             }
             Column(
-                Modifier::empty().fill_max_size().padding(14.0),
+                Modifier::empty()
+                    .fill_max_size()
+                    .padding(14.0)
+                    .vertical_scroll(scroll, false),
                 ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(12.0)),
                 move || {
                     SettingsHeader(state);
@@ -3969,18 +3979,25 @@ fn SettingsPanel(
                         "Open Skin Studio".to_string(),
                         SETTINGS_CARD,
                         move || {
-                            if let Ok(executable) = std::env::current_exe() {
-                                let mut command = std::process::Command::new(executable);
-                                command.arg("--skin-studio");
-                                if let Some(path) = state.get_non_reactive().skin_path {
-                                    command.arg(path);
-                                }
-                                if let Err(error) = command.spawn() {
-                                    state.update(|s| s.status = format!("Skin Studio: {error}"));
-                                }
+                            let path = state.get_non_reactive().skin_path;
+                            match studio::launch(path.as_deref()) {
+                                Ok(()) => state.update(|s| {
+                                    s.settings_open = false;
+                                    s.status = "Opened Skin Studio".into();
+                                }),
+                                Err(error) => state.update(|s| {
+                                    s.status = format!("Skin Studio: {error}");
+                                }),
                             }
                         },
                     );
+                    if state.get().status.starts_with("Skin Studio:") {
+                        Text(
+                            state.get().status,
+                            Modifier::empty(),
+                            settings_text_style(11.0, SETTINGS_TEXT),
+                        );
+                    }
                     #[cfg(not(target_arch = "wasm32"))]
                     SettingsSyncSection(state);
                     SettingsUpdateSection(state);
@@ -5282,6 +5299,7 @@ fn SystemWinampText(
     color: [u8; 4],
 ) {
     StyledSystemWinampText(
+        text.clone(),
         text,
         SystemTextBox {
             x,
@@ -5305,6 +5323,7 @@ fn PlaylistWinampText(
     scale: f32,
     color: [u8; 4],
 ) {
+    let description = text.clone();
     let text = if text.is_ascii() {
         let capacity = (width / 6.0).floor().max(1.0) as usize;
         if text.len() > capacity && capacity >= 4 {
@@ -5317,6 +5336,7 @@ fn PlaylistWinampText(
     };
     StyledSystemWinampText(
         text,
+        description,
         SystemTextBox {
             x,
             y,
@@ -5332,6 +5352,7 @@ fn PlaylistWinampText(
 #[composable]
 fn StyledSystemWinampText(
     text: String,
+    description: String,
     layout: SystemTextBox,
     color: [u8; 4],
     metrics: SystemTextMetrics,
@@ -5353,7 +5374,7 @@ fn StyledSystemWinampText(
                 },
                 cranpose_ui::ImageSampling::Nearest,
             ),
-            Some(text.clone()),
+            Some(description),
             Modifier::empty()
                 .size_points(
                     scaled(layout.width, layout.scale),

@@ -137,20 +137,52 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
     }
 }
 
-pub fn run(path: Option<&str>) {
-    let bytes = path
-        .map(std::fs::read)
-        .transpose()
-        .unwrap_or_else(|e| panic!("Open skin: {e}"));
-    let bytes = bytes
-        .as_deref()
-        .unwrap_or(include_bytes!("../../../assets/winamp.wsz"));
-    let doc = if path.is_some_and(|p| p.ends_with(".cstudio")) {
-        Document::open_project(bytes)
-    } else {
-        Document::open(bytes, path.map(str::to_string))
+/// Open the editor in its own native window without interrupting playback.
+pub fn launch(path: Option<&str>) -> std::io::Result<()> {
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    command.arg("--skin-studio");
+    if let Some(path) = path {
+        command.arg(path);
     }
-    .unwrap_or_else(|e| panic!("Open skin: {e:#}"));
+    let mut child = command.spawn()?;
+    // Reap the editor process when its window closes.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
+    let Some(path) = path else {
+        let mut doc = Document::open_project(include_bytes!(
+            "../../../assets/skins/Catamp Silverplay.cstudio"
+        ))?;
+        // The bundled artwork is an unsaved editable copy, never a developer path.
+        doc.path = None;
+        doc.view = model::View::default();
+        doc.message = "Catamp Silverplay · editable copy".into();
+        return Ok(doc);
+    };
+    let bytes = std::fs::read(path)?;
+    if std::path::Path::new(path)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cstudio"))
+    {
+        let mut doc = Document::open_project(&bytes)?;
+        doc.path = Some(
+            std::path::Path::new(path)
+                .with_extension("wsz")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        Ok(doc)
+    } else {
+        Document::open(&bytes, Some(path.into()))
+    }
+}
+
+pub fn run(path: Option<&str>) {
+    let doc = initial_document(path).unwrap_or_else(|e| panic!("Open skin: {e:#}"));
     let shared = SharedDocument(Arc::new(Mutex::new(doc)));
     if let Err(e) = mcp::start(shared.clone()) {
         shared.lock().unwrap().message = format!("MCP unavailable: {e:#}");
@@ -1671,6 +1703,37 @@ fn LivePlayer(shared: SharedDocument, revision: u64, scale: f32, playlist_height
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+    #[test]
+    fn bundled_editor_project_matches_the_default_player_skin() {
+        use std::io::{Cursor, Read};
+        fn entries(bytes: &[u8]) -> std::collections::BTreeMap<String, Vec<u8>> {
+            let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+            (0..zip.len())
+                .map(|i| {
+                    let mut file = zip.by_index(i).unwrap();
+                    let name = file.name().to_owned();
+                    let mut data = Vec::new();
+                    file.read_to_end(&mut data).unwrap();
+                    (name, data)
+                })
+                .collect()
+        }
+        let doc = initial_document(None).unwrap();
+        assert!(doc.path.is_none());
+        assert!(!doc.dirty);
+        assert!(!doc.view.presentation);
+        assert_eq!(doc.planes.len(), 7);
+        let exported = entries(&doc.archive().unwrap());
+        assert_eq!(exported.len(), 15);
+        assert_eq!(exported, entries(super::super::BUNDLED_SKIN));
+        super::super::bundled_skin().expect("Catamp must load in the player");
+    }
+
+    #[test]
+    fn explicit_studio_input_does_not_fall_back_to_bundled_art() {
+        assert!(initial_document(Some("missing-skin-for-startup-test.wsz")).is_err());
+    }
+
     #[test]
     fn blank_atlases_have_no_inherited_art_and_share_native_canvas_history() {
         let mut d = Document::blank();
