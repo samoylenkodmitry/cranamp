@@ -852,6 +852,8 @@ dependencies = [
  "getrandom 0.4.3",
  "image",
  "log",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",

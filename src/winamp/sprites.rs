@@ -20,7 +20,10 @@ pub fn to_rect(rect: SpriteRect) -> Rect {
 // Main window geometry
 pub const MAIN_WIDTH: f32 = 275.0;
 pub const MAIN_HEIGHT: f32 = 116.0;
-pub const MAIN_WINDOW: SpriteRect = (0.0, 0.0, MAIN_WIDTH, MAIN_HEIGHT);
+// Classic MAIN.BMP is 115 rows. The host reserves 116 points for docking;
+// draw the final source row once more in the dock slot, without stretching.
+pub const MAIN_WINDOW: SpriteRect = (0.0, 0.0, MAIN_WIDTH, 115.0);
+pub const MAIN_DOCK_EDGE: SpriteRect = (0.0, 114.0, MAIN_WIDTH, 1.0);
 pub const TITLE_DRAG_AREA: SpriteRect = (0.0, 0.0, 275.0, 14.0);
 
 // Source slices: TITLEBAR.BMP
