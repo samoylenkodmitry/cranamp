@@ -1,0 +1,15 @@
+Silverplay 22 — native hand-authored artwork
+
+Original Winamp format: 13 BMP + PLEDIT.TXT + VISCOLOR.TXT; no layout extensions.
+Seven independent painting layers; project export matches bundled player.
+140,800 native join comparisons across all 29 playlist tile phases and three taller heights, four active/pressed states: zero mismatches.
+Eight whole-player GPU states at short/tall playlist sizes match source join rows.
+112 GPU state captures: all native pixels are uniform integer blocks.
+1,680 moving-control regions compared against exported atlases: zero errors.
+Regrouping repair history into seven artist planes: all 15 exported source files byte-identical.
+No diagnostic pink (#ed4791) in any exported bitmap.
+Bundled project integration test passed; rebuilt default Studio opened Silverplay 22 with seven layers and no saved developer path.
+
+Replay: tools/skin-studio/catamp_silverplay_refine22.py
+Artwork joins: tools/skin-studio/check_catamp22_continuity.py
+State comparison: tools/skin-studio/check_silverplay_art.py --frames target/catamp22/frames

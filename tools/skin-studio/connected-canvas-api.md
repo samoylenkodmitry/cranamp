@@ -29,6 +29,12 @@ apply(patch)                          # one painting plane + one undo
 | Classic PL list area | No static bitmap; reported in `plan.skipped`; PLEDIT.TXT controls fill/text |
 | Rasterization | Studio native geometry only. No scaling, bitmap generation, antialias filtering, or blur |
 
+Runtime protection masks the *static paint beneath* live readouts. When rebuilding
+an entire background illustration, use `preserve_runtime=False` to replace old
+background fragments there too. This does not edit the separate glyph/control
+atlases or disable live text/visualizers. Inspect the actual player afterward;
+retaining an old rectangular background mask can visibly cut a new curved shape.
+
 ## Inspect the repair and its surrounding pixels
 
 ```python

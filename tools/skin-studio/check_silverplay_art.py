@@ -3,9 +3,13 @@ from pathlib import Path
 from zipfile import ZipFile
 from io import BytesIO
 from PIL import Image
+import argparse
 ROOT=Path(__file__).resolve().parents[2]
-OUT=ROOT/'target/catamp-silverplay-frames'
-with ZipFile(ROOT/'assets/skins/Catamp Silverplay.wsz') as z:
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--frames',type=Path,default=ROOT/'target/catamp-silverplay-frames')
+parser.add_argument('--skin',type=Path,default=ROOT/'assets/skins/Catamp Silverplay.wsz')
+args=parser.parse_args();OUT=args.frames
+with ZipFile(args.skin) as z:
     names=set(z.namelist());assert len(names)==15 and len([n for n in names if n.endswith('.bmp')])==13,names
     assert not any(n in names for n in ['cranamp.json','plbg.bmp','eqhandles.bmp','plselection.bmp'])
     sheets={n:Image.open(BytesIO(z.read(n))).convert('RGB') for n in names if n.endswith('.bmp')}

@@ -28,6 +28,20 @@ standard library. Run helper unit tests with:
 python3 -m unittest discover -s tools/skin-studio -p 'test_*.py'
 ```
 
+The bundled Silverplay 22 artwork has continuous sidewall profiles across main,
+EQ, playlist header, repeated rails and footer. Its seven native painting planes
+separate the case, main illustration, small cats and four control groups. The
+hand-authored `atelier22_*` recipes use opaque palette clusters without raster
+scaling or blur. `catamp_silverplay_refine22.py` replays them through Studio from
+the preserved Silverplay 21 WSZ; it requires clean work, applies seven layers,
+and captures the result for review before export.
+
+`check_catamp22_continuity.py` checks all 29 playlist tile phases and three taller
+sizes in four focus/pressed states, including actual GPU checks at short and tall
+sizes. `check_native_frames.py --output target/catamp22/frames` captures all 112
+control states; `check_silverplay_art.py --frames target/catamp22/frames` compares
+all 1,680 complete moving-control regions with the exported source sheets.
+
 ## Android controls
 
 - **Draw / Pan** switches a drag between painting and moving the canvas.
