@@ -1,5 +1,7 @@
 # Cranamp
 
+<img width="282" height="498" alt="Screenshot 2026-09-14 at 09 19 20" src="https://github.com/user-attachments/assets/ffb4ea04-ed0a-4300-ae2e-6c030ad2e6de" />
+
 Cranamp is a Cranpose-powered Winamp-style audio player written in Rust. The first cut extracts the Cranpose Winamp skin renderer into a standalone app and adds real playlist state, native file/folder selection, and Rodio playback on desktop targets.
 
 Web widget: https://samoylenkodmitry.github.io/cranamp/
