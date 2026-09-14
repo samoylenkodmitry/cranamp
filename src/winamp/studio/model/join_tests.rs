@@ -164,3 +164,34 @@ fn masks_mirrors_and_selected_parts_preserve_join_coverage() {
         }
     }
 }
+
+#[test]
+fn classic_list_holes_are_reported_in_mcp_and_gui_instead_of_silent_success() {
+    let mut d = canvas(145);
+    let result = d
+        .draw(
+            &json!({"operations":[{"op":"line","x":6,"y":270,"x2":16,"y2":270,"color":"#ed4791"}]}),
+        )
+        .unwrap();
+    assert_eq!(result["unmapped_pixels"], 5);
+    assert_eq!(result["unmapped_sample"][0], json!([12, 270]));
+    assert!(d.message.contains("no bitmap source"));
+    for x in 6..12 {
+        assert_eq!(d.render().get_pixel(x, 270).0, [237, 71, 145, 255]);
+    }
+    d.undo();
+    d.checkpoint();
+    d.paint_line([6, 270], [16, 270], [237, 71, 145, 255], "auto", true)
+        .unwrap();
+    d.finish_stroke();
+    assert!(d.message.contains("5 pixels have no bitmap source"));
+    d.checkpoint();
+    d.paint_line([6, 270], [6, 275], [237, 71, 145, 255], "auto", true)
+        .unwrap();
+    d.finish_stroke();
+    assert!(!d.message.contains("no bitmap source"));
+    let clean = d
+        .draw(&json!({"operations":[{"op":"pixel","x":6,"y":276,"color":"#ed4791"}]}))
+        .unwrap();
+    assert_eq!(clean["unmapped_pixels"], 0);
+}

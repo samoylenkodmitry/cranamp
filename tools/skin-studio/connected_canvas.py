@@ -187,11 +187,11 @@ def surface_map(rect, *, playlist_height=145, titles='both', repeats='error',
     def add(label,sheet,src,dest,shared=False):
         intersection=_intersection(rect,[*dest,*src[2:]])
         if intersection is None:return
-        if shared and repeats in ('error','skip'):
-            skipped.append({'label':label,'rect':intersection,'reason':'shared source; use repeats="shared" for one selected copy'})
-            return
         fragments=[intersection]
         for cut in cuts:fragments=[p for f in fragments for p in _subtract(f,cut)]
+        if shared and repeats in ('error','skip'):
+            skipped.extend({'label':label,'rect':f,'reason':'shared source; use repeats="shared" for one selected copy'} for f in fragments)
+            return
         for f in fragments:
             x,y,w,h=f;sx,sy=src[0]+x-dest[0],src[1]+y-dest[1]
             source=[sx,sy,w,h]

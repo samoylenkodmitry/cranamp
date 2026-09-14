@@ -144,6 +144,9 @@ shared tiles. Selected parts and masks deliberately restrict that coverage.
 Classic playlist rails repeat every 29 rows. The footer follows the final cropped
 tile at any playlist height, so an authored rail-to-footer connection must match
 every tile phase. The list's solid fill and live text have no static bitmap source.
+Auto drawing reports attempted pixels in those holes: the GUI shows a status
+message; `studio_draw` returns `unmapped_pixels` and up to eight coordinates in
+`unmapped_sample`. Intentional part selection and paint masks are not holes.
 The main docking row 115 aliases source row 114; they cannot hold different pixels.
 
 Run `cargo test --lib join_tests` to compare painting with one unsplit bitmap:

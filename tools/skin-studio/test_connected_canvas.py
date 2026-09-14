@@ -426,6 +426,8 @@ class ConnectedCanvasTests(unittest.TestCase):
         self.assertTrue(any(t['label'].startswith('playlist.top.left') for t in parts))
         omitted=p.parts([4,248,5,9],repeats='skip')
         self.assertFalse(any('rail' in t['label'] for t in omitted))
+        masked=p.parts([4,248,5,9],exclude=[[4,252,5,5]])
+        self.assertFalse(any('rail' in t['label'] for t in masked))
 
     def test_footer_join_requires_explicit_shared_mapping_at_all_heights(self):
         for height in [145,146,261,384,522]:
