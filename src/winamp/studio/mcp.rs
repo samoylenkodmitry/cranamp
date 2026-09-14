@@ -9,13 +9,20 @@ use std::{
     time::Duration,
 };
 pub const ADDRESS: &str = "127.0.0.1:18765";
+static ACTIVE: std::sync::OnceLock<std::sync::Mutex<SharedDocument>> = std::sync::OnceLock::new();
 pub fn start(shared: SharedDocument) -> Result<()> {
+    if let Some(active) = ACTIVE.get() {
+        *active.lock().unwrap() = shared;
+        return Ok(());
+    }
     let listener =
         TcpListener::bind(ADDRESS).context("Skin Studio MCP port 18765 is already in use")?;
+    let _ = ACTIVE.set(std::sync::Mutex::new(shared.clone()));
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
             let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let shared = ACTIVE.get().unwrap().lock().unwrap().clone();
             let _ = serve(&mut stream, &shared);
         }
     });

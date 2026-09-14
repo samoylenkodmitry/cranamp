@@ -34,8 +34,9 @@ Catamp Silverplay is the bundled default skin on desktop, Android, iOS and web.
 An existing custom skin selection is preserved. Select **Catamp Silverplay
 (Bundled)** in Settings to switch back to it.
 
-On desktop, open **Settings → Open Skin Studio** to edit the selected skin in a
-separate Cranpose window while playback continues. The bundled Catamp opens with
+Open **Settings → Open Skin Studio** to edit the selected skin while playback
+continues. Desktop uses a separate Cranpose window; Android uses a touch editor
+inside the app with pan/zoom, painting layers, history, and native file export. The bundled Catamp opens with
 seven editable painting layers. Studio supports native pixel drawing, sprite
 state previews, layer masks, undo/redo, and a local MCP interface. Export a `.wsz`
 and add it through Settings to use your edits in the player.

@@ -1,7 +1,8 @@
 # Cranamp Skin Studio
 
-Open **Settings → Open Skin Studio** in the desktop player. The editor opens in
-a separate native window while playback continues. It edits the selected skin;
+Open **Settings → Open Skin Studio** on desktop or Android. On desktop the editor
+opens in a separate native window. Android opens the editor inside the activity.
+Playback continues in both cases. It edits the selected skin;
 with the bundled default selected, it opens Catamp Silverplay with seven painting
 layers and no output path. Choose an export destination to save your copy.
 Add the exported `.wsz` through the player's Settings to apply it.
@@ -15,8 +16,8 @@ cargo run -- --skin-studio '/absolute/path/project.cstudio'
 Catamp Silverplay uses the original thirteen Winamp bitmap sheets plus
 `pledit.txt` and `viscolor.txt`. The player and editor embed the same artwork.
 Studio uses Cranpose for the GUI; mouse strokes and MCP commands modify the same
-document and share undo/redo history. The editor is available on desktop;
-the bundled skin is also available on Android, iOS and web.
+document and share undo/redo history. The editor is available on desktop and
+Android; the bundled skin is also available on iOS and web.
 
 The whole-canvas drawing helper is documented in
 [connected-canvas-api.md](../../tools/skin-studio/connected-canvas-api.md).
@@ -26,6 +27,38 @@ standard library. Run helper unit tests with:
 ```sh
 python3 -m unittest discover -s tools/skin-studio -p 'test_*.py'
 ```
+
+## Android controls
+
+- **Draw / Pan** switches a drag between painting and moving the canvas.
+- **−/+ zoom** changes the integer number of screen pixels per skin pixel.
+- **Layers** selects, adds, locks or hides painting planes. **Parts** selects any
+  combination of sprite targets, shows their rectangles, and enables all-state edits.
+- **Tools** selects brushes, width, fill, preset colors or an exact HEX color.
+- **States** previews pressed/inactive controls and all slider frames, and lists history.
+- **Files** opens WSZ/CSTUDIO files through Android's picker, exports either format,
+  saves/restores a layered draft, or applies the edited skin to the player.
+- **Player** or Android Back saves a recoverable draft and returns to playback.
+  Documents and undo history remain alive when switching between player and Studio.
+
+MCP uses the same active document on Android. For a USB/emulator connection:
+`adb -s DEVICE_SERIAL forward tcp:18766 tcp:18765`, then POST MCP requests to
+`http://127.0.0.1:18766/mcp`. The server binds only to device loopback. GPU screenshot
+capture is currently provided by the desktop preview; Android supports the native
+editor image, atlas inspection and drawing commands.
+
+## Reproduce phone scaling on desktop
+
+```sh
+cargo run -- --touch-preview
+cargo run -- --touch-preview --studio
+```
+
+The handset-sized preview uses the real stacked player, Settings and touch editor.
+Check it as well as the integer-zoom desktop Studio: physical sprite edges must be
+snapped from their absolute native coordinates, with widths derived from the snapped
+endpoints. Rounding positions and widths independently leaves gaps at fractional
+phone scales. The stacked panels share the same pixel-grid origin.
 
 ## Sprite rectangles and painting layers
 

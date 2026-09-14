@@ -5,7 +5,10 @@ mod guides;
 mod mapping;
 mod material;
 mod mcp;
+mod mobile;
 mod model;
+pub(crate) use mobile::new_mobile_document;
+pub use mobile::MobileSkinStudio;
 mod study;
 use cranpose_core;
 use cranpose_foundation::{text::TextFieldState, PointerButton};
@@ -95,13 +98,13 @@ mod presentation_tests {
     }
 }
 
-#[cfg(feature = "renderer-wgpu")]
+#[cfg(all(feature = "renderer-wgpu", not(target_os = "android")))]
 static CAPTURE: std::sync::OnceLock<Mutex<cranpose::Robot>> = std::sync::OnceLock::new();
 
 static COMPOSED_REVISION: AtomicU64 = AtomicU64::new(0);
 
 pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
-    #[cfg(feature = "renderer-wgpu")]
+    #[cfg(all(feature = "renderer-wgpu", not(target_os = "android")))]
     {
         let robot = CAPTURE
             .get()
@@ -130,7 +133,7 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
         image::RgbaImage::from_raw(shot.width, shot.height, shot.pixels)
             .ok_or_else(|| anyhow::anyhow!("Invalid captured pixel buffer"))
     }
-    #[cfg(not(feature = "renderer-wgpu"))]
+    #[cfg(any(not(feature = "renderer-wgpu"), target_os = "android"))]
     {
         let _ = revision;
         anyhow::bail!("Scene capture requires the WGPU renderer")
@@ -138,6 +141,7 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
 }
 
 /// Open the editor in its own native window without interrupting playback.
+#[cfg(not(target_os = "android"))]
 pub fn launch(path: Option<&str>) -> std::io::Result<()> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command.arg("--skin-studio");
@@ -181,6 +185,7 @@ fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn run(path: Option<&str>) {
     let doc = initial_document(path).unwrap_or_else(|e| panic!("Open skin: {e:#}"));
     let shared = SharedDocument(Arc::new(Mutex::new(doc)));
@@ -190,7 +195,7 @@ pub fn run(path: Option<&str>) {
     let launcher = crate::create_surface_app()
         .with_title("Cranamp · Skin Studio")
         .with_size(1160, 850);
-    #[cfg(feature = "renderer-wgpu")]
+    #[cfg(all(feature = "renderer-wgpu", not(target_os = "android")))]
     let launcher = launcher
         .with_frame_pacing_mode(cranpose::FramePacingMode::Vsync)
         .with_test_driver(|robot| {
@@ -198,6 +203,29 @@ pub fn run(path: Option<&str>) {
         });
     launcher.run(move || SkinStudio(shared.clone()));
 }
+/// A handset-sized native preview for testing fractional scaling and touch UI.
+#[cfg(not(target_os = "android"))]
+pub fn run_touch_preview(editor: bool) {
+    let document = new_mobile_document(None).expect("Bundled Studio document");
+    if let Err(e) = mcp::start(document.clone()) {
+        document.lock().unwrap().message = e.to_string();
+    }
+    let launcher = crate::create_surface_app()
+        .with_title("Cranamp · Touch preview")
+        .with_size(393, 780);
+    #[cfg(feature = "renderer-wgpu")]
+    let launcher = launcher.with_test_driver(|robot| {
+        let _ = CAPTURE.set(Mutex::new(robot));
+    });
+    launcher.run(move || {
+        if editor {
+            MobileSkinStudio(document.clone(), || {}, |_, _| {});
+        } else {
+            super::WinampStackedApp();
+        }
+    });
+}
+
 pub fn stdio_bridge() {
     mcp::bridge();
 }

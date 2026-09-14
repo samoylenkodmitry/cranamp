@@ -4,15 +4,15 @@
 //! monolithic draw pass so interactions and sprite mapping stay explicit.
 
 #![allow(non_snake_case)]
+// Clippy 1.98 diagnoses std's Android TLS fallback even for the const
+// initializers below; desktop Clippy still checks these same declarations.
+#![cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
 
+mod pixel_grid;
 mod pixel_text;
 mod skin;
 mod sprites;
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(target_os = "ios")
-))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
 pub mod studio;
 
 use std::cell::Cell;
@@ -123,6 +123,7 @@ struct WinampState {
     eq_auto: bool,
     eq_preset_menu_open: bool,
     settings_open: bool,
+    studio_open: bool,
     /// Cross-device (and same-device) resume cue: `(playlist_index, seconds)`.
     /// Set when a synced resume point matches a restored track; consumed by the
     /// next playback tick to seek once the track is playing. See [`crate::sync`].
@@ -170,6 +171,7 @@ impl PartialEq for WinampState {
             && self.eq_auto == other.eq_auto
             && self.eq_preset_menu_open == other.eq_preset_menu_open
             && self.settings_open == other.settings_open
+            && self.studio_open == other.studio_open
             && self.pending_resume == other.pending_resume
             && self.eq_values == other.eq_values
             && self.skin_path == other.skin_path
@@ -228,6 +230,7 @@ impl Default for WinampState {
             eq_auto: false,
             eq_preset_menu_open: false,
             settings_open: false,
+            studio_open: false,
             pending_resume: None,
             eq_values: DEFAULT_EQ_VALUES,
             skin_path: None,
@@ -1778,6 +1781,60 @@ pub fn WinampStackedApp() {
     let tab_state = remember_winamp_tab_state();
     let skin_state = remember_winamp_skin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+    {
+        // Keep editable documents and their undo stacks alive while the player
+        // is visible. Opening another selected skin gets its own session.
+        let sessions = cranpose_core::remember(|| {
+            std::collections::BTreeMap::<Option<String>, studio::SharedDocument>::new()
+        });
+        let snapshot = tab_state.player.get();
+        if snapshot.studio_open {
+            let key = snapshot.skin_path.clone();
+            let cached = sessions.with(|all| all.get(&key).cloned());
+            let opened = cached
+                .map(Ok)
+                .unwrap_or_else(|| studio::new_mobile_document(key.as_deref()));
+            match opened {
+                Ok(document) => {
+                    sessions.update(|all| {
+                        all.insert(key, document.clone());
+                    });
+                    let applied_document = document.clone();
+                    studio::MobileSkinStudio(
+                        document,
+                        move || {
+                            tab_state.player.update(|s| s.studio_open = false);
+                        },
+                        move |bytes, path| match load_skin(&bytes) {
+                            Ok(skin) => {
+                                sessions.update(|all| {
+                                    all.insert(Some(path.clone()), applied_document.clone());
+                                });
+                                skin_state.set(Ok(skin));
+                                tab_state.player.update(|s| {
+                                    s.skin_path = Some(path);
+                                    s.status = "Applied Studio skin".into();
+                                });
+                            }
+                            Err(error) => tab_state.player.update(|s| s.status = error.to_string()),
+                        },
+                    );
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    cranpose_core::SideEffect(move || {
+                        tab_state.player.update(|s| {
+                            s.studio_open = false;
+                            s.status = format!("Skin Studio: {message}");
+                            s.settings_open = true;
+                        })
+                    });
+                }
+            }
+            return;
+        }
+    }
     let skin = match skin_state.get() {
         Ok(skin) => skin,
         Err(error) => {
@@ -2125,25 +2182,29 @@ fn WinampStackedStage(
             );
 
             if snapshot.eq_visible {
-                EqualizerWindow(skin.clone(), state, equalizer_drag_target, scale);
+                pixel_grid::provide([0., equalizer_y], || {
+                    EqualizerWindow(skin.clone(), state, equalizer_drag_target, scale);
+                });
             }
 
             if snapshot.playlist_visible {
-                PlaylistWindow(
-                    skin.pledit.clone(),
-                    skin.playlist_background.clone(),
-                    skin.playlist_selection.clone(),
-                    skin.palette,
-                    skin.display_text_color,
-                    skin.layout.footer,
-                    state,
-                    playlist_drag_target,
-                    WinampWindowSize::Fixed(Size::new(
-                        scaled(PLAYLIST_WIDTH, scale),
-                        scaled(layout.playlist_height, scale),
-                    )),
-                    scale,
-                );
+                pixel_grid::provide([0., playlist_y], || {
+                    PlaylistWindow(
+                        skin.pledit.clone(),
+                        skin.playlist_background.clone(),
+                        skin.playlist_selection.clone(),
+                        skin.palette,
+                        skin.display_text_color,
+                        skin.layout.footer,
+                        state,
+                        playlist_drag_target,
+                        WinampWindowSize::Fixed(Size::new(
+                            scaled(PLAYLIST_WIDTH, scale),
+                            scaled(layout.playlist_height, scale),
+                        )),
+                        scale,
+                    );
+                });
             }
         },
     );
@@ -3979,6 +4040,13 @@ fn SettingsPanel(
                         "Open Skin Studio".to_string(),
                         SETTINGS_CARD,
                         move || {
+                            if std::env::args().any(|arg| arg == "--touch-preview") {
+                                state.update(|s| {
+                                    s.settings_open = false;
+                                    s.studio_open = true;
+                                });
+                                return;
+                            }
                             let path = state.get_non_reactive().skin_path;
                             match studio::launch(path.as_deref()) {
                                 Ok(()) => state.update(|s| {
@@ -3991,6 +4059,13 @@ fn SettingsPanel(
                             }
                         },
                     );
+                    #[cfg(target_os = "android")]
+                    SettingsActionButton("Open Skin Studio".into(), SETTINGS_CARD, move || {
+                        state.update(|s| {
+                            s.settings_open = false;
+                            s.studio_open = true;
+                        });
+                    });
                     if state.get().status.starts_with("Skin Studio:") {
                         Text(
                             state.get().status,
@@ -4158,13 +4233,17 @@ fn PlaylistWindow(
         winamp_window_modifier(width, height, scale, drag_target),
         BoxSpec::default(),
         move || {
+            let list_bounds = pixel_grid::rect(
+                PLAYLIST_LIST_BG.0,
+                PLAYLIST_LIST_BG.1,
+                list_width,
+                list_height,
+                scale,
+            );
             Box(
                 Modifier::empty()
-                    .size_points(scaled(list_width, scale), scaled(list_height, scale))
-                    .absolute_offset(
-                        scaled(PLAYLIST_LIST_BG.0, scale),
-                        scaled(PLAYLIST_LIST_BG.1, scale),
-                    )
+                    .size_points(list_bounds.width, list_bounds.height)
+                    .absolute_offset(list_bounds.x, list_bounds.y)
                     .background(skin_color(palette.normal_bg)),
                 BoxSpec::default(),
                 || {},
@@ -5276,12 +5355,11 @@ fn playlist_footer_menu_x(menu: PlaylistFooterMenu, window_width: f32, menu_widt
 
 #[composable]
 fn FilledRect(x: f32, y: f32, width: f32, height: f32, scale: f32, color: Color) {
-    let width = scaled(width, scale);
-    let height = scaled(height, scale);
+    let bounds = pixel_grid::rect(x, y, width, height, scale);
     Box(
         Modifier::empty()
-            .size_points(width, height)
-            .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .size_points(bounds.width, bounds.height)
+            .absolute_offset(bounds.x, bounds.y)
             .background(color),
         BoxSpec::default(),
         || {},
@@ -5809,8 +5887,7 @@ fn visualizer_segment_rgba(
 
 #[composable]
 fn Sprite(image: ImageBitmap, source: SpriteRect, x: f32, y: f32, scale: f32) {
-    let w = scaled(source.2, scale);
-    let h = scaled(source.3, scale);
+    let bounds = pixel_grid::rect(x, y, source.2, source.3, scale);
     cranpose_ui::Image(
         cranpose_ui::BitmapRegionPainter(
             image,
@@ -5819,8 +5896,8 @@ fn Sprite(image: ImageBitmap, source: SpriteRect, x: f32, y: f32, scale: f32) {
         ),
         None,
         Modifier::empty()
-            .size_points(w, h)
-            .absolute_offset(scaled(x, scale), scaled(y, scale)),
+            .size_points(bounds.width, bounds.height)
+            .absolute_offset(bounds.x, bounds.y),
         Alignment::TOP_START,
         cranpose_ui::ContentScale::FillBounds,
         1.0,
@@ -5853,8 +5930,7 @@ fn StretchSprite(
     height: f32,
     scale: f32,
 ) {
-    let w = scaled(width.max(1.0), scale);
-    let h = scaled(height.max(1.0), scale);
+    let bounds = pixel_grid::rect(x, y, width.max(1.0), height.max(1.0), scale);
     cranpose_ui::Image(
         cranpose_ui::BitmapRegionPainter(
             image,
@@ -5863,8 +5939,8 @@ fn StretchSprite(
         ),
         None,
         Modifier::empty()
-            .size_points(w, h)
-            .absolute_offset(scaled(x, scale), scaled(y, scale)),
+            .size_points(bounds.width, bounds.height)
+            .absolute_offset(bounds.x, bounds.y),
         Alignment::TOP_START,
         cranpose_ui::ContentScale::FillBounds,
         1.0,
@@ -5910,8 +5986,13 @@ fn PressableSpriteHitArea(
     let on_click = Rc::new(on_click);
 
     let current = if is_pressed.get() { pressed } else { normal };
-    let sprite_w = scaled(current.2, scale);
-    let sprite_h = scaled(current.3, scale);
+    let bounds = pixel_grid::rect(
+        layout.sprite_x,
+        layout.sprite_y,
+        current.2,
+        current.3,
+        scale,
+    );
     let hit_w = scaled(layout.hit_area.2, scale);
     let hit_h = scaled(layout.hit_area.3, scale);
 
@@ -5923,11 +6004,8 @@ fn PressableSpriteHitArea(
         ),
         None,
         Modifier::empty()
-            .size_points(sprite_w, sprite_h)
-            .absolute_offset(
-                scaled(layout.sprite_x, scale),
-                scaled(layout.sprite_y, scale),
-            ),
+            .size_points(bounds.width, bounds.height)
+            .absolute_offset(bounds.x, bounds.y),
         Alignment::TOP_START,
         cranpose_ui::ContentScale::FillBounds,
         1.0,
@@ -8926,7 +9004,8 @@ fn winamp_window_modifier(
     scale: f32,
     drag_target: WinampDragTarget,
 ) -> Modifier {
-    let modifier = Modifier::empty().size_points(scaled(width, scale), scaled(height, scale));
+    let bounds = pixel_grid::rect(0., 0., width, height, scale);
+    let modifier = Modifier::empty().size_points(bounds.width, bounds.height);
     match drag_target {
         WinampDragTarget::Inline(position) => {
             let position = position.get();
