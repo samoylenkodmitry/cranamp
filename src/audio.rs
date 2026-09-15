@@ -192,9 +192,24 @@ pub async fn track_from_picked_file(entry: cranpose_services::ContentHandle) -> 
 fn picker_cache_dir() -> std::path::PathBuf {
     let dir = cranpose::application_directories()
         .map(|directories| directories.temporary.join("picker"))
-        .unwrap_or_else(|_| std::env::temp_dir().join("cranamp-picker"));
+        .unwrap_or_else(|_| fallback_cache_dir());
     let _ = std::fs::create_dir_all(&dir);
     dir
+}
+
+/// The browser has no filesystem and `std::env::temp_dir()` panics there rather
+/// than failing, so reaching for it takes the whole player down. `application_
+/// directories()` is unavailable on the web, which is exactly when this is
+/// reached -- and nothing is materialized there anyway, since web content
+/// handles are already re-openable.
+#[cfg(target_arch = "wasm32")]
+fn fallback_cache_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from("cranamp-picker")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn fallback_cache_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("cranamp-picker")
 }
 
 fn collect_picked_audio_tracks(

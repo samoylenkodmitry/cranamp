@@ -430,6 +430,21 @@ pub fn open_document(path: Option<&str>) -> anyhow::Result<SharedDocument> {
     Ok(SharedDocument(Arc::new(Mutex::new(document))))
 }
 
+/// Where an untitled export lands. The browser has no filesystem, and
+/// `std::env::temp_dir()` panics there rather than failing, so a web build that
+/// opened the Studio without a file already in hand took the whole player down
+/// with it. On the web the name stands alone and the browser places it.
+fn default_export_path() -> std::path::PathBuf {
+    let documents = cranpose::application_directories()
+        .ok()
+        .and_then(|directories| directories.documents);
+    #[cfg(target_arch = "wasm32")]
+    let base = documents.unwrap_or_default();
+    #[cfg(not(target_arch = "wasm32"))]
+    let base = documents.unwrap_or_else(std::env::temp_dir);
+    base.join("Skin edited.wsz")
+}
+
 #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 pub fn run(path: Option<&str>) {
     let doc = initial_document(path).unwrap_or_else(|e| panic!("Open skin: {e:#}"));
@@ -1029,13 +1044,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
             let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Skin");
             p.with_file_name(format!("{stem} edited.wsz"))
         })
-        .unwrap_or_else(|| {
-            cranpose::application_directories()
-                .ok()
-                .and_then(|d| d.documents)
-                .unwrap_or_else(std::env::temp_dir)
-                .join("Skin edited.wsz")
-        })
+        .unwrap_or_else(default_export_path)
         .to_string_lossy()
         .to_string();
     let path_field =
