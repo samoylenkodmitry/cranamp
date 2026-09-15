@@ -666,6 +666,36 @@ pub fn MobileSkinStudio(
                                         move || state(&c, json!({"brush_size":size})),
                                     );
                                 }
+                                // The two materials the engine grew for paper
+                                // and for light. Adding them to the desktop
+                                // panel alone would have put them out of reach
+                                // of the two platforms that have no MCP to
+                                // reach them with instead.
+                                for (amount, label) in [
+                                    (0u32, "Smooth"),
+                                    (5, "Fine grain"),
+                                    (9, "Paper grain"),
+                                    (16, "Coarse grain"),
+                                ] {
+                                    let c = d.clone();
+                                    TouchButton(label.into(), w, view.grain == amount, move || {
+                                        state(&c, json!({"grain":amount}))
+                                    });
+                                }
+                                for (amount, label) in [
+                                    (255u32, "Solid"),
+                                    (190, "Strength 75%"),
+                                    (128, "Strength 50%"),
+                                    (64, "Strength 25%"),
+                                ] {
+                                    let c = d.clone();
+                                    TouchButton(
+                                        label.into(),
+                                        w,
+                                        view.opacity == amount,
+                                        move || state(&c, json!({"opacity":amount})),
+                                    );
+                                }
                                 let c = d.clone();
                                 let filled = view.filled;
                                 TouchButton("Filled shapes".into(), w, filled, move || {

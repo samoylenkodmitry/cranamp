@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 from pathlib import Path
 import base64
+import json
 import re
 import struct
 import zlib
@@ -101,7 +102,23 @@ def presentation_bounds(scene_size, zoom=2, playlist_height=145):
 
 
 def _screenshot_size(result):
-    """Read and validate PNG IHDR only; never decode or transform raster pixels."""
+    """The captured size, from the text Studio returns or from the PNG header.
+
+    Studio answers a screenshot with a path with that path and its size, and one
+    without a path with the image inline. Reading the reported size is exact and
+    free; the header path stays for the inline case. Never decodes or transforms
+    raster pixels.
+    """
+    for item in result.get('content',[]):
+        if item.get('type')=='text':
+            try:
+                size=json.loads(item['text']).get('size')
+            except (KeyError,TypeError,ValueError):
+                continue
+            if (isinstance(size,list) and len(size)==2
+                    and all(isinstance(n,int) and not isinstance(n,bool) and 0<n<2**31
+                            for n in size)):
+                return list(size)
     for item in result.get('content',[]):
         if item.get('type')!='image' or item.get('mimeType')!='image/png':continue
         try:
@@ -136,7 +153,14 @@ def capture_canvas(path):
         raise ValueError('capture_canvas requires presentation=true; view unchanged')
     # Validate layout inputs before requesting any screenshots.
     presentation_bounds([10000,10000],view.get('zoom'),view.get('preview_playlist_height'))
-    full=call('studio_screenshot',{})
+    # Measure through a throwaway file rather than inline. The measuring shot is
+    # the whole scene, and asking for it inline moved 420 KB of base64 to read
+    # a width and a height.
+    probe=output.with_name(output.name+'.measure.png')
+    try:
+        full=call('studio_screenshot',{'path':str(probe)})
+    finally:
+        probe.unlink(missing_ok=True)
     bounds=presentation_bounds(_screenshot_size(full),view['zoom'],view['preview_playlist_height'])
     result=call('studio_screenshot',{'path':str(output),'crop':bounds})
     if _screenshot_size(result)!=bounds[2:]:
