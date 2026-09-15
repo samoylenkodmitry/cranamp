@@ -15,6 +15,12 @@ use std::{
 /// Shared capacity for human edits, isolated patches, and layered projects.
 const MAX_PAINT_LAYERS: usize = 64;
 
+/// One pixel of one atlas sheet: the sheet's position in `images`, then x, y.
+type AtlasPixel = (usize, u32, u32);
+/// The colour a transaction put there, and the canvas pixel that sent it.
+type AtlasInk = ([u8; 4], [i32; 2]);
+type AtlasWrite = (AtlasPixel, [u8; 4], [i32; 2]);
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct View {
@@ -133,6 +139,20 @@ pub struct Document {
     /// on pale artwork, or the magenta transparency key -- and silence then
     /// reads as a broken editor.
     stroke_pixels: usize,
+    /// Canvas bounds of everything written since the last checkpoint, so a
+    /// caller can check a stroke landed where it meant to without rendering.
+    painted_bounds: Option<[i32; 4]>,
+    /// Pixels a stroke could not reach because no chosen sprite covers them.
+    clipped_pixels: usize,
+    /// Atlas pixels this transaction has written, with the colour and the canvas
+    /// pixel that wrote them. Sprites share source cells -- the four timer
+    /// digits are one cell of `numbers.bmp`, the playlist top is one tile drawn
+    /// nine times -- so a stroke crossing them lands on top of itself and the
+    /// last colour wins in every position at once. That used to be reported as
+    /// a clean write.
+    atlas_writes: BTreeMap<AtlasPixel, AtlasInk>,
+    overwrites: usize,
+    overwrite_note: Option<String>,
 }
 impl Document {
     /// A new classic atlas set with zero inherited artwork or metadata.
@@ -183,6 +203,11 @@ impl Document {
             cluster: None,
             unmapped_pixels: BTreeSet::new(),
             stroke_pixels: 0,
+            painted_bounds: None,
+            clipped_pixels: 0,
+            atlas_writes: BTreeMap::new(),
+            overwrites: 0,
+            overwrite_note: None,
         }
     }
     pub fn open(bytes: &[u8], path: Option<String>) -> Result<Self> {
@@ -233,6 +258,11 @@ impl Document {
             cluster: None,
             unmapped_pixels: BTreeSet::new(),
             stroke_pixels: 0,
+            painted_bounds: None,
+            clipped_pixels: 0,
+            atlas_writes: BTreeMap::new(),
+            overwrites: 0,
+            overwrite_note: None,
             stroke: None,
             images,
             files,
@@ -296,6 +326,9 @@ impl Document {
         self.finish_stroke();
         self.unmapped_pixels.clear();
         self.stroke_pixels = 0;
+        self.painted_bounds = None;
+        self.clipped_pixels = 0;
+        self.forget_atlas_writes();
         self.stroke = Some(self.snapshot());
     }
     pub fn finish_stroke(&mut self) {
@@ -330,6 +363,20 @@ impl Document {
                 self.message = format!(
                     "{} · {} · {target} changed no pixels — that colour is already there, or the layer is hidden or locked",
                     self.view.brush, self.view.panel
+                );
+                self.revision += 1;
+            }
+            if self.clipped_pixels > 0 {
+                self.message = format!(
+                    "{} · {} px landed, {} fell outside the chosen sprites",
+                    self.view.brush, self.stroke_pixels, self.clipped_pixels
+                );
+                self.revision += 1;
+            }
+            if self.overwrites > 0 {
+                self.message = format!(
+                    "{} · {} px landed on a shared source cell twice — the last colour wins in every position it is drawn",
+                    self.view.brush, self.overwrites
                 );
                 self.revision += 1;
             }
@@ -585,6 +632,42 @@ impl Document {
                 .unwrap_or((1, 1))
         } else {
             mapping::size(&self.view.panel)
+        }
+    }
+    fn forget_atlas_writes(&mut self) {
+        self.atlas_writes.clear();
+        self.overwrites = 0;
+        self.overwrite_note = None;
+    }
+    /// Record where a transaction put each atlas pixel, and notice when it puts
+    /// two different colours in the same one.
+    fn note_atlas_writes(&mut self, touched: Vec<AtlasWrite>) {
+        for (key, colour, at) in touched {
+            if let Some((previous, from)) = self.atlas_writes.get(&key) {
+                if *previous != colour {
+                    self.overwrites += 1;
+                    if self.overwrite_note.is_none() {
+                        let from = *from;
+                        let sheet = self
+                            .images
+                            .keys()
+                            .nth(key.0)
+                            .cloned()
+                            .unwrap_or_else(|| "?".into());
+                        self.overwrite_note = Some(format!(
+                            "canvas {:?} and {:?} both write {sheet} at {:?}: \
+                             that source cell is shared, so the last colour wins \
+                             everywhere it is drawn. Name one target in `layers`.",
+                            from,
+                            at,
+                            [key.1, key.2]
+                        ));
+                    }
+                }
+            }
+            if self.atlas_writes.len() < 400_000 {
+                self.atlas_writes.insert(key, (colour, at));
+            }
         }
     }
     pub fn render(&self) -> RgbaImage {
@@ -1096,11 +1179,16 @@ impl Document {
                     .filter(|l| selection.contains(&l.id) && l.map(x as u32, y as u32).is_some())
                     .collect()
             };
-            if selection.is_empty() && hits.is_empty() {
-                self.unmapped_pixels.insert([x, y]);
+            if hits.is_empty() {
+                if selection.is_empty() {
+                    self.unmapped_pixels.insert([x, y]);
+                } else {
+                    self.clipped_pixels += 1;
+                }
             }
             // Shared source pixels may be reached through multiple selected instances.
             let mut written = BTreeSet::new();
+            let mut touched = Vec::new();
             for l in hits {
                 let (sx, sy) = l.map(x as u32, y as u32).unwrap();
                 let targets = if all {
@@ -1113,6 +1201,11 @@ impl Document {
                     .get(&l.sheet)
                     .context("missing atlas")?
                     .dimensions();
+                let sheet_ix = self
+                    .images
+                    .keys()
+                    .position(|k| *k == l.sheet)
+                    .unwrap_or(usize::MAX);
                 let im = if let Some(i) = active {
                     self.planes[i]
                         .images
@@ -1129,20 +1222,34 @@ impl Document {
                             {
                                 continue;
                             }
+                            touched.push(((sheet_ix, r[0] + sx, r[1] + sy), color, [x, y]));
                             if p.0 != color {
                                 *p = Rgba(color);
                                 count += 1;
                                 self.stroke_pixels += 1;
+                                self.painted_bounds = Some(match self.painted_bounds {
+                                    Some([x0, y0, x1, y1]) => {
+                                        [x0.min(x), y0.min(y), x1.max(x), y1.max(y)]
+                                    }
+                                    None => [x, y, x, y],
+                                });
                             }
                         }
                     }
                 }
             }
+            self.note_atlas_writes(touched);
         }
         Ok(count)
     }
     pub fn draw(&mut self, args: &Value) -> Result<Value> {
         self.finish_stroke();
+        // Per transaction, not per session. A human stroke clears these in
+        // checkpoint(); an MCP caller has no equivalent, so without this every
+        // draw reported the union of every draw before it.
+        self.painted_bounds = None;
+        self.clipped_pixels = 0;
+        self.forget_atlas_writes();
         let before = self.snapshot();
         let before_revision = self.revision;
         let before_dirty = self.dirty;
@@ -1163,6 +1270,32 @@ impl Document {
                 bail!("Unknown layer {id}");
             }
         }
+        // `origin` moves the coordinate system onto a sprite. Absolute canvas
+        // coordinates for a sprite that moves -- a slider thumb, whose
+        // destination follows its own frame -- are correct only for the state
+        // they were read in, and a stale one paints a second copy of the art at
+        // an offset without tripping anything.
+        let origin = args
+            .get("origin")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let offset = match &origin {
+            Some(id) => {
+                let layer = self
+                    .layers()
+                    .into_iter()
+                    .find(|l| &l.id == id)
+                    .with_context(|| format!("Unknown layer {id}"))?;
+                [layer.destination[0] as i32, layer.destination[1] as i32]
+            }
+            None => [0, 0],
+        };
+        let mut selected = selected;
+        if let Some(id) = &origin {
+            if selected.is_empty() {
+                selected.push(id.clone());
+            }
+        }
         let all = args
             .get("all_states")
             .and_then(Value::as_bool)
@@ -1172,6 +1305,32 @@ impl Document {
             .get("operations")
             .and_then(Value::as_array)
             .context("operations array required")?;
+        let shifted = (offset != [0, 0]).then(|| {
+            operations
+                .iter()
+                .map(|op| {
+                    let mut op = op.clone();
+                    for (key, d) in [("x", offset[0]), ("y", offset[1])] {
+                        let at = op.get(key).and_then(Value::as_i64).unwrap_or(0) as i32;
+                        op[key] = json!(at + d);
+                    }
+                    for (key, d) in [("x2", offset[0]), ("y2", offset[1])] {
+                        if let Some(at) = op.get(key).and_then(Value::as_i64) {
+                            op[key] = json!(at as i32 + d);
+                        }
+                    }
+                    if let Some(c) = op.get_mut("control").and_then(Value::as_array_mut) {
+                        for (i, d) in [offset[0], offset[1]].into_iter().enumerate() {
+                            if let Some(v) = c.get(i).and_then(Value::as_f64) {
+                                c[i] = json!(v + d as f64);
+                            }
+                        }
+                    }
+                    op
+                })
+                .collect::<Vec<_>>()
+        });
+        let operations = shifted.as_ref().unwrap_or(operations);
         if operations.len() > 10000 {
             bail!("At most 10000 operations per transaction");
         }
@@ -1188,6 +1347,7 @@ impl Document {
         let previous_unmapped = std::mem::take(&mut self.unmapped_pixels);
         let previous_selection = std::mem::replace(&mut self.view.layers, selected.clone());
         let paint_layers = self.layers();
+        let mut backdrop: Option<RgbaImage> = None;
         let mut count = 0;
         let result = (|| -> Result<()> {
             for op in operations {
@@ -1246,6 +1406,101 @@ impl Document {
                             }
                         }
                     }
+                    "image" => {
+                        use base64::Engine as _;
+                        let data = op
+                            .get("data")
+                            .and_then(Value::as_str)
+                            .context("image op needs base64 PNG data")?;
+                        let bytes = base64::engine::general_purpose::STANDARD
+                            .decode(data.trim())
+                            .context("image data is not valid base64")?;
+                        let mut im = image::load_from_memory(&bytes)
+                            .context("image data is not a readable PNG")?
+                            .to_rgba8();
+                        anyhow::ensure!(
+                            im.width() <= 2048 && im.height() <= 2048,
+                            "Image is at most 2048x2048"
+                        );
+                        // A sheet has no alpha channel to keep, so a half
+                        // transparent pixel has to become an opaque blend with
+                        // what it lands on or it arrives as full-strength
+                        // colour: soft glows used to stamp as hard speckle.
+                        if im.pixels().any(|p| p[3] > 0 && p[3] < 255) {
+                            if backdrop.is_none() {
+                                backdrop = Some(self.render());
+                            }
+                            let base = backdrop.as_ref().unwrap();
+                            for (ix, iy, p) in im.enumerate_pixels_mut() {
+                                if p[3] == 0 || p[3] == 255 {
+                                    continue;
+                                }
+                                let (bx, by) = (x + ix as i32, y + iy as i32);
+                                let under = base
+                                    .get_pixel_checked(bx.max(0) as u32, by.max(0) as u32)
+                                    .filter(|_| bx >= 0 && by >= 0)
+                                    .map(|q| q.0)
+                                    .unwrap_or([0, 0, 0, 255]);
+                                let a = p[3] as f32 / 255.0;
+                                let mut out = [0u8; 4];
+                                for c in 0..3 {
+                                    out[c] = (p[c] as f32 * a + under[c] as f32 * (1.0 - a))
+                                        .round()
+                                        .clamp(0.0, 255.0)
+                                        as u8;
+                                }
+                                out[3] = 255;
+                                *p = Rgba(out);
+                            }
+                        }
+                        count += self.paint_cluster(&im, [x, y], layer, all, &paint_layers)?;
+                    }
+                    "text" => {
+                        let body = op
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .context("text op needs text")?;
+                        let scale = op
+                            .get("scale")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(1)
+                            .clamp(1, 8) as i32;
+                        let spacing = op.get("spacing").and_then(Value::as_i64).unwrap_or(1) as i32;
+                        let mut pen = x;
+                        for ch in body.chars() {
+                            if ch == ' ' {
+                                pen += (5 + spacing) * scale;
+                                continue;
+                            }
+                            let Some(rows) = crate::winamp::pixel_text::glyph(ch) else {
+                                bail!("No glyph for {ch:?}");
+                            };
+                            for (row, bits) in rows.iter().enumerate() {
+                                for column in 0..5 {
+                                    if bits & (1 << (4 - column)) == 0 {
+                                        continue;
+                                    }
+                                    for dy in 0..scale {
+                                        for dx in 0..scale {
+                                            let at = [
+                                                pen + column * scale + dx,
+                                                y + row as i32 * scale + dy,
+                                            ];
+                                            count += self.paint_line_untracked(
+                                                at,
+                                                at,
+                                                color,
+                                                layer,
+                                                all,
+                                                &paint_layers,
+                                            )?;
+                                        }
+                                    }
+                                }
+                            }
+                            pen += (5 + spacing) * scale;
+                        }
+                    }
                     _ => bail!("Unknown drawing operation {kind}"),
                 }
             }
@@ -1295,7 +1550,14 @@ impl Document {
                 self.revision += 1;
             }
         }
+        // `bounds` is what the caller asked for made real: where the ink
+        // actually landed. Checking a stroke used to mean rendering the whole
+        // canvas and looking at it.
         Ok(json!({"pixels_written":count,"revision":self.revision,
+            "bounds":self.painted_bounds,
+            "clipped_pixels":self.clipped_pixels,
+            "overwrites":self.overwrites,
+            "overwrite_sample":self.overwrite_note,
             "unmapped_pixels":self.unmapped_pixels.len(),
             "unmapped_sample":self.unmapped_pixels.iter().take(8).collect::<Vec<_>>()}))
     }

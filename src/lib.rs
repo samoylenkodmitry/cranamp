@@ -1,4 +1,6 @@
 #![deny(unsafe_code)]
+// The Studio MCP tool schemas are one deeply nested json! literal each.
+#![recursion_limit = "256"]
 
 pub mod audio;
 mod fonts;
