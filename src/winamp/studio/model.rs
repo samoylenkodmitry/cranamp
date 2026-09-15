@@ -17,6 +17,35 @@ const MAX_PAINT_LAYERS: usize = 64;
 
 /// One pixel of one atlas sheet: the sheet's position in `images`, then x, y.
 type AtlasPixel = (usize, u32, u32);
+
+/// A deterministic clump of noise for one pixel, smoothed across a lattice.
+///
+/// Paper is not flat, and a flat rectangle of kraft reads as plastic. Noise
+/// sampled per pixel is invisible from any distance a skin is looked at -- the
+/// first attempt read as suede -- while clumps of two or three pixels read as
+/// paper immediately, so the value is taken on a lattice and averaged with its
+/// two neighbours. Integer hashing throughout: the same skin recipe has to
+/// produce the same bytes on every machine.
+fn grain_at(x: i32, y: i32, size: i32, seed: i64, amplitude: f64) -> f64 {
+    fn value(cx: i32, cy: i32, seed: i64) -> f64 {
+        let mut h = (cx as i64)
+            .wrapping_mul(0x27d4_eb2d)
+            .wrapping_add((cy as i64).wrapping_mul(0x1656_67b1))
+            .wrapping_add(seed.wrapping_mul(0x2545_f491));
+        h ^= h >> 15;
+        h = h.wrapping_mul(0x2545_f491_4f6c_dd1d);
+        h ^= h >> 17;
+        // -1.0 ..= 1.0, from the top bits only: the low ones of a multiply
+        // hash are the least mixed.
+        ((h >> 24) & 0xffff) as f64 / 32767.5 - 1.0
+    }
+    let size = size.max(1);
+    let (cx, cy) = (x.div_euclid(size), y.div_euclid(size));
+    let mixed =
+        (value(cx, cy, seed) * 2.0 + value(cx + 1, cy, seed) + value(cx, cy + 1, seed)) / 4.0;
+    mixed * amplitude
+}
+
 /// The colour a transaction put there, and the canvas pixel that sent it.
 type AtlasInk = ([u8; 4], [i32; 2]);
 type AtlasWrite = (AtlasPixel, [u8; 4], [i32; 2]);
@@ -36,6 +65,12 @@ pub struct View {
     pub brush_size: u32,
     pub brush: String,
     pub curve_bend: i32,
+    /// Paper grain and a bakeable opacity, held on the view like every other
+    /// brush setting so a mouse stroke and an MCP operation get the same
+    /// material. An operation may still override either for itself.
+    pub grain: u32,
+    pub grain_size: u32,
+    pub opacity: u32,
     pub clean_corners: bool,
     pub filled: bool,
     pub mirror_x: bool,
@@ -71,6 +106,9 @@ impl Default for View {
             brush_size: 1,
             brush: "pencil".into(),
             curve_bend: 35,
+            grain: 0,
+            grain_size: 2,
+            opacity: 255,
             clean_corners: false,
             filled: false,
             mirror_x: false,
@@ -132,6 +170,10 @@ pub struct Document {
     discarded_history: usize,
     pub selection: Option<[u32; 4]>,
     pub cluster: Option<RgbaImage>,
+    /// The last dry run, waiting to be handed back as an image. A preview is
+    /// the whole surface as the operations would leave it; the document itself
+    /// has already been put back.
+    pub preview: Option<RgbaImage>,
     /// Attempted Auto pixels with no bitmap source (for example classic list fill).
     unmapped_pixels: BTreeSet<[i32; 2]>,
     /// Atlas pixels the stroke in progress has changed. Reported when it ends,
@@ -206,6 +248,7 @@ impl Document {
             painted_bounds: None,
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
+            preview: None,
             overwrites: 0,
             overwrite_note: None,
         }
@@ -261,6 +304,7 @@ impl Document {
             painted_bounds: None,
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
+            preview: None,
             overwrites: 0,
             overwrite_note: None,
             stroke: None,
@@ -508,6 +552,12 @@ impl Document {
             (1..=32).contains(&view.brush_size),
             "brush_size must be 1..32"
         );
+        anyhow::ensure!(view.grain <= 64, "grain is an amplitude 0..64");
+        anyhow::ensure!(
+            (1..=16).contains(&view.grain_size),
+            "grain_size is a lattice 1..16 pixels"
+        );
+        anyhow::ensure!((1..=255).contains(&view.opacity), "opacity is 1..255");
         anyhow::ensure!(
             ["pencil", "line", "rect", "ellipse", "lift", "stamp", "glass", "curve", "tuft"]
                 .contains(&view.brush.as_str()),
@@ -536,10 +586,80 @@ impl Document {
         }
         self.view = view;
         self.revision += 1;
-        Ok(self.status())
+        Ok(self.brief())
     }
+    /// Everything about the document. The explicit read, so it carries the
+    /// sheet list as well.
     pub fn status(&self) -> Value {
-        json!({"path":self.path,"revision":self.revision,"dirty":self.dirty,"view":self.view,"undo":self.undo.len(),"redo":self.redo.len(),"message":self.message,"canvas":self.canvas_size(),"layers":self.layers(),"sheets":self.sheets(),"paint_layers":self.paint_layer_info()})
+        let mut value = self.brief();
+        value["sheets"] = json!(self.sheets());
+        value
+    }
+    /// What a call that only touched the view answers with.
+    ///
+    /// The sprite catalogue used to ride along here, and so did the sheet list,
+    /// and every call that touched the view -- a colour, a zoom, a cropped read
+    /// -- carried all sixty-odd sprites and their 28 slider variants back with
+    /// it: eighteen kilobytes to set a brush colour. The sprites have two
+    /// panels of their own -- studio_targets says which exist,
+    /// studio_rectangles says where each variant lives -- and the sheet list
+    /// changes only when a sheet is added, so studio_status keeps it.
+    pub fn brief(&self) -> Value {
+        json!({"path":self.path,"revision":self.revision,"dirty":self.dirty,"view":self.view,"undo":self.undo.len(),"redo":self.redo.len(),"message":self.message,"canvas":self.canvas_size(),"surface":self.surface(),"sprites":self.layers().len(),"paint_layers":self.paint_layer_info()})
+    }
+    /// Which surface a stroke's coordinates mean right now. The assembled
+    /// canvas and a single sheet share one pencil and one history, so a draw
+    /// aimed at the wrong one still succeeds -- somewhere else.
+    pub fn surface(&self) -> String {
+        match self.view.panel.as_str() {
+            "atlas" => format!("atlas {}", self.view.sheet),
+            "canvas" => "canvas".into(),
+            panel => panel.into(),
+        }
+    }
+    /// What a sheet is for, when it is not what it looks like.
+    ///
+    /// `text.bmp` looks exactly like the classic glyph sheet and is not one
+    /// here: Cranamp sets every readout in its own 5x7 face and opens this
+    /// sheet only to sample one colour from it. Drawing thirty-one legible
+    /// glyphs into it is a day's work that changes nothing but that colour.
+    pub fn sheet_note(sheet: &str) -> Option<&'static str> {
+        match sheet {
+            "text.bmp" => Some(
+                "text.bmp is not drawn. Cranamp sets titles and readouts in its \
+                 own 5x7 face and reads this sheet only to sample the display \
+                 ink: the most common opaque colour, or the second most common \
+                 when more than two thirds of the sheet is opaque. Paint it in \
+                 the colour the readouts should be.",
+            ),
+            _ => None,
+        }
+    }
+    /// Which pixels of a sheet any sprite samples, in any panel, in any state.
+    ///
+    /// A sheet is not a picture: it is a bag of cells, and the space between
+    /// them is never drawn. `pledit.bmp` column 125 falls between the two
+    /// footer flaps and `titlebar.bmp` is mostly shade-mode bars Cranamp does
+    /// not use, so a band painted straight across either one quietly loses
+    /// part of itself.
+    fn sampled_mask(&self, sheet: &str) -> Option<(Vec<bool>, u32)> {
+        let (w, h) = self.images.get(sheet)?.dimensions();
+        let mut mask = vec![false; (w as usize) * (h as usize)];
+        let mut view = self.view.clone();
+        view.panel = "canvas".into();
+        for layer in self.layers_for(&view) {
+            if layer.sheet != sheet {
+                continue;
+            }
+            for rect in &layer.variants {
+                for y in rect[1]..(rect[1] + rect[3]).min(h) {
+                    for x in rect[0]..(rect[0] + rect[2]).min(w) {
+                        mask[(y * w + x) as usize] = true;
+                    }
+                }
+            }
+        }
+        Some((mask, w))
     }
     pub fn layers(&self) -> Vec<Layer> {
         self.layers_for(&self.view)
@@ -644,7 +764,12 @@ impl Document {
     fn note_atlas_writes(&mut self, touched: Vec<AtlasWrite>) {
         for (key, colour, at) in touched {
             if let Some((previous, from)) = self.atlas_writes.get(&key) {
-                if *previous != colour {
+                // Only a *different* canvas pixel landing in the same source
+                // cell is the trap worth naming: one tile drawn nine times,
+                // four timer digits sharing one cell. Two operations painting
+                // the same canvas pixel -- fill a panel, then draw on it -- is
+                // ordinary drawing, and counting it buried the real signal.
+                if *previous != colour && *from != at {
                     self.overwrites += 1;
                     if self.overwrite_note.is_none() {
                         let from = *from;
@@ -1006,6 +1131,32 @@ impl Document {
                 "ramp axis must be finite and nonzero"
             );
         }
+        // Paper grain and a bakeable opacity. Both were being composed in an
+        // image library and stamped in through the `image` operation, which
+        // works and needs Pillow, so neither material could be drawn from the
+        // editor itself, from Android, or from any recipe without Python.
+        let grain = op
+            .get("grain")
+            .and_then(Value::as_f64)
+            .unwrap_or(self.view.grain as f64);
+        anyhow::ensure!((0.0..=64.0).contains(&grain), "grain is an amplitude 0..64");
+        let grain_size = op
+            .get("grain_size")
+            .and_then(Value::as_i64)
+            .unwrap_or(self.view.grain_size as i64) as i32;
+        anyhow::ensure!(
+            (1..=16).contains(&grain_size),
+            "grain_size is a lattice 1..16 pixels"
+        );
+        let grain_seed = op.get("grain_seed").and_then(Value::as_i64).unwrap_or(0);
+        let opacity = op
+            .get("opacity")
+            .and_then(Value::as_u64)
+            .unwrap_or(self.view.opacity as u64);
+        anyhow::ensure!((1..=255).contains(&opacity), "opacity is 1..255");
+        // Rendered per operation, so it cannot go stale the way the image
+        // operation's backdrop once did.
+        let under = (opacity < 255).then(|| self.render());
         let mut geometry = op.clone();
         if geometry.get("clean_corners").is_none() {
             geometry["clean_corners"] = json!(self.view.clean_corners);
@@ -1039,6 +1190,27 @@ impl Document {
             } else {
                 color
             };
+            let mut color = color;
+            if grain > 0.0 {
+                let g = grain_at(x, y, grain_size, grain_seed, grain);
+                for channel in color.iter_mut().take(3) {
+                    *channel = (*channel as f64 + g).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+            if let Some(base) = under.as_ref() {
+                let a = opacity as f64 / 255.0;
+                let beneath = base
+                    .get_pixel_checked(x.max(0) as u32, y.max(0) as u32)
+                    .filter(|_| x >= 0 && y >= 0)
+                    .map(|p| p.0)
+                    .unwrap_or([0, 0, 0, 255]);
+                for c in 0..3 {
+                    color[c] = (color[c] as f64 * a + beneath[c] as f64 * (1.0 - a))
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+                color[3] = 255;
+            }
             let xs = if mx {
                 vec![x, w as i32 - 1 - x]
             } else {
@@ -1347,11 +1519,23 @@ impl Document {
         let previous_unmapped = std::mem::take(&mut self.unmapped_pixels);
         let previous_selection = std::mem::replace(&mut self.view.layers, selected.clone());
         let paint_layers = self.layers();
+        // The backdrop a half-transparent image blends into. It is the whole
+        // composed skin, so it is rendered lazily -- but it also has to be
+        // rendered *again* once this transaction has painted anything, or a
+        // later glow blends into a picture that no longer exists and writes the
+        // old pixels back. `backdrop_at` is the pixel count it was taken at.
         let mut backdrop: Option<RgbaImage> = None;
+        let mut backdrop_at = usize::MAX;
         let mut count = 0;
+        // Which operation is in hand, so a refusal can say so. A transaction is
+        // allowed ten thousand operations; "No glyph for '@'" with no index is
+        // a needle in ten thousand.
+        let mut at: Option<(usize, String)> = None;
+        let mut skipped: Vec<char> = Vec::new();
         let result = (|| -> Result<()> {
-            for op in operations {
+            for (index, op) in operations.iter().enumerate() {
                 let kind = op.get("op").and_then(Value::as_str).unwrap_or("pixel");
+                at = Some((index, kind.to_owned()));
                 let color = parse_color(
                     op.get("color")
                         .and_then(Value::as_str)
@@ -1427,8 +1611,9 @@ impl Document {
                         // what it lands on or it arrives as full-strength
                         // colour: soft glows used to stamp as hard speckle.
                         if im.pixels().any(|p| p[3] > 0 && p[3] < 255) {
-                            if backdrop.is_none() {
+                            if backdrop_at != count {
                                 backdrop = Some(self.render());
+                                backdrop_at = count;
                             }
                             let base = backdrop.as_ref().unwrap();
                             for (ix, iy, p) in im.enumerate_pixels_mut() {
@@ -1473,7 +1658,11 @@ impl Document {
                                 continue;
                             }
                             let Some(rows) = crate::winamp::pixel_text::glyph(ch) else {
-                                bail!("No glyph for {ch:?}");
+                                if !skipped.contains(&ch) {
+                                    skipped.push(ch);
+                                }
+                                pen += (5 + spacing) * scale;
+                                continue;
                             };
                             for (row, bits) in rows.iter().enumerate() {
                                 for column in 0..5 {
@@ -1508,12 +1697,36 @@ impl Document {
         })();
         self.view.layers = previous_selection;
         self.view.mask_colors = previous_mask;
+        let result = result.map_err(|error| match &at {
+            Some((index, kind)) => error.context(format!("operations[{index}] \"{kind}\"")),
+            None => error,
+        });
         if let Err(error) = result {
             self.restore(before);
             self.revision = before_revision;
             self.dirty = before_dirty;
             self.unmapped_pixels = previous_unmapped;
             return Err(error);
+        }
+        // A dry run: the operations are applied, the surface is rendered, and
+        // the document is put back. The only way to see a stroke before making
+        // it used to be to make it, look, and undo -- or to reimplement the
+        // rasteriser in an image library and hope the two agreed.
+        if args.get("preview") == Some(&json!(true)) {
+            let bounds = self.painted_bounds;
+            let report = json!({"preview":true,"bounds":bounds,
+                "pixels_written":count,"surface":self.surface(),
+                "clipped_pixels":self.clipped_pixels,
+                "overwrites":self.overwrites,
+                "overwrite_sample":self.overwrite_note,
+                "unmapped_pixels":self.unmapped_pixels.len()});
+            self.preview = Some(self.render());
+            self.restore(before);
+            self.revision = before_revision;
+            self.dirty = before_dirty;
+            self.unmapped_pixels = previous_unmapped;
+            self.painted_bounds = bounds;
+            return Ok(report);
         }
         if before != self.snapshot() {
             self.changed();
@@ -1550,16 +1763,48 @@ impl Document {
                 self.revision += 1;
             }
         }
+        // Ink that landed in a part of the sheet no sprite ever samples. Only
+        // a sheet open on its own can be painted there; the assembled canvas
+        // has no way to address the gaps between cells.
+        let mut unsampled: Vec<[u32; 2]> = Vec::new();
+        if self.view.panel == "atlas" {
+            if let Some(index) = self.images.keys().position(|k| k == &self.view.sheet) {
+                if let Some((mask, width)) = self.sampled_mask(&self.view.sheet) {
+                    for (sheet, x, y) in self.atlas_writes.keys() {
+                        if *sheet == index && !mask[(y * width + x) as usize] {
+                            unsampled.push([*x, *y]);
+                        }
+                    }
+                }
+            }
+        }
+        if !unsampled.is_empty() {
+            self.message
+                .push_str(&format!("; {} never sampled", unsampled.len()));
+        }
         // `bounds` is what the caller asked for made real: where the ink
         // actually landed. Checking a stroke used to mean rendering the whole
         // canvas and looking at it.
-        Ok(json!({"pixels_written":count,"revision":self.revision,
+        let mut result = json!({"pixels_written":count,"revision":self.revision,
+            "surface":self.surface(),
             "bounds":self.painted_bounds,
             "clipped_pixels":self.clipped_pixels,
             "overwrites":self.overwrites,
             "overwrite_sample":self.overwrite_note,
             "unmapped_pixels":self.unmapped_pixels.len(),
-            "unmapped_sample":self.unmapped_pixels.iter().take(8).collect::<Vec<_>>()}))
+            "unmapped_sample":self.unmapped_pixels.iter().take(8).collect::<Vec<_>>(),
+            "unsampled_pixels":unsampled.len(),
+            "unsampled_sample":unsampled.iter().take(8).collect::<Vec<_>>()});
+        if !skipped.is_empty() {
+            result["unsupported_characters"] =
+                json!(skipped.iter().map(|c| c.to_string()).collect::<Vec<_>>());
+        }
+        if let Some(note) = Self::sheet_note(&self.view.sheet) {
+            if self.view.panel == "atlas" {
+                result["note"] = json!(note);
+            }
+        }
+        Ok(result)
     }
     pub fn recolor(&mut self, args: &Value) -> Result<Value> {
         self.finish_stroke();
@@ -2509,6 +2754,151 @@ mod tests {
             .unwrap();
         assert_eq!(d.render().get_pixel(23, 0), &Rgba([255, 0, 255, 255]));
     }
+    /// A half-transparent image blends into the skin as it stands. The backdrop
+    /// it blends into used to be rendered once per transaction and then reused,
+    /// so a glow placed after the picture beneath it was painted blended into
+    /// the picture that was there before -- and wrote it back, silently undoing
+    /// earlier operations in the same transaction. Two glows are needed to see
+    /// it: the first is what populated the stale backdrop.
+    #[test]
+    fn a_blended_image_sees_what_the_same_transaction_painted_under_it() {
+        use base64::Engine as _;
+        let mut d = Document::blank();
+        let translucent = |w: u32, h: u32, alpha: u8| {
+            let mut im = RgbaImage::from_pixel(w, h, Rgba([255, 255, 255, alpha]));
+            im.put_pixel(0, 0, Rgba([255, 255, 255, alpha]));
+            let mut out = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(im)
+                .write_to(&mut out, image::ImageFormat::Png)
+                .unwrap();
+            json!({"op":"image","x":0,"y":0,
+                   "data":base64::engine::general_purpose::STANDARD.encode(out.into_inner())})
+        };
+        d.state(json!({"panel":"atlas","sheet":"main.bmp","layer":"sheet"}))
+            .unwrap();
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":40,"height":8,"color":"#ffffff"},
+            translucent(8, 8, 128),
+            {"op":"rect","x":0,"y":0,"width":40,"height":8,"color":"#000000"},
+            translucent(40, 8, 128),
+        ]}))
+        .unwrap();
+        // Black, then white at half alpha: the row is mid grey everywhere. It
+        // used to come back white, because the second stamp blended into the
+        // backdrop the first one had cached, from before the black rectangle.
+        for x in [0, 9, 20, 39] {
+            assert_eq!(
+                d.images["main.bmp"].get_pixel(x, 4),
+                &Rgba([128, 128, 128, 255]),
+                "column {x} blended into a stale backdrop"
+            );
+        }
+    }
+    /// Three things a draw result has to say that it used to keep to itself: a
+    /// refusal names the operation that caused it, a character the 5x7 face
+    /// does not have is skipped and named instead of aborting ten thousand
+    /// operations, and ink that lands between a sheet's cells -- where no
+    /// sprite will ever sample it -- is counted.
+    #[test]
+    fn a_draw_reports_the_operation_that_failed_the_glyphs_it_skipped_and_ink_nothing_samples() {
+        let mut d = document();
+        let error = d
+            .draw(&json!({"operations":[
+                {"op":"pixel","x":1,"y":1,"color":"#123456"},
+                {"op":"rect","x":2,"y":2,"width":4,"height":4,"color":"#123456"},
+                {"op":"nonsense","x":3,"y":3},
+            ]}))
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("operations[2] \"nonsense\""),
+            "{error:#}"
+        );
+        assert!(!d.dirty, "a refused transaction leaves nothing behind");
+
+        d.state(json!({"panel":"atlas","sheet":"text.bmp","layer":"sheet"}))
+            .unwrap();
+        let result = d
+            .draw(&json!({"operations":[
+                {"op":"text","x":1,"y":1,"text":"OK@ \u{00e9}","color":"#ffffff"},
+            ]}))
+            .unwrap();
+        assert_eq!(result["unsupported_characters"], json!(["@", "é"]));
+        assert!(result["pixels_written"].as_u64().unwrap() > 0);
+        assert!(result["note"].as_str().unwrap().contains("not drawn"));
+
+        // pledit.bmp column 125 lies between the two footer flaps: bottom.left
+        // is sheet 0..124 and bottom.right is 126..275, so nothing samples it.
+        d.state(json!({"panel":"atlas","sheet":"pledit.bmp","layer":"sheet"}))
+            .unwrap();
+        let result = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":120,"y":72,"width":10,"height":38,"color":"#123456"},
+            ]}))
+            .unwrap();
+        assert_eq!(result["unsampled_pixels"], json!(38));
+        assert!(result["unsampled_sample"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|p| p[0] == json!(125)));
+    }
+
+    /// The two materials that used to need an image library, and the dry run
+    /// that used to need one reimplemented. Grain has to be identical on every
+    /// machine, because a recipe's whole claim is that it reproduces the skin.
+    #[test]
+    fn grain_is_deterministic_opacity_bakes_a_blend_and_preview_leaves_no_trace() {
+        let field = json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":60,"height":20,"color":"#808080",
+             "grain":12,"grain_seed":7},
+        ]});
+        let mut a = Document::blank();
+        let mut b = Document::blank();
+        for d in [&mut a, &mut b] {
+            d.state(json!({"panel":"atlas","sheet":"main.bmp","layer":"sheet"}))
+                .unwrap();
+            d.draw(&field).unwrap();
+        }
+        assert_eq!(a.images["main.bmp"], b.images["main.bmp"]);
+        let grained = (0..60)
+            .map(|x| a.images["main.bmp"].get_pixel(x, 4)[0])
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(grained.len() > 6, "grain should vary: {grained:?}");
+        assert!(
+            grained.iter().all(|v| (116..=140).contains(v)),
+            "grain should stay inside its amplitude: {grained:?}"
+        );
+
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"main.bmp","layer":"sheet"}))
+            .unwrap();
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":10,"height":10,"color":"#000000"},
+            {"op":"rect","x":0,"y":0,"width":10,"height":10,"color":"#ffffff","opacity":128},
+        ]}))
+        .unwrap();
+        assert_eq!(
+            d.images["main.bmp"].get_pixel(5, 5),
+            &Rgba([128, 128, 128, 255])
+        );
+
+        let before = d.snapshot();
+        let revision = d.revision;
+        let undo = d.undo.len();
+        let report = d
+            .draw(&json!({"preview":true,"operations":[
+                {"op":"rect","x":20,"y":0,"width":8,"height":8,"color":"#ff0000"},
+            ]}))
+            .unwrap();
+        assert_eq!(report["preview"], json!(true));
+        assert_eq!(report["bounds"], json!([20, 0, 27, 7]));
+        let image = d.preview.take().expect("a preview answers with an image");
+        assert_eq!(image.get_pixel(24, 4), &Rgba([255, 0, 0, 255]));
+        assert!(d.snapshot() == before, "a preview changes nothing");
+        assert_eq!((d.revision, d.undo.len()), (revision, undo));
+        assert_eq!(d.images["main.bmp"].get_pixel(24, 4)[3], 0);
+    }
+
     #[test]
     fn brush_batch_updates_revision_and_history_once() {
         let mut d = document();

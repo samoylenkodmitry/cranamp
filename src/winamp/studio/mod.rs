@@ -2735,6 +2735,36 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
             DIM,
         );
     }
+    Label("PAPER GRAIN".into(), 12., 300., 172., 12., DIM);
+    for (i, (amount, label)) in [(0u32, "Smooth"), (5, "Fine"), (9, "Paper"), (16, "Coarse")]
+        .into_iter()
+        .enumerate()
+    {
+        let d = shared.clone();
+        Choice(
+            label.into(),
+            12. + i as f32 * 89.,
+            322.,
+            82.,
+            v.grain == amount,
+            move || state(&d, json!({"grain":amount})),
+        );
+    }
+    Label("STRENGTH".into(), 12., 360., 172., 12., DIM);
+    for (i, (amount, label)) in [(255u32, "Solid"), (190, "75%"), (128, "50%"), (64, "25%")]
+        .into_iter()
+        .enumerate()
+    {
+        let d = shared.clone();
+        Choice(
+            label.into(),
+            12. + i as f32 * 89.,
+            382.,
+            82.,
+            v.opacity == amount,
+            move || state(&d, json!({"opacity":amount})),
+        );
+    }
     for (i, (field, label, on)) in [
         ("filled", "Fill shapes", v.filled),
         ("mirror_x", "Mirror left / right", v.mirror_x),
@@ -2750,7 +2780,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
         Toggle(
             label.into(),
             12. + (i % 2) as f32 * 178.,
-            316. + (i / 2) as f32 * 48.,
+            420. + (i / 2) as f32 * 48.,
             170.,
             on,
             move || state(&d, json!({field:!on})),
@@ -2766,7 +2796,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
             "Mask picked color".into()
         },
         12.,
-        491.,
+        595.,
         348.,
         mask_on,
         move || {
@@ -2779,7 +2809,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64) {
     Label(
         "Lift a region; Stamp places its exact pixels.".into(),
         12.,
-        526.,
+        630.,
         353.,
         10.,
         DIM,

@@ -33,11 +33,23 @@ class ConnectedCanvasTests(unittest.TestCase):
         status={'content':[{'type':'text','text':json.dumps({'view':{
             'presentation':True,'zoom':2,'preview_playlist_height':145}})}]}
         crop=self.screenshot_header(550,754)
-        with patch('pixel_pen.call',side_effect=[status,self.screenshot_header(1157,871),crop]) as call:
+        # The measuring shot goes to a throwaway file and its size is read from
+        # the text Studio answers with, not from 420 KB of inline base64.
+        measured={'content':[{'type':'text','text':json.dumps({'size':[1157,871]})}]}
+        output=Path('target/measured.png').resolve()
+        with patch('pixel_pen.call',side_effect=[status,measured,crop]) as call:
             self.assertIs(capture_canvas('target/measured.png'),crop)
             self.assertEqual([c.args for c in call.call_args_list],[('studio_status',),
-                ('studio_screenshot',{}),('studio_screenshot',{
-                    'path':str(Path('target/measured.png').resolve()),'crop':[303,58,550,754]})])
+                ('studio_screenshot',{'path':str(output)+'.measure.png'}),
+                ('studio_screenshot',{'path':str(output),'crop':[303,58,550,754]})])
+        self.assertFalse(Path(str(output)+'.measure.png').exists())
+
+    def test_screenshot_size_prefers_reported_size_and_rejects_bad_values(self):
+        def reported(value):
+            return {'content':[{'type':'text','text':json.dumps({'size':value})}]}
+        self.assertEqual(_screenshot_size(reported([550,754])),[550,754])
+        for bad in ([0,754],[550],'550x754',[True,754],[550.0,754],None):
+            with self.assertRaises(ValueError):_screenshot_size(reported(bad))
 
     def test_capture_rejects_invalid_png_or_nonpresentation_without_mutations(self):
         for data in ('','!!!!',base64.b64encode(bytes(33)).decode()):

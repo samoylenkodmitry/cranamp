@@ -208,8 +208,8 @@ one tool per panel, named for it.
 | `studio_history`, `studio_undo`, `studio_redo` | The shared history |
 | `studio_status`, `studio_new`, `studio_open`, `studio_project`, `studio_export`, `studio_screenshot` | The document and the window |
 
-Six things make that surface usable at speed, every one of them the scar of a
-skin drawn through it:
+Fifteen things make that surface usable at speed, every one of them the scar of
+a skin drawn through it:
 
 - **A `text` operation** draws a string in the editor's own 5x7 face at an
   integer scale. A classic skin is full of set labels -- `MONO`, `AUTO`,
@@ -221,9 +221,14 @@ skin drawn through it:
   so a stamp never punches a rectangle through what it lands on, and partly
   transparent ones blend with what is under them -- a sheet has no alpha channel
   to keep, so the alternative is a soft glow arriving as hard speckle. Blending
-  sees the canvas as it stands, this sprite's current art included, so it is
-  right for adding light to artwork that is already there and wrong for a
-  redraw, which compounds: composite a redraw onto a clean backdrop yourself.
+  sees the canvas as it stands *including what earlier operations in the same
+  transaction have just painted*, so it is right for adding light to artwork
+  that is already there and wrong for a redraw, which compounds: composite a
+  redraw onto a clean backdrop yourself. The backdrop used to be composed once
+  per transaction and then reused, which meant a glow placed after the picture
+  beneath it blended into the picture that was there *before* -- and wrote that
+  back, silently undoing the work underneath it. Two cut windows and two glows
+  in one transaction were enough to lose one of the windows.
 - **An `origin` on the transaction** names a layer and puts 0,0 on that sprite's
   current destination. A sprite that moves -- a slider thumb follows its own
   frame -- has no fixed canvas address, so art aimed with coordinates read in
@@ -240,19 +245,130 @@ skin drawn through it:
   pixels collided and where. Name one target in `layers` to cure it. All three
   describe the transaction in hand -- they were session cumulative at first,
   which made every draw after the first report the union of its predecessors.
+  `overwrites` counts only *different* canvas pixels landing in one source cell.
+  It used to count any repeat, so filling a panel and then drawing on it --
+  ordinary drawing, the same canvas pixel written twice -- reported hundreds of
+  collisions and buried the one signal that matters.
 - **`studio_canvas` takes a `crop`**, so checking one button costs one small
   image instead of a render of the whole skin, and reports back the path it
   actually wrote: a relative one resolves against the Studio process, not the
   caller, which is how a render ends up somewhere nobody looks.
+- **`studio_atlas` takes the same `path`, `crop` and `zoom`**, so the one-BMP
+  detour can be looked at and not only drawn into. It is the only way to see a
+  sheet the assembled canvas never shows: `numbers.bmp`, `text.bmp`, a pressed
+  variant, a slider frame that is not the current one. The capability was there
+  from the start and simply not in the schema, which made the whole detour
+  write-only to anything reading the tool list.
+- **`studio_status` carries the document, not the catalogue.** Every sprite and
+  every one of its variants used to ride along with it -- and with every other
+  call that touched the view, because they all answer with the status. Setting a
+  colour cost eighteen kilobytes; so did reading one cropped button. The sprites
+  have two panels of their own: `studio_targets` says which exist,
+  `studio_rectangles` says where each variant lives. Status now also names the
+  `surface` a stroke's coordinates mean -- `canvas`, or `atlas <sheet>` -- and so
+  does every `studio_draw` result, because one pencil and one history serve both
+  and a stroke aimed at the wrong one still succeeds, somewhere else.
 - **Zoom stops at 8x on purpose.** Judging a 14x25 sprite wants more than that;
   read at 1:1 and enlarge nearest-neighbour at your end, which costs nothing and
   has no ceiling.
+- **A `path` on an image tool means "write it and tell me where".**
+  `studio_screenshot`, `studio_states` and `studio_study` used to write the file
+  *and* hand back the whole PNG as base64 -- for a full scene, 420 KB, about a
+  hundred thousand tokens of a caller's context, spent twice for one look, after
+  it had already been given the file. `studio_canvas` always answered with the
+  path and the size, and now all of them do; omit `path` and the image still
+  comes back inline, which is what a small crop wants.
+- **Both catalogue tools filter.** `studio_rectangles` unfiltered is fifteen
+  kilobytes and `studio_targets` is seven, and almost nobody wants either whole:
+  they want one sheet, or one sprite. Both take `sheet` and `id` (a
+  case-insensitive substring), `studio_rectangles` also takes `runtime`, and
+  `studio_targets` takes `variants` to include every source rectangle a sprite
+  has. "All 28 frames of `band0.track`" went from a 15 KB read to a 571-byte
+  one, which is the difference between checking and guessing.
+- **A refusal names the operation that caused it.** A transaction may carry ten
+  thousand operations, and `No glyph for '@'` named none of them; it is now
+  `operations[2] "text": ...`, and the rollback is unchanged -- all or nothing.
+- **A character the 5x7 face does not have is skipped, not fatal.** It comes
+  back in `unsupported_characters` alongside the pixels that did land. A
+  seven-hundred-operation sheet used to die on one `@` and roll back everything
+  before it, which is a poor trade for a character that could simply be absent.
+  The set the face does have is named on the `text` field itself.
+- **`grain` and `opacity` on any shape.** Paper is not flat, and a flat
+  rectangle of kraft reads as plastic; light leaking out of a box has to be
+  added to the picture already inside it. Both were being composed in an image
+  library and stamped in through the `image` operation, which works and meant a
+  skin that wanted paper needed Python and Pillow -- so neither material could
+  be drawn from the editor, from Android, or from a recipe with no image
+  library. `grain` is deterministic noise on the shape's own colours, clumped on
+  a `grain_size` lattice because per-pixel noise is invisible at the size a skin
+  is looked at, and seeded by `grain_seed` so a recipe reproduces byte for byte.
+  `opacity` bakes the shape over what is there at a fraction of its strength --
+  the same blend the `image` operation does, resolved and written opaque,
+  because the sheet has no alpha to keep. Both live on the view like every other
+  brush setting, as **PAPER GRAIN** and **STRENGTH** in Drawing tools, so a
+  mouse stroke and an MCP operation get the same material and an operation can
+  still override either for itself; adding an engine capability only a script
+  could reach would have been the same mistake in a new place. Catamp Cardboard
+  was drawn with an image library first and redrawn with these: the same skin,
+  no Pillow, and half the bytes, because native grain has far fewer distinct
+  colours than per-pixel noise.
+- **`preview: true` on a draw is a dry run.** The operations are applied, the
+  surface comes back as it would leave it, and the document is put back --
+  nothing recorded, revision unmoved, and `crop`, `zoom` and `path` behave as
+  they do on `studio_canvas`. It also reports `bounds` and `overwrites`, so a
+  stroke can be checked before it is made. Without it the only ways to see an
+  eleven-pixel cat were to draw it, look, and undo, or to reimplement the
+  rasteriser in an image library and hope the two agreed; the second is what
+  actually happened, and the proofing script it needed is deleted.
+- **`unsampled_pixels` counts ink nothing will ever show.** A sheet is a bag of
+  cells and the space between them is never drawn: `pledit.bmp` column 125 falls
+  between the two footer flaps, so a footer band painted straight across the
+  sheet loses a column and a button laid across it arrives a pixel out of step
+  with its own hit area. Drawing that band now reports 38 unsampled pixels and
+  says they are all at x=125. Sheets that are not artwork at all say so too --
+  `text.bmp` is read for one colour and never drawn, which is a day's work to
+  discover by hand.
 
 The older tools -- `studio_state`, `studio_render`, `studio_guides`,
 `studio_paint_layers`, `studio_layout`, `studio_patch`, `studio_inspect_region`,
 the one-off skin switches and the palette pair -- still answer, so existing
 scripts keep working, but they are no longer offered: they address single windows
 and an isolated patch handoff, which is not how this editor edits.
+
+## What runs where
+
+The drawing engine is one crate on every platform, so the materials, the
+reports and the history behave identically in a desktop window, in a browser,
+and on Android: `grain`, `opacity`, palette ramps, the native brushes, the
+shared undo, `unsampled_pixels` and the sheet notes are all the same code, and
+the web build is checked with
+`cargo check --target wasm32-unknown-unknown --no-default-features --features web,renderer-wgpu`.
+
+Two things are not everywhere, and neither is new:
+
+- **MCP is desktop and Android only.** The browser cannot open a listening
+  socket, so a recipe cannot be replayed into the web editor. Everything a
+  recipe does is reachable by hand there instead, which is the point of keeping
+  the materials in the engine rather than in a Python helper.
+- **`studio_screenshot` is the desktop preview's GPU capture.** Android supports
+  the native editor image, atlas inspection and drawing; the browser has the
+  live player itself.
+
+The touch layout -- under 1140x820 logical points -- has Files, Tools, Layers,
+Parts and States, and no single-sheet panel, so `studio_atlas`'s territory is
+desktop-layout only. A laptop browser is over that threshold and gets the full
+desktop layout, Skin atlases included.
+
+Anything the engine grows has to appear in both panels or it is invisible on the
+two platforms that have no MCP to reach it with instead. **PAPER GRAIN** and
+**STRENGTH** are in desktop Drawing tools and in the touch Tools drawer, and
+both write the same view fields, so a value set in one shows up selected in the
+other. Verified by building the web bundle, serving `dist/`, opening
+Settings → Open Skin Studio in a browser at both layout sizes, and dragging a
+coarse-grain stroke at half strength across the main window: 194 pixels, no
+MCP, no Python. The same session also confirmed the playlist-fill report reads
+in a browser -- a stroke through the empty list answered "162 pixels have no
+bitmap source ... turn on List canvas to paint there".
 
 ## Layouts
 
@@ -319,8 +435,9 @@ Numbers on the canvas match the list. Select a cell to clip atlas painting to it
 In the assembled view, selecting a sprite targets that part. **Clear paint clip**
 restores unrestricted painting. Guides never enter preview artwork or WSZ export.
 
-MCP: `studio_guides` lists the rectangles; `{"select":"main.play#1"}` selects
-a specific atlas cell. `studio_state` supports `guides` and nullable `clip`.
+MCP: `studio_rectangles` lists them, narrowed by `sheet`, `id` or `runtime`;
+`{"select":"main.play#1"}` selects a specific atlas cell. `studio_canvas`
+carries `guides` and a nullable `clip`.
 For example, the pressed play cell is `cbuttons.bmp [23,18,23,18]`; volume has
 28 separate track-frame rectangles. Runtime reservations remain visible so
 illustrations can be placed around the player-drawn content.
@@ -343,8 +460,8 @@ Sprite targeting still accepts any combination: for example, paint into a
 one stroke to every pressed/unpressed source variant of selected controls.
 Alpha lock and color masks apply to pixels already in the active painting plane.
 
-MCP `studio_paint_layers` supports `list`, `add`, `select`, `set`, `move`,
-`merge_down`, and `delete`. `studio_state` selects `paint_layer` by ID (`null`
+MCP `studio_layers` supports `list`, `add`, `select`, `set`, `move`,
+`merge_down`, and `delete`. `studio_targets` selects `paint_layer` by ID (`null`
 selects the base). Layers are bottom-to-top, with move index zero above the base.
 Opacity is 0–255. Locked planes reject drawing. Hidden planes do not export.
 
@@ -355,7 +472,7 @@ retained: switching clipping off reveals them again. Clipped chains are supporte
 For the bottom painting plane the original atlas provides the mask. Reordering
 or deleting layers changes which plane supplies the mask.
 
-Use `studio_paint_layers {"action":"set","id":"paint-6","clip_below":true}`
+Use `studio_layers {"action":"set","id":"paint-6","clip_below":true}`
 after placing the shading plane directly above the desired silhouette. The GUI
 switch, MCP, undo and project saves share this property. Merging a clipped plane
 bakes its effective pixels into a visible, unlocked, fully opaque, unclipped
@@ -376,7 +493,7 @@ editing canvas. It does not add a bitmap, change layout metadata, move controls,
 or alter the exported skin format. Main remains at y=0, EQ at y=116, and the
 playlist at y=232. The original one-pixel main-window reservation remains.
 
-MCP: `studio_state` with `panel: "canvas"`. Layer IDs are qualified, for example
+MCP: `studio_canvas`. Layer IDs are qualified, for example
 `main.background`, `equalizer.background`, `playlist.bottom.right`. Select any
 combination and draw across panel boundaries in one undoable transaction.
 `preview_playlist_height` determines the assembled playlist height (145–522).
@@ -419,78 +536,76 @@ replaces unsaved work).
 
 **Atlases** opens a sheet chooser. The entire selected bitmap becomes the native
 pencil canvas, with the same palette, integer zoom, picker and shared history as
-the assembled panel. MCP: `studio_state` with `panel: "atlas"`, `sheet: "text.bmp"`
-and `layer: "sheet"`. This also supports painting the previously unreachable
+the assembled panel. MCP: `studio_atlas {"sheet":"text.bmp"}`, and `path`,
+`crop` and `zoom` on the same call read the sheet back as a PNG. This also supports painting the previously unreachable
 font, status and metadata-associated art sheets.
 
 **Unique EQ art** (Equalizer tab) enables eleven independent 14×25 handles in
 `eqhandles.bmp` (154×50: eleven columns, normal above pressed). It reserves 25
 pixels of the 63-pixel track and limits travel to 38. Each `bandN.thumb` can be
-selected, painted, grouped, and undone independently. MCP: `studio_eq_handles`.
+selected, painted, grouped, and undone independently. MCP: `studio_options`
+with `eq_handles`.
 Disabling this returns to the classic shared 11×11 head mapping. The feature button sits above the canvas.
 
 **Glass visualizer** (Main player tab) makes unlit visualizer pixels transparent,
 revealing the artist's native background while retaining the live spectrum.
-MCP: `studio_layout` with `visualizer_glass: true`.
+MCP: `studio_options` with `visualizer_glass: true`.
 
 **Selection artwork** (Playlist tab) enables a native 243×11 `plselection.bmp`.
 Edit `list.selection` on the assembled canvas or its atlas. The runtime reserves
 an eight-pixel marker gutter before track titles, keeps durations aligned, and
 uses the artwork for each selected row. Wider windows crop the native art at
 243 pixels and retain the selection palette beyond it; pixels are not stretched.
-MCP: `studio_playlist_selection`.
+MCP: `studio_options` with `playlist_selection`.
 
 All these operations share human/MCP history and survive WSZ export.
 
-## Drawing
+## Player preview, and what a shared cell cannot do
 
-1. Choose Main player, Equalizer, or Playlist.
-2. Choose Pencil or Pick pixel, and a swatch or `#RRGGBB` brush color.
-3. Draw directly on the assembled canvas at integer zoom. The editor resolves
-   each stroke to the underlying BMP and source rectangle.
-4. Auto targets the topmost sprite footprint. **Sprite targets…** opens a native multi-select list. Toggle any combination
-   of backgrounds and controls, including occluded pixels. **Solo** selects just
-   one layer; **Select all** includes every layer; **Auto / clear** returns to
-   topmost targeting. The pencil writes to every selected footprint it crosses.
-5. **Current state only** edits the displayed source region. **All sprite
-   states** writes the same local pixels into every variant of that control.
-   This covers normal/pressed and on/off controls, and all 28 slider frames.
-6. Switch Released/Pressed and On/Off. Scrub frames 0–27 for volume, balance,
-   seek, equalizer or playlist scroll. **States** shows the selected layer's
-   source variants side by side; Auto uses the panel's primary slider.
-7. **Player preview** runs the actual Cranamp main/EQ/playlist composables
-   against the current document. Integer zoom and pan work here too. Use 1×
-   for the whole stack. **Tall playlist / Compact playlist** switches the live preview between 261 and 145 native pixels. MCP `studio_state` accepts `preview_playlist_height` from 145 to 522. **Presentation** shows the entire live stack at the largest fitting integer zoom (up to 2×). MCP can toggle it with `presentation: true/false`. Return to Canvas editing to paint.
-8. **List canvas** enables an editable `list.background` layer. It exports a
-   native 243×203 `plbg.bmp`, cropped/tiled by the player without stretching.
-   **Travel** on the Equalizer tab reserves space for larger fader artwork;
-   changes share undo history. The default is 52 pixels; Moonpool uses 38.
-9. Enter a destination WSZ path and choose Export. Exports are validated by
-   Cranamp's skin loader and written atomically. The input is not changed
-   unless you explicitly export to the same path.
+**Player preview** runs the actual Cranamp main, equalizer and playlist
+composables against the current document, at integer zoom and pan; 1x shows the
+whole stack. **Tall playlist / Compact playlist** switches the live preview
+between 261 and 145 native pixels, and `studio_canvas` takes
+`preview_playlist_height` anywhere from 145 to 522. **Presentation** shows the
+entire live stack at the largest fitting integer zoom, up to 2x, which
+`presentation: true` also does. The Pressed and On/Off selectors change the
+preview's artwork through preview-only copies, leaving the document and the
+export untouched; real pointer input still works, and equalizer faces take the
+same discrete frame as their bodies even mid-drag. Return to canvas editing to
+paint.
 
-Magenta is Winamp's transparent color key. The MCP brush also accepts
-`transparent`. **History** lists human and MCP edits; click any step to restore it. Undo/redo
-retains 32 transactions during the current session. A new edit after undo replaces
-the redo branch. Export marks the saved state, which undo/redo can return to. Shared classic atlas regions necessarily change every place they are used.
-Enable Unique EQ art to separate the eleven heads.
-Playlist repeat/stretch tiles likewise cannot have independent pixels at each
-repeated screen location; the inspector identifies those mappings.
+The editing canvas assembles skin bitmaps only -- no runtime text, no
+visualizer. `studio_screenshot` waits for the requested document revision to be
+composed, the live player's atlas reload included, so a client never needs a
+sleep after painting.
 
-`studio_screenshot` waits for the requested document revision to be composed,
-including the live player’s atlas reload, before capturing the GPU scene. Clients
-do not need arbitrary sleeps after `studio_state` or painting.
+**List canvas** enables an editable `list.background` plane and exports a native
+243x203 `plbg.bmp`, cropped and tiled by the player without stretching.
+**Travel** on the Equalizer tab reserves room for taller fader artwork and
+shares the undo history; the default is 52 pixels, and Moonpool uses 38.
 
-The editing canvas assembles skin bitmaps, without runtime-generated text or
-visualizers. Player preview includes Cranamp's runtime controls. The Pressed and On/Off
-selectors also affect its artwork: preview-only copies substitute the selected
-sprite variants without changing the document or export. Real pointer input
-remains available. EQ faces use the same discrete frame as their illustrated
-bodies, including during continuous drags.
+Export validates through Cranamp's own skin loader and writes atomically. The
+file you opened is not touched unless you export over it. Export also marks the
+saved state, which undo and redo can return to; the history keeps 32
+transactions for the session, and a new edit after an undo replaces the redo
+branch.
 
-## MCP
+Some pixels cannot be told apart, and no editor setting changes that. A shared
+classic atlas region is one cell wherever it is drawn: **Unique EQ art**
+separates the eleven equalizer heads into cells of their own, and nothing
+separates the four timer digits or the nine playlist header tiles.
+`studio_pixel` and `studio_rectangles` name those mappings, and `overwrites` in
+a draw result catches a transaction writing one of them twice.
 
-Start the native studio, then connect an MCP client with the stdio relay:
+A sheet is not a picture either. It is a bag of cells, and the space between
+them is never drawn: `pledit.bmp` column 125 falls between the two footer flaps,
+and most of `titlebar.bmp` is shade-mode art Cranamp does not use. Ink that
+lands there is reported as `unsampled_pixels`, with coordinates, because
+otherwise a band painted straight across a sheet quietly loses part of itself.
+
+## Connecting a client
+
+Start the native studio, then point an MCP client at the stdio relay:
 
 ```json
 {
@@ -503,62 +618,36 @@ Start the native studio, then connect an MCP client with the stdio relay:
 }
 ```
 
-The running studio also exposes JSON-RPC at
+The running studio also exposes the same JSON-RPC at
 `http://127.0.0.1:18765/mcp`. It binds only to loopback, rejects browser Origin
-headers, and accepts at most 8 MiB per request. Run one studio instance for
-this endpoint. The stdio relay connects to that same native window; it does
-not create a separate document.
+headers, and accepts at most 8 MiB per request. Run one studio for that
+endpoint; the stdio relay connects to that same native window rather than
+opening a document of its own.
 
-Tools:
-
-- `studio_status`, `studio_pixel`: document state and bidirectional pixel mapping.
-- `studio_state`: panel, layer, color, zoom, frame positions, pressed/on state.
-- `studio_draw`: atomic pixel, line, rectangle, and pixel-stamp transactions.
-- `studio_render`, `studio_states`: PNG previews with nearest-neighbor zoom.
-- `studio_screenshot`: actual GPU scene capture at native logical pixels; optional `crop: [x, y, width, height]` and PNG `path`. Use this to review runtime text and controls without OS screenshot thumbnail scaling.
-- `studio_playlist_background`: enable/read the optional painted playlist canvas.
-- `studio_layout`: read/patch footer layout and native EQ travel (1–52 pixels).
-- `studio_palette`, `studio_recolor`: exact palette substitutions without resizing.
-- `studio_set_palette`, `studio_visualizer_palette`: playlist and runtime visualizer colors.
-- `studio_history`, `studio_history_goto` (cursor), `studio_undo`, `studio_redo`: shared history.
-- `studio_open`, `studio_export`: import and validated WSZ export.
-
-For direct development calls, use the thin client (Node 18+):
+For direct development calls the thin client takes a tool name and its arguments
+(Node 18+):
 
 ```sh
-node tools/skin-studio/client.mjs studio_state \
-  '{"panel":"main","layer":"play","all_states":true}'
+node tools/skin-studio/client.mjs studio_status
+node tools/skin-studio/client.mjs studio_targets '{"id":"band0.track","variants":true}'
 node tools/skin-studio/client.mjs studio_draw \
   '{"operations":[{"op":"line","x":41,"y":90,"x2":51,"y2":90,"color":"#d5f2fa"}]}'
-node tools/skin-studio/client.mjs studio_states \
-  '{"zoom":4,"path":"/tmp/play-button-states.png"}'
+node tools/skin-studio/client.mjs studio_canvas \
+  '{"zoom":4,"crop":[16,88,23,18],"path":"/tmp/play.png"}'
 node tools/skin-studio/client.mjs studio_undo
 ```
 
-Use `"layers":["background","play"]` in `studio_state` to select multiple layers
-for both mouse and MCP strokes. `studio_draw` also accepts a temporary `layers`
-override and a `label` for its history entry. Omitted targets use the GUI selection;
-`[]` means Auto. `all_states` applies independently to each selected layer. The
-legacy singular `layer` argument still selects one layer. Changing panels resets
-selection unless the command supplies a new one.
+Ask for an image with a `path` and you get the path and its size back; ask
+without one and the whole PNG arrives inline as base64, which for a full
+`studio_screenshot` is around 420 KB.
 
-Coordinates always refer to **native panel pixels**, never enlarged GUI pixels.
-The play-button example maps to `cbuttons.bmp` at x=25..35, y=2 and y=20.
-Use `studio_pixel` to inspect ownership before painting.
-
-Pixel stamps accept `rows` plus a single-character palette. Unmapped characters
-are skipped; mapped characters become exact pixels. This supports hand-drawn
-cats, lettering, bevels and other motifs without raster scaling or imagegen.
-
-The `image` operation takes the same ground in one step: `data` is a base64 PNG
-laid down at `x`/`y`, at most 2048x2048. There is no scaling and no resampling
--- one source pixel is one skin pixel. Alpha 0 is left untouched; alpha between
-blends with the canvas underneath and is written opaque, because the sheet has
-nowhere to keep it.
-
-Set `origin` to a layer ID and every coordinate in the transaction becomes
-relative to that sprite's destination *as it stands now*, which is the only
-reliable way to aim at one that moves with its frame.
+Coordinates are always **native pixels** -- of the assembled canvas, or of the
+one sheet `studio_atlas` has open -- never enlarged GUI pixels. Every
+`studio_draw` result names which of the two it painted, because one pencil and
+one history serve both and a stroke aimed at the wrong surface still succeeds
+somewhere else. `studio_pixel` maps either direction and is the way to settle an
+ownership question rather than derive one: the play button's canvas rows 90 and
+108 are `cbuttons.bmp` x=25..35 at y=2 and y=20.
 
 ## Implementation and verification
 
@@ -643,7 +732,7 @@ picked color** locks painting to the current brush color; choose the replacement
 color afterward. **Clear color mask** restores unrestricted color painting. These
 protections apply separately to each selected source variant, so all-state shading
 cannot accidentally fill transparent space in another frame. MCP uses
-`studio_state` fields `alpha_lock` and `mask_colors`; `studio_draw` also accepts a
+`studio_canvas` fields `alpha_lock` and `mask_colors`; `studio_draw` also accepts a
 temporary `mask_colors` array without replacing the GUI's persistent mask.
 
 
@@ -679,7 +768,7 @@ root to the tip; choose a 1–16 pixel width and adjust **Bend** from −100% to
 100%. Live previews and mouse release use the same native rasterizer and one
 shared undo transaction as MCP. A tapered stroke narrows to a single-pixel tip.
 
-MCP `studio_state` accepts `brush: "curve"` / `"tuft"` and `curve_bend`. Drawing
+MCP `studio_canvas` accepts `brush: "curve"` / `"tuft"` and `curve_bend`. Drawing
 operations use `op: "curve"` / `"tuft"`, endpoints `x,y,x2,y2`, and either
 `curve_bend` or an explicit absolute quadratic `control: [x,y]`. Palette ramps,
 selected sprite targets, painting planes, mirrors and masks remain available.
@@ -743,7 +832,7 @@ and actual player across all four on/off and pressed/released combinations.
 
 ### Thin contour cleanup
 
-Drawing tools → **Clean 1px corners** is shared with MCP `studio_state` and
+Drawing tools → **Clean 1px corners** is shared with MCP `studio_canvas` and
 `studio_draw` through `clean_corners`. Open one-pixel paths and curves remove
 redundant right-angle elbows while retaining endpoints and connectivity.
 Filled/closed shapes, ellipses and broad strokes are unchanged. An individual
@@ -768,3 +857,62 @@ ID, order and the GUI view stay stable; other artists' planes remain untouched.
 The native tool checks complete ownership and rejects changed or locked/clipped
 planes. The whole revision is one undo step, so repeated polishing no longer
 requires backing out later artists' work.
+
+## Catamp Cardboard — a skin drawn from blank through this editor
+
+`assets/skins/Catamp Cardboard.wsz` is the first Catamp built from **New blank**
+rather than from another Catamp, and the whole of it is one deterministic
+recipe rather than a stroke journal:
+
+```sh
+python3 tools/skin-studio/catamp_cardboard.py             # every sheet, then export
+python3 tools/skin-studio/catamp_cardboard.py main eq      # one stage at a time
+```
+
+- `cardboard_material.py` — the kraft, the cut edges, the flute core, the tape,
+  the rubber-stamp lettering, the pools of light, a 4x5 face for the one 29-pixel
+  cell the editor's 5x7 face cannot label, and seven-segment timer digits.
+- `cardboard_cats.py` — the cats, as hand-authored pixel grids. Grids are
+  right-padded on import and checked against the palette, so a row typed a pixel
+  short is not a defect to hunt for later.
+- `catamp_cardboard.py` — one stage per sheet, each drawn in `studio_atlas` at
+  that sheet's own native coordinates.
+
+None of it needs an image library. The grain and the light were composed in
+Pillow first and stamped in as PNGs, which is what `grain`, `opacity` and a
+palette ramp are for; a motif is proofed with `studio_draw {"preview":true}`
+rather than by a second rasteriser written in Python. What is left in Python is
+what should be: the shapes, the palette, and the order they go down in.
+
+The skin is one corrugated box with windows cut in it. Both light rules hold
+everywhere: the outside of the box is lit from above-left, and the inside is lit
+only by the glow that leaks out of it -- which is why every readout Cranamp
+draws live sits inside a cut window, where warm light on dark board beats ink on
+kraft. The cats are where cats in a box are, which is mostly out of sight: one
+asleep beside the transport keys, eleven heads through eleven slots in the lid,
+a kitten walking the seek tape, a loaf on each of the volume and balance
+grooves, one sitting on the playlist scrollbar, a tail down the left fold, and
+one so far back in the box that only its outline and its eyes catch the light.
+
+Three things about the classic format cost a redraw each and are worth knowing
+before the next skin from blank:
+
+- **`text.bmp` is not a glyph sheet here.** Cranamp renders titles with its own
+  5x7 face and reads this sheet only to sample the display ink -- the second most
+  common colour, when two thirds of the sheet is opaque. Paint it as the glyph
+  sheet it looks like, in the ink the readouts should use.
+- **The playlist footer is two cells a pixel apart.** `bottom.left` is sheet
+  0..124 drawn at canvas 0..124; `bottom.right` is sheet 126..275 drawn at canvas
+  125..274, and sheet column 125 is never drawn. Nothing continuous may cross
+  that seam, so the footer is two flaps meeting at a fold -- which is what the
+  bottom of a box looks like anyway. `studio_pixel` settles the mapping; doing
+  the arithmetic by eye lands a button a pixel out of step with its own hit area.
+- **The header tile is 25 pixels wide and repeats nine times.** Any pattern with
+  a period that does not divide 25 shifts at every repeat and reads as a row of
+  seams; the side rails repeat every 29 rows, so their flutes run *across* the
+  rail and are constant down it, and meet themselves exactly at every phase.
+
+Verification: `studio_export` validates through Cranamp's own loader, and
+`check_native_frames.py` swept all 112 live GPU states -- active and inactive,
+released and pressed, all 28 slider frames -- with no nonuniform 2x2
+source-pixel block, so every sprite samples at exact native pixels.
