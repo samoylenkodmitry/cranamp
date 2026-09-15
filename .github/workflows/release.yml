@@ -359,6 +359,12 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v4
+        with:
+          # The action's default is "tools platform-tools", and Google has
+          # withdrawn the legacy "tools" package, so the default now fails
+          # outright. Everything this job actually builds against is installed
+          # by name in the next step.
+          packages: platform-tools
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
