@@ -3365,7 +3365,7 @@ mod integration_tests {
         assert_eq!(doc.planes.len(), 7);
         let exported = entries(&doc.archive().unwrap());
         assert_eq!(exported.len(), 15);
-        assert_eq!(exported, entries(super::super::BUNDLED_SKIN));
+        assert_eq!(exported, entries(super::super::BUNDLED_SKINS[0].bytes));
         super::super::bundled_skin().expect("Catamp must load in the player");
     }
 

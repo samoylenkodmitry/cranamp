@@ -661,16 +661,21 @@ fn remember_winamp_skin(_state: MutableState<WinampState>) -> WinampSkinState {
     {
         let skin_path = _state.get_non_reactive().skin_path;
         cranpose_core::remember(move || {
-            if let Some(path) = skin_path {
-                load_skin_file_background(
-                    _state,
-                    skin_state,
-                    std::path::PathBuf::from(path),
-                    false,
-                    None,
-                    false,
-                );
+            let Some(path) = skin_path else { return };
+            if let Some(entry) = bundled_skin_entry(&path) {
+                if let Ok(loaded) = load_skin(entry.bytes) {
+                    skin_state.set(Ok(loaded));
+                }
+                return;
             }
+            load_skin_file_background(
+                _state,
+                skin_state,
+                std::path::PathBuf::from(path),
+                false,
+                None,
+                false,
+            );
         });
     }
     #[cfg(target_arch = "wasm32")]
@@ -728,10 +733,45 @@ fn load_skin_file_background(
     );
 }
 
-const BUNDLED_SKIN: &[u8] = include_bytes!("../../assets/skins/Catamp Silverplay.wsz");
+/// A skin compiled into the binary. The first is what a fresh install wears.
+struct BundledSkin {
+    /// Stable, so a saved `bundled:` path survives a rename of the label.
+    id: &'static str,
+    label: &'static str,
+    bytes: &'static [u8],
+}
+
+const BUNDLED_SKINS: &[BundledSkin] = &[
+    BundledSkin {
+        id: "silverplay",
+        label: BUNDLED_SKIN_LABEL,
+        bytes: include_bytes!("../../assets/skins/Catamp Silverplay.wsz"),
+    },
+    BundledSkin {
+        id: "feral-night",
+        label: "Catamp Feral Night (Bundled)",
+        bytes: include_bytes!("../../assets/skins/Catamp Feral Night.wsz"),
+    },
+];
+
+/// A saved skin path naming a bundled skin instead of a file on disk.
+const BUNDLED_PREFIX: &str = "bundled:";
+
+fn bundled_skin_entry(path: &str) -> Option<&'static BundledSkin> {
+    let id = path.strip_prefix(BUNDLED_PREFIX)?;
+    BUNDLED_SKINS.iter().find(|skin| skin.id == id)
+}
+
+/// A saved skin path the Studio can open. A bundled skin has no file, so the
+/// Studio starts from its own document, exactly as it does with no skin saved.
+/// Only where the Studio itself is built: iOS has no editor to hand it to.
+#[cfg(not(target_os = "ios"))]
+fn studio_skin_path(path: Option<String>) -> Option<String> {
+    path.filter(|path| bundled_skin_entry(path).is_none())
+}
 
 fn bundled_skin() -> Result<WinampSkin, String> {
-    load_skin(BUNDLED_SKIN).map_err(|err| format!("{err:#}"))
+    load_skin(BUNDLED_SKINS[0].bytes).map_err(|err| format!("{err:#}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -769,10 +809,16 @@ fn ensure_skins_library_dir() -> std::io::Result<std::path::PathBuf> {
 /// Lists every applyable skin: the bundled skin first, then each `.wsz`/`.zip`
 /// in the library directory sorted by file name.
 fn list_library_skins() -> Vec<LibrarySkin> {
-    let mut skins = vec![LibrarySkin {
-        label: BUNDLED_SKIN_LABEL.to_string(),
-        path: None,
-    }];
+    let mut skins: Vec<LibrarySkin> = BUNDLED_SKINS
+        .iter()
+        .enumerate()
+        .map(|(i, skin)| LibrarySkin {
+            label: skin.label.to_string(),
+            // The first keeps `None`, so player state written before there was
+            // a second bundled skin still resolves to the one it meant.
+            path: (i > 0).then(|| std::path::PathBuf::from(format!("{BUNDLED_PREFIX}{}", skin.id))),
+        })
+        .collect();
     #[cfg(not(target_arch = "wasm32"))]
     if let Ok(entries) = std::fs::read_dir(skins_library_dir()) {
         let mut files: Vec<std::path::PathBuf> = entries
@@ -869,6 +915,22 @@ fn apply_library_skin(
 ) {
     match &skin.path {
         Some(path) => {
+            if let Some(entry) = path.to_str().and_then(bundled_skin_entry) {
+                match load_skin(entry.bytes) {
+                    Ok(loaded) => {
+                        skin_state.set(Ok(loaded));
+                        let id = entry.id;
+                        state.update(move |s| {
+                            s.skin_path = Some(format!("{BUNDLED_PREFIX}{id}"));
+                            s.status = "Loaded Bundled Skin".to_string();
+                        });
+                    }
+                    Err(error) => {
+                        state.update(|s| s.status = format!("Skin Load Failed: {error:#}"))
+                    }
+                }
+                return;
+            }
             #[cfg(not(target_arch = "wasm32"))]
             {
                 let label = skin.label.clone();
@@ -1829,7 +1891,7 @@ fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinS
     if !snapshot.studio_open {
         return;
     }
-    let key = snapshot.skin_path.clone();
+    let key = studio_skin_path(snapshot.skin_path.clone());
     let cached = sessions.with(|all| all.get(&key).cloned());
     let opened = cached
         .map(Ok)
@@ -4094,7 +4156,7 @@ fn SettingsPanel(
                                 });
                                 return;
                             }
-                            let path = state.get_non_reactive().skin_path;
+                            let path = studio_skin_path(state.get_non_reactive().skin_path);
                             match studio::launch(path.as_deref()) {
                                 Ok(()) => state.update(|s| {
                                     s.settings_open = false;
@@ -8510,6 +8572,9 @@ fn restore_saved_track(track: SavedTrack) -> Option<Track> {
 
 fn valid_saved_skin_path(path: Option<String>) -> Option<String> {
     let path = path.filter(|path| !path.is_empty())?;
+    if bundled_skin_entry(&path).is_some() {
+        return Some(path);
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -9373,6 +9438,54 @@ mod tests {
             .0
             .iter()
             .all(|pixel| *pixel == [0, 0, 0, 255]));
+    }
+
+    /// Both preinstalled skins have to survive being compiled in and loaded
+    /// back out; an embed that no longer parses is otherwise found by a user.
+    #[test]
+    fn every_bundled_skin_loads_from_the_bytes_compiled_into_the_binary() {
+        for skin in BUNDLED_SKINS {
+            load_skin(skin.bytes)
+                .unwrap_or_else(|error| panic!("{} does not load: {error:#}", skin.label));
+            assert!(skin.label.ends_with("(Bundled)"), "{}", skin.label);
+        }
+        assert!(
+            BUNDLED_SKINS.len() >= 2,
+            "the list is meant to hold more than one"
+        );
+    }
+
+    /// The skin list offers every bundled skin. The first keeps the empty path
+    /// it has always had, so a player state saved before there was a second one
+    /// still resolves to the skin it named.
+    #[test]
+    fn the_skin_list_offers_each_bundled_skin_and_keeps_the_first_addressed_as_none() {
+        let listed = list_library_skins();
+        assert_eq!(listed[0].label, BUNDLED_SKIN_LABEL);
+        assert_eq!(listed[0].path, None);
+        assert_eq!(listed[1].label, "Catamp Feral Night (Bundled)");
+        assert_eq!(
+            listed[1].path.as_deref(),
+            Some(std::path::Path::new("bundled:feral-night"))
+        );
+    }
+
+    /// A bundled skin is remembered as an id, not a file, so the check that
+    /// drops saved paths whose file has gone has to let it through -- and the
+    /// Studio, which only opens files, has to be handed nothing instead.
+    #[test]
+    fn a_bundled_id_survives_saving_but_is_never_handed_to_the_studio() {
+        let id = "bundled:feral-night".to_string();
+        assert_eq!(valid_saved_skin_path(Some(id.clone())), Some(id.clone()));
+        assert_eq!(valid_saved_skin_path(Some("bundled:nope".into())), None);
+        #[cfg(not(target_os = "ios"))]
+        {
+            assert_eq!(studio_skin_path(Some(id)), None);
+            assert_eq!(
+                studio_skin_path(Some("/tmp/real.wsz".into())),
+                Some("/tmp/real.wsz".to_string())
+            );
+        }
     }
 
     #[test]

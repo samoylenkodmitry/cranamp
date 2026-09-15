@@ -72,6 +72,10 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         "bundled skin row should be listed; visible={after:?}"
     );
     assert!(
+        contains(&after, "Catamp Feral Night (Bundled)"),
+        "the second bundled skin should be listed too; visible={after:?}"
+    );
+    assert!(
         contains(&after, "SYNC"),
         "sync section should appear; visible={after:?}"
     );
