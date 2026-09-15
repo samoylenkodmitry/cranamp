@@ -888,10 +888,16 @@ mod tests {
         let labels = harness::visible_texts(&mut shell);
         assert!(labels.iter().any(|t| t == "Layers"));
         assert!(labels.iter().any(|t| t == "Files"));
-        shell.set_cursor(40., 232.);
+        // Tap the middle of a skin pixel, not its corner. The canvas floors the
+        // pointer to find the pixel under it, so a press placed exactly on the
+        // boundary answers row 100 or row 99 depending on a fraction of a
+        // point, and which one it lands on depends on the host's layout metrics
+        // rather than on anything this test is about: it passed on macOS and
+        // failed on Linux twice, both times reporting the whole row missing.
+        shell.set_cursor(40.5, 232.5);
         shell.pointer_pressed();
         harness::pump(&mut shell);
-        shell.set_cursor(47., 232.);
+        shell.set_cursor(47.5, 232.5);
         harness::pump(&mut shell);
         shell.pointer_released();
         harness::pump(&mut shell);
