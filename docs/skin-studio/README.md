@@ -208,6 +208,46 @@ one tool per panel, named for it.
 | `studio_history`, `studio_undo`, `studio_redo` | The shared history |
 | `studio_status`, `studio_new`, `studio_open`, `studio_project`, `studio_export`, `studio_screenshot` | The document and the window |
 
+Six things make that surface usable at speed, every one of them the scar of a
+skin drawn through it:
+
+- **A `text` operation** draws a string in the editor's own 5x7 face at an
+  integer scale. A classic skin is full of set labels -- `MONO`, `AUTO`,
+  `PRESETS`, the wordmark -- and every one of them was otherwise a hand-built
+  stamp per letter, slow to write and easy to misalign.
+- **An `image` operation** stamps a base64 PNG at x/y. Gradients, dithering,
+  noise and hand-placed shading are far faster to compose in an image library
+  than one drawing operation at a time. Fully transparent pixels are left alone,
+  so a stamp never punches a rectangle through what it lands on, and partly
+  transparent ones blend with what is under them -- a sheet has no alpha channel
+  to keep, so the alternative is a soft glow arriving as hard speckle. Blending
+  sees the canvas as it stands, this sprite's current art included, so it is
+  right for adding light to artwork that is already there and wrong for a
+  redraw, which compounds: composite a redraw onto a clean backdrop yourself.
+- **An `origin` on the transaction** names a layer and puts 0,0 on that sprite's
+  current destination. A sprite that moves -- a slider thumb follows its own
+  frame -- has no fixed canvas address, so art aimed with coordinates read in
+  another state lands at an offset and writes a second copy of itself. With
+  `origin` the question cannot be asked, and it targets that layer by default.
+- **Every `studio_draw` reports `bounds`**, the rectangle the ink actually
+  landed in, **`clipped_pixels`**, how much fell outside the sprites it was
+  aimed at, and **`overwrites`**, how often the transaction wrote one shared
+  source cell twice with different colours. That last one is the trap this
+  editor cannot design away: the four timer digits are one cell of
+  `numbers.bmp`, the playlist top is one tile drawn nine times, so a stroke
+  across them lands on top of itself and the last colour wins in every position
+  at once. It used to be reported as a clean write; now it says which two canvas
+  pixels collided and where. Name one target in `layers` to cure it. All three
+  describe the transaction in hand -- they were session cumulative at first,
+  which made every draw after the first report the union of its predecessors.
+- **`studio_canvas` takes a `crop`**, so checking one button costs one small
+  image instead of a render of the whole skin, and reports back the path it
+  actually wrote: a relative one resolves against the Studio process, not the
+  caller, which is how a render ends up somewhere nobody looks.
+- **Zoom stops at 8x on purpose.** Judging a 14x25 sprite wants more than that;
+  read at 1:1 and enlarge nearest-neighbour at your end, which costs nothing and
+  has no ceiling.
+
 The older tools -- `studio_state`, `studio_render`, `studio_guides`,
 `studio_paint_layers`, `studio_layout`, `studio_patch`, `studio_inspect_region`,
 the one-off skin switches and the palette pair -- still answer, so existing
@@ -509,6 +549,16 @@ Use `studio_pixel` to inspect ownership before painting.
 Pixel stamps accept `rows` plus a single-character palette. Unmapped characters
 are skipped; mapped characters become exact pixels. This supports hand-drawn
 cats, lettering, bevels and other motifs without raster scaling or imagegen.
+
+The `image` operation takes the same ground in one step: `data` is a base64 PNG
+laid down at `x`/`y`, at most 2048x2048. There is no scaling and no resampling
+-- one source pixel is one skin pixel. Alpha 0 is left untouched; alpha between
+blends with the canvas underneath and is written opaque, because the sheet has
+nowhere to keep it.
+
+Set `origin` to a layer ID and every coordinate in the transaction becomes
+relative to that sprite's destination *as it stands now*, which is the only
+reliable way to aim at one that moves with its frame.
 
 ## Implementation and verification
 

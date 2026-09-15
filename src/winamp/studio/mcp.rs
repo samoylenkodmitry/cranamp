@@ -107,7 +107,7 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
 /// editing this editor no longer has.
 fn tools() -> Vec<Value> {
     vec![
- tool("studio_canvas","The whole skin as one canvas -- main, equalizer and playlist joined at their own positions -- which is the only drawing surface. Reads it back as an image at an integer zoom, and sets what the canvas shows: zoom, brush, colour, stroke width, the sprite state every sprite is drawn in, and whether rectangles are outlined. This is where drawing happens; studio_atlas is a detour to one BMP.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8},"path":{"type":"string"},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft"]},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean"},"active":{"type":"boolean"},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}),&[]),
+ tool("studio_canvas","The whole skin as one canvas -- main, equalizer and playlist joined at their own positions -- which is the only drawing surface. Reads it back as an image at an integer zoom, optionally cropped to [x, y, width, height] so one sprite can be checked without the whole skin, and sets what the canvas shows: zoom, brush, colour, stroke width, the sprite state every sprite is drawn in, and whether rectangles are outlined. This is where drawing happens; studio_atlas is a detour to one BMP.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft"]},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean"},"active":{"type":"boolean"},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}),&[]),
  tool("studio_atlas","Edit one BMP on its own, at native coordinates, with the same pencil and undo history. Omit sheet to go back to the whole skin, which is where drawing normally happens.",json!({"sheet":{"type":"string"},"zoom":{"type":"integer","minimum":1,"maximum":8}}),&[]),
  tool("studio_targets","Which sprites a stroke is routed into -- the editor's Sprite targets panel. Omit everything to list them. Auto (the default) paints every sprite under the brush, control art and window background alike, which is what a human stroke does. Solo one, or choose any combination.",json!({"layers":{"type":"array","items":{"type":"string"}},"solo":{"type":"string"},"auto":{"type":"boolean"},"paint_layer":{"type":["string","null"]}}),&[]),
  tool("studio_rectangles","Where every sprite lives in the joined canvas -- the editor's Sprite rectangles panel. Read-only unless select is given, which clips painting to that rectangle. Rectangles are an overlay, never pixels in the artwork.",json!({"select":{"type":"string"}}),&[]),
@@ -116,7 +116,7 @@ fn tools() -> Vec<Value> {
  tool("studio_status","Read the shared document, active state, layers and source rectangles.",json!({}),&[]),
  tool("studio_new","Create a transparent classic skin from scratch. No artwork or metadata is inherited. Unsaved edits require discard=true.",json!({"discard":{"type":"boolean"}}),&[]),
  tool("studio_open","Load a WSZ into the running native Studio. Existing unsaved edits require discard=true.",json!({"path":{"type":"string"},"discard":{"type":"boolean"}}),&["path"]),
- tool("studio_draw","Paint assembled panel pixels. One atomic undoable transaction. Optional layers targets every selected sprite beneath each pixel; omitted uses GUI selection. Optional label names the history entry. Pixel/line/rect/stamp operations map into their owning atlas; all_states maps the same local pixels into every pressed/frame variant. Coordinates are native pixels, never zoomed coordinates. Path points start [x,y], then line [x,y], quadratic [cx,cy,x,y], cubic [c1x,c1y,c2x,c2y,x,y], relative to x/y. Filled paths use native scanlines. brush_size controls solid stroke width; mirror_x/y reflect around canvas centre. Optional ramp colour array and ramp_axis [x1,y1,x2,y2] shade geometry with exact palette colours. Curve and tuft use endpoints x/y and x2/y2, curve_bend -100..100 or an explicit absolute control [x,y]. Tuft tapers brush_size to a pointed tip. Optional clean_corners removes redundant elbows from open 1px curves/paths only; preserves endpoints, fills and thick strokes. No antialiasing. Stamp rows contain palette-character pixel art, unmapped characters are skipped.",json!({"mask_colors":{"type":"array","items":{"type":"string"}},"label":{"type":"string"},"layer":{"type":"string"},"layers":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"operations":{"type":"array","items":{"type":"object","properties":{"op":{"enum":["pixel","line","rect","ellipse","path","curve","tuft","stamp","cluster"]},"x":{"type":"integer"},"y":{"type":"integer"},"x2":{"type":"integer"},"y2":{"type":"integer"},"width":{"type":"integer"},"height":{"type":"integer"},"fill":{"type":"boolean"},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"clean_corners":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"control":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2},"points":{"type":"array","items":{"type":"array","items":{"type":"number"}}},"ramp":{"type":"array","items":{"type":"string"}},"material":{"enum":["glass"]},"bevel":{"type":"number","minimum":1,"maximum":128},"refraction":{"type":"number","minimum":0,"maximum":32},"ramp_axis":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},"color":{"type":"string"},"rows":{"type":"array","items":{"type":"string"}},"palette":{"type":"object","additionalProperties":{"type":"string"}}},"required":["op","x","y"]}}}),&["operations"]),
+ tool("studio_draw","Paint assembled panel pixels. One atomic undoable transaction. Optional layers targets every selected sprite beneath each pixel; omitted uses GUI selection. Optional label names the history entry. Pixel/line/rect/stamp operations map into their owning atlas; all_states maps the same local pixels into every pressed/frame variant. Coordinates are native pixels, never zoomed coordinates. Path points start [x,y], then line [x,y], quadratic [cx,cy,x,y], cubic [c1x,c1y,c2x,c2y,x,y], relative to x/y. Filled paths use native scanlines. brush_size controls solid stroke width; mirror_x/y reflect around canvas centre. Optional ramp colour array and ramp_axis [x1,y1,x2,y2] shade geometry with exact palette colours. Curve and tuft use endpoints x/y and x2/y2, curve_bend -100..100 or an explicit absolute control [x,y]. Tuft tapers brush_size to a pointed tip. Optional clean_corners removes redundant elbows from open 1px curves/paths only; preserves endpoints, fills and thick strokes. No antialiasing. Stamp rows contain palette-character pixel art, unmapped characters are skipped. Text draws a string in the editor's own 5x7 face at an integer scale, which is how a classic skin's labels are set. Image stamps a base64 PNG at x/y: fully transparent pixels are left alone and partly transparent ones blend with what they land on, so composed artwork -- gradients, glows, dithered shading -- arrives in one operation looking as it did. Optional origin names a layer and puts 0,0 on that sprite's current destination, which is the only safe way to aim at a sprite that moves with its own frame, and targets that layer unless layers says otherwise. Every result also reports overwrites: how often the transaction wrote one shared source cell twice with different colours, which is what silently repeats artwork across the four timer digits or the nine playlist tiles. Every result reports the bounds the ink actually landed in and how many pixels fell outside the chosen sprites.",json!({"mask_colors":{"type":"array","items":{"type":"string"}},"label":{"type":"string"},"origin":{"type":"string"},"layer":{"type":"string"},"layers":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"operations":{"type":"array","items":{"type":"object","properties":{"op":{"enum":["pixel","line","rect","ellipse","path","curve","tuft","stamp","cluster","text","image"]},"data":{"type":"string"},"text":{"type":"string"},"scale":{"type":"integer","minimum":1,"maximum":8},"spacing":{"type":"integer","minimum":-2,"maximum":8},"x":{"type":"integer"},"y":{"type":"integer"},"x2":{"type":"integer"},"y2":{"type":"integer"},"width":{"type":"integer"},"height":{"type":"integer"},"fill":{"type":"boolean"},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"clean_corners":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"control":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2},"points":{"type":"array","items":{"type":"array","items":{"type":"number"}}},"ramp":{"type":"array","items":{"type":"string"}},"material":{"enum":["glass"]},"bevel":{"type":"number","minimum":1,"maximum":128},"refraction":{"type":"number","minimum":0,"maximum":32},"ramp_axis":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},"color":{"type":"string"},"rows":{"type":"array","items":{"type":"string"}},"palette":{"type":"object","additionalProperties":{"type":"string"}}},"required":["op"]}}}),&["operations"]),
  tool("studio_project","Save or open a layered .cstudio project. WSZ remains the flattened skin export. Opening unsaved work requires discard=true.",json!({"action":{"enum":["save","open"]},"path":{"type":"string"},"discard":{"type":"boolean"}}),&["action","path"]),
  tool("studio_cluster","Pick up a native pixel region from selected layers (Auto captures visible canvas). No skin mutation. Omit rect to read clipboard as reusable stamp rows/palette. Optional flip_x, flip_y and quarter_turns transform the clipboard losslessly. Paint it using studio_draw op cluster, or human Stamp brush. Clipboard is an editor tool, never added to WSZ.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"flip_x":{"type":"boolean"},"flip_y":{"type":"boolean"},"quarter_turns":{"type":"integer","minimum":0,"maximum":3}}),&[]),
  tool("studio_study","Read-only material study board: native crop above integer enlarged detail, optional grayscale value preview, registered layer geometry, pixel grid, and reference image alongside. Does not edit skin or change view. rect defaults to last lifted region. Reference pixels are never imported into the skin.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"zoom":{"type":"integer","minimum":1,"maximum":8},"selected":{"type":"boolean"},"values":{"type":"boolean"},"grid":{"type":"boolean"},"geometry":{"type":"boolean"},"reference":{"type":"string"},"reference_rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"path":{"type":"string"}}),&[]),
@@ -280,6 +280,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 view["panel"] = json!("canvas");
             }
             let path = view.as_object_mut().and_then(|v| v.remove("path"));
+            let crop = view.as_object_mut().and_then(|v| v.remove("crop"));
             let zoom_out = view.as_object_mut().and_then(|v| v.remove("zoom"));
             if let Some(zoom) = zoom_out.clone() {
                 view["zoom"] = zoom;
@@ -288,7 +289,18 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             match path.and_then(|p| p.as_str().map(str::to_owned)) {
                 Some(path) => {
                     let zoom = zoom_out.and_then(|z| z.as_u64()).unwrap_or(1) as u32;
-                    let im = doc.render();
+                    let mut im = doc.render();
+                    if let Some(crop) = crop.as_ref().and_then(Value::as_array) {
+                        let r: Vec<u32> = crop
+                            .iter()
+                            .filter_map(|v| v.as_u64().map(|n| n as u32))
+                            .collect();
+                        anyhow::ensure!(r.len() == 4, "crop is [x, y, width, height]");
+                        let (x, y) = (r[0].min(im.width()), r[1].min(im.height()));
+                        let w = r[2].min(im.width() - x).max(1);
+                        let h = r[3].min(im.height() - y).max(1);
+                        im = image::imageops::crop_imm(&im, x, y, w, h).to_image();
+                    }
                     let im = image::imageops::resize(
                         &im,
                         im.width() * zoom,
@@ -296,7 +308,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                         image::imageops::FilterType::Nearest,
                     );
                     im.save(&path)?;
-                    json!({"view":state,"path":path,"size":[im.width(),im.height()]})
+                    json!({"view":state,"path":wrote(&path),"size":[im.width(),im.height()]})
                 }
                 None => state,
             }
@@ -426,6 +438,15 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
         _ => bail!("Unknown Studio tool {name}"),
     };
     Ok(text(value))
+}
+/// Where a file actually landed. A relative path is resolved against the
+/// Studio process's directory, not the caller's, so echoing back what was asked
+/// for is how a render ends up somewhere nobody looks.
+fn wrote(path: &str) -> String {
+    std::path::Path::new(path)
+        .canonicalize()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| path.to_string())
 }
 fn base64(bytes: &[u8]) -> String {
     const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -593,5 +614,233 @@ mod tests {
             json!([]),
             "auto by default, as for a human"
         );
+    }
+}
+
+#[cfg(test)]
+mod drawing_tests {
+    use super::*;
+    use crate::winamp::studio::model::Document;
+    use std::sync::{Arc, Mutex};
+
+    fn blank() -> SharedDocument {
+        let shared = SharedDocument(Arc::new(Mutex::new(Document::blank())));
+        call("studio_canvas", json!({}), &shared).unwrap();
+        shared
+    }
+
+    fn result(shared: &SharedDocument, name: &str, args: Value) -> Value {
+        let out = call(name, args, shared).unwrap();
+        serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap()
+    }
+
+    /// Setting a label used to be one hand-built stamp per letter. The editor
+    /// already carries a 5x7 face for its own rectangle numbers; drawing with
+    /// it is both faster and correctly spaced.
+    #[test]
+    fn text_draws_a_label_in_the_editors_own_face() {
+        let shared = blank();
+        let out = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"text","x":20,"y":30,"text":"CAT","color":"#f5c06a"}]}),
+        );
+        assert!(out["pixels_written"].as_u64().unwrap() > 20);
+        // Three glyphs, five wide with one of spacing: x 20..=36, seven tall.
+        assert_eq!(out["bounds"][0], 20);
+        assert_eq!(out["bounds"][2], 36);
+        assert_eq!(out["bounds"][3], 36);
+    }
+
+    /// A sprite that moves -- a slider thumb follows its own frame -- has no
+    /// fixed canvas address, so art aimed at one read in another state lands at
+    /// an offset and quietly writes a second copy. `origin` removes the
+    /// question by putting 0,0 on the sprite.
+    #[test]
+    fn origin_puts_the_coordinates_on_the_sprite_wherever_it_currently_sits() {
+        let shared = blank();
+        call("studio_canvas", json!({"volume": 5}), &shared).unwrap();
+        let out = result(
+            &shared,
+            "studio_draw",
+            json!({"origin":"main.volume.thumb",
+                   "operations":[{"op":"pixel","x":0,"y":0,"color":"#4488cc"}]}),
+        );
+        assert_eq!(out["pixels_written"], 1);
+        assert_eq!(out["clipped_pixels"], 0);
+        // Same cell, read back through a different frame: the thumb has moved,
+        // and the ink moved with it because it went into the sprite, not a spot.
+        for frame in (0..28).step_by(9) {
+            let mut doc = shared.0.lock().unwrap();
+            doc.state(json!({"volume": frame})).unwrap();
+            let at = doc
+                .layers()
+                .into_iter()
+                .find(|l| l.id == "main.volume.thumb")
+                .unwrap()
+                .destination;
+            assert_eq!(
+                doc.render().get_pixel(at[0], at[1]).0,
+                [0x44, 0x88, 0xcc, 0xff],
+                "frame {frame}"
+            );
+        }
+    }
+
+    /// The four timer digits are one cell of numbers.bmp, so a stroke across
+    /// them writes the same pixels twice and the last colour wins in all four
+    /// positions. It looked like a clean write, and the artwork came out
+    /// repeated.
+    #[test]
+    fn writing_one_shared_source_cell_twice_says_so() {
+        let shared = blank();
+        let out = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"pixel","x":48,"y":26,"color":"#112233"},
+                                 {"op":"pixel","x":60,"y":26,"color":"#ccddee"}]}),
+        );
+        assert!(out["overwrites"].as_u64().unwrap() > 0);
+        let note = out["overwrite_sample"].as_str().unwrap();
+        assert!(note.contains("numbers.bmp"), "{note}");
+        assert!(note.contains("layers"), "{note}");
+        // Naming one target is the cure, and then there is nothing to report.
+        let aimed = result(
+            &shared,
+            "studio_draw",
+            json!({"layers":["main.digit0"],
+                   "operations":[{"op":"pixel","x":48,"y":26,"color":"#112233"},
+                                 {"op":"pixel","x":60,"y":26,"color":"#ccddee"}]}),
+        );
+        assert_eq!(aimed["overwrites"], 0);
+        assert!(aimed["overwrite_sample"].is_null());
+    }
+
+    /// A sheet has no alpha channel, so a half transparent pixel either blends
+    /// with what it lands on or arrives at full strength. It used to arrive at
+    /// full strength, which turned every soft glow into hard speckle.
+    #[test]
+    fn a_half_transparent_stamp_blends_with_what_is_under_it() {
+        let shared = blank();
+        result(
+            &shared,
+            "studio_draw",
+            json!({"layers":["main.background"],
+                   "operations":[{"op":"rect","x":8,"y":8,"width":4,"height":4,
+                                  "color":"#202060"}]}),
+        );
+        let mut im = image::RgbaImage::new(1, 1);
+        im.put_pixel(0, 0, image::Rgba([0xff, 0xff, 0xff, 0x80]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        im.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        result(
+            &shared,
+            "studio_draw",
+            json!({"layers":["main.background"],
+                   "operations":[{"op":"image","x":9,"y":9,"data":base64(png.get_ref())}]}),
+        );
+        let doc = shared.0.lock().unwrap();
+        let [r, g, b, _] = doc.render().get_pixel(9, 9).0;
+        assert!((r as i32 - 0x90).abs() <= 2, "r {r:#x}");
+        assert!((g as i32 - 0x90).abs() <= 2, "g {g:#x}");
+        assert!((b as i32 - 0xb0).abs() <= 2, "b {b:#x}");
+    }
+
+    /// Both figures describe the transaction in hand. They were session
+    /// cumulative at first, which made the second draw onward report the union
+    /// of everything before it -- exactly the reassurance they were added to
+    /// give, and exactly wrong.
+    #[test]
+    fn what_a_draw_reports_covers_that_draw_and_no_earlier_one() {
+        let shared = blank();
+        let first = result(
+            &shared,
+            "studio_draw",
+            json!({"layers":["main.play"],
+                   "operations":[{"op":"rect","x":0,"y":0,"width":40,"height":40,
+                                  "color":"#112233"}]}),
+        );
+        assert!(
+            first["clipped_pixels"].as_u64().unwrap() > 0,
+            "aimed past the sprite"
+        );
+        let second = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"pixel","x":44,"y":92,"color":"#445566"}]}),
+        );
+        assert_eq!(second["bounds"], json!([44, 92, 44, 92]));
+        assert_eq!(second["clipped_pixels"], 0);
+    }
+
+    /// Artwork with gradients, dithering and hand-placed noise is composed far
+    /// faster outside the editor than one drawing operation at a time; the image
+    /// op is the door back in, and transparent pixels have to stay untouched or
+    /// every stamp would punch a rectangle through whatever it lands on.
+    #[test]
+    fn an_image_stamps_its_opaque_pixels_and_leaves_the_transparent_ones_alone() {
+        let shared = blank();
+        let before = {
+            let doc = shared.0.lock().unwrap();
+            doc.render().get_pixel(41, 31).0
+        };
+        let mut im = image::RgbaImage::new(2, 2);
+        im.put_pixel(0, 0, image::Rgba([0x11, 0x22, 0x33, 0xff]));
+        im.put_pixel(1, 0, image::Rgba([0x11, 0x22, 0x33, 0xff]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        im.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let out = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"image","x":40,"y":30,"data":base64(png.get_ref())}]}),
+        );
+        assert_eq!(out["pixels_written"], 2);
+        let doc = shared.0.lock().unwrap();
+        assert_eq!(doc.render().get_pixel(40, 30).0, [0x11, 0x22, 0x33, 0xff]);
+        assert_eq!(doc.render().get_pixel(41, 31).0, before);
+    }
+
+    /// A stroke aimed at named sprites used to lose whatever fell outside them
+    /// without a word, so a label one pixel too wide simply came out clipped.
+    #[test]
+    fn a_stroke_reports_what_fell_outside_the_sprites_it_was_aimed_at() {
+        let shared = blank();
+        let out = result(
+            &shared,
+            "studio_draw",
+            json!({
+                "layers": ["main.close"],
+                "operations": [{"op":"rect","x":260,"y":0,"width":20,"height":20,
+                                "color":"#f5c06a","fill":true}],
+            }),
+        );
+        assert!(
+            out["clipped_pixels"].as_u64().unwrap() > 0,
+            "most of that rectangle is outside a 9x9 button and the caller has to be told"
+        );
+        assert!(
+            out["pixels_written"].as_u64().unwrap() > 0,
+            "the rest still landed"
+        );
+    }
+
+    /// Checking one sprite should not cost a render of the whole skin.
+    #[test]
+    fn the_canvas_can_be_read_back_cropped() {
+        let shared = blank();
+        let dir = std::env::temp_dir().join("cranamp-crop-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("crop.png");
+        let out = result(
+            &shared,
+            "studio_canvas",
+            json!({"zoom": 2, "crop": [16, 88, 23, 18], "path": path.to_str().unwrap()}),
+        );
+        assert_eq!(
+            out["size"],
+            json!([46, 36]),
+            "the crop, at the asked-for zoom"
+        );
+        std::fs::remove_file(&path).ok();
     }
 }
