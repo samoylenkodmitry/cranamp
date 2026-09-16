@@ -2124,8 +2124,8 @@ impl Document {
                     }
                     _ => bail!("Unknown drawing operation {kind}"),
                 }
-                if let Some((sheet, box_)) = self.operation_box {
-                    if let Some(note) = crossed_into_repeat(&cells, sheet, box_, index, kind) {
+                if let Some((_, box_)) = self.operation_box {
+                    if let Some(note) = crossed_into_repeat(&cells, box_, index, kind) {
                         if crossed.len() < 8 && !crossed.iter().any(|c| c["cell"] == note["cell"]) {
                             crossed.push(note);
                         }
@@ -3440,12 +3440,10 @@ pub fn parse_color(s: &str) -> Result<[u8; 4]> {
 /// SCAN SCAN either side of it and goes looking for a bug in the tiling.
 fn crossed_into_repeat(
     cells: &[(String, usize, [u32; 4])],
-    sheet: usize,
     box_: [u32; 4],
     index: usize,
     kind: &str,
 ) -> Option<Value> {
-    let _ = sheet;
     let mut touched: BTreeSet<&str> = BTreeSet::new();
     let mut repeated: Option<(&str, usize)> = None;
     for (id, times, r) in cells {

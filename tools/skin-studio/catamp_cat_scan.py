@@ -906,6 +906,41 @@ def palettes():
 
 
 @stage
+def measured():
+    """Check every caption this skin sets against the engine's own glyph walk.
+
+    The width of a word is the one piece of the engine's arithmetic a recipe
+    has always had to reimplement, and every recipe that reimplemented it got
+    it wrong the same way -- the pen advances (cell + spacing) * scale and all
+    three computed cell * scale + spacing, which agree at scale 1 and nowhere
+    else. `studio_canvas` answers `measure` now, so the copy can be checked
+    rather than trusted, and a caption that would run off the end of its cell
+    is a failed replay rather than a skin with a repeated word across its
+    playlist header.
+    """
+    groups = {}
+    for word, face, scale, spacing in F.SET_WORDS:
+        groups.setdefault((face, scale, spacing), set()).add(word)
+    checked = 0
+    for (face, scale, spacing), words in sorted(groups.items()):
+        words = sorted(words)
+        reply = answer('studio_canvas', {'face': face, 'text_scale': scale,
+                                         'spacing': spacing,
+                                         'measure': words})
+        if reply.get('unsupported_characters'):
+            raise ValueError(f'the {face} face has no '
+                             f'{reply["unsupported_characters"]}')
+        for got in reply['measured']:
+            mine = F.text_width(got['text'], scale, face, spacing)
+            if mine != got['width']:
+                raise ValueError(
+                    f'{got["text"]!r} in {face} at {scale}x: the recipe says '
+                    f'{mine} pixels and the engine says {got["width"]}')
+            checked += 1
+    print(f'  {checked} captions measured against the engine, all agreeing')
+
+
+@stage
 def export():
     path = str(Path(__file__).resolve().parents[2]
                / 'assets/skins/Catamp Cat Scan.wsz')
@@ -914,7 +949,7 @@ def export():
 
 ORDER = ['blank', 'options', 'titlebar', 'main', 'readouts', 'transport', 'switches',
          'seek', 'sliders', 'eq', 'playlist', 'display_ink', 'palettes',
-         'export']
+         'measured', 'export']
 
 if __name__ == '__main__':
     cats.check()

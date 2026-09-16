@@ -208,7 +208,7 @@ one tool per panel, named for it.
 | `studio_history`, `studio_undo`, `studio_redo` | The shared history |
 | `studio_status`, `studio_new`, `studio_open`, `studio_project`, `studio_export`, `studio_screenshot` | The document and the window |
 
-Thirty-six things make that surface usable at speed, every one of them the
+Forty-one things make that surface usable at speed, every one of them the
 scar of a skin drawn through it:
 
 - **A `text` operation** draws a string in the editor's own 5x7 face at an
@@ -268,9 +268,9 @@ scar of a skin drawn through it:
   `surface` a stroke's coordinates mean -- `canvas`, or `atlas <sheet>` -- and so
   does every `studio_draw` result, because one pencil and one history serve both
   and a stroke aimed at the wrong one still succeeds, somewhere else.
-- **Zoom stops at 8x on purpose.** Judging a 14x25 sprite wants more than that;
-  read at 1:1 and enlarge nearest-neighbour at your end, which costs nothing and
-  has no ceiling.
+- **Zoom stopped at 8x, and that was the wrong cap.** Judging a 14x25 sprite
+  wants more than 8x, and telling the caller to enlarge at their end costs a
+  file and an image library. `magnify` replaced it; see below.
 - **A `path` on an image tool means "write it and tell me where".**
   `studio_screenshot`, `studio_states` and `studio_study` used to write the file
   *and* hand back the whole PNG as base64 -- for a full scene, 420 KB, about a
@@ -519,6 +519,50 @@ scar of a skin drawn through it:
   targets first" is the right diagnosis and leaves an MCP caller with no call
   to make; the panel is a tool, so it says `studio_targets {"solo":"main.play"}`
   as well.
+- **`studio_canvas` measures a word.** How wide a caption comes out is the one
+  piece of the engine's arithmetic a recipe always had to reimplement, and all
+  three that did -- Cardboard's, Sampler's, Cat Scan's -- reimplemented it the
+  same way wrong: the pen advances `(cell + spacing) * scale` and every copy
+  computed `cell * scale + spacing`, which agree at scale 1 and at no other
+  scale. A caption measured one way and set the other runs past the end of the
+  cell it was aimed at, and on a sheet with a repeating tile that error is
+  drawn nine times. `measure` takes a word or a list of them and answers
+  `width` and `height` -- the ink, which is what centring wants -- and
+  `advance`, where the pen ends, which is what setting a second run after the
+  first wants, from the same glyph walk that draws them. It names the
+  characters the face does not have too, which used to arrive one stroke after
+  it would have been useful.
+- **The zoom cap moved from the factor to the pixels.** Eight was the ceiling
+  everywhere, which bites hardest in the case it was meant to help: eight times
+  a 14x25 equalizer handle is a 112x200 thumbnail, and judging one wants more.
+  The documented answer was to read at 1:1 and enlarge nearest-neighbour at the
+  caller's end, which for an agent is a file, an image library and two more
+  round trips per look, in a project whose whole point is that a skin can be
+  drawn without one. `magnify` is 1..64 on every image tool and is refused when
+  the result would pass 2048 pixels a side, naming the largest that fits: a
+  crop may go as close as it likes and the whole canvas may not.
+- **Both catalogue filters take a list.** `id` and `sheet` accept one
+  case-insensitive substring or several, so "where do these six transport keys
+  live" is one call rather than six round trips for one question a recipe asks
+  once per sheet.
+- **`studio_rectangles` answers `at`: everything overlapping a box.** A flat
+  list says where each rectangle is and nothing about what is next to what,
+  which is the question an artist actually has -- *if I run a rail across this
+  band, what does it cross?* The spectrum and the volume slider sit side by
+  side rather than stacked, and Cat Scan's first main window put a steel rail
+  the width of the window through the middle of the chest; the spectrum came
+  out of a metal bar. `studio_inspect_region` could already answer it and is
+  retired and unlisted, so the only way to find the capability was to know it
+  was there.
+- **`studio_screenshot` takes a `panel` and a `crop` together.** It took both
+  and used only the panel: the crop was accepted, dropped, and answered with an
+  ordinary-looking result, which is the quiet failure `additionalProperties`
+  and the by-name refusals exist to stop. They compose now, and the crop is in
+  the panel's **own native skin coordinates** -- the ones `studio_rectangles`
+  answers in -- rather than in scene pixels, because the player may be at any
+  zoom and working that out by eye is the thing `panel` was added to stop. So
+  `{"panel":"main","crop":[14,86,146,22],"magnify":4}` is the live transport
+  row, close up, asked for in the coordinates the catalogue gave you.
 
 ### What each tool answers with
 
@@ -529,19 +573,21 @@ printing the JSON.
 | Tool | Answers |
 | --- | --- |
 | `studio_status` | the document: `path`, `revision`, `dirty`, `undo`, `redo`, `message`, `canvas`, `surface`, `sprites` (a count), `sheets` (name, width, height) and the whole `view` |
-| `studio_canvas`, `studio_atlas` | the same, without `sheets`; with `path`, `{view, path, size}` |
+| `studio_canvas`, `studio_atlas` | the same, without `sheets`; with `path`, `{view, path, size}`; with `measure`, `{measured, face, scale, spacing}` and `unsupported_characters` |
 | `studio_targets` | `{sprites, of, chosen}` -- one entry per sprite, for the whole skin whatever surface is open: `id`, `sheet`, `source`, `states`, `drawn`, and with `variants: true` also `variants` and `labels` |
-| `studio_rectangles` | `{rectangles, of}` -- one entry per **variant**: `id`, `label`, `sheet`, `rect` (where it is drawn), `source` (where it lives), `variant`, `active`, `runtime`, `hit` |
+| `studio_rectangles` | `{rectangles, of}` -- one entry per **variant**, narrowed by `at`, `sheet`, `id`, `runtime` or `hit`: `id`, `label`, `sheet`, `rect` (where it is drawn), `source` (where it lives), `variant`, `active`, `runtime`, `hit` |
 | `studio_draw` | `pixels_written`, `bounds`, `clipped_pixels`, `overwrites`, `overwrite_sample`, `unmapped_pixels`, `unsampled_pixels`, their samples, `surface`, `revision`, and when there is something to say `unsupported_characters`, `identical_variants`, `crossed_cells` and the sheet's `note` |
 | `studio_states` | the contact sheet, plus `sprite`: `id`, `sheet`, `of`, and per variant `index`, `label`, `rect`, `painted_pixels`, `differs_from_previous`, `largest_channel_change`, `same_picture_as` |
 | `studio_pixel` | every sprite under one canvas pixel and where each keeps it |
 | `studio_options` | every option, `readability` (per readout: `reads`, `ink`, `ground`, `contrast`, `readable`), and `sheets_changed` when one added or removed a sheet |
-| `studio_screenshot` | `path`/`size` or the PNG, plus `showing` (`player` or `editor`) and `player` (`x`, `y`, `zoom`) |
+| `studio_screenshot` | `path`/`size` or the PNG, plus `showing` (`player` or `editor`) and `player` (`x`, `y`, `zoom`); `panel` and `crop` compose, and `magnify` enlarges |
 | `studio_export` | `path`, `bytes`, and when there is something to say `undrawn_sprites` and `hard_to_read` |
 | `studio_layers`, `studio_history`, `studio_project` | the planes, the history, the project file |
 
 Every image tool takes `path` and answers with where it wrote rather than the
-bytes; omit it and the PNG comes back inline.
+bytes; omit it and the PNG comes back inline. Every one of them also takes
+`magnify`, 1..64, which enlarges the returned image instead of `zoom` and is
+capped at 2048 pixels a side rather than at a factor.
 
 The older tools -- `studio_state`, `studio_render`, `studio_guides`,
 `studio_paint_layers`, `studio_layout`, `studio_patch`, `studio_inspect_region`,
@@ -1367,6 +1413,11 @@ the readouts on clear strips of film with black lettering, which is how the
 *printed* parts of a film read and would have put a glaring white block in the
 middle of every dark window; the contrast checker passed it and the room did
 not. Black on a clear strip is kept for the parts the vet printed.
+
+The recipe measures its own captions against the engine before it exports: 59
+words, every one of them handed to `studio_canvas {"measure": [...]}` and
+checked against the arithmetic the recipe lays them out with, so the two cannot
+drift again in the direction they already drifted once.
 
 Five things about the classic format cost a redraw each here, and two of them
 were new:

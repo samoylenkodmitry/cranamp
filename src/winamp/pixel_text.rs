@@ -169,6 +169,41 @@ pub(crate) fn layout(
     }
     skipped
 }
+/// How wide a word comes out, from the same walk that draws it.
+///
+/// Every skin recipe so far has carried its own copy of this arithmetic --
+/// Cardboard's, Sampler's and Cat Scan's -- because the engine knew the answer
+/// and had no way to say it. All three copies had the same bug: the pen
+/// advances `(cell + spacing) * scale` and they compute `cell * scale +
+/// spacing`, which agree at scale 1 and at no other scale. A caption measured
+/// one way and set the other runs past the end of the cell it was aimed at,
+/// and on a sheet with a repeating tile in it that error is drawn nine times.
+///
+/// `width` and `height` are the ink, which is what centring a word in a cell
+/// wants; `advance` is where the pen ends, which is what setting a second run
+/// after the first one wants.
+#[cfg(not(target_os = "ios"))]
+pub(crate) fn measure(text: &str, small: bool, scale: i32, spacing: i32) -> TextExtent {
+    let cell = if small { 4 } else { 5 };
+    let (mut right, mut bottom) = (0, 0);
+    let missing = layout(text, small, scale, spacing, |dx, dy| {
+        right = right.max(dx + 1);
+        bottom = bottom.max(dy + 1);
+    });
+    TextExtent {
+        width: right,
+        height: bottom,
+        advance: text.chars().count() as i32 * (cell + spacing) * scale,
+        missing,
+    }
+}
+#[cfg(not(target_os = "ios"))]
+pub(crate) struct TextExtent {
+    pub width: i32,
+    pub height: i32,
+    pub advance: i32,
+    pub missing: Vec<char>,
+}
 /// A four-by-five small-caps face, for the cells a classic skin gives a word
 /// and no room for one.
 ///

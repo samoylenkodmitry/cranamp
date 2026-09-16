@@ -425,18 +425,35 @@ def dust(pen, x, y, w, h, *, seed=0, count=None):
 
 
 def text_width(word, scale=1, face='small', spacing=1):
-    """How wide a set word comes out. The default face is the small one,
-    because it is the one everything in this skin is set in and because a
-    measure that defaults to a different face than the thing it measures is a
-    caption that ends ten pixels past where it was aimed."""
+    """How wide a set word comes out.
+
+    Two traps, one in each direction. The default face is the small one,
+    because it is the face everything in this skin is set in and a measure that
+    defaults to a different face than the thing it measures is a caption that
+    ends ten pixels past where it was aimed. And the pen advances
+    `(cell + spacing) * scale`, not `cell * scale + spacing`: the two agree at
+    scale 1 and nowhere else, which is why three recipes carried the second
+    form without anyone noticing. `studio_canvas {"measure": [...]}` is the
+    authority now -- the engine's own glyph walk -- and `catamp_cat_scan.py`
+    checks this against it on every replay; this stays so a caption can be laid
+    out before the editor is running.
+    """
     cell = 4 if face == 'small' else 5
-    return len(word) * (cell * scale + spacing) - spacing
+    return max(0, len(word) * (cell + spacing) * scale - spacing * scale)
+
+
+# Every word this skin sets, with the face it was set in. The recipe hands the
+# list to `studio_canvas {"measure": [...]}` at the end of a replay and checks
+# the arithmetic above against the engine's own glyph walk, so the two can
+# never drift again in the direction they already drifted once.
+SET_WORDS = []
 
 
 def printed(pen, x, y, word, color=INK, *, face='small', scale=1, spacing=1):
     """Printed on a film: the field captions, the frequency scale, the words on
     the switch plates. Everything set on this viewer is set small, because
     every legend on real radiology kit is."""
+    SET_WORDS.append((word, face, scale, spacing))
     pen.ops.append(dict(op='text', x=int(x), y=int(y), text=word, color=color,
                         face=face, scale=scale, spacing=spacing))
     return pen
