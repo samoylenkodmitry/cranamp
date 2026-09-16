@@ -208,8 +208,8 @@ one tool per panel, named for it.
 | `studio_history`, `studio_undo`, `studio_redo` | The shared history |
 | `studio_status`, `studio_new`, `studio_open`, `studio_project`, `studio_export`, `studio_screenshot` | The document and the window |
 
-Fifteen things make that surface usable at speed, every one of them the scar of
-a skin drawn through it:
+Twenty-seven things make that surface usable at speed, every one of them the
+scar of a skin drawn through it:
 
 - **A `text` operation** draws a string in the editor's own 5x7 face at an
   integer scale. A classic skin is full of set labels -- `MONO`, `AUTO`,
@@ -288,11 +288,137 @@ a skin drawn through it:
 - **A refusal names the operation that caused it.** A transaction may carry ten
   thousand operations, and `No glyph for '@'` named none of them; it is now
   `operations[2] "text": ...`, and the rollback is unchanged -- all or nothing.
+- **A refusal names the field and the value it got.** Six of the view's numbers
+  were checked together and answered with the whole list of ranges --
+  `preview_playlist_height 145..522; zoom 1..8; slider frames 0..27; digit
+  0..9; playback 0..2` -- which says which ranges exist and not which field was
+  wrong or what was sent. It is `zoom is 1..8 (got 10)`, and `eq[3] is 0..27`
+  names the band.
+- **An argument a tool does not have is refused, by name.** Every schema here
+  declares `additionalProperties: false` and the server was not enforcing it,
+  so a field aimed at the wrong tool was accepted, dropped, and answered with a
+  perfectly ordinary-looking result. `presentation` belongs to `studio_canvas`;
+  sent to `studio_screenshot` it returned a capture of the editor's own window
+  described as the player's scene, and nothing in the reply said the argument
+  had gone nowhere. The refusal now says `studio_screenshot has no presentation
+  -- presentation is studio_canvas's. It takes: crop, path`. The retired tools
+  are not listed and so have no schema to check against; they are left alone.
+- **Export says what was never drawn.** Validating through the loader proves
+  the archive parses and nothing else: a skin from **New blank** with twelve of
+  its thirteen sheets untouched writes six kilobytes and answers exactly as a
+  finished one does, while the transport keys, the timer, the title bar and the
+  whole equalizer are simply invisible in the player. `undrawn_sprites` names
+  them, and `studio_targets` carries a `drawn` flag per sprite, which is the
+  same question asked halfway through. Both are reports and never refusals -- a
+  skin with no channel lamps is a choice somebody may have made.
+- **Export says what cannot be read.** Studio knew both halves of this from the
+  start and never put them together: the runtime rectangles say where Cranamp
+  writes, `text.bmp` says what colour the display ink will be, and PLEDIT.TXT
+  says what colour the playlist text will be. A title one shade off its own
+  background is the mistake that actually ships, and the only way to catch it
+  was to render the player and squint. `studio_options` answers `readability`
+  -- every readout, its ink, the artwork under it and the contrast between them
+  -- and export repeats anything below three to one. Four and a half is
+  comfortable at this size; below two is a readout that is not there. Writing
+  this found a bug in the checker before it found one in a skin: the playlist
+  footer's two readouts are the one place in that window that does *not* use
+  PLEDIT.TXT, and checking them against `Normal` reported dark-on-dark for a
+  footer that reads perfectly.
+- **`variants` comes with `labels` saying what each one is.** Four rectangles
+  for a switch say nothing about which is off and which is pressed; twenty-eight
+  for a slider say nothing about which end of the travel frame 0 is. Both were
+  answerable only by reading `mapping.rs` and the player's sprite constants, and
+  guessing wrong paints the pressed art into the released cell, where nothing
+  reports it because nothing is wrong with the drawing. The labels are on the
+  rectangles too, so the canvas hint reads `play · pressed` rather than
+  `play:1`. Three of them are worth reading before drawing a skin: the classic
+  playlist header keeps two rows and **Cranamp draws the lower one always** --
+  there is no unfocused playlist, so art in the upper row is never seen by
+  anybody; the main and equalizer titles are the other way round, focused
+  first; and `balance.track` runs frame 0 hard left to frame 27 hard right
+  rather than out from the centre the way classic Winamp does. Catamp Sampler
+  had its whole playlist header in the row nobody sees until these existed.
+- **A draw reports `identical_variants`: variants that came out the same
+  picture.** A recipe that draws twenty-eight slider frames and forgets to
+  offset each by its own y puts all of them on frame 0. Every other report says
+  it worked -- `bounds` is sensible, nothing is clipped, nothing is unsampled,
+  and `overwrites` is a canvas-to-source measure that does not apply to a sheet
+  open on its own. The only thing wrong is that twenty-seven frames are now the
+  same picture, so that is what is said, in the result and in the status line.
+  An empty cell is not a duplicate but an unpainted one, so fully transparent
+  variants are left out; otherwise the first stroke on a blank sheet reports
+  every sprite on it. It is silent in ordinary work, and it catches the other
+  half of the same defect too: a pressed state that came out identical to its
+  released one.
+- **`studio_states` also answers the numbers.** A contact sheet cannot show
+  that two cells differ by four pixels, or by none. Each variant now reports
+  what it is, how many pixels it differs from the one before it by, the largest
+  channel change between them, and which earlier variant it is a copy of; a
+  repeated cell is marked `4 = 1` on the sheet itself. A pressed felt patch
+  eleven per cent darker than its released one looks pressed in the code and
+  identical on screen, and this is the only thing that says so.
+- **A sheet with something surprising about it says so when it is opened.**
+  `text.bmp` is not a glyph sheet, `plbg.bmp` is drawn one track row every 11
+  pixels and tiles from the top above 203, `plselection.bmp` is one row of the
+  same height, and most of `titlebar.bmp` is shade-mode art Cranamp never
+  draws. The notes existed and arrived in a *draw* result, which is one stroke
+  after they would have been useful; they are in the status line the moment
+  `studio_atlas` opens the sheet.
+- **An option that adds a drawing surface names it.** `playlist_background`,
+  `playlist_selection` and `eq_handles` are not settings, they create or remove
+  a sheet, and turning one on used to answer with the option set and no mention
+  of the 154x50 surface that had just appeared or what its cells are.
+  `sheets_changed` says what arrived, how big it is, and what it holds --
+  including that eleven independent handles cost the equalizer fourteen pixels
+  of travel.
+- **`studio_screenshot` says what it captured and can frame the player.** The
+  window shows either the editor or the live player and this call captures
+  whichever it is; the description promised the player's scene and the result
+  said nothing about which one arrived. It now answers `showing` and where the
+  player sits, takes `presentation: true` to put the window into the live stack
+  first, and takes `panel` -- `main`, `equalizer`, `playlist`, `all` -- to crop
+  to one window in the player's own coordinates. Cutting one window out of a
+  capture used to mean measuring it by eye against a full-scene PNG, and
+  measuring it again after every resize, because the stack is centred in
+  whatever room it has.
+- **`studio_rectangles` answers `rectangles`, not `guides`.** A guide is what
+  the editor calls its overlay; a caller asked for rectangles and got a key
+  named after the implementation. Response shapes are listed under **What each
+  tool answers with** below, which is where the two catalogue tools' different
+  shapes -- one entry per sprite, one entry per variant -- stop being a
+  surprise.
+- **`studio_rectangles` also answers `hit`: the controls with no sprite.** Every
+  button in a classic skin is a sprite and says where it is, except eleven of
+  them: the playlist footer's five menus (`ADD`, `REM`, `SEL`, `MISC`, `LIST`)
+  and its six transport keys are rectangles Cranamp hit-tests and draws nothing
+  for, and the artist has to put a button in each. Nothing in Studio said
+  where, so the only way to find out was to read the player's source -- and
+  drawing a footer without them puts a cat across the elapsed-time readout, or
+  a button a pixel out of step with its own hit area. They are guides now, with
+  `hit: true`, alongside the main window's skin-chooser corner; they move with
+  the playlist's height like every other footer rectangle, the desktop canvas
+  outlines the one under the pointer, and the touch layout's **Parts** drawer
+  lists them with their coordinates because there is no pointer there to hover
+  one with. Selecting one clips painting to it, which is the only handle a
+  rectangle without a sprite has.
 - **A character the 5x7 face does not have is skipped, not fatal.** It comes
   back in `unsupported_characters` alongside the pixels that did land. A
   seven-hundred-operation sheet used to die on one `@` and roll back everything
   before it, which is a poor trade for a character that could simply be absent.
   The set the face does have is named on the `text` field itself.
+- **`face: "small"` is a second face, four by five.** A classic skin has cells
+  that need a word and have no room for one: the mono lamp is 27 pixels wide,
+  the stereo lamp 29, an equalizer band caption 14, a playlist footer button
+  28. The 5x7 face runs off the end of all of them, so every skin that wanted a
+  word there carried its own glyph table in its build script -- Cardboard's
+  seven letters, Sampler's thirty-odd, the same table written twice -- which
+  meant the capability existed for a skin with a Python recipe and for nobody
+  drawing by hand, on Android or in a browser. Five pixels tall has no room for
+  a descender, so it is a small-caps face and `a` is drawn as `A` rather than
+  skipped. `M`, `H` and `W` are the same four columns with the bar in a
+  different place, so M fills the two rows under its apex and W the two above
+  its point; with one bar each, `MISC` came out of the playlist footer reading
+  `HISC`.
 - **`grain` and `opacity` on any shape.** Paper is not flat, and a flat
   rectangle of kraft reads as plastic; light leaking out of a box has to be
   added to the picture already inside it. Both were being composed in an image
@@ -329,6 +455,29 @@ a skin drawn through it:
   `text.bmp` is read for one colour and never drawn, which is a day's work to
   discover by hand.
 
+### What each tool answers with
+
+The two catalogue tools are different shapes on purpose: one entry per sprite,
+one entry per variant. Nothing said so, and both keys had to be discovered by
+printing the JSON.
+
+| Tool | Answers |
+| --- | --- |
+| `studio_status` | the document: `path`, `revision`, `dirty`, `undo`, `redo`, `message`, `canvas`, `surface`, `sprites` (a count), `sheets` (name, width, height) and the whole `view` |
+| `studio_canvas`, `studio_atlas` | the same, without `sheets`; with `path`, `{view, path, size}` |
+| `studio_targets` | `{sprites, of, chosen}` -- one entry per sprite: `id`, `sheet`, `source`, `states`, `drawn`, and with `variants: true` also `variants` and `labels` |
+| `studio_rectangles` | `{rectangles, of}` -- one entry per **variant**: `id`, `label`, `sheet`, `rect` (where it is drawn), `source` (where it lives), `variant`, `active`, `runtime`, `hit` |
+| `studio_draw` | `pixels_written`, `bounds`, `clipped_pixels`, `overwrites`, `overwrite_sample`, `unmapped_pixels`, `unsampled_pixels`, their samples, `surface`, `revision`, and when there is something to say `unsupported_characters`, `identical_variants` and the sheet's `note` |
+| `studio_states` | the contact sheet, plus `sprite`: `id`, `sheet`, `of`, and per variant `index`, `label`, `rect`, `painted_pixels`, `differs_from_previous`, `largest_channel_change`, `same_picture_as` |
+| `studio_pixel` | every sprite under one canvas pixel and where each keeps it |
+| `studio_options` | every option, `readability` (per readout: `reads`, `ink`, `ground`, `contrast`, `readable`), and `sheets_changed` when one added or removed a sheet |
+| `studio_screenshot` | `path`/`size` or the PNG, plus `showing` (`player` or `editor`) and `player` (`x`, `y`, `zoom`) |
+| `studio_export` | `path`, `bytes`, and when there is something to say `undrawn_sprites` and `hard_to_read` |
+| `studio_layers`, `studio_history`, `studio_project` | the planes, the history, the project file |
+
+Every image tool takes `path` and answers with where it wrote rather than the
+bytes; omit it and the PNG comes back inline.
+
 The older tools -- `studio_state`, `studio_render`, `studio_guides`,
 `studio_paint_layers`, `studio_layout`, `studio_patch`, `studio_inspect_region`,
 the one-off skin switches and the palette pair -- still answer, so existing
@@ -355,15 +504,20 @@ Two things are not everywhere, and neither is new:
   live player itself.
 
 The touch layout -- under 1140x820 logical points -- has Files, Tools, Layers,
-Parts and States, and no single-sheet panel, so `studio_atlas`'s territory is
-desktop-layout only. A laptop browser is over that threshold and gets the full
-desktop layout, Skin atlases included.
+Parts, States and Sheets. **Sheets** is the one-BMP detour, with **← The whole
+skin** at the top of it the way the desktop's sheet list has: a skin started
+from **New blank** is drawn sheet by sheet, and until that drawer existed this
+layout could start one and had no way to finish it. A laptop browser is over
+the threshold and gets the full desktop layout instead.
 
 Anything the engine grows has to appear in both panels or it is invisible on the
 two platforms that have no MCP to reach it with instead. **PAPER GRAIN** and
 **STRENGTH** are in desktop Drawing tools and in the touch Tools drawer, and
 both write the same view fields, so a value set in one shows up selected in the
-other. Verified by building the web bundle, serving `dist/`, opening
+other. So are **GRADIENT**, the glass lens' **BEVEL** and **REFRACTION**, and
+the **Text** brush, which spent longer than any of them on the wrong side of
+that rule: palette ramps, a bevel and a set label were engine capabilities from
+the day they landed and no hand could ask for any of the three. Verified by building the web bundle, serving `dist/`, opening
 Settings → Open Skin Studio in a browser at both layout sizes, and dragging a
 coarse-grain stroke at half strength across the main window: 194 pixels, no
 MCP, no Python. The same session also confirmed the playlist-fill report reads
@@ -389,10 +543,23 @@ drawable.
 ## Touch controls (Android and web)
 
 - **Draw / Pan** switches a drag between painting and moving the canvas.
+- **Parts → Show part rectangles** outlines the sprites you have selected, the
+  paint clip, the rectangles the player writes over, and the eleven it
+  hit-tests and draws nothing for, and lists those eleven with their
+  coordinates. It used to set a flag nothing on this layout drew: the overlay
+  lives on the desktop canvas and the touch canvas is a bitmap with a pointer
+  surface over it, so the switch was on and nothing happened. Outlining all
+  ninety-odd cells is not the answer either -- the desktop stopped doing that
+  because the hairlines buried the picture they pointed at, and there is no
+  pointer here to hover one with.
 - **−/+ zoom** changes the integer number of screen pixels per skin pixel.
 - **Layers** selects, adds, locks or hides painting planes. **Parts** selects any
   combination of sprite targets, shows their rectangles, and enables all-state edits.
-- **Tools** selects brushes, width, fill, preset colors or an exact HEX color.
+- **Tools** selects brushes, width, fill, preset colors or an exact HEX color,
+  and carries the same gradient, glass bevel and refraction, and text brush
+  controls the desktop panel does.
+- **Sheets** opens one BMP on its own, with **← The whole skin** at the top of
+  the list.
 - **States** previews pressed/inactive controls and all slider frames, and lists history.
 - **Files** opens WSZ/CSTUDIO files through Android's picker, exports either format,
   saves/restores a layered draft, or applies the edited skin to the player.
@@ -435,9 +602,19 @@ Numbers on the canvas match the list. Select a cell to clip atlas painting to it
 In the assembled view, selecting a sprite targets that part. **Clear paint clip**
 restores unrestricted painting. Guides never enter preview artwork or WSZ export.
 
-MCP: `studio_rectangles` lists them, narrowed by `sheet`, `id` or `runtime`;
-`{"select":"main.play#1"}` selects a specific atlas cell. `studio_canvas`
-carries `guides` and a nullable `clip`.
+A third kind of rectangle has no sprite and no source cell at all: the eleven
+controls Cranamp hit-tests in the playlist footer -- `ADD`, `REM`, `SEL`,
+`MISC`, `LIST` and the six transport keys -- and the main window's skin-chooser
+corner. The artist has to draw a button in each, and nothing in the editor used
+to say where they were. They are guides now, with `hit: true`, so the canvas
+outlines the one under the pointer and names it, and the touch layout's
+**Parts** drawer lists them with their coordinates. They move with the
+playlist's height like every other footer rectangle. Selecting one clips
+painting to it rather than targeting a sprite that does not exist.
+
+MCP: `studio_rectangles` answers `rectangles`, narrowed by `sheet`, `id`,
+`runtime` or `hit`; `{"select":"main.play#1"}` selects a specific atlas cell.
+`studio_canvas` carries `guides` and a nullable `clip`.
 For example, the pressed play cell is `cbuttons.bmp [23,18,23,18]`; volume has
 28 separate track-frame rectangles. Runtime reservations remain visible so
 illustrations can be placed around the player-drawn content.
@@ -685,8 +862,9 @@ against the current Silverplay WSZ, including transparent source pixels and all
 
 ## Pixel craft tools and material studies
 
-**Drawing tools** now includes native pencil, line, rectangle and ellipse brushes,
-solid widths, filled shapes and reflection about the canvas axes. Shapes preview
+**Drawing tools** now includes native pencil, line, rectangle, ellipse, curve,
+fur, glass, stamp and **text** brushes, solid widths, filled shapes,
+**gradients** and reflection about the canvas axes. Shapes preview
 while dragging and commit one shared Human history transaction when released.
 Cancel restores the original pixels. MCP paths support line, quadratic and cubic
 segments rasterized to solid native pixels; palette ramps select exact colors.
@@ -726,6 +904,33 @@ history, archive or art. Example:
 
 Earlier material studies were drawing exercises, not complete skins. Native
 pixel checks prove sampling and state coverage, not illustration quality.
+
+### Three things the engine could do and no hand could ask for
+
+The rule is that anything the engine grows has to appear in both panels or it
+is invisible on the two platforms with no MCP to reach it with instead. Three
+capabilities had been on the wrong side of it since the day they landed, and
+every one of them is the difference between artwork and a flat fill:
+
+- **GRADIENT.** The engine has taken exact palette ramps from the start and
+  neither panel could ask for one, so every gradient in every skin so far came
+  out of a Python recipe -- and a flat rectangle was the only thing a person
+  drawing by hand could make. **Off / Down / Across** with a second colour
+  beside it: a filled shape runs from the brush colour to that one, along the
+  axis of the drag. Both panels have it; `studio_canvas` takes `ramp_to` and
+  `ramp_axis`, and an operation's own `ramp` still overrides everything.
+- **BEVEL and REFRACTION.** The glass lens has been 1..128 and 0..32 over MCP
+  and fixed at a drag-derived bevel and a refraction of four for a hand stroke,
+  so a person got exactly one glass. Both are pills now, with **Drag** keeping
+  the old behaviour of taking the bevel from the height of the gesture.
+- **The text brush.** `text` was an operation with no brush at all, which meant
+  every set label in a classic skin -- `MONO`, `AUTO`, `PRESETS`, the wordmark,
+  the eleven equalizer band captions -- was reachable only from a script. Pick
+  **Text**, type the word, choose the 5x7 face or the 4x5 small-caps one and a
+  scale, and click the canvas. It is a shape like any other, so it takes the
+  brush colour, the mirrors, the masks, the grain and the gradient with it, and
+  one glyph walk serves both the brush and the operation because two would
+  drift.
 
 **Lock transparent pixels** protects empty source pixels while shading. **Mask
 picked color** locks painting to the current brush color; choose the replacement
@@ -916,3 +1121,98 @@ Verification: `studio_export` validates through Cranamp's own loader, and
 `check_native_frames.py` swept all 112 live GPU states -- active and inactive,
 released and pressed, all 28 slider frames -- with no nonuniform 2x2
 source-pixel block, so every sprite samples at exact native pixels.
+
+## Catamp Sampler -- a skin sewn rather than built
+
+`assets/skins/Catamp Sampler.wsz` is the second Catamp drawn from **New blank**
+through this editor, and it is one deterministic recipe rather than a stroke
+journal:
+
+```sh
+python3 tools/skin-studio/catamp_sampler.py             # every sheet, then export
+python3 tools/skin-studio/catamp_sampler.py main eq     # one stage at a time
+```
+
+- `sampler_cloth.py` -- linen, indigo-dyed cloth, felt, ribbon, twisted cord,
+  running and blanket and cross stitch, hems, patchwork seams, sewn buttons,
+  and the counted chart for a timer digit.
+- `sampler_cats.py` -- the cats. Two ways of making one, and the size decides
+  which.
+- `catamp_sampler.py` -- one stage per sheet, each drawn in `studio_atlas` at
+  that sheet's own native coordinates.
+
+Every other Catamp is made of something hard -- glass, silver, crystal, kraft
+board -- and every one of them has a light to glint off. Cloth has none, so
+depth comes from three things and only those: a seam casts one pixel of shadow
+and the thread beside it catches one of light; a raised thing sits on its own
+cast shadow and a pressed thing goes darker all over, because it is now level
+with the cloth and in the cloth's shadow; and a run of floss is two values,
+never one, because the twist turns over along its length. The grammar is that
+no edge is a plain line. A hem is a running stitch, a felt patch is
+blanket-stitched down, a patchwork join is a seam with topstitching either
+side -- which is what makes eleven different objects read as one piece of
+sewing.
+
+Three of the skin's controls say something with the twenty-eight frames a
+classic slider track has and a handle cannot:
+
+- **Volume is a sampler band being worked.** Sixteen squares of an evenweave
+  chart; the frame says how many have been stitched, and the unworked ones are
+  four holes of the weave with nothing in them.
+- **Balance is the same band worked outward from the middle**, so centre reads
+  as centre with no mark to say so.
+- **An equalizer band is worked from its handle down to the bottom of the
+  groove**, so a boosted band has more colour in it than a cut one -- and the
+  colour runs from cool at full cut to warm at full boost.
+
+The seek bar is a length of yarn couched to the cloth with a stitch every eight
+pixels, and the handle is the ball it came off, with its loose end trailing
+behind it: the part of the thread that has been unwound is the part that has
+been played.
+
+The cats are made two ways, and the size decides which. A big cat is
+*embroidered*: a filled silhouette and then thirty or forty tapered strokes
+laid along the form in four values, which is what long-and-short satin stitch
+is, and which `tuft` -- a curve narrowing to a single-pixel tip -- is exactly
+one stitch of. The construction points are fractional, so the same cat is built
+at two sizes with no resample anywhere. A small cat is *counted*: a
+hand-authored grid checked against its cell and its palette before an operation
+is emitted. The embroidered construction was tried at handle size first and does
+not survive it -- at fourteen pixels the ears fall outside the cell and the face
+has nowhere to sit but the top row. Below about twenty pixels there is no stitch
+left to taper.
+
+The equalizer turns on **Unique EQ art**, so the eleven bands get handles of
+their own rather than the classic shared head: one kitten grid relit by eleven
+coats and eleven collar colours, which costs no more than one kitten and gives
+a litter instead of a pattern. A twelfth cat watches them from the gap the
+preamp leaves, and the mother of the whole thing sits in the main window's left
+margin watching the spectrum.
+
+Five things about the classic format cost a redraw each here, and three of them
+were already known:
+
+- **A slider frame is drawn at its own y, not at the sheet's.** Twenty-eight
+  frames of cross stitch all landed on frame 0, which is a band that never
+  changes and a mistake with no error to report it: the ink went somewhere
+  legal.
+- **The playlist footer's eleven buttons have no sprites.** They are
+  `studio_rectangles {"hit":true}` now; before that they were a hard-coded
+  table copied from the player's source, and a sleeping cat went straight over
+  the elapsed-time readout.
+- **A dyed slider on dyed cloth is a slider; a pale one on pale linen is a
+  texture.** The first volume band was worked straight onto the linen and the
+  whole control disappeared into the ground it was sewn to.
+- **A pressed felt patch has to change value, not just its bevel.** Flipping
+  the one-pixel highlight and shadow is two pixels of difference across a
+  23x18 button, which is no difference at all; a pressed patch is level with
+  the cloth and in its shadow, so it goes darker all over.
+- **The playlist header's two rows are the opposite way round from the main
+  window's.** Cranamp draws the lower one always -- there is no unfocused
+  playlist -- so the whole worked header sat in the row nobody sees, and both
+  rows look right on their own. `studio_targets` labels say which is which now;
+  before they did, nothing in the editor did.
+
+Verification: `studio_export` validates through Cranamp's own loader, and the
+whole recipe replays from **New blank** into an empty document in fifteen
+seconds with no image library and no external asset.

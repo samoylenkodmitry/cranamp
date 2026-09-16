@@ -147,6 +147,8 @@ pub fn MobileSkinStudio(
     // The opening zoom fits the skin to whatever surface this is, once.
     let fitted = cranpose_core::rememberMutableStateOf(|| false);
     let color_field = cranpose_core::remember(|| TextFieldState::new("#ffffff")).with(|f| *f);
+    let word_field = cranpose_core::remember(|| TextFieldState::new("CATAMP")).with(|f| *f);
+    let ramp_field = cranpose_core::remember(|| TextFieldState::new("#000000")).with(|f| *f);
     let pan = cranpose_core::rememberMutableStateOf(|| [0f32; 2]);
     let pending_export = cranpose_core::rememberMutableStateOf(|| None::<Vec<u8>>);
     let poll = shared.clone();
@@ -352,11 +354,27 @@ pub fn MobileSkinStudio(
                                 let z = c.lock().unwrap().view.zoom;
                                 state(&c, json!({"zoom":(z+1).min(8)}));
                             });
-                            let c = d.clone();
-                            TouchButton("Whole skin".into(), col, false, move || {
-                                state(&c, json!({"panel":"canvas"}));
-                                pan.set([0., 0.]);
-                            });
+                            // The one-BMP detour, and the way back, which is
+                            // the first row of the drawer the way it is the
+                            // first row of the desktop's sheet list. A skin
+                            // started from New blank is drawn sheet by sheet,
+                            // and until this existed the touch layout could
+                            // start one and had no way to finish it.
+                            TouchButton(
+                                "Sheets".into(),
+                                col,
+                                drawer.get() == "Sheets",
+                                move || {
+                                    drawer.set(
+                                        if drawer.get_non_reactive() == "Sheets" {
+                                            ""
+                                        } else {
+                                            "Sheets"
+                                        }
+                                        .into(),
+                                    )
+                                },
+                            );
                             TouchButton("Parts".into(), col, drawer.get() == "Parts", move || {
                                 drawer.set(
                                     if drawer.get_non_reactive() == "Parts" {
@@ -387,6 +405,43 @@ pub fn MobileSkinStudio(
                     pan.get()[1].clamp(0., limits[1]),
                 ];
                 let d = shared.clone();
+                // Show part rectangles used to set a flag nothing on this
+                // layout drew: the overlay lives on the desktop canvas, and the
+                // touch canvas is a bitmap with a pointer surface over it. So
+                // the switch was on, and nothing happened.
+                //
+                // Outlining every cell is not the answer either -- the desktop
+                // stopped doing that because ninety-three hairlines buried the
+                // picture they were meant to point at, and there is no pointer
+                // here to hover one with. What is left is the set a person has
+                // actually asked about: the parts they selected, the clip they
+                // set, the rectangles the player writes over, and the eleven it
+                // hit-tests and draws nothing for.
+                let overlay: Vec<([u32; 4], Color)> = if view.guides {
+                    let doc = shared.lock().unwrap();
+                    let chosen = doc.view.layers.clone();
+                    let mut rects: Vec<([u32; 4], Color)> = doc
+                        .guides()
+                        .into_iter()
+                        .filter_map(|g| {
+                            if g.runtime {
+                                Some((g.rect, Color(0.95, 0.45, 0.68, 0.9)))
+                            } else if g.hit {
+                                Some((g.rect, Color(0.98, 0.70, 0.30, 0.95)))
+                            } else if chosen.iter().any(|c| *c == g.id) {
+                                Some((g.rect, Color(0.35, 0.85, 0.95, 0.95)))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if let Some(clip) = doc.view.clip {
+                        rects.push((clip, Color(1.0, 0.85, 0.35, 1.0)));
+                    }
+                    rects
+                } else {
+                    Vec::new()
+                };
                 Box(
                     Modifier::empty()
                         .absolute_offset(0., body_y)
@@ -418,6 +473,29 @@ pub fn MobileSkinStudio(
                             1.,
                             None,
                         );
+                        for (rect, color) in &overlay {
+                            let x = rect[0] as f32 * scale - offset[0] * scale;
+                            let y = rect[1] as f32 * scale - offset[1] * scale;
+                            let (rw, rh) = (rect[2] as f32 * scale, rect[3] as f32 * scale);
+                            // One-pixel edges rather than a filled rectangle:
+                            // the artwork underneath is the thing being looked
+                            // at, and a wash over it hides what it points at.
+                            for (dx, dy, bw, bh) in [
+                                (0., 0., rw, 1.),
+                                (0., rh - 1., rw, 1.),
+                                (0., 0., 1., rh),
+                                (rw - 1., 0., 1., rh),
+                            ] {
+                                Box(
+                                    Modifier::empty()
+                                        .absolute_offset(x + dx, y + dy)
+                                        .size_points(bw.max(1.), bh.max(1.))
+                                        .background(*color),
+                                    BoxSpec::default(),
+                                    || {},
+                                );
+                            }
+                        }
                         Box(
                             Modifier::empty().fill_max_size().pointer_input(
                                 (view.panel.clone(), view.zoom, pan_mode.get()),
@@ -635,11 +713,116 @@ pub fn MobileSkinStudio(
                                 });
                                 for brush in [
                                     "pencil", "line", "curve", "tuft", "rect", "ellipse", "lift",
-                                    "stamp", "glass",
+                                    "stamp", "glass", "text",
                                 ] {
                                     let c = d.clone();
                                     TouchButton(brush.into(), w, view.brush == brush, move || {
                                         state(&c, json!({"brush":brush}))
+                                    });
+                                }
+                                // The controls a brush needs and no other does.
+                                // Both of the glass lens' numbers were fixed
+                                // for a hand stroke and 1..128 and 0..32 over
+                                // MCP, and the text brush has two faces because
+                                // a classic skin has cells the 5x7 one runs off
+                                // the end of.
+                                if view.brush == "glass" {
+                                    for (amount, label) in [
+                                        (0u32, "Bevel from drag"),
+                                        (4, "Bevel 4px"),
+                                        (8, "Bevel 8px"),
+                                        (16, "Bevel 16px"),
+                                        (32, "Bevel 32px"),
+                                    ] {
+                                        let c = d.clone();
+                                        TouchButton(
+                                            label.into(),
+                                            w,
+                                            view.bevel == amount,
+                                            move || state(&c, json!({ "bevel": amount })),
+                                        );
+                                    }
+                                    for amount in [0u32, 2, 4, 8, 16] {
+                                        let c = d.clone();
+                                        TouchButton(
+                                            format!("Refraction {amount}px"),
+                                            w,
+                                            view.refraction == amount,
+                                            move || state(&c, json!({ "refraction": amount })),
+                                        );
+                                    }
+                                } else if view.brush == "text" {
+                                    cranpose_ui::BasicTextField(
+                                        word_field,
+                                        Modifier::empty()
+                                            .fill_max_width()
+                                            .height(44.)
+                                            .padding(8.)
+                                            .background(BG),
+                                        text_style(14., FG),
+                                    );
+                                    let c = d.clone();
+                                    TouchButton(
+                                        format!("Write “{}”", view.text),
+                                        w,
+                                        false,
+                                        move || state(&c, json!({ "text": word_field.text() })),
+                                    );
+                                    for (face, label) in
+                                        [("5x7", "Face 5×7"), ("small", "Face 4×5 small caps")]
+                                    {
+                                        let c = d.clone();
+                                        TouchButton(
+                                            label.into(),
+                                            w,
+                                            view.face == face,
+                                            move || state(&c, json!({ "face": face })),
+                                        );
+                                    }
+                                    for scale in [1u32, 2, 3] {
+                                        let c = d.clone();
+                                        TouchButton(
+                                            format!("Text {scale}×"),
+                                            w,
+                                            view.text_scale == scale,
+                                            move || state(&c, json!({ "text_scale": scale })),
+                                        );
+                                    }
+                                }
+                                // A gradient. The engine has taken exact
+                                // palette ramps from the start and neither
+                                // panel could ask for one, so a flat rectangle
+                                // was the only thing a hand could draw here.
+                                cranpose_ui::BasicTextField(
+                                    ramp_field,
+                                    Modifier::empty()
+                                        .fill_max_width()
+                                        .height(44.)
+                                        .padding(8.)
+                                        .background(BG),
+                                    text_style(14., FG),
+                                );
+                                for (axis, label) in [
+                                    ("", "Gradient off"),
+                                    ("down", "Gradient down"),
+                                    ("across", "Gradient across"),
+                                ] {
+                                    let c = d.clone();
+                                    let on = if axis.is_empty() {
+                                        view.ramp_to.is_none()
+                                    } else {
+                                        view.ramp_to.is_some() && view.ramp_axis == axis
+                                    };
+                                    TouchButton(label.into(), w, on, move || {
+                                        if axis.is_empty() {
+                                            state(&c, json!({"ramp_to":serde_json::Value::Null}))
+                                        } else {
+                                            state(
+                                                &c,
+                                                json!({"ramp_to":ramp_field.text(),
+                                                       "ramp_axis":axis}),
+                                            )
+                                        }
                                     });
                                 }
                                 for color in [
@@ -758,6 +941,36 @@ pub fn MobileSkinStudio(
                                     );
                                 }
                             }
+                            "Sheets" => {
+                                let c = d.clone();
+                                let whole = view.panel != "atlas";
+                                TouchButton("← The whole skin".into(), w, whole, move || {
+                                    state(&c, json!({"panel":"canvas","layer":"auto"}));
+                                    pan.set([0., 0.]);
+                                });
+                                for (name, sw, sh) in d.lock().unwrap().sheets() {
+                                    let c = d.clone();
+                                    let open = !whole && view.sheet == name;
+                                    let sheet = name.clone();
+                                    TouchButton(
+                                        format!("{name} · {sw}×{sh}"),
+                                        w,
+                                        open,
+                                        move || {
+                                            // A sheet is small; opening one at
+                                            // whatever zoom the whole skin was
+                                            // at leaves a postage stamp in the
+                                            // corner.
+                                            state(
+                                                &c,
+                                                json!({"panel":"atlas","sheet":sheet,
+                                                       "layer":"sheet","zoom":2}),
+                                            );
+                                            pan.set([0., 0.]);
+                                        },
+                                    );
+                                }
+                            }
                             "Parts" => {
                                 let c = d.clone();
                                 let all = view.all_states;
@@ -766,9 +979,17 @@ pub fn MobileSkinStudio(
                                 });
                                 let c = d.clone();
                                 let guides = view.guides;
-                                TouchButton("Show part rectangles".into(), w, guides, move || {
-                                    state(&c, json!({"guides":!guides}))
-                                });
+                                TouchButton(
+                                    if guides {
+                                        "Rectangles: selected, runtime, hit areas"
+                                    } else {
+                                        "Show part rectangles"
+                                    }
+                                    .into(),
+                                    w,
+                                    guides,
+                                    move || state(&c, json!({"guides":!guides})),
+                                );
                                 let c = d.clone();
                                 TouchButton(
                                     "Auto · topmost".into(),
@@ -789,6 +1010,41 @@ pub fn MobileSkinStudio(
                                         }
                                         state(&c, json!({"layers":targets}));
                                     });
+                                }
+                                // Controls the player hit-tests and draws
+                                // nothing for. They have no sprite, so they
+                                // cannot appear in the list above, and there is
+                                // no pointer here to hover one with -- so they
+                                // are listed with the rectangle they occupy.
+                                // Tapping one clips painting to it, which is
+                                // the only handle a rectangle without a sprite
+                                // has.
+                                let targets: Vec<_> = d
+                                    .lock()
+                                    .unwrap()
+                                    .guides()
+                                    .into_iter()
+                                    .filter(|g| g.hit)
+                                    .collect();
+                                for target in targets {
+                                    let c = d.clone();
+                                    let id = target.id.clone();
+                                    let r = target.rect;
+                                    TouchButton(
+                                        format!(
+                                            "{} · {},{} {}x{}",
+                                            target.label, r[0], r[1], r[2], r[3]
+                                        ),
+                                        w,
+                                        view.clip == Some(r),
+                                        move || {
+                                            let mut doc = c.lock().unwrap();
+                                            if let Err(e) = doc.select_guide(&id) {
+                                                doc.message = e.to_string();
+                                                doc.revision += 1;
+                                            }
+                                        },
+                                    );
                                 }
                             }
                             "States" => {

@@ -262,8 +262,16 @@ fn default_display_text_color(viscolor: VisColor) -> [u8; 4] {
 }
 
 fn sample_text_bitmap_color(bitmap: &ImageBitmap) -> Option<[u8; 4]> {
-    let pixels = bitmap.pixels();
-    let total_pixels = (bitmap.width() as usize).saturating_mul(bitmap.height() as usize);
+    let total = (bitmap.width() as usize).saturating_mul(bitmap.height() as usize);
+    sample_display_ink(bitmap.pixels(), total)
+}
+/// The colour the player will write its readouts in, from `text.bmp`'s pixels.
+///
+/// Exposed so the Skin Studio can ask the same question the loader asks, of a
+/// sheet it has not exported yet. Two copies of this rule would drift, and the
+/// one place it matters -- whether a title can be read on the artwork behind it
+/// -- is answered wrong by the copy that is behind.
+pub(crate) fn sample_display_ink(pixels: &[u8], total_pixels: usize) -> Option<[u8; 4]> {
     let mut opaque_pixels = 0usize;
     let mut counts: HashMap<[u8; 3], usize> = HashMap::new();
 

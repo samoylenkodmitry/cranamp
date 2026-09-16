@@ -9,7 +9,14 @@ pub struct Guide {
     pub source: [u32; 4],
     pub variant: usize,
     pub active: bool,
+    /// A live readout: Cranamp writes over these pixels, and they have no
+    /// source cell to paint.
     pub runtime: bool,
+    /// A control Cranamp hit-tests but draws nothing for. The classic playlist
+    /// footer's five menus and six transport keys are the whole of this: the
+    /// artist has to draw a button there, and until these rectangles existed
+    /// the only way to find out where was to read the player's source.
+    pub hit: bool,
 }
 pub fn intersection(a: [u32; 4], b: [u32; 4]) -> Option<[u32; 4]> {
     let x = a[0].max(b[0]);
