@@ -225,6 +225,15 @@ pub struct Document {
     /// The sheet box one operation wrote, so a transaction of ten thousand
     /// can say which one crossed out of the cell it was aimed at.
     operation_box: Option<(usize, [u32; 4])>,
+    /// Where this operation blended with the transparency key.
+    ///
+    /// `#ff00ff` erases everywhere else in this engine, and `opacity`, an
+    /// `image`'s alpha and `material: "glass"` all read it as a colour: a warm
+    /// glow laid into a cleared sprite cell comes out as brown mud and a glass
+    /// jar drawn in one comes out hot pink, the cell quietly stops being
+    /// transparent, and every other report is clean. Nobody has ever wanted a
+    /// colour blended toward magenta.
+    keyed_blend: Vec<[i32; 2]>,
     overwrites: usize,
     overwrite_note: Option<String>,
 }
@@ -281,6 +290,7 @@ impl Document {
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
             operation_box: None,
+            keyed_blend: Vec::new(),
             preview: None,
             overwrites: 0,
             overwrite_note: None,
@@ -338,6 +348,7 @@ impl Document {
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
             operation_box: None,
+            keyed_blend: Vec::new(),
             preview: None,
             overwrites: 0,
             overwrite_note: None,
@@ -1021,7 +1032,7 @@ impl Document {
         }
         let mut view = self.view.clone();
         view.panel = "canvas".into();
-        let mut out = Vec::new();
+        let mut out: Vec<Value> = Vec::new();
         for layer in self.layers_for(&view) {
             if layer.variants.len() < 2 {
                 continue;
@@ -1032,11 +1043,20 @@ impl Document {
             let Some(box_) = touched.get(&index) else {
                 continue;
             };
-            if !layer
-                .variants
-                .iter()
-                .any(|r| super::guides::intersection(*r, *box_).is_some())
-            {
+            // The box is the cheap filter and not the answer. One transaction
+            // usually draws every cell a sheet has, scattered over the whole of
+            // it, so the union of its writes is most of the sheet and a box
+            // test reports every sprite on it: the equalizer's PRESETS plate
+            // and its close key, drawn together, made a box that swallowed the
+            // ON and AUTO cells in between and named both as having duplicate
+            // variants the stroke had not touched a pixel of. Confirm against
+            // the writes themselves, which the transaction is already holding.
+            if !layer.variants.iter().any(|r| {
+                super::guides::intersection(*r, *box_).is_some()
+                    && (r[1]..r[1] + r[3]).any(|y| {
+                        (r[0]..r[0] + r[2]).any(|x| self.atlas_writes.contains_key(&(index, x, y)))
+                    })
+            }) {
                 continue;
             }
             let Some(image) = self.images.get(&layer.sheet) else {
@@ -1056,11 +1076,35 @@ impl Document {
                 same.entry(pixels).or_default().push(i);
             }
             let groups: Vec<Vec<usize>> = same.into_values().filter(|g| g.len() > 1).collect();
-            if !groups.is_empty() {
-                out.push(
-                    json!({"id":layer.id,"of":layer.variants.len(),"groups":groups,
-                                "labels":layer.labels}),
-                );
+            if groups.is_empty() {
+                continue;
+            }
+            // Sprites that share one set of source cells share the answer too.
+            // The equalizer's eleven bands all draw their groove from the same
+            // rectangle, so one duplicate frame was reported eleven times, each
+            // with its own copy of all twenty-eight labels -- four and a half
+            // kilobytes of JSON for one fact.
+            if let Some(shared) = out.iter_mut().find(|e| {
+                e["sheet"] == json!(layer.sheet)
+                    && e["groups"] == json!(groups)
+                    && e["variants"] == json!(layer.variants)
+            }) {
+                if let Some(ids) = shared["also"].as_array_mut() {
+                    ids.push(json!(layer.id));
+                }
+                continue;
+            }
+            out.push(json!({"id":layer.id,"sheet":layer.sheet,
+                            "of":layer.variants.len(),"groups":groups,
+                            "labels":layer.labels,"variants":layer.variants,
+                            "also":[]}));
+        }
+        for entry in out.iter_mut() {
+            if let Some(object) = entry.as_object_mut() {
+                object.remove("variants");
+                if object["also"].as_array().map(Vec::is_empty).unwrap_or(true) {
+                    object.remove("also");
+                }
             }
         }
         out
@@ -1541,12 +1585,22 @@ impl Document {
             "Unknown material"
         );
         let shaded = if material == Some("glass") {
-            Some(super::material::glass(
-                &points,
-                &self.selected_image(),
-                color,
-                op,
-            )?)
+            // Glass refracts what is under it, and what is under a cleared
+            // sprite cell is the transparency key, so the engine's own glass
+            // drawn into one comes out hot pink. Count it the same way the
+            // opacity blend does rather than let it ship.
+            let beneath = self.selected_image();
+            for [x, y] in points.iter().copied() {
+                if let Some(p) = beneath
+                    .get_pixel_checked(x.max(0) as u32, y.max(0) as u32)
+                    .filter(|_| x >= 0 && y >= 0)
+                {
+                    if p.0[3] == 0 || p.0[..3] == [255, 0, 255] {
+                        self.keyed_blend.push([x, y]);
+                    }
+                }
+            }
+            Some(super::material::glass(&points, &beneath, color, op)?)
         } else {
             None
         };
@@ -1577,6 +1631,9 @@ impl Document {
                     .filter(|_| x >= 0 && y >= 0)
                     .map(|p| p.0)
                     .unwrap_or([0, 0, 0, 255]);
+                if beneath[3] == 0 || beneath[..3] == [255, 0, 255] {
+                    self.keyed_blend.push([x, y]);
+                }
                 for c in 0..3 {
                     color[c] = (color[c] as f64 * a + beneath[c] as f64 * (1.0 - a))
                         .round()
@@ -1960,6 +2017,7 @@ impl Document {
             }
         }
         let mut crossed: Vec<Value> = Vec::new();
+        let mut keyed: Vec<Value> = Vec::new();
         let mut count = 0;
         // Which operation is in hand, so a refusal can say so. A transaction is
         // allowed ten thousand operations; "No glyph for '@'" with no index is
@@ -1971,6 +2029,7 @@ impl Document {
                 let kind = op.get("op").and_then(Value::as_str).unwrap_or("pixel");
                 at = Some((index, kind.to_owned()));
                 self.operation_box = None;
+                self.keyed_blend.clear();
                 let color = parse_color(
                     op.get("color")
                         .and_then(Value::as_str)
@@ -2068,6 +2127,9 @@ impl Document {
                                     .filter(|_| bx >= 0 && by >= 0)
                                     .map(|q| q.0)
                                     .unwrap_or([0, 0, 0, 255]);
+                                if under[3] == 0 || under[..3] == [255, 0, 255] {
+                                    self.keyed_blend.push([bx, by]);
+                                }
                                 let a = p[3] as f32 / 255.0;
                                 let mut out = [0u8; 4];
                                 for c in 0..3 {
@@ -2130,6 +2192,11 @@ impl Document {
                             crossed.push(note);
                         }
                     }
+                }
+                if !self.keyed_blend.is_empty() && keyed.len() < 8 {
+                    keyed.push(json!({"operation":index,"op":kind,
+                        "pixels":self.keyed_blend.len(),
+                        "at":self.keyed_blend.iter().take(4).collect::<Vec<_>>()}));
                 }
             }
             Ok(())
@@ -2242,6 +2309,13 @@ impl Document {
             self.message
                 .push_str(&format!("; {} crossed into a repeated cell", crossed.len()));
             result["crossed_cells"] = json!(crossed);
+        }
+        if !keyed.is_empty() {
+            let total: u64 = keyed.iter().filter_map(|k| k["pixels"].as_u64()).sum();
+            self.message.push_str(&format!(
+                "; {total} blended with the transparency key and were written opaque"
+            ));
+            result["keyed_blends"] = json!(keyed);
         }
         let same = self.identical_variants();
         if !same.is_empty() {
@@ -4766,6 +4840,104 @@ mod tests {
             .find(|r| r["reads"] == "the track title")
             .unwrap();
         assert_eq!(title["readable"], true, "{title}");
+    }
+
+    /// Two cells far apart on one sheet make a box that covers everything
+    /// between them, and the box used to be the whole answer to "did this
+    /// stroke touch that sprite".
+    #[test]
+    fn identical_variants_names_only_sprites_the_stroke_actually_wrote() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"eqmain.bmp","layer":"sheet"}))
+            .unwrap();
+        // Leave ON and AUTO with two variants each that are the same picture.
+        // They live between the close key and the PRESETS plate on this sheet.
+        let mut ops: Vec<Value> = Vec::new();
+        for x in [10, 36, 69, 95, 128, 154, 187, 213] {
+            ops.push(json!({"op":"rect","x":x,"y":119,"width":26,"height":12,
+                            "color":"#445566"}));
+        }
+        d.draw(&json!({ "operations": ops })).unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":10,"y":119,"width":4,"height":4,"color":"#889900"}]}))
+            .unwrap();
+        assert!(
+            out["identical_variants"]
+                .as_array()
+                .is_some_and(|v| v.iter().any(|e| e["id"] == "equalizer.on")),
+            "a stroke inside ON's own cell still reports it: {out}"
+        );
+        // The close key and the PRESETS plate, together, in one transaction.
+        // Their bounding box swallows ON and AUTO; neither is written.
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":0,"y":116,"width":9,"height":9,"color":"#112233"},
+                {"op":"rect","x":224,"y":164,"width":44,"height":12,"color":"#112233"}]}))
+            .unwrap();
+        assert!(
+            out["identical_variants"].is_null(),
+            "the box covers ON and AUTO and the stroke wrote neither: {out}"
+        );
+    }
+
+    /// Eleven equalizer bands draw their groove from one rectangle, so one
+    /// duplicate frame used to be reported eleven times over with eleven
+    /// copies of all twenty-eight labels.
+    #[test]
+    fn sprites_that_share_their_cells_share_one_report() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"eqmain.bmp","layer":"sheet"}))
+            .unwrap();
+        // Paint every track frame the same, which is the defect being caught.
+        let ops: Vec<Value> = (0..28)
+            .map(|f| {
+                let (x, y) = if f < 14 {
+                    (13 + f * 15, 164)
+                } else {
+                    (13 + (f - 14) * 15, 229)
+                };
+                json!({"op":"rect","x":x,"y":y,"width":14,"height":63,"color":"#334455"})
+            })
+            .collect();
+        let out = d.draw(&json!({ "operations": ops })).unwrap();
+        let same = out["identical_variants"].as_array().expect("a report");
+        assert_eq!(same.len(), 1, "one fact, said once: {out}");
+        assert_eq!(same[0]["id"], "equalizer.band0.track");
+        let also = same[0]["also"].as_array().expect("the other ten");
+        assert_eq!(also.len(), 10, "{same:?}");
+        assert!(also.contains(&json!("equalizer.band10.track")));
+    }
+
+    /// `#ff00ff` erases everywhere else in this engine; `opacity` and glass
+    /// read it as magenta, write the result opaque, and say nothing.
+    #[test]
+    fn a_blend_against_the_transparency_key_is_reported() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"cbuttons.bmp","layer":"sheet"}))
+            .unwrap();
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":23,"height":18,"color":"#ff00ff"}]}))
+            .unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"ellipse","x":4,"y":4,"width":10,"height":10,"color":"#ffcc66",
+                 "fill":true,"opacity":120}]}))
+            .unwrap();
+        let keyed = out["keyed_blends"].as_array().expect("a report");
+        assert_eq!(keyed[0]["operation"], 0);
+        assert_eq!(keyed[0]["op"], "ellipse");
+        assert!(keyed[0]["pixels"].as_u64().unwrap() > 40, "{out}");
+        // Over artwork rather than over the key, the same blend is silent.
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":23,"height":18,"color":"#203040"}]}))
+            .unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"ellipse","x":4,"y":4,"width":10,"height":10,"color":"#ffcc66",
+                 "fill":true,"opacity":120}]}))
+            .unwrap();
+        assert!(out["keyed_blends"].is_null(), "{out}");
     }
 
     #[test]

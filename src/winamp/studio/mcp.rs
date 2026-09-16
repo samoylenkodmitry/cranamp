@@ -272,7 +272,7 @@ fn operation_schema() -> Value {
         "ramp_axis":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},
         "rows":{"type":"array","items":{"type":"string"},"description":"One character per pixel; a character absent from palette is skipped, which is how transparency is spelled."},
         "palette":{"type":"object","additionalProperties":{"type":"string"}},
-        "text":{"type":"string","description":"Set in one of the editor's two faces, advancing cell*scale+spacing where cell is 5 or 4. A-Z a-z 0-9 - : . , / \\ \" ( ) [ ] + = _ ! ? & # % * < > | only; the rest are skipped and named in unsupported_characters."},
+        "text":{"type":"string","description":"Set in one of the editor's two faces, advancing (cell+spacing)*scale where cell is 5 or 4 -- studio_canvas measure answers it from the walk that draws it, and every recipe that worked it out by hand got cell*scale+spacing, which agrees at scale 1 and nowhere else. A-Z a-z 0-9 - : . , / \\ \" ( ) [ ] + = _ ! ? & # % * < > | only; the rest are skipped and named in unsupported_characters."},
         "face":{"enum":["5x7","small"],"description":"small is a 4x5 small-caps face for the cells a classic skin gives a word and no room for one -- a 14-pixel equalizer caption, a 27-pixel mono lamp. It has no lower case, so a-z are drawn as capitals rather than skipped."},
         "scale":{"type":"integer","minimum":1,"maximum":8},
         "spacing":{"type":"integer","minimum":-2,"maximum":8},
@@ -307,7 +307,7 @@ fn tools() -> Vec<Value> {
  tool("studio_status","The shared document: path, revision, unsaved edits, history depth, sheets, painting planes and the whole view -- panel, brush, colour, width, sprite state. surface is what a stroke's coordinates mean now (\"canvas\", or \"atlas <sheet>\"). Only this call carries the sheet list; the sprites are studio_targets and studio_rectangles.",json!({}),&[]),
  tool("studio_new","Create a transparent classic skin from scratch. No artwork or metadata is inherited. Unsaved edits require discard=true.",json!({"discard":{"type":"boolean"}}),&[]),
  tool("studio_open","Load a WSZ into the running native Studio. Existing unsaved edits require discard=true.",json!({"path":{"type":"string"},"discard":{"type":"boolean"}}),&["path"]),
- tool("studio_draw","One atomic undoable transaction, up to 10000 operations in order, all or nothing, on the surface the view is on: the assembled canvas, or one sheet at its own coordinates while studio_atlas has it open. Every result names that surface; a refusal names the operation index. Results report bounds (where the ink landed), clipped_pixels (outside the chosen sprites), unsampled_pixels (in a gap between a sheet's cells, where nothing will ever show it), unmapped_pixels (no bitmap source at all -- the classic playlist fill) and overwrites: two different canvas pixels writing one shared source cell, which is how a stroke across the four timer digits, or the playlist top tile drawn nine times, lands on top of itself. Name one target in layers to cure that.",json!({"operations":operation_schema(),"layers":{"type":"array","items":{"type":"string"},"description":"Sprites to route every pixel into. [] means Auto: every sprite under the brush."},"layer":{"type":"string"},"all_states":{"type":"boolean","description":"Write the same local pixels into every variant of each target."},"origin":{"type":"string","description":"Put 0,0 on this sprite's destination as it stands, and target it -- the only safe way to aim at a sprite that moves with its frame."},"label":{"type":"string"},"mask_colors":{"type":"array","items":{"type":"string"}},"preview":{"type":"boolean","description":"Dry run: apply the operations, answer with the surface as they would leave it, and put the document back. Nothing is recorded and the revision does not move. crop, zoom and path work as they do on studio_canvas."},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"}}),&["operations"]),
+ tool("studio_draw","One atomic undoable transaction, up to 10000 operations in order, all or nothing, on the surface the view is on: the assembled canvas, or one sheet at its own coordinates while studio_atlas has it open. Every result names that surface; a refusal names the operation index. Results report bounds (where the ink landed), clipped_pixels (outside the chosen sprites), unsampled_pixels (in a gap between a sheet's cells, where nothing will ever show it), unmapped_pixels (no bitmap source at all -- the classic playlist fill) overwrites: two different canvas pixels writing one shared source cell, which is how a stroke across the four timer digits, or the playlist top tile drawn nine times, lands on top of itself (name one target in layers to cure that), and keyed_blends: an opacity, an image's alpha or glass that read the transparency key as a colour, which turns a glow into mud and glass into magenta and takes the cell's transparency with it.",json!({"operations":operation_schema(),"layers":{"type":"array","items":{"type":"string"},"description":"Sprites to route every pixel into. [] means Auto: every sprite under the brush."},"layer":{"type":"string"},"all_states":{"type":"boolean","description":"Write the same local pixels into every variant of each target."},"origin":{"type":"string","description":"Put 0,0 on this sprite's destination as it stands, and target it -- the only safe way to aim at a sprite that moves with its frame."},"label":{"type":"string"},"mask_colors":{"type":"array","items":{"type":"string"}},"preview":{"type":"boolean","description":"Dry run: apply the operations, answer with the surface as they would leave it, and put the document back. Nothing is recorded and the revision does not move. crop, zoom and path work as they do on studio_canvas."},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"}}),&["operations"]),
  tool("studio_project","Save or open a layered .cstudio project. WSZ remains the flattened skin export. Opening unsaved work requires discard=true.",json!({"action":{"enum":["save","open"]},"path":{"type":"string"},"discard":{"type":"boolean"}}),&["action","path"]),
  tool("studio_cluster","Pick up a native pixel region from the selected sprites; Auto captures the visible canvas. Omit rect to read the clipboard back as stamp rows and a palette. flip_x, flip_y and quarter_turns transform it losslessly. Paint it with studio_draw op cluster, or the human Stamp brush. The clipboard never enters a WSZ.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"flip_x":{"type":"boolean"},"flip_y":{"type":"boolean"},"quarter_turns":{"type":"integer","minimum":0,"maximum":3}}),&[]),
  tool("studio_study","Read-only study board: a native crop above an integer enlargement, optionally as grayscale values, with sprite geometry, a pixel grid and a reference image alongside. rect defaults to the last lifted region; reference pixels are never imported. With path, written there instead of returned inline. Changes nothing.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"selected":{"type":"boolean"},"values":{"type":"boolean"},"grid":{"type":"boolean"},"geometry":{"type":"boolean"},"reference":{"type":"string"},"reference_rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"path":{"type":"string"}}),&[]),
@@ -328,6 +328,54 @@ fn text(value: Value) -> Value {
 /// Every schema here declares `additionalProperties: false` and the server was
 /// not enforcing it, so a field aimed at the wrong tool was accepted, ignored,
 /// and answered with a perfectly ordinary-looking result. `presentation` sent
+/// Is this `studio_canvas` call only setting the pencil, or asking it a
+/// question about a word?
+///
+/// Asking for the canvas puts the editor on the canvas, and always has. But
+/// the pencil is shared between the two surfaces -- the editor's own tool
+/// column stays open across a **Skin atlases** detour and picking a colour in
+/// it does not close the sheet -- and every brush setting lives on
+/// `studio_canvas` because there is nowhere else to put it. So did `measure`,
+/// which is documented as answering *instead of* reading the canvas back.
+/// Setting the face before measuring a caption therefore moved the pencil off
+/// the sheet a recipe had open, and the next stroke landed on the joined canvas
+/// at the sheet's own coordinates and succeeded: the ink is legal, the cell is
+/// legal, and the sprite the recipe was drawing comes back empty. The result
+/// names the `surface` it painted, which is how this is findable at all; the
+/// call that changed it said nothing.
+///
+/// An empty call is still "show me the canvas" and still moves there.
+fn only_the_pencil(args: &Value) -> bool {
+    const PENCIL: &[&str] = &[
+        "color",
+        "brush",
+        "brush_size",
+        "ramp_to",
+        "ramp_axis",
+        "bevel",
+        "refraction",
+        "text",
+        "face",
+        "text_scale",
+        "curve_bend",
+        "grain",
+        "grain_size",
+        "opacity",
+        "clean_corners",
+        "filled",
+        "mirror_x",
+        "mirror_y",
+        "alpha_lock",
+        "mask_colors",
+        "measure",
+        "spacing",
+    ];
+    match args.as_object() {
+        Some(fields) => !fields.is_empty() && fields.keys().all(|k| PENCIL.contains(&k.as_str())),
+        None => false,
+    }
+}
+
 /// to `studio_screenshot` -- it belongs to `studio_canvas` -- returned a
 /// capture of the editor's own window described as the player's scene, and
 /// nothing in the reply said the argument had gone nowhere. A silently dropped
@@ -464,7 +512,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
         "studio_status" => doc.status(),
         "studio_new" => {
             if doc.dirty && args["discard"] != true {
-                bail!("Export or undo unsaved edits before creating a blank skin");
+                bail!("There are unsaved edits. studio_new {{\"discard\":true}} throws them away; studio_export writes them first");
             }
             let revision = doc.revision + 1;
             *doc = Document::blank();
@@ -475,7 +523,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
         "studio_state" => doc.state(args)?,
         "studio_open" => {
             if doc.dirty && args["discard"] != true {
-                bail!("Export or undo unsaved edits first, or explicitly set discard=true");
+                bail!("There are unsaved edits. studio_open {{\"path\":..., \"discard\":true}} throws them away; studio_export writes them first");
             }
             let p = args["path"].as_str().context("path required")?;
             let revision = doc.revision + 1;
@@ -543,7 +591,9 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             } else if args["action"] == "open" {
                 anyhow::ensure!(
                     !doc.dirty || args["discard"] == true,
-                    "Save or export unsaved edits first"
+                    "There are unsaved edits. studio_project {{\"action\":\"open\", \
+                     \"path\":..., \"discard\":true}} throws them away; \
+                     studio_project {{\"action\":\"save\"}} writes them first"
                 );
                 let revision = doc.revision + 1;
                 *doc = Document::open_project(&std::fs::read(p)?)?;
@@ -647,7 +697,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                         view["layer"] = json!("auto");
                     }
                 }
-            } else {
+            } else if !only_the_pencil(&args) {
                 view["panel"] = json!("canvas");
             }
             let path = view.as_object_mut().and_then(|v| v.remove("path"));
@@ -1095,6 +1145,64 @@ mod tests {
         assert_eq!(after["layout"]["footer"], "time-total");
         assert_eq!(after["layout"]["eq_travel"], 40);
         assert_eq!(after["playlist_colors"]["Normal"], "#010203");
+    }
+
+    /// The pencil is shared between the two surfaces, so setting it -- or
+    /// asking it how wide a word comes out -- must not move the drawing off the
+    /// sheet a recipe has open. It used to, and the next stroke then landed on
+    /// the joined canvas at the sheet's own coordinates and succeeded there.
+    #[test]
+    fn setting_the_pencil_does_not_close_an_open_atlas() {
+        let shared = SharedDocument(Arc::new(Mutex::new(Document::blank())));
+        call("studio_atlas", json!({"sheet": "monoster.bmp"}), &shared).unwrap();
+        for pencil in [
+            json!({"face": "small"}),
+            json!({"text_scale": 2}),
+            json!({"color": "#ffcc66"}),
+            json!({"brush_size": 3}),
+            json!({"measure": ["MONO", "STEREO"]}),
+        ] {
+            call("studio_canvas", pencil.clone(), &shared).unwrap();
+            let view = shared.lock().unwrap().view.clone();
+            assert_eq!(
+                view.panel, "atlas",
+                "{pencil} moved the pencil off monoster.bmp"
+            );
+            assert_eq!(view.sheet, "monoster.bmp");
+        }
+        assert_eq!(shared.lock().unwrap().view.face, "small");
+        // Asking anything of the canvas itself still goes back to it.
+        call("studio_canvas", json!({"zoom": 3}), &shared).unwrap();
+        assert_eq!(shared.lock().unwrap().view.panel, "canvas");
+        call("studio_atlas", json!({"sheet": "monoster.bmp"}), &shared).unwrap();
+        call("studio_canvas", json!({}), &shared).unwrap();
+        assert_eq!(
+            shared.lock().unwrap().view.panel,
+            "canvas",
+            "an empty call is still show me the canvas"
+        );
+    }
+
+    /// A refusal that names two ways out and not the one the tool has leaves a
+    /// caller exporting a half-drawn skin or undoing ninety strokes one at a
+    /// time.
+    #[test]
+    fn refusing_to_discard_unsaved_edits_names_the_argument_that_does_it() {
+        let shared = SharedDocument(Arc::new(Mutex::new(Document::blank())));
+        call(
+            "studio_draw",
+            json!({"operations":[{"op":"rect","x":0,"y":0,"width":4,"height":4,
+                                  "color":"#ffffff"}]}),
+            &shared,
+        )
+        .unwrap();
+        let refusal = call("studio_new", json!({}), &shared)
+            .unwrap_err()
+            .to_string();
+        assert!(refusal.contains("discard"), "{refusal}");
+        assert!(refusal.contains("studio_new"), "{refusal}");
+        // And it is the way out.
+        call("studio_new", json!({"discard": true}), &shared).unwrap();
     }
 
     /// The canvas is the drawing surface, and asking for it puts the editor on

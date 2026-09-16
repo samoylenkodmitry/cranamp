@@ -1,7 +1,7 @@
 """A native geometry pen for Cranamp's own MCP drawing engine.
 No image library, bitmap resampling or external image creation is used.
 """
-import json,math,urllib.request
+import json,math,urllib.error,urllib.request
 class Pen:
     def __init__(self):self.ops=[]
     def path(self,points,c,fill=True,width=1,ramp=None,axis=None):
@@ -58,10 +58,23 @@ class Pen:
         self.stamp(x,y,[''.join(r) for r in result],{k:v for k,v in palette.items() if k!=' '})
     def commit(self,label):return call('studio_draw',{'label':label,'operations':self.ops})
 JOURNAL=[]
+STUDIO='http://127.0.0.1:18765/mcp'
+class NoStudio(RuntimeError):
+    """Nothing is listening on the Studio's port.
+
+    Every recipe in this tree runs against a Studio that has to already be
+    running, and the bare urllib failure for that is forty lines of
+    ConnectionRefusedError that never name Studio, the port, or the command
+    that starts one -- in the middle of a build that is halfway through a skin.
+    """
 def call(name,args={}):
     JOURNAL.append({'name':name,'arguments':args})
-    req=urllib.request.Request('http://127.0.0.1:18765/mcp',json.dumps({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':args}}).encode(),{'Content-Type':'application/json'})
-    r=json.load(urllib.request.urlopen(req,timeout=120))['result']
+    req=urllib.request.Request(STUDIO,json.dumps({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':args}}).encode(),{'Content-Type':'application/json'})
+    try:r=json.load(urllib.request.urlopen(req,timeout=120))['result']
+    except (urllib.error.URLError,ConnectionError) as why:
+        raise NoStudio(f'no Skin Studio answering at {STUDIO} ({why}). '
+                       f'Start one with `cargo run -- --skin-studio` and leave '
+                       f'it running, then re-run this.') from None
     if r.get('isError'):raise RuntimeError(r)
     return r
 
