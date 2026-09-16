@@ -7,7 +7,7 @@ A Winamp-style music player in Rust, powered by [Cranpose](https://github.com/sa
 ![Cranamp on Android, iOS and desktop, in decorative device frames](docs/images/devices.png)
 
 - **Platforms** — Windows, macOS, Linux, Android, iOS and web.
-- **Catamp** — Hand-drawn pixel cats and glass, bundled by default.
+- **Catamp** — Three hand-drawn pixel-cat skins bundled by default: silver and glass, a nocturnal thicket, and a vet's lightbox.
 - **Classic skins** — Import and switch Winamp `.wsz` and `.zip` skins.
 - **Web skin library** — Keep skins and your selection across browser reloads.
 - **Local music** — Open audio files and folders through platform file pickers.
