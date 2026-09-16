@@ -118,6 +118,28 @@ class TheReadouts(unittest.TestCase):
             self.assertTrue(0 <= y - size and y <= 13)
 
 
+class TheClaims(unittest.TestCase):
+    """The `checked` stage asks the document what the recipe assumed. Its two
+    tables are hand-maintained, so the thing that can rot without a Studio is
+    whether they still point at the skin."""
+
+    def test_every_ground_and_mark_is_inside_the_joined_canvas(self):
+        for what, (x, y, w, h), _ in recipe.GROUNDS:
+            self.assertTrue(0 <= x and x + w <= 275, what)
+            self.assertTrue(0 <= y and y + h <= 377, what)
+        for what, (x, y, w, h), ink, floor in recipe.READS:
+            self.assertTrue(0 <= x and x + w <= 275, what)
+            self.assertTrue(0 <= y and y + h <= 377, what)
+            self.assertRegex(ink, r'^#[0-9a-f]{6}$', what)
+            # Three is a readout you have to hunt for; below two is one that is
+            # not there. Nothing in this table may ask for less than three.
+            self.assertGreaterEqual(floor, 3.0, what)
+
+    def test_every_claimed_ground_is_a_colour_the_skin_has(self):
+        for what, _, claimed in recipe.GROUNDS:
+            self.assertIn(claimed, room.GLOW, what)
+
+
 class TheClient(unittest.TestCase):
     def test_a_missing_studio_says_what_to_start(self):
         # The bare failure is forty lines of ConnectionRefusedError that never

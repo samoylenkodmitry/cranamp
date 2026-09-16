@@ -208,7 +208,7 @@ one tool per panel, named for it.
 | `studio_history`, `studio_undo`, `studio_redo` | The shared history |
 | `studio_status`, `studio_new`, `studio_open`, `studio_project`, `studio_export`, `studio_screenshot` | The document and the window |
 
-Forty-seven things make that surface usable at speed, every one of them the
+Fifty-five things make that surface usable at speed, every one of them the
 scar of a skin drawn through it:
 
 - **A `text` operation** draws a string in the editor's own 5x7 face at an
@@ -615,6 +615,72 @@ scar of a skin drawn through it:
   is what arrives at the moment the question is asked. All three of
   `studio_new`, `studio_open` and `studio_project` say the call now.
 
+- **`studio_pixel` answers the artwork, not only the mapping.** It said which
+  sprites are under a pixel and where each keeps it, which settles a mapping;
+  the thing a stroke actually has to be chosen against is the *colour* that is
+  there, and answering that meant rendering a crop and looking at it -- a file
+  and two round trips for a number the document was already holding. It takes a
+  `width` and `height` now and answers `ground`, the artwork averaged over the
+  rectangle's opaque pixels, and with `ink` the export check's own WCAG
+  arithmetic pointed anywhere: `contrast` and `readable`. That check covers the
+  eight readouts Cranamp writes and nothing else, which in a skin made of
+  hand-drawn marks on hand-drawn artwork is most of nothing. A skin whose whole
+  grammar is "how far is this from a flame" hand-passed the answer to every one
+  of its cats for a whole build.
+- **The transparency key is not a colour to `ground_under` either.** The same
+  `#ff00ff` that erases everywhere else was being averaged into the ground as
+  magenta, so asking what is under a control -- every one of which is a mostly
+  cleared cell -- answered `#963384` and, with it, the wrong answer about
+  whether the mark on it reads. The readability check never hit it because its
+  eight rectangles sit on backgrounds; the probe hit it in its first minute.
+- **`studio_pixel` says which surface the coordinates meant.** Asked about a
+  canvas pixel while a sheet was open it answered `{"hits": []}`, which reads as
+  "no sprite there" and means "not on the surface you have open" -- the same
+  sentence the two catalogue tools were fixed for. It answers `surface` like
+  every stroke does, and when there is genuinely nothing there it says what it
+  looked in and how big that is.
+- **`clip` is the pencil, so it can be set without leaving the sheet it is
+  for.** On the canvas `layers` clips a stroke to named sprites and reports how
+  much fell outside; in `studio_atlas` there are no sprites to name, so a pool
+  of light spills into the cell beside it and only `crossed_cells` catches it,
+  and only when the neighbour is a repeated tile. Clipping painting to one cell
+  is the answer, and reaching it meant leaving the sheet, which is the one thing
+  it was wanted for. `clip` and `all_states` say where a stroke goes rather than
+  what the canvas shows; they moved with the brush settings.
+- **The history is seekable by the cursor it answers with.** Every entry carries
+  the label its transaction was given, and the only way back to one was
+  `studio_undo` with no arguments, called a guessed number of times.
+  `studio_history {"cursor": 12}` is what the History drawer does when a row is
+  clicked; it existed as an unlisted tool and so was invisible to anything
+  reading the tool list.
+- **`unsampled_pixels` counts ink, not clearing, and not sheets nothing
+  draws.** It is "ink nothing will ever show", and it was counting two things
+  that are neither. Clearing a sheet to the transparency key before painting it
+  is how a recipe starts, and it reported every gutter between every cell --
+  117 for `numbers.bmp`'s eleventh cell, every time. And `text.bmp` is read for
+  one colour and never drawn, so painting it correctly reported all 2,790 of its
+  pixels, for ever; that is a fact about the sheet, the sheet already has a note
+  saying it, and the result says `sheet_is_never_drawn` instead of a number. A
+  band that loses `pledit.bmp` column 125 still reports 38.
+- **The two switches that are invisible until something else draws.**
+  `active` and `pressed` choose the variant a stroke lands in, which is the
+  cleanest thing in this server and was written down nowhere: with them, a
+  four-state switch is the same code run four times, clipped and reported by
+  `layers`, and without them it is four rectangles worked out by hand in an
+  atlas where nothing clips and nothing reports. And `visualizer_glass` off
+  makes the player fill the spectrum's whole rectangle with the first VISCOLOR
+  entry -- an opaque box in the middle of a dark main window that no sheet
+  contains and no canvas render shows. Both say so in their own schema now, and
+  `eqhandles.bmp`'s arrival note says what it does **not** change: the eleven
+  band tracks still share one set of 28 cells, so that sheet is the only place
+  eleven bands can differ from each other.
+- **`cranamp --skin-studio` says it is up, and where.** Every recipe in this
+  tree runs against an editor that has to already be running, and the process
+  wrote nothing at all -- so a log that is empty because the editor never
+  started looked exactly like a log that is empty because it started perfectly,
+  and the first one is a build about to fail in forty lines of somebody else's
+  stack trace.
+
 ### What each tool answers with
 
 The two catalogue tools are different shapes on purpose: one entry per sprite,
@@ -629,11 +695,11 @@ printing the JSON.
 | `studio_rectangles` | `{rectangles, of}` -- one entry per **variant**, narrowed by `at`, `sheet`, `id`, `runtime` or `hit`: `id`, `label`, `sheet`, `rect` (where it is drawn), `source` (where it lives), `variant`, `active`, `runtime`, `hit` |
 | `studio_draw` | `pixels_written`, `bounds`, `clipped_pixels`, `overwrites`, `overwrite_sample`, `unmapped_pixels`, `unsampled_pixels`, their samples, `surface`, `revision`, and when there is something to say `unsupported_characters`, `identical_variants` (one entry per set of shared cells, with `also`), `keyed_blends`, `crossed_cells` and the sheet's `note` |
 | `studio_states` | the contact sheet, plus `sprite`: `id`, `sheet`, `of`, and per variant `index`, `label`, `rect`, `painted_pixels`, `differs_from_previous`, `largest_channel_change`, `same_picture_as` |
-| `studio_pixel` | every sprite under one canvas pixel and where each keeps it |
+| `studio_pixel` | `surface`, `hits` (every sprite under the pixel, where each keeps it, its `rgba` and what shares it), `ground` for the rectangle, `contrast`/`readable` with `ink`, and `nothing_at` when there is no artwork there |
 | `studio_options` | every option, `readability` (per readout: `reads`, `ink`, `ground`, `contrast`, `readable`), and `sheets_changed` when one added or removed a sheet |
 | `studio_screenshot` | `path`/`size` or the PNG, plus `showing` (`player` or `editor`) and `player` (`x`, `y`, `zoom`); `panel` and `crop` compose, and `magnify` enlarges |
 | `studio_export` | `path`, `bytes`, and when there is something to say `undrawn_sprites` and `hard_to_read` |
-| `studio_layers`, `studio_history`, `studio_project` | the planes, the history, the project file |
+| `studio_layers`, `studio_history`, `studio_project` | the planes, the history (seekable with `cursor`), the project file |
 
 Every image tool takes `path` and answers with where it wrote rather than the
 bytes; omit it and the PNG comes back inline. Every one of them also takes
@@ -1635,10 +1701,19 @@ of them were new:
   colon is painted on the window behind the digits like every classic skin does
   it. Without it the readout is `00 00`.
 
+Two of the recipe's stages are questions rather than drawing. `measured` hands
+every caption to the engine's own glyph walk and checks it against the cell it
+is set in. `checked` asks `studio_pixel` the two things the first build guessed
+at: what each cat is actually standing in front of -- a cat lit for the wrong
+room is the one mistake here that no report catches, because the ink is correct,
+in the right cell, in colours that are on the ladder -- and how well every
+hand-drawn mark reads on the hand-drawn artwork under it, which is the same
+arithmetic the export check runs over the eight readouts and nothing else.
+
 Verification: `studio_export` validates through Cranamp's own loader and reports
 no undrawn sprite and nothing hard to read -- every readout is between six and a
 half and thirteen to one against its own artwork; `check_native_frames.py` swept
 all 112 live GPU states with no nonuniform 2x2 source-pixel block, so every
 sprite samples at exact native pixels; and the whole recipe replays from **New
-blank** into an empty document in four and a half seconds, byte for byte, with
-no image library and no external asset.
+blank** into an empty document in five seconds, byte for byte, with no image
+library and no external asset.

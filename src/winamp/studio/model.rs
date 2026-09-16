@@ -237,6 +237,30 @@ pub struct Document {
     overwrites: usize,
     overwrite_note: Option<String>,
 }
+/// The WCAG relative luminance of a colour.
+fn relative_luminance(c: [u8; 4]) -> f64 {
+    let channel = |v: u8| {
+        let s = v as f64 / 255.;
+        if s <= 0.03928 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
+}
+
+/// How well one colour reads on another, to one decimal place.
+///
+/// Four and a half is comfortable at the size a skin is looked at; below three
+/// is a readout you have to hunt for, and below two is one that is not there.
+/// One implementation, because the export check and `studio_pixel` answering
+/// for an arbitrary rectangle are the same question asked twice.
+fn contrast_ratio(a: [u8; 4], b: [u8; 4]) -> f64 {
+    let (x, y) = (relative_luminance(a), relative_luminance(b));
+    ((x.max(y) + 0.05) / (x.min(y) + 0.05) * 10.).round() / 10.
+}
+
 impl Document {
     /// A new classic atlas set with zero inherited artwork or metadata.
     pub fn blank() -> Self {
@@ -762,7 +786,11 @@ impl Document {
             "eqhandles.bmp" => {
                 "eleven 14x25 handles, one per band, normal above pressed. \
                  Equalizer travel is limited to 38 pixels while these exist, \
-                 because the handle itself takes 25 of the 63-pixel groove."
+                 because the handle itself takes 25 of the 63-pixel groove. \
+                 The eleven band *tracks* are untouched and still share one set \
+                 of 28 cells, so nothing that is true of only one band can be \
+                 said in its groove -- this sheet is the only place eleven \
+                 bands can differ from each other."
             }
             "plbg.bmp" => {
                 "the ground under the track list, one row every 11 pixels, tiled \
@@ -1303,10 +1331,60 @@ impl Document {
         }
         im
     }
-    pub fn inspect(&self, x: u32, y: u32) -> Value {
+    /// What the artwork is at a place, and whether a colour would read on it.
+    ///
+    /// Three things, and they used to be one. `hits` settles a mapping: every
+    /// sprite under the pixel, where each keeps it, and what shares it.
+    /// `ground` is the artwork itself, averaged over the rectangle's opaque
+    /// pixels -- a skin whose whole grammar is "how far is this from a flame"
+    /// has to know what a cat is standing in front of before it can put one
+    /// down, and answering that by rendering a crop and looking at it is a file
+    /// and two round trips for a number the document is already holding.
+    /// `contrast` is the export check's own arithmetic pointed anywhere: that
+    /// check covers the eight readouts Cranamp writes and nothing else, and a
+    /// skin is full of hand-drawn marks that have to read on hand-drawn
+    /// artwork.
+    ///
+    /// The coordinates mean the surface the view is on, like every stroke, and
+    /// the answer says which -- asked about a canvas pixel while a sheet was
+    /// open, this used to answer `{"hits": []}`, which reads as "no sprite
+    /// there" and means "not on the surface you have open".
+    pub fn inspect(&self, rect: [u32; 4], ink: Option<[u8; 4]>) -> Value {
+        let [x, y, w, h] = rect;
         let composite = self.composite_images();
         let hits:Vec<Value>=self.layers().iter().rev().filter_map(|l|l.map(x,y).map(|(sx,sy)|json!({"layer":l.id,"sheet":l.sheet,"atlas_pixel":[l.source[0]+sx,l.source[1]+sy],"local_pixel":[sx,sy],"variants":l.variants.len(),"shared_or_stretched":l.stretched(),"rgba":composite.get(&l.sheet).and_then(|im|im.get_pixel_checked(l.source[0]+sx,l.source[1]+sy)).map(|p|p.0)}))).collect();
-        json!({"canvas_pixel":[x,y],"hits":hits})
+        let mut out = json!({"canvas_pixel":[x,y],"surface":self.surface(),"hits":hits});
+        if w != 1 || h != 1 {
+            out["rect"] = json!(rect);
+        }
+        let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+        let ground = self.ground_under(rect);
+        if let Some(ground) = ground {
+            out["ground"] = json!(hex(ground));
+            if let Some(ink) = ink {
+                let r = contrast_ratio(ink, ground);
+                out["ink"] = json!(hex(ink));
+                out["contrast"] = json!(r);
+                out["readable"] = json!(r >= 3.0);
+            }
+        }
+        // Nothing there is an answer, and it is a different answer from "no
+        // sprite there". Say what was actually looked in.
+        if out["hits"].as_array().is_some_and(Vec::is_empty) && ground.is_none() {
+            let (sw, sh) = if self.view.panel == "atlas" {
+                self.images
+                    .get(&self.view.sheet)
+                    .map(|i| i.dimensions())
+                    .unwrap_or((0, 0))
+            } else {
+                self.canvas_size()
+            };
+            out["nothing_at"] = json!(format!(
+                "{} is {sw}x{sh} and holds no artwork at {x},{y}",
+                self.surface()
+            ));
+        }
+        out
     }
 
     /// The sprite a state sheet would show, or `None` when nothing names one.
@@ -2273,12 +2351,29 @@ impl Document {
         // a sheet open on its own can be painted there; the assembled canvas
         // has no way to address the gaps between cells.
         let mut unsampled: Vec<[u32; 2]> = Vec::new();
+        let mut never_drawn = false;
         if self.view.panel == "atlas" {
             if let Some(index) = self.images.keys().position(|k| k == &self.view.sheet) {
                 if let Some((mask, width)) = self.sampled_mask(&self.view.sheet) {
-                    for (sheet, x, y) in self.atlas_writes.keys() {
-                        if *sheet == index && !mask[(y * width + x) as usize] {
-                            unsampled.push([*x, *y]);
+                    // A sheet nothing samples at all is not a sheet with ink in
+                    // the wrong place on it. `text.bmp` is read for one colour
+                    // and never drawn, so painting it -- which is the correct
+                    // thing to do -- reported every one of its 2,790 pixels,
+                    // every time, forever. That is a fact about the sheet and
+                    // the sheet already has a note saying it.
+                    never_drawn = !mask.iter().any(|sampled| *sampled);
+                    if !never_drawn {
+                        for ((sheet, x, y), (colour, _)) in self.atlas_writes.iter() {
+                            // Erasing a gap is not ink nothing will ever show.
+                            // Clearing a sheet to the transparency key before
+                            // painting it is the ordinary way to start, and it
+                            // reported every gutter between every cell.
+                            if *sheet == index
+                                && colour[..3] != [255, 0, 255]
+                                && !mask[(y * width + x) as usize]
+                            {
+                                unsampled.push([*x, *y]);
+                            }
                         }
                     }
                 }
@@ -2301,6 +2396,9 @@ impl Document {
             "unmapped_sample":self.unmapped_pixels.iter().take(8).collect::<Vec<_>>(),
             "unsampled_pixels":unsampled.len(),
             "unsampled_sample":unsampled.iter().take(8).collect::<Vec<_>>()});
+        if never_drawn {
+            result["sheet_is_never_drawn"] = json!(true);
+        }
         if !skipped.is_empty() {
             result["unsupported_characters"] =
                 json!(skipped.iter().map(|c| c.to_string()).collect::<Vec<_>>());
@@ -3301,7 +3399,13 @@ impl Document {
     ///
     /// Walked from the topmost sprite down, because that is the order the
     /// player draws them in and a readout sits on whatever is nearest it.
-    fn ground_under(&self, rect: [u32; 4]) -> Option<[u8; 4]> {
+    /// The artwork under a rectangle, averaged over its opaque pixels.
+    ///
+    /// Public because it is the answer to two questions, not one: the checker
+    /// asks it about the eight readouts Cranamp writes, and `studio_pixel` asks
+    /// it about anywhere at all -- which is what a skin whose whole grammar is
+    /// "how far is this from a flame" needs before it can put a cat down.
+    pub fn ground_under(&self, rect: [u32; 4]) -> Option<[u8; 4]> {
         let mut view = self.view.clone();
         view.panel = "canvas".into();
         let layers = self.layers_for(&view);
@@ -3321,7 +3425,15 @@ impl Document {
                         continue;
                     }
                     let pixel = image.get_pixel(px, py).0;
-                    if pixel[3] == 0 {
+                    // The transparency key is not a colour, here as everywhere
+                    // else. Averaged in as one, a sprite cell that is mostly
+                    // cleared -- which every control drawn on top of a window
+                    // is -- answers magenta, and the artwork the player will
+                    // actually show through it is the thing that was asked
+                    // about. A transport key on dark cloth came back as
+                    // `#963384`, and with it the wrong answer to whether the
+                    // mark on it reads.
+                    if pixel[3] == 0 || pixel[..3] == [255, 0, 255] {
                         continue;
                     }
                     for c in 0..3 {
@@ -3342,6 +3454,8 @@ impl Document {
         })
     }
     /// Whether each thing the player writes can be read on the artwork under it.
+    /// The ratio itself is `contrast_ratio`, so `studio_pixel` answers the same
+    /// question about any rectangle with the same arithmetic.
     ///
     /// Studio already knows both halves and never put them together: the
     /// runtime rectangles say where Cranamp writes, `text.bmp` says what colour
@@ -3354,21 +3468,7 @@ impl Document {
     /// below three is a readout you have to hunt for, and below two is one that
     /// is not there.
     pub fn readability(&mut self) -> Vec<Value> {
-        fn luminance(c: [u8; 4]) -> f64 {
-            let channel = |v: u8| {
-                let s = v as f64 / 255.;
-                if s <= 0.03928 {
-                    s / 12.92
-                } else {
-                    ((s + 0.055) / 1.055).powf(2.4)
-                }
-            };
-            0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
-        }
-        let ratio = |a: [u8; 4], b: [u8; 4]| {
-            let (x, y) = (luminance(a), luminance(b));
-            ((x.max(y) + 0.05) / (x.min(y) + 0.05) * 10.).round() / 10.
-        };
+        let ratio = contrast_ratio;
         let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
         let ink = self.display_ink();
         let (palette, _) = self.text_palettes();
@@ -4845,6 +4945,55 @@ mod tests {
     /// Two cells far apart on one sheet make a box that covers everything
     /// between them, and the box used to be the whole answer to "did this
     /// stroke touch that sprite".
+    /// `unsampled_pixels` is "ink nothing will ever show". Erasing a gap is not
+    /// ink, and a sheet nothing samples at all is not a sheet with ink in the
+    /// wrong place on it -- both used to be counted, and between them they
+    /// fired on almost every transaction a recipe makes.
+    #[test]
+    fn unsampled_pixels_counts_ink_rather_than_clearing_and_never_drawn_sheets() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"numbers.bmp","layer":"sheet"}))
+            .unwrap();
+        // Clearing the whole sheet to the transparency key is how a recipe
+        // starts. numbers.bmp is 99 wide and holds ten 9-pixel cells, so the
+        // eleventh is a gap -- and erasing it says nothing about anything.
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":0,"y":0,"width":99,"height":13,"color":"#ff00ff"}]}))
+            .unwrap();
+        assert_eq!(out["unsampled_pixels"], 0, "{out}");
+        // Actual ink in the same gap is still reported, with where.
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":90,"y":0,"width":9,"height":13,"color":"#ffcc00"}]}))
+            .unwrap();
+        assert_eq!(out["unsampled_pixels"], 117, "{out}");
+        assert_eq!(out["unsampled_sample"][0], json!([90, 0]));
+
+        // text.bmp is read for one colour and never drawn, so painting it --
+        // the correct thing to do -- reported all 2,790 of its pixels every
+        // time. That is a fact about the sheet, and the sheet says it.
+        d.state(json!({"panel":"atlas","sheet":"text.bmp","layer":"sheet"}))
+            .unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":0,"y":0,"width":155,"height":18,"color":"#ffdf9c"}]}))
+            .unwrap();
+        assert_eq!(out["unsampled_pixels"], 0, "{out}");
+        assert_eq!(out["sheet_is_never_drawn"], true, "{out}");
+
+        // And a real gap on a sheet that is drawn still reports: pledit.bmp
+        // column 125 falls between the two footer flaps.
+        d.state(json!({"panel":"atlas","sheet":"pledit.bmp","layer":"sheet"}))
+            .unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":0,"y":72,"width":276,"height":38,"color":"#334455"}]}))
+            .unwrap();
+        assert_eq!(out["unsampled_pixels"], 38, "{out}");
+        assert!(out["sheet_is_never_drawn"].is_null());
+    }
+
     #[test]
     fn identical_variants_names_only_sprites_the_stroke_actually_wrote() {
         let mut d = Document::blank();

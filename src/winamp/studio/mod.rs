@@ -461,8 +461,22 @@ fn default_export_path() -> std::path::PathBuf {
 pub fn run(path: Option<&str>) {
     let doc = initial_document(path).unwrap_or_else(|e| panic!("Open skin: {e:#}"));
     let shared = SharedDocument(Arc::new(Mutex::new(doc)));
-    if let Err(e) = mcp::start(shared.clone()) {
-        shared.lock().unwrap().message = format!("MCP unavailable: {e:#}");
+    // Say so, on stdout, before the window opens. Every recipe in this tree
+    // runs against a Studio that has to already be up, and this process wrote
+    // nothing at all: a log that is empty because the editor never started and
+    // a log that is empty because it started perfectly looked exactly alike,
+    // and the first one is a build that is about to fail in forty lines of
+    // somebody else's stack trace.
+    match mcp::start(shared.clone()) {
+        Ok(()) => println!(
+            "Cranamp Skin Studio: MCP on http://{}, editing {}",
+            mcp::ADDRESS,
+            path.unwrap_or("the bundled Catamp")
+        ),
+        Err(e) => {
+            eprintln!("Cranamp Skin Studio: no MCP -- {e:#}");
+            shared.lock().unwrap().message = format!("MCP unavailable: {e:#}");
+        }
     }
     let launcher = crate::create_surface_app()
         .with_title("Cranamp · Skin Studio")
@@ -2254,10 +2268,15 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                                         // to enter and leave.
                                                                         if sampling {
                                                                             let info = doc.inspect(
-                                                                                point[0].max(0)
-                                                                                    as u32,
-                                                                                point[1].max(0)
-                                                                                    as u32,
+                                                                                [
+                                                                                    point[0].max(0)
+                                                                                        as u32,
+                                                                                    point[1].max(0)
+                                                                                        as u32,
+                                                                                    1,
+                                                                                    1,
+                                                                                ],
+                                                                                None,
                                                                             );
                                                                             let im = doc.render();
                                                                             if let Some(p) = im
@@ -3604,15 +3623,21 @@ mod integration_tests {
         d.state(json!({"panel":"atlas","sheet":"volume.bmp","layer":"sheet"}))
             .unwrap();
         assert_eq!(d.render().dimensions(), (68, 433));
-        assert_eq!(d.inspect(67, 432)["hits"][0]["rgba"], json!([0, 0, 0, 0]));
+        assert_eq!(
+            d.inspect([67, 432, 1, 1], None)["hits"][0]["rgba"],
+            json!([0, 0, 0, 0])
+        );
         d.draw(&json!({"operations":[{"op":"pixel","x":67,"y":432,"color":"#abcdef"}]}))
             .unwrap();
         assert_eq!(
-            d.inspect(67, 432)["hits"][0]["rgba"],
+            d.inspect([67, 432, 1, 1], None)["hits"][0]["rgba"],
             json!([171, 205, 239, 255])
         );
         d.undo();
-        assert_eq!(d.inspect(67, 432)["hits"][0]["rgba"], json!([0, 0, 0, 0]));
+        assert_eq!(
+            d.inspect([67, 432, 1, 1], None)["hits"][0]["rgba"],
+            json!([0, 0, 0, 0])
+        );
         d.redo();
         d.state(json!({"panel":"main","layer":"auto"})).unwrap();
         assert_eq!(d.render().dimensions(), (275, 115));
@@ -3642,7 +3667,7 @@ mod integration_tests {
         assert_eq!(shared.lock().unwrap().status()["undo"], 2);
         mcp::call("studio_undo", json!({}), &shared).unwrap();
         assert_eq!(
-            shared.lock().unwrap().inspect(40, 90)["hits"][0]["rgba"],
+            shared.lock().unwrap().inspect([40, 90, 1, 1], None)["hits"][0]["rgba"],
             json!([17, 34, 51, 255])
         );
         mcp::call("studio_undo", json!({}), &shared).unwrap();

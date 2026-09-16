@@ -1374,6 +1374,77 @@ def measured():
     print(f'  {len(fits)} captions measured against the engine, all fitting')
 
 
+# What the skin claims about itself, and where. Every cat in this skin is lit
+# for a ground the recipe *told* it it was standing on, and every hand-drawn
+# mark is a colour chosen against artwork drawn somewhere else in the file. Both
+# were eyeballed off renders for the whole of the first build, and both are
+# questions the document can answer.
+GROUNDS = (
+    # what,                       rect,                    claimed
+    ('the tail up the left edge', (0, 40, 22, 60), R.GLOOM),
+    ('the cat behind candle B',   (172, 40, 25, 16), R.UMBER),
+    ('the cat on the corner',     (250, 85, 24, 26), R.DUSK),
+    ('the cat on the mantel',     (38, 160, 40, 56), R.GLOOM),
+)
+
+READS = (
+    # what,                        rect,                     ink,        floor
+    ('a resting transport sigil',  (39, 88, 23, 18), R.SALT, 3.0),
+    ('the board alphabet',         (60, 73, 180, 8), R.SALT_LIT, 4.5),
+    ('YES on the board',           (22, 73, 16, 8), R.SALT, 3.0),
+    ('the EQ and PL keys',         (219, 58, 46, 12), R.SALT_LIT, 4.5),
+    ('the footer menu words',      (10, 346, 125, 18), R.SALT_LIT, 4.5),
+    ('LIST on the table',          (228, 346, 28, 18), R.SALT_LIT, 4.5),
+    ('the wordmark on the table',  (99, 4, 78, 7), R.SALT_LIT, 4.5),
+    ('EQUALIZER on the wall',      (99, 120, 78, 7), R.SALT_LIT, 4.5),
+    ('TRANSCRIPT on its tape',     (95, 235, 84, 10), R.INK, 4.5),
+)
+
+
+@stage
+def checked():
+    """Ask the document the two questions the first build guessed at.
+
+    `rimlit()` lights a cat for the ground it is told it is in front of, and a
+    cat lit for the wrong room is the one mistake in this skin that no report
+    catches: the ink is correct, in the right cell, in colours that are on the
+    ladder, and the animal is lit by a candle that is not there. And the export
+    check covers the eight readouts Cranamp writes, which in a skin made of
+    hand-drawn marks on hand-drawn artwork is most of nothing.
+
+    `studio_pixel` answers both -- the artwork under any rectangle, and the same
+    WCAG arithmetic pointed at it -- so what was eyeballed off renders for a
+    whole build is now a stage that fails.
+    """
+    # Say which state the probe means. `ground` is composited from the variants
+    # the view is showing, so asking about a resting mark while the view is left
+    # on `pressed` measures the released ink against the pressed cell's glow --
+    # a pairing that exists nowhere, reads as a finding, and sent me looking for
+    # a legibility problem this skin does not have.
+    answer('studio_canvas', {'active': True, 'pressed': False})
+    for what, rect, claimed in GROUNDS:
+        here = answer('studio_pixel', dict(zip(('x', 'y', 'width', 'height'), rect)))
+        got = here.get('ground')
+        if got is None:
+            raise ValueError(f'{what}: nothing is drawn at {rect}')
+        drift = abs(R.step(got) - R.step(claimed))
+        if drift > 1:
+            raise ValueError(
+                f'{what} is lit for {claimed} (ladder {R.step(claimed)}) and is '
+                f'standing in front of {got} (ladder {R.step(got)}) -- it has '
+                f'been lit for a room it is not in')
+    print(f'  {len(GROUNDS)} cats lit for the ground they are actually on')
+
+    for what, rect, ink, floor in READS:
+        here = answer('studio_pixel', dict(
+            zip(('x', 'y', 'width', 'height'), rect), ink=ink))
+        if here['contrast'] < floor:
+            raise ValueError(
+                f'{what}: {ink} on {here["ground"]} is {here["contrast"]} to one '
+                f'and wants {floor}')
+    print(f'  {len(READS)} hand-drawn marks measured against their own artwork')
+
+
 @stage
 def export():
     path = str(Path(__file__).resolve().parents[2] / 'assets/skins/Catamp Seance.wsz')
@@ -1386,7 +1457,7 @@ def export():
 
 ORDER = ['blank', 'options', 'main', 'titlebar', 'readouts', 'transport',
          'switches', 'seek', 'volume', 'balance', 'eq', 'eq_bands', 'playlist',
-         'palettes', 'measured', 'export']
+         'palettes', 'measured', 'checked', 'export']
 
 
 @stage
