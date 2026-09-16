@@ -307,9 +307,12 @@ jobs:
           fi
           cp README.md LICENSE "$package_dir/"
           mkdir -p "$package_dir/skins"
+          # Every Catamp in the repository, so a download has the whole set
+          # whether or not it is compiled in. Sampler shipped without being
+          # added here and was in the source tree and in no release.
           cp "assets/skins/Catamp Silverplay.wsz" "assets/skins/Catamp Silverplay.cstudio" "$package_dir/skins/"
-          cp "assets/skins/Catamp Feral Night.wsz" "$package_dir/skins/"
-          cp "assets/skins/Catamp Cardboard.wsz" "$package_dir/skins/"
+          cp "assets/skins/Catamp Feral Night.wsz" "assets/skins/Catamp Cardboard.wsz" \
+             "assets/skins/Catamp Sampler.wsz" "assets/skins/Catamp Cat Scan.wsz" "$package_dir/skins/"
           cp assets/demo-music/generated/*.mp3 "$package_dir/demo-music/"
           cp assets/demo-music/generated/cranamp-demo-playlist.m3u "$package_dir/demo-music/"
           cp assets/demo-music/README.md assets/demo-music/LICENSES.md "$package_dir/demo-music/"

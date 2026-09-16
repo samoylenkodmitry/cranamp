@@ -13,3 +13,4 @@
 
 # On-device UI test output.
 platform/ios/uitests/results.xcresult/
+__pycache__/

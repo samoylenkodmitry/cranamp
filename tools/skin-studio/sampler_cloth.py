@@ -410,7 +410,15 @@ def stitched(pen, x, y, text, color, *, scale=1, spacing=1, shadow=None):
 
 
 def text_width(text, scale=1, spacing=1):
-    return max(0, len(text) * (5 * scale + spacing) - spacing)
+    """How wide a word comes out in the 5x7 face.
+
+    The pen advances (cell + spacing) * scale, not cell * scale + spacing:
+    the two agree at scale 1 and nowhere else, and this had the second form
+    in every recipe until the engine was taught to answer the question itself.
+    `studio_canvas {"measure": [...]}` is the authority; this is the same
+    arithmetic so a recipe can lay a caption out before the editor is running.
+    """
+    return max(0, len(text) * (5 + spacing) * scale - spacing * scale)
 
 
 def micro(pen, x, y, text, color, *, spacing=1, shadow=None):
@@ -432,8 +440,9 @@ def micro(pen, x, y, text, color, *, spacing=1, shadow=None):
     return pen
 
 
-def micro_width(text, spacing=1):
-    return max(0, len(text) * (4 + spacing) - spacing)
+def micro_width(text, spacing=1, scale=1):
+    """The same, for the 4x5 small-caps face."""
+    return max(0, len(text) * (4 + spacing) * scale - spacing * scale)
 
 
 # The timer is the most-read number in the skin, and it gets a nine-by-thirteen

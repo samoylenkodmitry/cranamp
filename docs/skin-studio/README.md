@@ -208,7 +208,7 @@ one tool per panel, named for it.
 | `studio_history`, `studio_undo`, `studio_redo` | The shared history |
 | `studio_status`, `studio_new`, `studio_open`, `studio_project`, `studio_export`, `studio_screenshot` | The document and the window |
 
-Twenty-seven things make that surface usable at speed, every one of them the
+Forty-one things make that surface usable at speed, every one of them the
 scar of a skin drawn through it:
 
 - **A `text` operation** draws a string in the editor's own 5x7 face at an
@@ -268,9 +268,9 @@ scar of a skin drawn through it:
   `surface` a stroke's coordinates mean -- `canvas`, or `atlas <sheet>` -- and so
   does every `studio_draw` result, because one pencil and one history serve both
   and a stroke aimed at the wrong one still succeeds, somewhere else.
-- **Zoom stops at 8x on purpose.** Judging a 14x25 sprite wants more than that;
-  read at 1:1 and enlarge nearest-neighbour at your end, which costs nothing and
-  has no ceiling.
+- **Zoom stopped at 8x, and that was the wrong cap.** Judging a 14x25 sprite
+  wants more than 8x, and telling the caller to enlarge at their end costs a
+  file and an image library. `magnify` replaced it; see below.
 - **A `path` on an image tool means "write it and tell me where".**
   `studio_screenshot`, `studio_states` and `studio_study` used to write the file
   *and* hand back the whole PNG as base64 -- for a full scene, 420 KB, about a
@@ -454,6 +454,115 @@ scar of a skin drawn through it:
   says they are all at x=125. Sheets that are not artwork at all say so too --
   `text.bmp` is read for one colour and never drawn, which is a day's work to
   discover by hand.
+- **`studio_new` and `studio_open` land on the whole skin.** The editor has
+  one drawing surface and every GUI path that replaces the document puts the
+  view back on it; the two MCP calls that replace it did not, so a skin started
+  from **New blank** over MCP -- the documented way to start one -- was handed a
+  retired single-window panel instead: a canvas 275x115 rather than 275x377, a
+  sprite catalogue with 29 of the 81 sprites in it, and a `surface` that is
+  neither of the two values `studio_status` promises. Every coordinate in the
+  first stroke of a new skin meant something other than what the documentation
+  said it meant.
+- **A curve's own endpoints may be fractional.** Its control point always
+  could, and so could every point of a path, because construction geometry is
+  fractional -- a rib swept round an ellipse, a tail built at two sizes from
+  one set of numbers. A curve is exactly where that geometry meets the rest of
+  a drawing, and it was the one shape that had to be rounded at the join; the
+  rasteriser turns all four corners into `f64` on its next line either way.
+  `pixel_pen`'s own `taper` had been emitting a hand-built `path` to get round
+  it since the day it was written.
+- **A coordinate refusal names the field and the value.** `Coordinates must be
+  integers` is true of eleven fields and specific to none of them, which is the
+  rule the rest of this server already follows; it is `x is a whole number of
+  pixels (got 1.5)` and `zoom is 1..8 (got 10)`.
+- **`studio_targets` answers for the whole skin whatever is open.** Both
+  catalogues were scoped to the surface, and with `studio_atlas` holding one
+  sheet the sprite catalogue is a single pseudo-sprite called `sheet` -- so
+  "where do this slider's twenty-eight frames live", which is a question only a
+  recipe drawing that sheet at its own coordinates ever asks, could not be
+  asked without leaving the sheet, which is what it was avoiding. A recipe that
+  computes those rectangles instead lands all twenty-eight frames on frame 0.
+  `studio_rectangles` stays scoped, because a source cell is a fact about the
+  sheet it is on -- and both now say what they looked in when a filter matches
+  nothing, rather than answering `{"sprites":[],"of":1}`, which reads as "no
+  such sprite" and means "not on the sheet you have open".
+- **A canvas rectangle is labelled with the variant it is actually showing.**
+  The labels exist so that four rectangles for a switch say which is pressed
+  and twenty-eight for a slider say which end is silence. On the assembled
+  canvas every one of them was variant 0's: the volume track at frame 20 read
+  `track · 0 · silent`, the balance track at centre read `hard left`, and the
+  channel lamp drawn from its ON cell read `off · not this channel mode`. The
+  canvas has one rectangle per sprite rather than one per variant, and the
+  index of the one entry in that list is not the index of the variant in it.
+  It is the mistake the labels were added to catch, made by the thing that
+  reports them, and it was in the editor's own canvas hint under the pointer as
+  well as in `studio_rectangles`.
+- **`crossed_cells`: ink that left its own cell and landed in a repeated one.**
+  A sheet is a bag of cells and crossing between two of them is often exactly
+  what an artist means -- a band along a footer, a wash over a background. It
+  is never what they mean when the cell on the other side is a *tile*. The
+  playlist header's is 25 pixels wide and drawn nine times, so a caption four
+  pixels too long for the title cell does not spill into empty sheet; it spills
+  into the tile, and the player writes it nine times across the top of the
+  window. Nothing reported it: every pixel of it is a legal part of some cell,
+  and `overwrites` is a canvas-to-source measure that does not apply to a sheet
+  open on its own. Cat Scan's playlist header read `CASE NOTES` with `SCAN SCAN
+  SCAN` either side of it. The report names the operation, the cell and how
+  many times the player draws it, and it is silent for a cell painted on its
+  own.
+- **`unsampled_pixels` asks about the skin, not about the preview.**
+  `plbg.bmp` is 243x203 and tiles from the top, and the mask was built at the
+  preview's current playlist height -- so painting the whole sheet, which is
+  the correct thing to do, reported 28,188 pixels of ink nothing would ever
+  show. At the tallest playlist the player uses all of it.
+- **The state sheet's refusal names the call.** "Choose one sprite in Sprite
+  targets first" is the right diagnosis and leaves an MCP caller with no call
+  to make; the panel is a tool, so it says `studio_targets {"solo":"main.play"}`
+  as well.
+- **`studio_canvas` measures a word.** How wide a caption comes out is the one
+  piece of the engine's arithmetic a recipe always had to reimplement, and all
+  three that did -- Cardboard's, Sampler's, Cat Scan's -- reimplemented it the
+  same way wrong: the pen advances `(cell + spacing) * scale` and every copy
+  computed `cell * scale + spacing`, which agree at scale 1 and at no other
+  scale. A caption measured one way and set the other runs past the end of the
+  cell it was aimed at, and on a sheet with a repeating tile that error is
+  drawn nine times. `measure` takes a word or a list of them and answers
+  `width` and `height` -- the ink, which is what centring wants -- and
+  `advance`, where the pen ends, which is what setting a second run after the
+  first wants, from the same glyph walk that draws them. It names the
+  characters the face does not have too, which used to arrive one stroke after
+  it would have been useful.
+- **The zoom cap moved from the factor to the pixels.** Eight was the ceiling
+  everywhere, which bites hardest in the case it was meant to help: eight times
+  a 14x25 equalizer handle is a 112x200 thumbnail, and judging one wants more.
+  The documented answer was to read at 1:1 and enlarge nearest-neighbour at the
+  caller's end, which for an agent is a file, an image library and two more
+  round trips per look, in a project whose whole point is that a skin can be
+  drawn without one. `magnify` is 1..64 on every image tool and is refused when
+  the result would pass 2048 pixels a side, naming the largest that fits: a
+  crop may go as close as it likes and the whole canvas may not.
+- **Both catalogue filters take a list.** `id` and `sheet` accept one
+  case-insensitive substring or several, so "where do these six transport keys
+  live" is one call rather than six round trips for one question a recipe asks
+  once per sheet.
+- **`studio_rectangles` answers `at`: everything overlapping a box.** A flat
+  list says where each rectangle is and nothing about what is next to what,
+  which is the question an artist actually has -- *if I run a rail across this
+  band, what does it cross?* The spectrum and the volume slider sit side by
+  side rather than stacked, and Cat Scan's first main window put a steel rail
+  the width of the window through the middle of the chest; the spectrum came
+  out of a metal bar. `studio_inspect_region` could already answer it and is
+  retired and unlisted, so the only way to find the capability was to know it
+  was there.
+- **`studio_screenshot` takes a `panel` and a `crop` together.** It took both
+  and used only the panel: the crop was accepted, dropped, and answered with an
+  ordinary-looking result, which is the quiet failure `additionalProperties`
+  and the by-name refusals exist to stop. They compose now, and the crop is in
+  the panel's **own native skin coordinates** -- the ones `studio_rectangles`
+  answers in -- rather than in scene pixels, because the player may be at any
+  zoom and working that out by eye is the thing `panel` was added to stop. So
+  `{"panel":"main","crop":[14,86,146,22],"magnify":4}` is the live transport
+  row, close up, asked for in the coordinates the catalogue gave you.
 
 ### What each tool answers with
 
@@ -464,19 +573,21 @@ printing the JSON.
 | Tool | Answers |
 | --- | --- |
 | `studio_status` | the document: `path`, `revision`, `dirty`, `undo`, `redo`, `message`, `canvas`, `surface`, `sprites` (a count), `sheets` (name, width, height) and the whole `view` |
-| `studio_canvas`, `studio_atlas` | the same, without `sheets`; with `path`, `{view, path, size}` |
-| `studio_targets` | `{sprites, of, chosen}` -- one entry per sprite: `id`, `sheet`, `source`, `states`, `drawn`, and with `variants: true` also `variants` and `labels` |
-| `studio_rectangles` | `{rectangles, of}` -- one entry per **variant**: `id`, `label`, `sheet`, `rect` (where it is drawn), `source` (where it lives), `variant`, `active`, `runtime`, `hit` |
-| `studio_draw` | `pixels_written`, `bounds`, `clipped_pixels`, `overwrites`, `overwrite_sample`, `unmapped_pixels`, `unsampled_pixels`, their samples, `surface`, `revision`, and when there is something to say `unsupported_characters`, `identical_variants` and the sheet's `note` |
+| `studio_canvas`, `studio_atlas` | the same, without `sheets`; with `path`, `{view, path, size}`; with `measure`, `{measured, face, scale, spacing}` and `unsupported_characters` |
+| `studio_targets` | `{sprites, of, chosen}` -- one entry per sprite, for the whole skin whatever surface is open: `id`, `sheet`, `source`, `states`, `drawn`, and with `variants: true` also `variants` and `labels` |
+| `studio_rectangles` | `{rectangles, of}` -- one entry per **variant**, narrowed by `at`, `sheet`, `id`, `runtime` or `hit`: `id`, `label`, `sheet`, `rect` (where it is drawn), `source` (where it lives), `variant`, `active`, `runtime`, `hit` |
+| `studio_draw` | `pixels_written`, `bounds`, `clipped_pixels`, `overwrites`, `overwrite_sample`, `unmapped_pixels`, `unsampled_pixels`, their samples, `surface`, `revision`, and when there is something to say `unsupported_characters`, `identical_variants`, `crossed_cells` and the sheet's `note` |
 | `studio_states` | the contact sheet, plus `sprite`: `id`, `sheet`, `of`, and per variant `index`, `label`, `rect`, `painted_pixels`, `differs_from_previous`, `largest_channel_change`, `same_picture_as` |
 | `studio_pixel` | every sprite under one canvas pixel and where each keeps it |
 | `studio_options` | every option, `readability` (per readout: `reads`, `ink`, `ground`, `contrast`, `readable`), and `sheets_changed` when one added or removed a sheet |
-| `studio_screenshot` | `path`/`size` or the PNG, plus `showing` (`player` or `editor`) and `player` (`x`, `y`, `zoom`) |
+| `studio_screenshot` | `path`/`size` or the PNG, plus `showing` (`player` or `editor`) and `player` (`x`, `y`, `zoom`); `panel` and `crop` compose, and `magnify` enlarges |
 | `studio_export` | `path`, `bytes`, and when there is something to say `undrawn_sprites` and `hard_to_read` |
 | `studio_layers`, `studio_history`, `studio_project` | the planes, the history, the project file |
 
 Every image tool takes `path` and answers with where it wrote rather than the
-bytes; omit it and the PNG comes back inline.
+bytes; omit it and the PNG comes back inline. Every one of them also takes
+`magnify`, 1..64, which enlarges the returned image instead of `zoom` and is
+capped at 2048 pixels a side rather than at a factor.
 
 The older tools -- `studio_state`, `studio_render`, `studio_guides`,
 `studio_paint_layers`, `studio_layout`, `studio_patch`, `studio_inspect_region`,
@@ -1216,3 +1327,127 @@ were already known:
 Verification: `studio_export` validates through Cranamp's own loader, and the
 whole recipe replays from **New blank** into an empty document in fifteen
 seconds with no image library and no external asset.
+
+## Catamp Cat Scan -- a skin with the light behind it
+
+`assets/skins/Catamp Cat Scan.wsz` is the third Catamp drawn from **New blank**
+through this editor, and it is one deterministic recipe rather than a stroke
+journal:
+
+```sh
+python3 tools/skin-studio/catamp_cat_scan.py          # every sheet, then export
+python3 tools/skin-studio/catamp_cat_scan.py main eq  # one stage at a time
+```
+
+- `catscan_film.py` -- the backlit film, the brushed steel of the case, the
+  slots of bare diffuser, the clips and the tape, grease pencil, dust, the two
+  kinds of window Cranamp writes into, and the density ladder everything in the
+  skin is coloured from.
+- `catscan_cats.py` -- the cats. Two kinds, and where a cat is decides which.
+- `catamp_cat_scan.py` -- one stage per sheet, each drawn in `studio_atlas` at
+  that sheet's own native coordinates.
+
+The player is a vet's lightbox at two in the morning, with somebody's cat's
+films clipped to it. Every other Catamp is lit from above-left -- silver
+glints, kraft catches a key light, felt sits on its own cast shadow. This one
+has no key light at all: the only light in the skin is *behind* the picture,
+and everything visible is something standing in front of it. That inverts every
+rule the other skins are drawn by and gives this one four of its own.
+
+- **A bright pixel is a thin one.** Value is density, not illumination. Air is
+  black, soft tissue is a broad dim haze, bone is bright and a swallowed staple
+  is pure white. Nothing is lit; things are only more or less in the way.
+- **An opaque thing has no interior.** The clips, the tape, the grease pencil
+  and the cat sitting on the box are flat silhouettes, and the only thing that
+  describes their shape is the light leaking past the edge. Shading the inside
+  of a silhouette is what turns it into a sticker.
+- **Bone is three values and a haze, never one.** The haze goes down first and
+  is wider than the bone; then the spongy middle, a speckle one step up; then
+  the dense rind, one step up again and only on the outline.
+- **Pressed means pressed against the light.** Everywhere else in Catamp a
+  pressed control goes darker. Here a chip pushed flat against the diffuser
+  loses the shadow it was floating on and the light behind it comes up -- 350
+  of a play button's 414 pixels change, with a largest channel change of 226,
+  where flipping a bevel would have moved two.
+
+And one more, which is the only warm colour in the skin: the light through a
+cat's ears. Everything else is the green-grey of a fluorescent viewer behind a
+sheet of polyester, and the ears are the single place the beam passes through
+something alive.
+
+Four controls say something with their frames that a handle cannot:
+
+- **The equalizer is eleven things the cat has eaten**, in the order they came
+  out: a hair tie, a bottle cap, a spring, a bead, a bell, a paperclip, a
+  screw, a button, a battery, a brick and a milk-jug ring, with a fish skeleton
+  on the preamp because that one is not the cat's fault. Each band's track is a
+  length of gut filling with contrast from the bottom up to its own handle, so
+  a boosted band has more in it than a cut one. Eleven copies of one head is a
+  pattern; eleven different objects is a story, and **Unique EQ art** is what
+  buys the eleven cells.
+- **Volume is a step wedge** -- the aluminium staircase a radiographer puts in
+  the beam to calibrate an exposure. The level is how many of its thirteen
+  steps the beam has got through, so silence is a strip of unexposed film.
+- **Balance is the tail.** Six caudal vertebrae leaning together, upright in
+  the middle, so centre reads as centre with no mark to say so.
+- **The seek bar is a spine survey with a loupe sliding along it**, nose at the
+  left and tail tip at the right, and the part already read ringed in wax. It
+  is the one piece of glass in a skin made of film and steel, so it is the
+  engine's own glass material.
+
+The cats are made two ways and where a cat is decides which. **Inside a film** a
+cat is an anatomy: layers of density seen through each other, composed out of
+discs, arcs and wedges on a character grid, deepest first. Freehanding one
+produces a ring -- the first skull drawn for this skin was one -- because the
+hand draws the outline it can see and leaves the inside empty, and on a
+radiograph the inside is the picture. **On the box** a cat is a silhouette with
+no interior at all, and the ears are cut into its outline rather than laid over
+it, because a silhouette with two triangles on top is a cat wearing a hat. The
+cat sitting in the equalizer was drawn on the film first, where it was a
+perfectly correct black silhouette of nothing; the gap the preamp leaves is
+bare diffuser now, so there is a light for it to sit in front of.
+
+Everything Cranamp writes live is written in the brightest colour in the skin
+onto the blackest -- `#e3f2e8` on `#0a1112`, sixteen to one. The first draft put
+the readouts on clear strips of film with black lettering, which is how the
+*printed* parts of a film read and would have put a glaring white block in the
+middle of every dark window; the contrast checker passed it and the room did
+not. Black on a clear strip is kept for the parts the vet printed.
+
+The recipe measures its own captions against the engine before it exports: 59
+words, every one of them handed to `studio_canvas {"measure": [...]}` and
+checked against the arithmetic the recipe lays them out with, so the two cannot
+drift again in the direction they already drifted once.
+
+Five things about the classic format cost a redraw each here, and two of them
+were new:
+
+- **The main title cell is sheet `[27,0,275,14]`, not `[0,0,...]`.** The four
+  window keys live in the 27 columns before it, so a bar drawn from the sheet's
+  own left edge arrives 27 pixels to the left of where it is seen and loses its
+  last 27 columns -- and nothing reports it, because every one of those pixels
+  is a legal part of some cell.
+- **Five of the six transport keys have their pressed cell one row of 18 below
+  the released one, and eject does not.** Eject is 22x16 and its pressed cell
+  starts at y=16. Assuming the stride put its pressed art two rows low;
+  `unsampled_pixels` named the two rows that fell off the bottom and was the
+  only thing that did. Every cell in the recipe is asked for now rather than
+  worked out.
+- **The playlist header tile is 25 pixels wide and drawn nine times**, so a
+  caption that runs four pixels past the end of the title cell is repeated
+  across the whole header. `crossed_cells` exists because of this one.
+- **The playlist footer is two cells a pixel apart**, so nothing continuous may
+  cross sheet column 125 -- which is why the case is two panels butted together
+  with a fold between them.
+- **A slider frame is drawn at its own y, not at the sheet's**, and the
+  twenty-eight are at two different sheet rows with a stride that changes
+  halfway. The recipe reads them from `studio_targets` rather than computing
+  them.
+
+Verification: `studio_export` validates through Cranamp's own loader and
+reports no undrawn sprite and nothing hard to read; `check_native_frames.py`
+swept all 112 live GPU states -- active and inactive, released and pressed, all
+28 slider frames -- with no nonuniform 2x2 source-pixel block, so every sprite
+samples at exact native pixels. The whole recipe replays from **New blank** into
+an empty document in forty-five seconds with no image library and no external
+asset.
