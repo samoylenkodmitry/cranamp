@@ -225,9 +225,42 @@ pub struct Document {
     /// The sheet box one operation wrote, so a transaction of ten thousand
     /// can say which one crossed out of the cell it was aimed at.
     operation_box: Option<(usize, [u32; 4])>,
+    /// Where this operation blended with the transparency key.
+    ///
+    /// `#ff00ff` erases everywhere else in this engine, and `opacity`, an
+    /// `image`'s alpha and `material: "glass"` all read it as a colour: a warm
+    /// glow laid into a cleared sprite cell comes out as brown mud and a glass
+    /// jar drawn in one comes out hot pink, the cell quietly stops being
+    /// transparent, and every other report is clean. Nobody has ever wanted a
+    /// colour blended toward magenta.
+    keyed_blend: Vec<[i32; 2]>,
     overwrites: usize,
     overwrite_note: Option<String>,
 }
+/// The WCAG relative luminance of a colour.
+fn relative_luminance(c: [u8; 4]) -> f64 {
+    let channel = |v: u8| {
+        let s = v as f64 / 255.;
+        if s <= 0.03928 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
+}
+
+/// How well one colour reads on another, to one decimal place.
+///
+/// Four and a half is comfortable at the size a skin is looked at; below three
+/// is a readout you have to hunt for, and below two is one that is not there.
+/// One implementation, because the export check and `studio_pixel` answering
+/// for an arbitrary rectangle are the same question asked twice.
+fn contrast_ratio(a: [u8; 4], b: [u8; 4]) -> f64 {
+    let (x, y) = (relative_luminance(a), relative_luminance(b));
+    ((x.max(y) + 0.05) / (x.min(y) + 0.05) * 10.).round() / 10.
+}
+
 impl Document {
     /// A new classic atlas set with zero inherited artwork or metadata.
     pub fn blank() -> Self {
@@ -281,6 +314,7 @@ impl Document {
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
             operation_box: None,
+            keyed_blend: Vec::new(),
             preview: None,
             overwrites: 0,
             overwrite_note: None,
@@ -338,6 +372,7 @@ impl Document {
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
             operation_box: None,
+            keyed_blend: Vec::new(),
             preview: None,
             overwrites: 0,
             overwrite_note: None,
@@ -751,7 +786,11 @@ impl Document {
             "eqhandles.bmp" => {
                 "eleven 14x25 handles, one per band, normal above pressed. \
                  Equalizer travel is limited to 38 pixels while these exist, \
-                 because the handle itself takes 25 of the 63-pixel groove."
+                 because the handle itself takes 25 of the 63-pixel groove. \
+                 The eleven band *tracks* are untouched and still share one set \
+                 of 28 cells, so nothing that is true of only one band can be \
+                 said in its groove -- this sheet is the only place eleven \
+                 bands can differ from each other."
             }
             "plbg.bmp" => {
                 "the ground under the track list, one row every 11 pixels, tiled \
@@ -1021,7 +1060,7 @@ impl Document {
         }
         let mut view = self.view.clone();
         view.panel = "canvas".into();
-        let mut out = Vec::new();
+        let mut out: Vec<Value> = Vec::new();
         for layer in self.layers_for(&view) {
             if layer.variants.len() < 2 {
                 continue;
@@ -1032,11 +1071,20 @@ impl Document {
             let Some(box_) = touched.get(&index) else {
                 continue;
             };
-            if !layer
-                .variants
-                .iter()
-                .any(|r| super::guides::intersection(*r, *box_).is_some())
-            {
+            // The box is the cheap filter and not the answer. One transaction
+            // usually draws every cell a sheet has, scattered over the whole of
+            // it, so the union of its writes is most of the sheet and a box
+            // test reports every sprite on it: the equalizer's PRESETS plate
+            // and its close key, drawn together, made a box that swallowed the
+            // ON and AUTO cells in between and named both as having duplicate
+            // variants the stroke had not touched a pixel of. Confirm against
+            // the writes themselves, which the transaction is already holding.
+            if !layer.variants.iter().any(|r| {
+                super::guides::intersection(*r, *box_).is_some()
+                    && (r[1]..r[1] + r[3]).any(|y| {
+                        (r[0]..r[0] + r[2]).any(|x| self.atlas_writes.contains_key(&(index, x, y)))
+                    })
+            }) {
                 continue;
             }
             let Some(image) = self.images.get(&layer.sheet) else {
@@ -1056,11 +1104,35 @@ impl Document {
                 same.entry(pixels).or_default().push(i);
             }
             let groups: Vec<Vec<usize>> = same.into_values().filter(|g| g.len() > 1).collect();
-            if !groups.is_empty() {
-                out.push(
-                    json!({"id":layer.id,"of":layer.variants.len(),"groups":groups,
-                                "labels":layer.labels}),
-                );
+            if groups.is_empty() {
+                continue;
+            }
+            // Sprites that share one set of source cells share the answer too.
+            // The equalizer's eleven bands all draw their groove from the same
+            // rectangle, so one duplicate frame was reported eleven times, each
+            // with its own copy of all twenty-eight labels -- four and a half
+            // kilobytes of JSON for one fact.
+            if let Some(shared) = out.iter_mut().find(|e| {
+                e["sheet"] == json!(layer.sheet)
+                    && e["groups"] == json!(groups)
+                    && e["variants"] == json!(layer.variants)
+            }) {
+                if let Some(ids) = shared["also"].as_array_mut() {
+                    ids.push(json!(layer.id));
+                }
+                continue;
+            }
+            out.push(json!({"id":layer.id,"sheet":layer.sheet,
+                            "of":layer.variants.len(),"groups":groups,
+                            "labels":layer.labels,"variants":layer.variants,
+                            "also":[]}));
+        }
+        for entry in out.iter_mut() {
+            if let Some(object) = entry.as_object_mut() {
+                object.remove("variants");
+                if object["also"].as_array().map(Vec::is_empty).unwrap_or(true) {
+                    object.remove("also");
+                }
             }
         }
         out
@@ -1259,10 +1331,60 @@ impl Document {
         }
         im
     }
-    pub fn inspect(&self, x: u32, y: u32) -> Value {
+    /// What the artwork is at a place, and whether a colour would read on it.
+    ///
+    /// Three things, and they used to be one. `hits` settles a mapping: every
+    /// sprite under the pixel, where each keeps it, and what shares it.
+    /// `ground` is the artwork itself, averaged over the rectangle's opaque
+    /// pixels -- a skin whose whole grammar is "how far is this from a flame"
+    /// has to know what a cat is standing in front of before it can put one
+    /// down, and answering that by rendering a crop and looking at it is a file
+    /// and two round trips for a number the document is already holding.
+    /// `contrast` is the export check's own arithmetic pointed anywhere: that
+    /// check covers the eight readouts Cranamp writes and nothing else, and a
+    /// skin is full of hand-drawn marks that have to read on hand-drawn
+    /// artwork.
+    ///
+    /// The coordinates mean the surface the view is on, like every stroke, and
+    /// the answer says which -- asked about a canvas pixel while a sheet was
+    /// open, this used to answer `{"hits": []}`, which reads as "no sprite
+    /// there" and means "not on the surface you have open".
+    pub fn inspect(&self, rect: [u32; 4], ink: Option<[u8; 4]>) -> Value {
+        let [x, y, w, h] = rect;
         let composite = self.composite_images();
         let hits:Vec<Value>=self.layers().iter().rev().filter_map(|l|l.map(x,y).map(|(sx,sy)|json!({"layer":l.id,"sheet":l.sheet,"atlas_pixel":[l.source[0]+sx,l.source[1]+sy],"local_pixel":[sx,sy],"variants":l.variants.len(),"shared_or_stretched":l.stretched(),"rgba":composite.get(&l.sheet).and_then(|im|im.get_pixel_checked(l.source[0]+sx,l.source[1]+sy)).map(|p|p.0)}))).collect();
-        json!({"canvas_pixel":[x,y],"hits":hits})
+        let mut out = json!({"canvas_pixel":[x,y],"surface":self.surface(),"hits":hits});
+        if w != 1 || h != 1 {
+            out["rect"] = json!(rect);
+        }
+        let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+        let ground = self.ground_under(rect);
+        if let Some(ground) = ground {
+            out["ground"] = json!(hex(ground));
+            if let Some(ink) = ink {
+                let r = contrast_ratio(ink, ground);
+                out["ink"] = json!(hex(ink));
+                out["contrast"] = json!(r);
+                out["readable"] = json!(r >= 3.0);
+            }
+        }
+        // Nothing there is an answer, and it is a different answer from "no
+        // sprite there". Say what was actually looked in.
+        if out["hits"].as_array().is_some_and(Vec::is_empty) && ground.is_none() {
+            let (sw, sh) = if self.view.panel == "atlas" {
+                self.images
+                    .get(&self.view.sheet)
+                    .map(|i| i.dimensions())
+                    .unwrap_or((0, 0))
+            } else {
+                self.canvas_size()
+            };
+            out["nothing_at"] = json!(format!(
+                "{} is {sw}x{sh} and holds no artwork at {x},{y}",
+                self.surface()
+            ));
+        }
+        out
     }
 
     /// The sprite a state sheet would show, or `None` when nothing names one.
@@ -1541,12 +1663,22 @@ impl Document {
             "Unknown material"
         );
         let shaded = if material == Some("glass") {
-            Some(super::material::glass(
-                &points,
-                &self.selected_image(),
-                color,
-                op,
-            )?)
+            // Glass refracts what is under it, and what is under a cleared
+            // sprite cell is the transparency key, so the engine's own glass
+            // drawn into one comes out hot pink. Count it the same way the
+            // opacity blend does rather than let it ship.
+            let beneath = self.selected_image();
+            for [x, y] in points.iter().copied() {
+                if let Some(p) = beneath
+                    .get_pixel_checked(x.max(0) as u32, y.max(0) as u32)
+                    .filter(|_| x >= 0 && y >= 0)
+                {
+                    if p.0[3] == 0 || p.0[..3] == [255, 0, 255] {
+                        self.keyed_blend.push([x, y]);
+                    }
+                }
+            }
+            Some(super::material::glass(&points, &beneath, color, op)?)
         } else {
             None
         };
@@ -1577,6 +1709,9 @@ impl Document {
                     .filter(|_| x >= 0 && y >= 0)
                     .map(|p| p.0)
                     .unwrap_or([0, 0, 0, 255]);
+                if beneath[3] == 0 || beneath[..3] == [255, 0, 255] {
+                    self.keyed_blend.push([x, y]);
+                }
                 for c in 0..3 {
                     color[c] = (color[c] as f64 * a + beneath[c] as f64 * (1.0 - a))
                         .round()
@@ -1960,6 +2095,7 @@ impl Document {
             }
         }
         let mut crossed: Vec<Value> = Vec::new();
+        let mut keyed: Vec<Value> = Vec::new();
         let mut count = 0;
         // Which operation is in hand, so a refusal can say so. A transaction is
         // allowed ten thousand operations; "No glyph for '@'" with no index is
@@ -1971,6 +2107,7 @@ impl Document {
                 let kind = op.get("op").and_then(Value::as_str).unwrap_or("pixel");
                 at = Some((index, kind.to_owned()));
                 self.operation_box = None;
+                self.keyed_blend.clear();
                 let color = parse_color(
                     op.get("color")
                         .and_then(Value::as_str)
@@ -2068,6 +2205,9 @@ impl Document {
                                     .filter(|_| bx >= 0 && by >= 0)
                                     .map(|q| q.0)
                                     .unwrap_or([0, 0, 0, 255]);
+                                if under[3] == 0 || under[..3] == [255, 0, 255] {
+                                    self.keyed_blend.push([bx, by]);
+                                }
                                 let a = p[3] as f32 / 255.0;
                                 let mut out = [0u8; 4];
                                 for c in 0..3 {
@@ -2130,6 +2270,11 @@ impl Document {
                             crossed.push(note);
                         }
                     }
+                }
+                if !self.keyed_blend.is_empty() && keyed.len() < 8 {
+                    keyed.push(json!({"operation":index,"op":kind,
+                        "pixels":self.keyed_blend.len(),
+                        "at":self.keyed_blend.iter().take(4).collect::<Vec<_>>()}));
                 }
             }
             Ok(())
@@ -2206,12 +2351,29 @@ impl Document {
         // a sheet open on its own can be painted there; the assembled canvas
         // has no way to address the gaps between cells.
         let mut unsampled: Vec<[u32; 2]> = Vec::new();
+        let mut never_drawn = false;
         if self.view.panel == "atlas" {
             if let Some(index) = self.images.keys().position(|k| k == &self.view.sheet) {
                 if let Some((mask, width)) = self.sampled_mask(&self.view.sheet) {
-                    for (sheet, x, y) in self.atlas_writes.keys() {
-                        if *sheet == index && !mask[(y * width + x) as usize] {
-                            unsampled.push([*x, *y]);
+                    // A sheet nothing samples at all is not a sheet with ink in
+                    // the wrong place on it. `text.bmp` is read for one colour
+                    // and never drawn, so painting it -- which is the correct
+                    // thing to do -- reported every one of its 2,790 pixels,
+                    // every time, forever. That is a fact about the sheet and
+                    // the sheet already has a note saying it.
+                    never_drawn = !mask.iter().any(|sampled| *sampled);
+                    if !never_drawn {
+                        for ((sheet, x, y), (colour, _)) in self.atlas_writes.iter() {
+                            // Erasing a gap is not ink nothing will ever show.
+                            // Clearing a sheet to the transparency key before
+                            // painting it is the ordinary way to start, and it
+                            // reported every gutter between every cell.
+                            if *sheet == index
+                                && colour[..3] != [255, 0, 255]
+                                && !mask[(y * width + x) as usize]
+                            {
+                                unsampled.push([*x, *y]);
+                            }
                         }
                     }
                 }
@@ -2234,6 +2396,9 @@ impl Document {
             "unmapped_sample":self.unmapped_pixels.iter().take(8).collect::<Vec<_>>(),
             "unsampled_pixels":unsampled.len(),
             "unsampled_sample":unsampled.iter().take(8).collect::<Vec<_>>()});
+        if never_drawn {
+            result["sheet_is_never_drawn"] = json!(true);
+        }
         if !skipped.is_empty() {
             result["unsupported_characters"] =
                 json!(skipped.iter().map(|c| c.to_string()).collect::<Vec<_>>());
@@ -2242,6 +2407,13 @@ impl Document {
             self.message
                 .push_str(&format!("; {} crossed into a repeated cell", crossed.len()));
             result["crossed_cells"] = json!(crossed);
+        }
+        if !keyed.is_empty() {
+            let total: u64 = keyed.iter().filter_map(|k| k["pixels"].as_u64()).sum();
+            self.message.push_str(&format!(
+                "; {total} blended with the transparency key and were written opaque"
+            ));
+            result["keyed_blends"] = json!(keyed);
         }
         let same = self.identical_variants();
         if !same.is_empty() {
@@ -3227,7 +3399,13 @@ impl Document {
     ///
     /// Walked from the topmost sprite down, because that is the order the
     /// player draws them in and a readout sits on whatever is nearest it.
-    fn ground_under(&self, rect: [u32; 4]) -> Option<[u8; 4]> {
+    /// The artwork under a rectangle, averaged over its opaque pixels.
+    ///
+    /// Public because it is the answer to two questions, not one: the checker
+    /// asks it about the eight readouts Cranamp writes, and `studio_pixel` asks
+    /// it about anywhere at all -- which is what a skin whose whole grammar is
+    /// "how far is this from a flame" needs before it can put a cat down.
+    pub fn ground_under(&self, rect: [u32; 4]) -> Option<[u8; 4]> {
         let mut view = self.view.clone();
         view.panel = "canvas".into();
         let layers = self.layers_for(&view);
@@ -3247,7 +3425,15 @@ impl Document {
                         continue;
                     }
                     let pixel = image.get_pixel(px, py).0;
-                    if pixel[3] == 0 {
+                    // The transparency key is not a colour, here as everywhere
+                    // else. Averaged in as one, a sprite cell that is mostly
+                    // cleared -- which every control drawn on top of a window
+                    // is -- answers magenta, and the artwork the player will
+                    // actually show through it is the thing that was asked
+                    // about. A transport key on dark cloth came back as
+                    // `#963384`, and with it the wrong answer to whether the
+                    // mark on it reads.
+                    if pixel[3] == 0 || pixel[..3] == [255, 0, 255] {
                         continue;
                     }
                     for c in 0..3 {
@@ -3268,6 +3454,8 @@ impl Document {
         })
     }
     /// Whether each thing the player writes can be read on the artwork under it.
+    /// The ratio itself is `contrast_ratio`, so `studio_pixel` answers the same
+    /// question about any rectangle with the same arithmetic.
     ///
     /// Studio already knows both halves and never put them together: the
     /// runtime rectangles say where Cranamp writes, `text.bmp` says what colour
@@ -3280,21 +3468,7 @@ impl Document {
     /// below three is a readout you have to hunt for, and below two is one that
     /// is not there.
     pub fn readability(&mut self) -> Vec<Value> {
-        fn luminance(c: [u8; 4]) -> f64 {
-            let channel = |v: u8| {
-                let s = v as f64 / 255.;
-                if s <= 0.03928 {
-                    s / 12.92
-                } else {
-                    ((s + 0.055) / 1.055).powf(2.4)
-                }
-            };
-            0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
-        }
-        let ratio = |a: [u8; 4], b: [u8; 4]| {
-            let (x, y) = (luminance(a), luminance(b));
-            ((x.max(y) + 0.05) / (x.min(y) + 0.05) * 10.).round() / 10.
-        };
+        let ratio = contrast_ratio;
         let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
         let ink = self.display_ink();
         let (palette, _) = self.text_palettes();
@@ -4766,6 +4940,153 @@ mod tests {
             .find(|r| r["reads"] == "the track title")
             .unwrap();
         assert_eq!(title["readable"], true, "{title}");
+    }
+
+    /// Two cells far apart on one sheet make a box that covers everything
+    /// between them, and the box used to be the whole answer to "did this
+    /// stroke touch that sprite".
+    /// `unsampled_pixels` is "ink nothing will ever show". Erasing a gap is not
+    /// ink, and a sheet nothing samples at all is not a sheet with ink in the
+    /// wrong place on it -- both used to be counted, and between them they
+    /// fired on almost every transaction a recipe makes.
+    #[test]
+    fn unsampled_pixels_counts_ink_rather_than_clearing_and_never_drawn_sheets() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"numbers.bmp","layer":"sheet"}))
+            .unwrap();
+        // Clearing the whole sheet to the transparency key is how a recipe
+        // starts. numbers.bmp is 99 wide and holds ten 9-pixel cells, so the
+        // eleventh is a gap -- and erasing it says nothing about anything.
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":0,"y":0,"width":99,"height":13,"color":"#ff00ff"}]}))
+            .unwrap();
+        assert_eq!(out["unsampled_pixels"], 0, "{out}");
+        // Actual ink in the same gap is still reported, with where.
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":90,"y":0,"width":9,"height":13,"color":"#ffcc00"}]}))
+            .unwrap();
+        assert_eq!(out["unsampled_pixels"], 117, "{out}");
+        assert_eq!(out["unsampled_sample"][0], json!([90, 0]));
+
+        // text.bmp is read for one colour and never drawn, so painting it --
+        // the correct thing to do -- reported all 2,790 of its pixels every
+        // time. That is a fact about the sheet, and the sheet says it.
+        d.state(json!({"panel":"atlas","sheet":"text.bmp","layer":"sheet"}))
+            .unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":0,"y":0,"width":155,"height":18,"color":"#ffdf9c"}]}))
+            .unwrap();
+        assert_eq!(out["unsampled_pixels"], 0, "{out}");
+        assert_eq!(out["sheet_is_never_drawn"], true, "{out}");
+
+        // And a real gap on a sheet that is drawn still reports: pledit.bmp
+        // column 125 falls between the two footer flaps.
+        d.state(json!({"panel":"atlas","sheet":"pledit.bmp","layer":"sheet"}))
+            .unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":0,"y":72,"width":276,"height":38,"color":"#334455"}]}))
+            .unwrap();
+        assert_eq!(out["unsampled_pixels"], 38, "{out}");
+        assert!(out["sheet_is_never_drawn"].is_null());
+    }
+
+    #[test]
+    fn identical_variants_names_only_sprites_the_stroke_actually_wrote() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"eqmain.bmp","layer":"sheet"}))
+            .unwrap();
+        // Leave ON and AUTO with two variants each that are the same picture.
+        // They live between the close key and the PRESETS plate on this sheet.
+        let mut ops: Vec<Value> = Vec::new();
+        for x in [10, 36, 69, 95, 128, 154, 187, 213] {
+            ops.push(json!({"op":"rect","x":x,"y":119,"width":26,"height":12,
+                            "color":"#445566"}));
+        }
+        d.draw(&json!({ "operations": ops })).unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":10,"y":119,"width":4,"height":4,"color":"#889900"}]}))
+            .unwrap();
+        assert!(
+            out["identical_variants"]
+                .as_array()
+                .is_some_and(|v| v.iter().any(|e| e["id"] == "equalizer.on")),
+            "a stroke inside ON's own cell still reports it: {out}"
+        );
+        // The close key and the PRESETS plate, together, in one transaction.
+        // Their bounding box swallows ON and AUTO; neither is written.
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":0,"y":116,"width":9,"height":9,"color":"#112233"},
+                {"op":"rect","x":224,"y":164,"width":44,"height":12,"color":"#112233"}]}))
+            .unwrap();
+        assert!(
+            out["identical_variants"].is_null(),
+            "the box covers ON and AUTO and the stroke wrote neither: {out}"
+        );
+    }
+
+    /// Eleven equalizer bands draw their groove from one rectangle, so one
+    /// duplicate frame used to be reported eleven times over with eleven
+    /// copies of all twenty-eight labels.
+    #[test]
+    fn sprites_that_share_their_cells_share_one_report() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"eqmain.bmp","layer":"sheet"}))
+            .unwrap();
+        // Paint every track frame the same, which is the defect being caught.
+        let ops: Vec<Value> = (0..28)
+            .map(|f| {
+                let (x, y) = if f < 14 {
+                    (13 + f * 15, 164)
+                } else {
+                    (13 + (f - 14) * 15, 229)
+                };
+                json!({"op":"rect","x":x,"y":y,"width":14,"height":63,"color":"#334455"})
+            })
+            .collect();
+        let out = d.draw(&json!({ "operations": ops })).unwrap();
+        let same = out["identical_variants"].as_array().expect("a report");
+        assert_eq!(same.len(), 1, "one fact, said once: {out}");
+        assert_eq!(same[0]["id"], "equalizer.band0.track");
+        let also = same[0]["also"].as_array().expect("the other ten");
+        assert_eq!(also.len(), 10, "{same:?}");
+        assert!(also.contains(&json!("equalizer.band10.track")));
+    }
+
+    /// `#ff00ff` erases everywhere else in this engine; `opacity` and glass
+    /// read it as magenta, write the result opaque, and say nothing.
+    #[test]
+    fn a_blend_against_the_transparency_key_is_reported() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"cbuttons.bmp","layer":"sheet"}))
+            .unwrap();
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":23,"height":18,"color":"#ff00ff"}]}))
+            .unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"ellipse","x":4,"y":4,"width":10,"height":10,"color":"#ffcc66",
+                 "fill":true,"opacity":120}]}))
+            .unwrap();
+        let keyed = out["keyed_blends"].as_array().expect("a report");
+        assert_eq!(keyed[0]["operation"], 0);
+        assert_eq!(keyed[0]["op"], "ellipse");
+        assert!(keyed[0]["pixels"].as_u64().unwrap() > 40, "{out}");
+        // Over artwork rather than over the key, the same blend is silent.
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":23,"height":18,"color":"#203040"}]}))
+            .unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"ellipse","x":4,"y":4,"width":10,"height":10,"color":"#ffcc66",
+                 "fill":true,"opacity":120}]}))
+            .unwrap();
+        assert!(out["keyed_blends"].is_null(), "{out}");
     }
 
     #[test]
