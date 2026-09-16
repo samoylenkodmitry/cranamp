@@ -65,6 +65,20 @@ def call(name,args={}):
     if r.get('isError'):raise RuntimeError(r)
     return r
 
+def answer(name,args={}):
+    """The tool's answer as data rather than as an MCP envelope.
+
+    Every Studio tool replies with {'content':[{'type':'text','text':'<json>'}]},
+    so a caller that wants a number out of it -- where the twenty-eight frames
+    of a slider track live, what a sprite's variants are called -- has to reach
+    through two layers and json.loads the third every time.
+    """
+    r=call(name,args)
+    body=[c['text'] for c in r.get('content',[]) if c.get('type')=='text']
+    if not body:return r
+    try:return json.loads(body[0])
+    except json.JSONDecodeError:return {'text':body[0]}
+
 def ramp(stops,n=32):
     out=[]
     for i in range(n):

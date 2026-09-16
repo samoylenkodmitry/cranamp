@@ -8,14 +8,41 @@ type Point = [i32; 2];
 fn integer(v: &Value, key: &str, default: i32) -> Result<i32> {
     let n = v
         .get(key)
-        .map(|x| x.as_i64().context("integer coordinate required"))
+        .map(|x| {
+            x.as_i64()
+                .with_context(|| format!("{key} is a whole number of pixels (got {x})"))
+        })
         .transpose()?
         .unwrap_or(default as i64);
     anyhow::ensure!(
         (-4096..=4096).contains(&n),
-        "coordinates must be -4096..4096"
+        "{key} is -4096..4096 (got {n})"
     );
     Ok(n as i32)
+}
+/// A coordinate that may be fractional.
+///
+/// A curve's control point has always been allowed to be fractional and a
+/// path's points too, because construction geometry is fractional: a rib
+/// swept round an ellipse, a whisker leaving a muzzle, a tail at two sizes
+/// from one set of numbers. Its own two endpoints were not, and a curve is
+/// exactly where that geometry meets the rest of a drawing -- so every helper
+/// that built one had to round at the join, or emit a `path` by hand to avoid
+/// it. The rasteriser turns all four into f64 on the next line either way.
+fn number(v: &Value, key: &str, default: f64) -> Result<f64> {
+    let n = v
+        .get(key)
+        .map(|x| {
+            x.as_f64()
+                .with_context(|| format!("{key} is a number of pixels (got {x})"))
+        })
+        .transpose()?
+        .unwrap_or(default);
+    anyhow::ensure!(
+        n.is_finite() && (-4096. ..=4096.).contains(&n),
+        "{key} is -4096..4096 (got {n})"
+    );
+    Ok(n)
 }
 fn segment(a: Point, b: Point, out: &mut BTreeSet<Point>) {
     walk_segment(a, b, |p| {
@@ -98,43 +125,42 @@ fn polygon(points: &[Point], out: &mut BTreeSet<Point>) {
 /// [cx,cy,x,y], cubic [c1x,c1y,c2x,c2y,x,y]. Coordinates are relative to x,y.
 pub fn rasterize(op: &Value) -> Result<Vec<Point>> {
     let kind = op["op"].as_str().context("op required")?;
-    let x = integer(op, "x", 0)?;
-    let y = integer(op, "y", 0)?;
     let width = integer(op, "brush_size", 1)?;
     anyhow::ensure!((1..=32).contains(&width), "brush_size must be 1..32");
-    let fill = op.get("fill").and_then(Value::as_bool).unwrap_or(false);
     if kind == "curve" || kind == "tuft" {
-        let end = [integer(op, "x2", x)? as f64, integer(op, "y2", y)? as f64];
+        // A curve keeps its construction geometry fractional at all four
+        // corners, not only at the control point: it is rewritten into an
+        // absolute path below and never sees an integer until the path is
+        // rasterized.
+        let (x, y) = (number(op, "x", 0.)?, number(op, "y", 0.)?);
+        let end = [number(op, "x2", x)?, number(op, "y2", y)?];
         let bend = integer(op, "curve_bend", 35)?;
-        anyhow::ensure!((-100..=100).contains(&bend), "curve_bend must be -100..100");
-        let dx = end[0] - x as f64;
-        let dy = end[1] - y as f64;
+        anyhow::ensure!((-100..=100).contains(&bend), "curve_bend is -100..100");
+        let dx = end[0] - x;
+        let dy = end[1] - y;
         let control: [f64; 2] = op
             .get("control")
             .map(|v| serde_json::from_value(v.clone()))
             .transpose()?
             .unwrap_or([
-                (x as f64 + end[0]) / 2. - dy * bend as f64 / 100.,
-                (y as f64 + end[1]) / 2. + dx * bend as f64 / 100.,
+                (x + end[0]) / 2. - dy * bend as f64 / 100.,
+                (y + end[1]) / 2. + dx * bend as f64 / 100.,
             ]);
         anyhow::ensure!(
             control
                 .iter()
                 .all(|v| v.is_finite() && (-4096. ..=4096.).contains(v)),
-            "Invalid curve control point"
+            "control is a finite point in -4096..4096 (got {control:?})"
         );
         let mut path = op.clone();
         path["op"] = serde_json::json!("path");
         path["x"] = serde_json::json!(0);
         path["y"] = serde_json::json!(0);
         path["fill"] = serde_json::json!(false);
-        path["points"] = serde_json::json!([
-            [x as f64, y as f64],
-            [control[0], control[1], end[0], end[1]]
-        ]);
+        path["points"] = serde_json::json!([[x, y], [control[0], control[1], end[0], end[1]]]);
         if kind == "tuft" && width > 1 && (dx != 0. || dy != 0.) {
-            let mut vx = control[0] - x as f64;
-            let mut vy = control[1] - y as f64;
+            let mut vx = control[0] - x;
+            let mut vy = control[1] - y;
             if vx == 0. && vy == 0. {
                 vx = dx;
                 vy = dy;
@@ -144,7 +170,7 @@ pub fn rasterize(op: &Value) -> Result<Vec<Point>> {
             let nx = -vy / length * half;
             let ny = vx / length * half;
             path["points"] = serde_json::json!([
-                [x as f64 + nx, y as f64 + ny],
+                [x + nx, y + ny],
                 [
                     control[0] + nx * 0.55,
                     control[1] + ny * 0.55,
@@ -154,8 +180,8 @@ pub fn rasterize(op: &Value) -> Result<Vec<Point>> {
                 [
                     control[0] - nx * 0.55,
                     control[1] - ny * 0.55,
-                    x as f64 - nx,
-                    y as f64 - ny
+                    x - nx,
+                    y - ny
                 ]
             ]);
             path["brush_size"] = serde_json::json!(1);
@@ -163,6 +189,9 @@ pub fn rasterize(op: &Value) -> Result<Vec<Point>> {
         }
         return rasterize(&path);
     }
+    let x = integer(op, "x", 0)?;
+    let y = integer(op, "y", 0)?;
+    let fill = op.get("fill").and_then(Value::as_bool).unwrap_or(false);
     let mut out = BTreeSet::new();
     let mut contour = Vec::new();
     match kind {

@@ -94,6 +94,40 @@ pub fn dispatch(request: Value, shared: &SharedDocument) -> Value {
         }
     }
 }
+/// Why a catalogue query came back with nothing in it.
+///
+/// `studio_rectangles` is scoped to the surface the view is on -- while
+/// studio_atlas has one sheet open it answers about that sheet's cells -- so a
+/// perfectly good id asked at the wrong moment answers `{"rectangles":[]}`,
+/// which reads as "no such sprite" and is really "not on the sheet you have
+/// open". Nothing in the reply told the two apart. `studio_targets` answers
+/// about the whole skin whatever is open, so it has only the first case.
+fn empty_catalogue(
+    surface: Option<String>,
+    kept: Option<&Vec<Value>>,
+    total: usize,
+    sheet: Option<&str>,
+    needle: Option<&str>,
+) -> Option<String> {
+    if kept.is_some_and(|k| !k.is_empty()) || (sheet.is_none() && needle.is_none()) {
+        return None;
+    }
+    let asked = match (sheet, needle) {
+        (Some(s), Some(n)) => format!("sheet {s} and id containing \"{n}\""),
+        (Some(s), None) => format!("sheet {s}"),
+        (None, Some(n)) => format!("id containing \"{n}\""),
+        (None, None) => unreachable!(),
+    };
+    let where_from = match surface {
+        Some(s) if s != "canvas" => {
+            format!("{s} -- studio_targets answers for the whole skin whatever is open")
+        }
+        _ => "the whole skin".to_string(),
+    };
+    Some(format!(
+        "Nothing matched {asked} among the {total} on {where_from}."
+    ))
+}
 fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
     json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false}})
 }
@@ -150,7 +184,7 @@ fn tools() -> Vec<Value> {
     vec![
  tool("studio_canvas","The whole skin as one canvas -- main, equalizer and playlist joined at their own positions -- and the only drawing surface. Reads it back as a PNG at an integer zoom, optionally cropped to [x,y,width,height]; with path it writes the file and returns where. Also sets what the canvas shows: zoom, brush, colour, width, the state every sprite is drawn in, and whether rectangles are outlined.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft","text"]},"ramp_to":{"type":["string","null"],"description":"A gradient from the brush colour to this one, along the shape the gesture drew. null turns it off."},"ramp_axis":{"enum":["down","across"]},"bevel":{"type":"integer","minimum":0,"maximum":128,"description":"Glass lens bevel; 0 takes it from the height of the drag, as it always did."},"refraction":{"type":"integer","minimum":0,"maximum":32},"text":{"type":"string","description":"What the text brush writes."},"face":{"enum":["5x7","small"]},"text_scale":{"type":"integer","minimum":1,"maximum":8},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"grain":{"type":"integer","minimum":0,"maximum":64},"grain_size":{"type":"integer","minimum":1,"maximum":16},"opacity":{"type":"integer","minimum":1,"maximum":255},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean"},"active":{"type":"boolean"},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}),&[]),
  tool("studio_atlas","One BMP on its own, at its own native coordinates, sharing the pencil and the history. path/crop/zoom read it back exactly as studio_canvas reads the skin -- the only way to see a sheet the canvas never shows: numbers.bmp, text.bmp, a pressed variant. Omit sheet to go back to the whole skin, where drawing normally happens.",json!({"sheet":{"type":"string"},"zoom":{"type":"integer","minimum":1,"maximum":8},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4}}),&[]),
- tool("studio_targets","Which sprites a stroke is routed into. Omit everything to list them; narrow with sheet or id (case-insensitive substring), Every sprite says whether it has been drawn at all, so a skin started from New blank can be asked what is left. Add variants for every source rectangle a sprite has -- all 28 frames of one slider track -- which also answers labels, saying what each variant is: which of a switch's four is pressed, which end of a slider's twenty-eight is silence, and that the classic playlist header keeps a row Cranamp never draws. Auto, the default, paints every sprite under the brush, as a human stroke does. Solo one, or choose any combination.",json!({"layers":{"type":"array","items":{"type":"string"}},"solo":{"type":"string"},"auto":{"type":"boolean"},"paint_layer":{"type":["string","null"]},"sheet":{"type":"string"},"id":{"type":"string"},"variants":{"type":"boolean"}}),&[]),
+ tool("studio_targets","Which sprites a stroke is routed into. It lists the whole skin whatever surface is open, so a recipe drawing one sheet at its own coordinates can ask where that sheet's cells are without leaving it. Omit everything to list them; narrow with sheet or id (case-insensitive substring). Every sprite says whether it has been drawn at all, so a skin started from New blank can be asked what is left. Add variants for every source rectangle a sprite has -- all 28 frames of one slider track -- which also answers labels, saying what each variant is: which of a switch's four is pressed, which end of a slider's twenty-eight is silence, and that the classic playlist header keeps a row Cranamp never draws. Auto, the default, paints every sprite under the brush, as a human stroke does. Solo one, or choose any combination.",json!({"layers":{"type":"array","items":{"type":"string"}},"solo":{"type":"string"},"auto":{"type":"boolean"},"paint_layer":{"type":["string","null"]},"sheet":{"type":"string"},"id":{"type":"string"},"variants":{"type":"boolean"}}),&[]),
  tool("studio_rectangles","Where every sprite variant lives in the joined canvas, plus the two kinds of rectangle that have no sprite at all. Narrow with sheet, id (case-insensitive substring), runtime -- the live readouts Cranamp draws over the artwork -- or hit: controls Cranamp hit-tests and draws nothing for, which is the classic playlist footer\'s five menus and six transport keys, and the main window\'s skin-chooser corner. Those eleven footer buttons have to be drawn by the artist and used to be findable only in the player\'s source. select clips painting to one rectangle; otherwise read-only. Rectangles are an overlay, never pixels in the artwork.",json!({"select":{"type":"string"},"sheet":{"type":"string"},"id":{"type":"string"},"runtime":{"type":"boolean"},"hit":{"type":"boolean"}}),&[]),
  tool("studio_layers","Painting planes over the original atlases -- the editor's Painting layers panel. Add, select, rename, show, hide, lock, set opacity, clip to the plane below, move, merge down or delete. WSZ exports the composite; a project file keeps the planes.",json!({"action":{"enum":["list","add","select","set","move","merge_down","delete"]},"id":{"type":"string"},"name":{"type":"string"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"clip_below":{"type":"boolean"},"opacity":{"type":"integer","minimum":0,"maximum":255},"index":{"type":"integer","minimum":0}}),&[]),
  tool("studio_options","Everything about the skin that is not painted into a sheet. Three of these add or remove a drawing surface rather than change a setting -- playlist_background, playlist_selection and eq_handles -- and the answer names any sheet that appeared or went away, with its size and what its cells are -- the editor's Skin options panel. The time readout, the equalizer's slider travel, whether the playlist, equalizer sliders, playlist selection and visualizer carry their own artwork, the six PLEDIT.TXT text colours and the 24 VISCOLOR.TXT visualizer colours. It also answers readability: the contrast of every colour Cranamp writes against the artwork it will be written on, which is the one thing a skin cannot be looked at to check. Omit everything to read them all.",json!({"footer":{"enum":["classic","time-total"]},"eq_travel":{"type":"integer","minimum":1,"maximum":52},"visualizer_glass":{"type":"boolean"},"playlist_background":{"type":"boolean"},"eq_handles":{"type":"boolean"},"playlist_selection":{"type":"boolean"},"playlist_colors":{"type":"object","additionalProperties":{"type":"string"}},"visualizer_colors":{"type":"array","items":{"type":"string"},"minItems":24,"maxItems":24}}),&[]),
@@ -313,6 +347,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             let revision = doc.revision + 1;
             *doc = Document::blank();
             doc.revision = revision;
+            doc.open_on_whole_skin();
             doc.status()
         }
         "studio_state" => doc.state(args)?,
@@ -328,6 +363,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 Document::open(&std::fs::read(p)?, Some(p.into()))?
             };
             doc.revision = revision;
+            doc.open_on_whole_skin();
             doc.status()
         }
         "studio_inspect_region" => {
@@ -356,7 +392,17 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                             && hit.is_none_or(|r| g.hit == r)
                     })
                     .collect::<Vec<_>>();
-                json!({"rectangles":kept,"of":total})
+                let mut answer = json!({"rectangles":kept,"of":total});
+                if let Some(note) = empty_catalogue(
+                    Some(doc.surface()),
+                    answer["rectangles"].as_array(),
+                    total,
+                    sheet,
+                    needle.as_deref(),
+                ) {
+                    answer["note"] = json!(note);
+                }
+                answer
             }
         }
         "studio_patch" => doc.patch(&args)?,
@@ -373,6 +419,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 let revision = doc.revision + 1;
                 *doc = Document::open_project(&std::fs::read(p)?)?;
                 doc.revision = revision;
+                doc.open_on_whole_skin();
                 doc.status()
             } else {
                 bail!("Unknown project action")
@@ -521,7 +568,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 // What is still blank, which for a skin being drawn from New
                 // blank is the whole of "what is left to do".
                 let blank = doc.undrawn_sprites();
-                let all = doc.layers();
+                let all = doc.skin_layers();
                 let total = all.len();
                 let sprites = all
                     .into_iter()
@@ -549,7 +596,17 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                         value
                     })
                     .collect::<Vec<_>>();
-                json!({"sprites":sprites,"of":total,"chosen":doc.view.layers})
+                let mut answer = json!({"sprites":sprites,"of":total,"chosen":doc.view.layers});
+                if let Some(note) = empty_catalogue(
+                    None,
+                    answer["sprites"].as_array(),
+                    total,
+                    sheet,
+                    needle.as_deref(),
+                ) {
+                    answer["note"] = json!(note);
+                }
+                answer
             }
         }
         "studio_options" => {
@@ -1151,5 +1208,142 @@ mod drawing_tests {
             "the crop, at the asked-for zoom"
         );
         std::fs::remove_file(&path).ok();
+    }
+
+    /// New blank is the documented way to start a skin, and over MCP it used
+    /// to hand back a retired single-window panel: canvas 275x115 instead of
+    /// 275x377, 29 of the 81 sprites, and a `surface` that is neither of the
+    /// two values the schema promises.
+    #[test]
+    fn a_blank_document_opens_on_the_whole_skin() {
+        let shared = SharedDocument(Arc::new(Mutex::new(Document::blank())));
+        let out = result(&shared, "studio_new", json!({ "discard": true }));
+        assert_eq!(out["surface"], "canvas");
+        assert_eq!(out["canvas"], json!([275, 377]));
+        assert_eq!(out["sprites"], json!(81));
+    }
+
+    /// A curve's control point and a path's points have always been allowed to
+    /// be fractional, because construction geometry is; its own two endpoints
+    /// were not, and a curve is where that geometry meets the rest of a
+    /// drawing. The rasteriser turns all four into f64 either way.
+    #[test]
+    fn a_curve_may_start_and_end_between_pixels() {
+        let shared = blank();
+        let out = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"curve","x":20.5,"y":30.25,"x2":60.5,"y2":50.75,
+                                 "control":[24.5,48.5],"color":"#ffffff","brush_size":2}]}),
+        );
+        assert!(out["pixels_written"].as_u64().unwrap() > 0);
+        let refused = call(
+            "studio_draw",
+            json!({"operations":[{"op":"rect","x":1.5,"y":2,"width":3,"height":3}]}),
+            &shared,
+        )
+        .unwrap_err();
+        let refused = format!("{refused:#}");
+        assert!(
+            refused.contains("x is a whole number of pixels"),
+            "a refusal names the field and the value it got: {refused}"
+        );
+    }
+
+    /// The catalogue is a property of the skin, not of the open sheet. Asked
+    /// with an atlas open it used to answer about one pseudo-sprite called
+    /// `sheet`, so a recipe drawing that sheet at its own coordinates could
+    /// not ask where the sheet's cells are without leaving it.
+    #[test]
+    fn the_catalogue_answers_for_the_skin_while_one_sheet_is_open() {
+        let shared = blank();
+        call("studio_atlas", json!({"sheet":"volume.bmp"}), &shared).unwrap();
+        let out = result(
+            &shared,
+            "studio_targets",
+            json!({"id":"volume.track","variants":true}),
+        );
+        assert_eq!(out["sprites"][0]["id"], "main.volume.track");
+        assert_eq!(out["sprites"][0]["variants"].as_array().unwrap().len(), 28);
+        // studio_rectangles stays scoped to the open sheet, because a source
+        // cell is a fact about that sheet -- so a sprite that lives elsewhere
+        // says where it looked rather than answering an empty list.
+        let empty = result(&shared, "studio_rectangles", json!({"id":"main.play"}));
+        assert!(
+            empty["note"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("atlas volume.bmp"),
+            "an empty match says what it looked in: {empty}"
+        );
+    }
+
+    /// The canvas showed every rectangle with variant 0's name whatever state
+    /// the sprite was actually drawn in: the volume track at frame 20 read
+    /// `0 · silent`, the channel lamp drawn from its ON cell read `off`.
+    #[test]
+    fn a_canvas_rectangle_is_labelled_with_the_variant_it_is_showing() {
+        let shared = blank();
+        call("studio_canvas", json!({ "volume": 20 }), &shared).unwrap();
+        let out = result(&shared, "studio_rectangles", json!({"id":"volume.track"}));
+        assert_eq!(out["rectangles"][0]["variant"], json!(20));
+        assert_eq!(out["rectangles"][0]["label"], "track · 20");
+    }
+
+    /// The playlist header's tile is 25 pixels wide and drawn nine times, so a
+    /// caption that runs four pixels past the end of the title cell does not
+    /// spill into empty sheet -- it spills into the tile, and the player writes
+    /// it nine times across the top of the window.
+    #[test]
+    fn ink_that_crosses_into_a_repeated_cell_says_so() {
+        let shared = blank();
+        call("studio_atlas", json!({"sheet":"pledit.bmp"}), &shared).unwrap();
+        let spilled = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"text","x":98,"y":32,"text":"/ CAT SCAN",
+                                 "color":"#ffffff","face":"small"}]}),
+        );
+        assert_eq!(spilled["crossed_cells"][0]["cell"], "playlist.top.tile");
+        assert_eq!(spilled["crossed_cells"][0]["drawn"], json!(9));
+        // Painting the tile deliberately is ordinary work and says nothing.
+        let inside = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"rect","x":127,"y":21,"width":25,"height":20,
+                                 "color":"#203040"}]}),
+        );
+        assert!(
+            inside.get("crossed_cells").is_none(),
+            "a cell painted on its own is not a crossing: {inside}"
+        );
+    }
+
+    /// "Will anything ever show this pixel" is a question about the skin, not
+    /// about the preview: the playlist background tiles from the top of a
+    /// 243x203 sheet, and at a 145-pixel preview painting the whole of it --
+    /// which is correct -- reported 28,188 pixels of wasted ink.
+    #[test]
+    fn the_playlist_background_is_sampled_to_its_last_row() {
+        let shared = blank();
+        result(
+            &shared,
+            "studio_options",
+            json!({"playlist_background":true}),
+        );
+        call(
+            "studio_canvas",
+            json!({ "preview_playlist_height": 145 }),
+            &shared,
+        )
+        .unwrap();
+        call("studio_atlas", json!({"sheet":"plbg.bmp"}), &shared).unwrap();
+        let out = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"rect","x":0,"y":0,"width":243,"height":203,
+                                 "color":"#101418"}]}),
+        );
+        assert_eq!(out["unsampled_pixels"], json!(0));
     }
 }

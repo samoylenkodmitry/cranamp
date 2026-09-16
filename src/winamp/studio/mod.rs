@@ -364,23 +364,7 @@ pub fn launch(path: Option<&str>) -> std::io::Result<()> {
 /// pixel is routed to whichever sheet is under it. The individual panels remain
 /// as MCP addressing, not as editing modes.
 fn open_on_whole_skin(doc: &mut Document) {
-    doc.view.panel = "canvas".into();
-    doc.view.layer = "auto".into();
-    doc.view.layers.clear();
-    doc.view.zoom = doc.view.zoom.clamp(1, 4);
-    // Paint onto the top of the picture, not underneath it. A layered project
-    // composites its painting planes over the base atlases, so a document that
-    // arrives with planes and no selection would take every stroke into the
-    // atlases below them -- landing correctly, recorded in history, and visible
-    // only in the gaps where no plane covers the artwork.
-    if doc.view.paint_layer.is_none() {
-        doc.view.paint_layer = doc
-            .planes
-            .iter()
-            .rev()
-            .find(|plane| plane.visible && !plane.locked)
-            .map(|plane| plane.id.clone());
-    }
+    doc.open_on_whole_skin();
 }
 
 fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {

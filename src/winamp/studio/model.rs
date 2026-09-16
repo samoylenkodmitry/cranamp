@@ -113,6 +113,10 @@ pub struct View {
 impl Default for View {
     fn default() -> Self {
         Self {
+            // A fresh View addresses the main window, which is what the
+            // per-window addressing tests construct one for. Every path that
+            // hands a document to a *user* -- the GUI's, and MCP's -- puts it
+            // on the joined canvas with `open_on_whole_skin` instead.
             panel: "main".into(),
             sheet: "text.bmp".into(),
             layer: "auto".into(),
@@ -218,6 +222,9 @@ pub struct Document {
     /// last colour wins in every position at once. That used to be reported as
     /// a clean write.
     atlas_writes: BTreeMap<AtlasPixel, AtlasInk>,
+    /// The sheet box one operation wrote, so a transaction of ten thousand
+    /// can say which one crossed out of the cell it was aimed at.
+    operation_box: Option<(usize, [u32; 4])>,
     overwrites: usize,
     overwrite_note: Option<String>,
 }
@@ -273,6 +280,7 @@ impl Document {
             painted_bounds: None,
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
+            operation_box: None,
             preview: None,
             overwrites: 0,
             overwrite_note: None,
@@ -329,6 +337,7 @@ impl Document {
             painted_bounds: None,
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
+            operation_box: None,
             preview: None,
             overwrites: 0,
             overwrite_note: None,
@@ -764,6 +773,13 @@ impl Document {
         let mut mask = vec![false; (w as usize) * (h as usize)];
         let mut view = self.view.clone();
         view.panel = "canvas".into();
+        // "Will anything ever show this pixel" is a question about the skin,
+        // not about the preview. The playlist background tiles from the top of
+        // a 243x203 sheet and the preview was 145 pixels tall, so painting the
+        // whole sheet -- which is the correct thing to do -- reported 28,188
+        // pixels as ink nothing will ever show. At the tallest playlist the
+        // player uses all of it.
+        view.preview_playlist_height = 522;
         for layer in self.layers_for(&view) {
             if layer.sheet != sheet {
                 continue;
@@ -780,6 +796,47 @@ impl Document {
     }
     pub fn layers(&self) -> Vec<Layer> {
         self.layers_for(&self.view)
+    }
+    /// Put a freshly loaded document on the only drawing surface the editor
+    /// has.
+    ///
+    /// The GUI did this after every document swap of its own and MCP did it
+    /// after none, so `studio_new` and `studio_open` handed back a retired
+    /// single-window panel: a canvas 275x115 instead of 275x377, a sprite
+    /// catalogue with 29 of the 81 sprites in it, and a `surface` that is
+    /// neither of the two values the schema promises. A skin drawn from New
+    /// blank over MCP is the documented way to start one.
+    pub fn open_on_whole_skin(&mut self) {
+        self.view.panel = "canvas".into();
+        self.view.layer = "auto".into();
+        self.view.layers.clear();
+        self.view.zoom = self.view.zoom.clamp(1, 4);
+        // Paint onto the top of the picture, not underneath it. A layered
+        // project composites its painting planes over the base atlases, so a
+        // document that arrives with planes and no selection would take every
+        // stroke into the atlases below them -- landing correctly, recorded in
+        // history, and visible only in the gaps where no plane covers the art.
+        if self.view.paint_layer.is_none() {
+            self.view.paint_layer = self
+                .planes
+                .iter()
+                .rev()
+                .find(|plane| plane.visible && !plane.locked)
+                .map(|plane| plane.id.clone());
+        }
+    }
+    /// Every sprite the skin has, whatever surface the view is on.
+    ///
+    /// The catalogue is a property of the skin and not of the open sheet. With
+    /// `studio_atlas` holding one BMP, `layers()` answers with a single
+    /// pseudo-sprite called `sheet` -- so "where do this slider's twenty-eight
+    /// frames live" could not be asked from the one place the answer is needed,
+    /// which is a recipe drawing that sheet at its own coordinates. It had to
+    /// leave the sheet to ask, and leaving the sheet is what it was avoiding.
+    pub fn skin_layers(&self) -> Vec<Layer> {
+        let mut view = self.view.clone();
+        view.panel = "canvas".into();
+        self.layers_for(&view)
     }
     fn layers_for(&self, view: &View) -> Vec<Layer> {
         if view.panel == "atlas" {
@@ -883,6 +940,22 @@ impl Document {
     /// two different colours in the same one.
     fn note_atlas_writes(&mut self, touched: Vec<AtlasWrite>) {
         for (key, colour, at) in touched {
+            self.operation_box = match self.operation_box {
+                Some((sheet, [x0, y0, w, h])) if sheet == key.0 => {
+                    let (nx, ny) = (x0.min(key.1), y0.min(key.2));
+                    Some((
+                        sheet,
+                        [
+                            nx,
+                            ny,
+                            (x0 + w).max(key.1 + 1) - nx,
+                            (y0 + h).max(key.2 + 1) - ny,
+                        ],
+                    ))
+                }
+                Some(other) => Some(other),
+                None => Some((key.0, [key.1, key.2, 1, 1])),
+            };
             if let Some((previous, from)) = self.atlas_writes.get(&key) {
                 // Only a *different* canvas pixel landing in the same source
                 // cell is the trap worth naming: one tile drawn nine times,
@@ -1246,7 +1319,10 @@ impl Document {
     /// frame that was never drawn. Neither is visible on a contact sheet.
     pub fn variant_differences(&self) -> Result<Value> {
         let layer = self.state_sheet_layer().context(
-            "Choose one sprite in Sprite targets first: a state sheet is one sprite's variants",
+            // Naming only the GUI panel leaves an MCP caller with the right
+            // diagnosis and no call to make: the panel is a tool.
+            "A state sheet is one sprite's variants, so choose one sprite first: \
+             studio_targets {\"solo\":\"main.play\"}, or the editor's Sprite targets panel",
         )?;
         let composite = self.composite_images();
         let source = &composite[&layer.sheet];
@@ -1297,7 +1373,10 @@ impl Document {
     /// Every variant of one sprite, laid out in a grid and numbered.
     pub fn state_sheet(&self) -> Result<RgbaImage> {
         let layer = self.state_sheet_layer().context(
-            "Choose one sprite in Sprite targets first: a state sheet is one sprite's variants",
+            // Naming only the GUI panel leaves an MCP caller with the right
+            // diagnosis and no call to make: the panel is a tool.
+            "A state sheet is one sprite's variants, so choose one sprite first: \
+             studio_targets {\"solo\":\"main.play\"}, or the editor's Sprite targets panel",
         )?;
         let columns = layer.variants.len().clamp(1, 7) as u32;
         // A band above each cell for its number, and a margin so neighbouring
@@ -1854,6 +1933,33 @@ impl Document {
         // old pixels back. `backdrop_at` is the pixel count it was taken at.
         let mut backdrop: Option<RgbaImage> = None;
         let mut backdrop_at = usize::MAX;
+        // Every cell of the open sheet, and how many places the player draws
+        // it. A sheet is a bag of cells and an operation is nearly always
+        // aimed at one of them; the one that is worth reporting is the one
+        // that crossed out of its own cell into a cell drawn more than once,
+        // because that repeats the accident everywhere the tile goes.
+        let mut cells: Vec<(String, usize, [u32; 4])> = Vec::new();
+        if self.view.panel == "atlas" {
+            let mut times: BTreeMap<String, usize> = BTreeMap::new();
+            let layers = self.skin_layers();
+            for l in &layers {
+                if l.sheet == self.view.sheet {
+                    *times.entry(l.id.clone()).or_default() += 1;
+                }
+            }
+            let mut seen = BTreeSet::new();
+            for l in &layers {
+                if l.sheet != self.view.sheet {
+                    continue;
+                }
+                for v in &l.variants {
+                    if seen.insert((l.id.clone(), *v)) {
+                        cells.push((l.id.clone(), times[&l.id], *v));
+                    }
+                }
+            }
+        }
+        let mut crossed: Vec<Value> = Vec::new();
         let mut count = 0;
         // Which operation is in hand, so a refusal can say so. A transaction is
         // allowed ten thousand operations; "No glyph for '@'" with no index is
@@ -1864,13 +1970,18 @@ impl Document {
             for (index, op) in operations.iter().enumerate() {
                 let kind = op.get("op").and_then(Value::as_str).unwrap_or("pixel");
                 at = Some((index, kind.to_owned()));
+                self.operation_box = None;
                 let color = parse_color(
                     op.get("color")
                         .and_then(Value::as_str)
                         .unwrap_or(&self.view.color),
                 )?;
-                let x = integer(op, "x", 0)?;
-                let y = integer(op, "y", 0)?;
+                // A stamp, a cluster, an image and a set word all land on a
+                // whole pixel. A shape does not: its geometry stays fractional
+                // until the rasteriser walks it, so reading its origin as an
+                // integer here refused a curve the engine was about to turn
+                // into f64 on its next line.
+                let placed = |key: &str| integer(op, key, 0);
                 match kind {
                     "pixel" | "line" | "rect" | "ellipse" | "path" | "curve" | "tuft" => {
                         let mut shape = op.clone();
@@ -1884,10 +1995,12 @@ impl Document {
                         count += self.paint_shape(&shape, color, layer, all, &paint_layers)?;
                     }
                     "cluster" => {
+                        let (x, y) = (placed("x")?, placed("y")?);
                         let im = self.cluster.clone().context("Lift a pixel cluster first")?;
                         count += self.paint_cluster(&im, [x, y], layer, all, &paint_layers)?;
                     }
                     "stamp" => {
+                        let (x, y) = (placed("x")?, placed("y")?);
                         let rows = op
                             .get("rows")
                             .and_then(Value::as_array)
@@ -1919,6 +2032,7 @@ impl Document {
                         }
                     }
                     "image" => {
+                        let (x, y) = (placed("x")?, placed("y")?);
                         use base64::Engine as _;
                         let data = op
                             .get("data")
@@ -1969,6 +2083,7 @@ impl Document {
                         count += self.paint_cluster(&im, [x, y], layer, all, &paint_layers)?;
                     }
                     "text" => {
+                        let (x, y) = (placed("x")?, placed("y")?);
                         let body = op
                             .get("text")
                             .and_then(Value::as_str)
@@ -2008,6 +2123,13 @@ impl Document {
                         }
                     }
                     _ => bail!("Unknown drawing operation {kind}"),
+                }
+                if let Some((sheet, box_)) = self.operation_box {
+                    if let Some(note) = crossed_into_repeat(&cells, sheet, box_, index, kind) {
+                        if crossed.len() < 8 && !crossed.iter().any(|c| c["cell"] == note["cell"]) {
+                            crossed.push(note);
+                        }
+                    }
                 }
             }
             Ok(())
@@ -2115,6 +2237,11 @@ impl Document {
         if !skipped.is_empty() {
             result["unsupported_characters"] =
                 json!(skipped.iter().map(|c| c.to_string()).collect::<Vec<_>>());
+        }
+        if !crossed.is_empty() {
+            self.message
+                .push_str(&format!("; {} crossed into a repeated cell", crossed.len()));
+            result["crossed_cells"] = json!(crossed);
         }
         let same = self.identical_variants();
         if !same.is_empty() {
@@ -2462,12 +2589,24 @@ impl Document {
                 if atlas && l.sheet != self.view.sheet {
                     continue;
                 }
-                let variants = if atlas {
-                    l.variants.clone()
+                // An atlas shows every cell a sprite has; the assembled canvas
+                // shows the one the player is drawing right now -- and that
+                // one has an index of its own. Numbering it 0 because it is
+                // the only entry in the list labelled every rectangle on the
+                // canvas with the first variant's name: the volume track at
+                // frame 20 read `0 · silent`, the balance track at centre read
+                // `hard left`, and the channel lamp drawn from its ON cell read
+                // `off · not this channel mode`. Which is the exact mistake the
+                // labels were added to catch, made by the thing reporting them.
+                let variants: Vec<(usize, [u32; 4])> = if atlas {
+                    l.variants.iter().copied().enumerate().collect()
                 } else {
-                    vec![l.source]
+                    vec![(
+                        l.variants.iter().position(|v| *v == l.source).unwrap_or(0),
+                        l.source,
+                    )]
                 };
-                for (i, r) in variants.iter().enumerate() {
+                for (i, r) in variants.iter().map(|(i, r)| (*i, r)) {
                     let mut rect = if atlas { *r } else { l.destination };
                     rect[1] += offset;
                     if !seen.insert((l.sheet.clone(), rect)) {
@@ -3286,13 +3425,70 @@ pub fn parse_color(s: &str) -> Result<[u8; 4]> {
     }
     Ok(c)
 }
+/// One operation's ink, having left the cell it was aimed at and landed in a
+/// cell the player draws in more than one place.
+///
+/// A sheet is a bag of cells and crossing between two of them is often exactly
+/// what an artist means -- a band along a footer, a wash over a background. It
+/// is never what they mean when the cell on the other side is a *tile*: the
+/// playlist header's is 25 pixels wide and drawn nine times, so a caption that
+/// runs four pixels past the end of the title cell does not spill into empty
+/// sheet, it spills into the tile, and the player writes it nine times across
+/// the top of the window. Nothing reported that -- every pixel of it is a legal
+/// part of some cell, `overwrites` is a canvas-to-source measure that does not
+/// apply to a sheet open on its own, and the artist reads CASE NOTES with SCAN
+/// SCAN SCAN either side of it and goes looking for a bug in the tiling.
+fn crossed_into_repeat(
+    cells: &[(String, usize, [u32; 4])],
+    sheet: usize,
+    box_: [u32; 4],
+    index: usize,
+    kind: &str,
+) -> Option<Value> {
+    let _ = sheet;
+    let mut touched: BTreeSet<&str> = BTreeSet::new();
+    let mut repeated: Option<(&str, usize)> = None;
+    for (id, times, r) in cells {
+        let hit = box_[0] < r[0] + r[2]
+            && r[0] < box_[0] + box_[2]
+            && box_[1] < r[1] + r[3]
+            && r[1] < box_[1] + box_[3];
+        if !hit {
+            continue;
+        }
+        touched.insert(id.as_str());
+        if *times > 1 {
+            repeated = Some((id.as_str(), *times));
+        }
+    }
+    let (id, times) = repeated?;
+    if touched.len() < 2 {
+        return None;
+    }
+    Some(json!({
+        "operation": index,
+        "op": kind,
+        "cell": id,
+        "drawn": times,
+        "note": format!(
+            "operations[{index}] \"{kind}\" crossed out of its own cell into {id}, \
+             which the player draws {times} times -- so whatever landed there is \
+             repeated in every one of them"
+        ),
+    }))
+}
 fn integer(v: &Value, key: &str, default: i32) -> Result<i32> {
     match v.get(key) {
         None => Ok(default),
         Some(n) => {
-            let n = n.as_i64().context("Coordinates must be integers")?;
+            // Name the field and the value, the way every other refusal here
+            // does. "Coordinates must be integers" is true of eleven fields
+            // and says which of them was wrong about none of them.
+            let n = n
+                .as_i64()
+                .with_context(|| format!("{key} is a whole number of pixels (got {n})"))?;
             if !(-4096..=4096).contains(&n) {
-                bail!("Coordinate outside supported range");
+                bail!("{key} is -4096..4096 (got {n})");
             }
             Ok(n as i32)
         }
