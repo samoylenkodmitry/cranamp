@@ -208,7 +208,7 @@ one tool per panel, named for it.
 | `studio_history`, `studio_undo`, `studio_redo` | The shared history |
 | `studio_status`, `studio_new`, `studio_open`, `studio_project`, `studio_export`, `studio_screenshot` | The document and the window |
 
-Forty-one things make that surface usable at speed, every one of them the
+Forty-seven things make that surface usable at speed, every one of them the
 scar of a skin drawn through it:
 
 - **A `text` operation** draws a string in the editor's own 5x7 face at an
@@ -564,6 +564,57 @@ scar of a skin drawn through it:
   `{"panel":"main","crop":[14,86,146,22],"magnify":4}` is the live transport
   row, close up, asked for in the coordinates the catalogue gave you.
 
+- **A blend against the transparency key is counted and named.** `#ff00ff`
+  erases everywhere in this engine and the `color` field says so, but `opacity`,
+  an `image`'s alpha and `material: "glass"` all read it as a colour. A warm glow
+  laid into a cleared sprite cell comes back as a brown-purple ellipse, a glass
+  jar drawn in one comes back hot pink, the cell quietly stops being transparent,
+  and every other report is clean: the pixels are written, nothing is clipped,
+  nothing is unsampled. It looks *plausible*, which is the worst kind of wrong,
+  and a whole row of pressed transport buttons and two of eleven equalizer
+  handles shipped that way before anybody looked at one at 9x. `keyed_blends`
+  names the operation, how many pixels it did it to, and where. Nobody has ever
+  wanted a colour blended toward magenta; composite the glow onto the colour the
+  cell will be seen against and write it opaque.
+- **`identical_variants` names only sprites the stroke actually wrote.** It asked
+  "did this touch that sprite" with one bounding box per sheet for the whole
+  transaction, and a classic sheet is a bag of cells scattered over it -- one
+  transaction per sheet is the ordinary way to draw one, so the union box is most
+  of the sheet most of the time. The equalizer's PRESETS plate and its close key,
+  drawn together, made a box that swallowed the ON and AUTO cells in between and
+  reported both as having duplicate variants that the stroke had not written a
+  pixel of. Either half of the same transaction on its own reported nothing,
+  which is what made it hard to believe: the report appeared when you *added* an
+  unrelated operation. The box is the cheap pre-filter now and the writes are the
+  answer.
+- **Sprites that share their source cells share one report.** The equalizer's
+  eleven bands all draw their groove from the same rectangle, so one duplicate
+  frame arrived eleven times over, each with its own copy of all twenty-eight
+  labels: four and a half kilobytes of JSON for one fact. It is one entry now,
+  with `also` naming the other ten.
+- **Setting the pencil does not close an open atlas.** `studio_canvas` put the
+  editor on the canvas whatever was asked of it, so setting the brush's face --
+  or asking `measure`, which is documented as answering *instead of* reading the
+  canvas back -- moved the pencil off the sheet a recipe had open. The next
+  stroke then landed on the joined canvas at the sheet's own coordinates and
+  succeeded: 2,968 pixels of mono and stereo lamp went across the middle of the
+  main window, every count looked right, and the sheet came back empty. The
+  editor's own tool column does not close **Skin atlases** when you pick a colour
+  in it, and MCP and the GUI disagreed. The brush settings and `measure` are the
+  pencil rather than the canvas; asking anything of the canvas still goes back to
+  it, and so does an empty call.
+- **The `text` operation's own schema had the advance formula wrong.** It said
+  `cell*scale+spacing` -- which is the mistake `measure` exists to stop, printed
+  in the one description a caller reads while writing a `text` operation, and
+  right at scale 1, so it read as confirmation. The pen advances
+  `(cell + spacing) * scale`.
+- **A refusal over unsaved edits names the argument that discards them.**
+  "Export or undo unsaved edits before creating a blank skin" leaves a caller
+  exporting a half-drawn skin or undoing ninety strokes one call at a time;
+  `discard: true` was in the description and not in the refusal, and the refusal
+  is what arrives at the moment the question is asked. All three of
+  `studio_new`, `studio_open` and `studio_project` say the call now.
+
 ### What each tool answers with
 
 The two catalogue tools are different shapes on purpose: one entry per sprite,
@@ -576,7 +627,7 @@ printing the JSON.
 | `studio_canvas`, `studio_atlas` | the same, without `sheets`; with `path`, `{view, path, size}`; with `measure`, `{measured, face, scale, spacing}` and `unsupported_characters` |
 | `studio_targets` | `{sprites, of, chosen}` -- one entry per sprite, for the whole skin whatever surface is open: `id`, `sheet`, `source`, `states`, `drawn`, and with `variants: true` also `variants` and `labels` |
 | `studio_rectangles` | `{rectangles, of}` -- one entry per **variant**, narrowed by `at`, `sheet`, `id`, `runtime` or `hit`: `id`, `label`, `sheet`, `rect` (where it is drawn), `source` (where it lives), `variant`, `active`, `runtime`, `hit` |
-| `studio_draw` | `pixels_written`, `bounds`, `clipped_pixels`, `overwrites`, `overwrite_sample`, `unmapped_pixels`, `unsampled_pixels`, their samples, `surface`, `revision`, and when there is something to say `unsupported_characters`, `identical_variants`, `crossed_cells` and the sheet's `note` |
+| `studio_draw` | `pixels_written`, `bounds`, `clipped_pixels`, `overwrites`, `overwrite_sample`, `unmapped_pixels`, `unsampled_pixels`, their samples, `surface`, `revision`, and when there is something to say `unsupported_characters`, `identical_variants` (one entry per set of shared cells, with `also`), `keyed_blends`, `crossed_cells` and the sheet's `note` |
 | `studio_states` | the contact sheet, plus `sprite`: `id`, `sheet`, `of`, and per variant `index`, `label`, `rect`, `painted_pixels`, `differs_from_previous`, `largest_channel_change`, `same_picture_as` |
 | `studio_pixel` | every sprite under one canvas pixel and where each keeps it |
 | `studio_options` | every option, `readability` (per readout: `reads`, `ink`, `ground`, `contrast`, `readable`), and `sheets_changed` when one added or removed a sheet |
@@ -1451,3 +1502,143 @@ swept all 112 live GPU states -- active and inactive, released and pressed, all
 samples at exact native pixels. The whole recipe replays from **New blank** into
 an empty document in forty-five seconds with no image library and no external
 asset.
+
+## Catamp Seance -- a skin lit only by what is drawn in it
+
+`assets/skins/Catamp Seance.wsz` is the fourth Catamp drawn from **New blank**
+through this editor, and it is one deterministic recipe rather than a stroke
+journal:
+
+```sh
+python3 tools/skin-studio/catamp_seance.py            # every sheet, then export
+python3 tools/skin-studio/catamp_seance.py main eq    # one stage at a time
+```
+
+- `seance_room.py` -- the ladder everything in the skin is coloured off, the
+  cloth, the pools of candlelight, flames, smoke, wax, salt, eyeshine and the
+  dot.
+- `seance_cats.py` -- the cats. Two ways of drawing one, and where the cat is
+  decides which.
+- `catamp_seance.py` -- one stage per sheet or per group of sprites.
+
+It is seven minutes past three in the morning and the cats have got the spirit
+board out. There are candles, because a cat will knock a candle over but will
+not put one out. There is spilled salt, and the sigils are drawn in it, badly,
+by a paw. And the thing they are calling up is the small red dot.
+
+Every other Catamp has a light somewhere outside the picture: silver takes a key
+light from above-left, kraft catches one, film has a whole fluorescent box
+behind it. **Every light in this skin is in this skin** -- nine candle flames,
+all of them drawn, all of them small -- and the rest of the grammar comes out of
+that one decision.
+
+- **Falloff is fast and it is coloured.** One step from a flame is cream, two is
+  amber, three is a burnt brown, four is the room's violet and there is no
+  fifth. A shadow here is never grey and never black. Everything is coloured off
+  one twelve-step ladder and the only question ever asked about a pixel is how
+  far it is from the nearest flame, so a rim light and the thing it sits on are
+  a fixed distance apart rather than two colours picked by eye twice.
+- **A bright side faces the flame that is near it, not the same way as its
+  neighbour.** There is no global light direction to be consistent with. Two
+  objects a hand apart are lit from opposite sides, and getting that wrong is
+  what makes a candlelit picture look like a grey picture with an orange filter
+  over it.
+- **Eyeshine obeys none of it.** It is reflected rather than received, so a cat
+  across the room has exactly the two discs the one beside the candle has while
+  every other part of it has gone. That is why the dark half of this skin is
+  nothing but eyes at different heights, and why it is the one colour in the
+  file that is not on the ladder.
+- **The dot is not a light.** Two pixels of flat red, no halo, no falloff, no
+  shadow, and nothing it lands on gets brighter. Everything else here is warm or
+  violet; it is neither, and it is the only thing in the room the cats can see
+  properly and you can only nearly.
+
+Salt is the other half of the grammar. Every mark a *cat* made is drawn in
+spilled salt -- the sigils, the wordmark, the window keys -- and every mark is
+therefore broken, because a salt line is a scatter of grains with a dust of it
+either side and some of the path has none. Salt has a ladder of its own, and
+that is not a detail: it reflects a flame rather than glowing with it, so it
+brightens toward white while everything else brightens toward amber. Run it up
+the warm ladder instead and a summoning circle comes out as a ring of embers.
+
+The cats are made two ways and where a cat is decides which. **Near a flame** a
+cat is a crescent: the whole animal is a hole in the light, filled one step
+darker than whatever it is standing in front of, and the only drawn part is the
+band of fur along the side that faces the candle -- brightest where the edge
+turns square-on and gone by the time it turns away. `rimlit()` does that
+arithmetic from the outline and the flame's position, so a cat put down beside a
+different candle relights itself and cannot disagree with the room; there is no
+call in that file that fills a cat with fur colour. **Away from every flame** a
+cat is two eyes. Not a dim cat: no cat.
+
+Six controls say something with their frames that a handle cannot:
+
+- **Volume is how many cats have woken up and turned round to look at you.**
+  Silence is a strip of dark with nothing in it at all and every step up wakes
+  one more, somewhere in the room. It works because eyeshine does not fall off,
+  so a crowd fits in a space thirteen pixels tall without any of it needing to
+  be lit. The handle is the nearest one, and the only cat in the crowd with a
+  head as well as a pair of eyes.
+- **Balance is the saucer of milk, and it tips.** Centre needs no mark on it:
+  milk sitting level is what level looks like. At each end the milk has gone
+  over the rim and there is a wet patch on the cloth.
+- **The seek bar is the board**, with the alphabet across it, YES at one end and
+  NO at the other, and the planchette sliding along covering letters the way a
+  planchette does. The dot is in its lens.
+- **The equalizer is a mantelpiece with eleven different candles on it** -- a
+  pillar, a taper, a birthday candle, a tea light in its tin, a stub in a bottle
+  neck, a stick of incense, one in a jar, one shaped like a cat, a beeswax coil,
+  a match, and one that has fallen over and is burning sideways -- with a cat
+  sitting in the gap the preamp leaves, watching the big one burn.
+- **Shuffle is three cups** with the dot under the middle one, and **repeat is a
+  cat with its own tail in its mouth**: on is the ring closed and off is the same
+  cat having let go.
+- **The status lamp is an eye**: open while it plays, half shut while it is
+  paused, and asleep when it is stopped.
+
+Pressed is where this skin parts company with every other Catamp. Everywhere
+else a pressed control goes darker -- felt sits down in its own shadow, a chip
+pushes flat against a diffuser. Here the room is lit by small fires and a
+pressed control is one that has **caught**: the salt goes to the top of its own
+ladder and a light comes up inside the ring that is not there at rest. It moves
+the whole cell rather than a bevel's four pixels, and it is the answer to the
+question the cats are asking -- press play and the dot is in the circle.
+
+Six things about this editor and this format cost a redraw each here, and four
+of them were new:
+
+- **`opacity` and `material: "glass"` read the transparency key as a colour.**
+  A glow laid into a cleared cell came out as brown mud and a glass jar came out
+  hot pink, and nothing said so. The pools that land in a sprite cell are
+  composited against the colour the cell is seen against and written opaque;
+  `keyed_blends` exists because of this one.
+- **`studio_canvas` used to close an open atlas.** Setting the face before
+  measuring a caption moved the pencil to the joined canvas, and both channel
+  lamps were drawn across the middle of the main window at monoster's own
+  coordinates.
+- **Light does not fit its own cell.** The playlist header's tile is twenty-five
+  pixels wide and the player draws it nine times, so a pool four pixels too wide
+  for the cell it is lighting is repeated nine times across the top of the
+  window -- `crossed_cells` named it. Every pool in a cell is now measured
+  against the cell rather than against the thing it is lighting.
+- **A control that fills flat reads as a hole.** The volume strip was painted in
+  the room's own black, which is correct art and made the one obviously-a-sprite
+  rectangle in a lit table. It carries the light the table carries there now: it
+  starts two pixels from a candle and ends sixty-eight pixels away from it.
+- **A quantised slider has frames that agree.** The milk's surface is a straight
+  line rounded to whole pixels, so four frames either side of centre came out the
+  same picture and a third of the control's travel did nothing;
+  `identical_variants` was the only thing that said so. A glint that slides one
+  pixel a frame cannot agree with itself, and the same fix -- wax spattered in
+  proportion to the burn -- cured the three lowest equalizer frames.
+- **`numbers.bmp` has ten cells and no eleventh for a colon**, so the timer's
+  colon is painted on the window behind the digits like every classic skin does
+  it. Without it the readout is `00 00`.
+
+Verification: `studio_export` validates through Cranamp's own loader and reports
+no undrawn sprite and nothing hard to read -- every readout is between six and a
+half and thirteen to one against its own artwork; `check_native_frames.py` swept
+all 112 live GPU states with no nonuniform 2x2 source-pixel block, so every
+sprite samples at exact native pixels; and the whole recipe replays from **New
+blank** into an empty document in four and a half seconds, byte for byte, with
+no image library and no external asset.
