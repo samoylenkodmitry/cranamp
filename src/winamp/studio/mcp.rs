@@ -122,7 +122,8 @@ fn operation_schema() -> Value {
         "ramp_axis":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},
         "rows":{"type":"array","items":{"type":"string"},"description":"One character per pixel; a character absent from palette is skipped, which is how transparency is spelled."},
         "palette":{"type":"object","additionalProperties":{"type":"string"}},
-        "text":{"type":"string","description":"Set in the editor's 5x7 face, advancing 5*scale+spacing. A-Z a-z 0-9 - : . , / \\ \" ( ) [ ] + = _ ! ? & # % * < > | only; the rest are skipped and named in unsupported_characters."},
+        "text":{"type":"string","description":"Set in one of the editor's two faces, advancing cell*scale+spacing where cell is 5 or 4. A-Z a-z 0-9 - : . , / \\ \" ( ) [ ] + = _ ! ? & # % * < > | only; the rest are skipped and named in unsupported_characters."},
+        "face":{"enum":["5x7","small"],"description":"small is a 4x5 small-caps face for the cells a classic skin gives a word and no room for one -- a 14-pixel equalizer caption, a 27-pixel mono lamp. It has no lower case, so a-z are drawn as capitals rather than skipped."},
         "scale":{"type":"integer","minimum":1,"maximum":8},
         "spacing":{"type":"integer","minimum":-2,"maximum":8},
         "data":{"type":"string","description":"Base64 PNG, at most 2048x2048, one source pixel per skin pixel. Alpha 0 is left alone; alpha between blends with the surface as it stands -- this transaction's earlier operations included -- and is written opaque. Right for adding light to artwork already there, wrong for a redraw, which compounds."},
@@ -147,12 +148,12 @@ fn operation_schema() -> Value {
 /// editing this editor no longer has.
 fn tools() -> Vec<Value> {
     vec![
- tool("studio_canvas","The whole skin as one canvas -- main, equalizer and playlist joined at their own positions -- and the only drawing surface. Reads it back as a PNG at an integer zoom, optionally cropped to [x,y,width,height]; with path it writes the file and returns where. Also sets what the canvas shows: zoom, brush, colour, width, the state every sprite is drawn in, and whether rectangles are outlined.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft"]},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"grain":{"type":"integer","minimum":0,"maximum":64},"grain_size":{"type":"integer","minimum":1,"maximum":16},"opacity":{"type":"integer","minimum":1,"maximum":255},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean"},"active":{"type":"boolean"},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}),&[]),
+ tool("studio_canvas","The whole skin as one canvas -- main, equalizer and playlist joined at their own positions -- and the only drawing surface. Reads it back as a PNG at an integer zoom, optionally cropped to [x,y,width,height]; with path it writes the file and returns where. Also sets what the canvas shows: zoom, brush, colour, width, the state every sprite is drawn in, and whether rectangles are outlined.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft","text"]},"ramp_to":{"type":["string","null"],"description":"A gradient from the brush colour to this one, along the shape the gesture drew. null turns it off."},"ramp_axis":{"enum":["down","across"]},"bevel":{"type":"integer","minimum":0,"maximum":128,"description":"Glass lens bevel; 0 takes it from the height of the drag, as it always did."},"refraction":{"type":"integer","minimum":0,"maximum":32},"text":{"type":"string","description":"What the text brush writes."},"face":{"enum":["5x7","small"]},"text_scale":{"type":"integer","minimum":1,"maximum":8},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"grain":{"type":"integer","minimum":0,"maximum":64},"grain_size":{"type":"integer","minimum":1,"maximum":16},"opacity":{"type":"integer","minimum":1,"maximum":255},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean"},"active":{"type":"boolean"},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}),&[]),
  tool("studio_atlas","One BMP on its own, at its own native coordinates, sharing the pencil and the history. path/crop/zoom read it back exactly as studio_canvas reads the skin -- the only way to see a sheet the canvas never shows: numbers.bmp, text.bmp, a pressed variant. Omit sheet to go back to the whole skin, where drawing normally happens.",json!({"sheet":{"type":"string"},"zoom":{"type":"integer","minimum":1,"maximum":8},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4}}),&[]),
- tool("studio_targets","Which sprites a stroke is routed into. Omit everything to list them; narrow with sheet or id (case-insensitive substring), or add variants for every source rectangle a sprite has -- all 28 frames of one slider track. Auto, the default, paints every sprite under the brush, as a human stroke does. Solo one, or choose any combination.",json!({"layers":{"type":"array","items":{"type":"string"}},"solo":{"type":"string"},"auto":{"type":"boolean"},"paint_layer":{"type":["string","null"]},"sheet":{"type":"string"},"id":{"type":"string"},"variants":{"type":"boolean"}}),&[]),
- tool("studio_rectangles","Where every sprite variant lives in the joined canvas. Narrow with sheet, id (case-insensitive substring) or runtime -- the live readouts Cranamp draws over the artwork, which have no source pixels to paint. select clips painting to one rectangle; otherwise read-only. Rectangles are an overlay, never pixels in the artwork.",json!({"select":{"type":"string"},"sheet":{"type":"string"},"id":{"type":"string"},"runtime":{"type":"boolean"}}),&[]),
+ tool("studio_targets","Which sprites a stroke is routed into. Omit everything to list them; narrow with sheet or id (case-insensitive substring), Every sprite says whether it has been drawn at all, so a skin started from New blank can be asked what is left. Add variants for every source rectangle a sprite has -- all 28 frames of one slider track -- which also answers labels, saying what each variant is: which of a switch's four is pressed, which end of a slider's twenty-eight is silence, and that the classic playlist header keeps a row Cranamp never draws. Auto, the default, paints every sprite under the brush, as a human stroke does. Solo one, or choose any combination.",json!({"layers":{"type":"array","items":{"type":"string"}},"solo":{"type":"string"},"auto":{"type":"boolean"},"paint_layer":{"type":["string","null"]},"sheet":{"type":"string"},"id":{"type":"string"},"variants":{"type":"boolean"}}),&[]),
+ tool("studio_rectangles","Where every sprite variant lives in the joined canvas, plus the two kinds of rectangle that have no sprite at all. Narrow with sheet, id (case-insensitive substring), runtime -- the live readouts Cranamp draws over the artwork -- or hit: controls Cranamp hit-tests and draws nothing for, which is the classic playlist footer\'s five menus and six transport keys, and the main window\'s skin-chooser corner. Those eleven footer buttons have to be drawn by the artist and used to be findable only in the player\'s source. select clips painting to one rectangle; otherwise read-only. Rectangles are an overlay, never pixels in the artwork.",json!({"select":{"type":"string"},"sheet":{"type":"string"},"id":{"type":"string"},"runtime":{"type":"boolean"},"hit":{"type":"boolean"}}),&[]),
  tool("studio_layers","Painting planes over the original atlases -- the editor's Painting layers panel. Add, select, rename, show, hide, lock, set opacity, clip to the plane below, move, merge down or delete. WSZ exports the composite; a project file keeps the planes.",json!({"action":{"enum":["list","add","select","set","move","merge_down","delete"]},"id":{"type":"string"},"name":{"type":"string"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"clip_below":{"type":"boolean"},"opacity":{"type":"integer","minimum":0,"maximum":255},"index":{"type":"integer","minimum":0}}),&[]),
- tool("studio_options","Everything about the skin that is not painted into a sheet -- the editor's Skin options panel. The time readout, the equalizer's slider travel, whether the playlist, equalizer sliders, playlist selection and visualizer carry their own artwork, the six PLEDIT.TXT text colours and the 24 VISCOLOR.TXT visualizer colours. Omit everything to read them all.",json!({"footer":{"enum":["classic","time-total"]},"eq_travel":{"type":"integer","minimum":1,"maximum":52},"visualizer_glass":{"type":"boolean"},"playlist_background":{"type":"boolean"},"eq_handles":{"type":"boolean"},"playlist_selection":{"type":"boolean"},"playlist_colors":{"type":"object","additionalProperties":{"type":"string"}},"visualizer_colors":{"type":"array","items":{"type":"string"},"minItems":24,"maxItems":24}}),&[]),
+ tool("studio_options","Everything about the skin that is not painted into a sheet. Three of these add or remove a drawing surface rather than change a setting -- playlist_background, playlist_selection and eq_handles -- and the answer names any sheet that appeared or went away, with its size and what its cells are -- the editor's Skin options panel. The time readout, the equalizer's slider travel, whether the playlist, equalizer sliders, playlist selection and visualizer carry their own artwork, the six PLEDIT.TXT text colours and the 24 VISCOLOR.TXT visualizer colours. It also answers readability: the contrast of every colour Cranamp writes against the artwork it will be written on, which is the one thing a skin cannot be looked at to check. Omit everything to read them all.",json!({"footer":{"enum":["classic","time-total"]},"eq_travel":{"type":"integer","minimum":1,"maximum":52},"visualizer_glass":{"type":"boolean"},"playlist_background":{"type":"boolean"},"eq_handles":{"type":"boolean"},"playlist_selection":{"type":"boolean"},"playlist_colors":{"type":"object","additionalProperties":{"type":"string"}},"visualizer_colors":{"type":"array","items":{"type":"string"},"minItems":24,"maxItems":24}}),&[]),
  tool("studio_status","The shared document: path, revision, unsaved edits, history depth, sheets, painting planes and the whole view -- panel, brush, colour, width, sprite state. surface is what a stroke's coordinates mean now (\"canvas\", or \"atlas <sheet>\"). Only this call carries the sheet list; the sprites are studio_targets and studio_rectangles.",json!({}),&[]),
  tool("studio_new","Create a transparent classic skin from scratch. No artwork or metadata is inherited. Unsaved edits require discard=true.",json!({"discard":{"type":"boolean"}}),&[]),
  tool("studio_open","Load a WSZ into the running native Studio. Existing unsaved edits require discard=true.",json!({"path":{"type":"string"},"discard":{"type":"boolean"}}),&["path"]),
@@ -161,26 +162,107 @@ fn tools() -> Vec<Value> {
  tool("studio_cluster","Pick up a native pixel region from the selected sprites; Auto captures the visible canvas. Omit rect to read the clipboard back as stamp rows and a palette. flip_x, flip_y and quarter_turns transform it losslessly. Paint it with studio_draw op cluster, or the human Stamp brush. The clipboard never enters a WSZ.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"flip_x":{"type":"boolean"},"flip_y":{"type":"boolean"},"quarter_turns":{"type":"integer","minimum":0,"maximum":3}}),&[]),
  tool("studio_study","Read-only study board: a native crop above an integer enlargement, optionally as grayscale values, with sprite geometry, a pixel grid and a reference image alongside. rect defaults to the last lifted region; reference pixels are never imported. With path, written there instead of returned inline. Changes nothing.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"zoom":{"type":"integer","minimum":1,"maximum":8},"selected":{"type":"boolean"},"values":{"type":"boolean"},"grid":{"type":"boolean"},"geometry":{"type":"boolean"},"reference":{"type":"string"},"reference_rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"path":{"type":"string"}}),&[]),
  tool("studio_pixel","Inspect a canvas pixel: every sprite under it, where each keeps it in its sheet, and what shares those pixels. The way to settle a mapping instead of deriving one.",json!({"x":{"type":"integer","minimum":0},"y":{"type":"integer","minimum":0}}),&["x","y"]),
- tool("studio_states","Every source variant of the selected sprite as one nearest-neighbour contact sheet -- all 28 track frames, or both pressed states. With path, written there instead of returned inline.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8},"path":{"type":"string"}}),&[]),
+ tool("studio_states","Every source variant of the selected sprite as one nearest-neighbour contact sheet -- all 28 track frames, or both pressed states -- numbered, with a cell that repeats an earlier one marked `4 = 1`. It also answers what each variant is, how many pixels it differs from the one before it by, and the largest channel change between them: a contact sheet cannot show that two cells differ by four pixels, or by none. Pass differences:false for the image alone. With path, the PNG is written there instead of returned inline.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8},"differences":{"type":"boolean"},"path":{"type":"string"}}),&[]),
  tool("studio_history","The shared human and MCP history, the cursor, and how many steps are retained.",json!({}),&[]),
  tool("studio_undo","Undo the last human or MCP drawing transaction.",json!({}),&[]),
  tool("studio_redo","Redo the last undone transaction.",json!({}),&[]),
- tool("studio_screenshot","The actual Cranamp GPU scene at native logical pixels, captured once the requested revision is composed. crop is [x,y,width,height] in scene pixels. With path the PNG is written and you get the path and its size; without it the image comes back inline, about 420 KB for a full scene. Changes nothing.",json!({"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4}}),&[]),
- tool("studio_export","Validate through Cranamp's loader and write the edited classic WSZ atomically.",json!({"path":{"type":"string"}}),&["path"]),
+ tool("studio_screenshot","The Cranamp GPU scene at native logical pixels, captured once the requested revision is composed. The window shows either the editor or the live player, and the answer says which in `showing` and where the player sits in `player`. panel crops to one window -- main, equalizer, playlist or all -- in the player\'s own coordinates, so a crop does not have to be measured by eye and does not go stale when the window is resized. presentation:true puts the window into the live stack first, which is the only thing here that changes anything. crop is [x,y,width,height] in scene pixels. With path the PNG is written and you get the path and its size; without it the image comes back inline, about 420 KB for a full scene.",json!({"path":{"type":"string"},"panel":{"enum":["main","equalizer","playlist","all"]},"presentation":{"type":"boolean"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4}}),&[]),
+ tool("studio_export","Validate through Cranamp's loader and write the edited classic WSZ atomically. Validating proves the archive parses and nothing more, so the answer also names any sprite that is still blank -- a skin from New blank with twelve untouched sheets exports in six kilobytes and looks exactly like a finished one from here -- and any readout whose ink cannot be read on the artwork behind it. Both are reports, never refusals.",json!({"path":{"type":"string"}}),&["path"]),
 ]
 }
 fn text(value: Value) -> Value {
     json!({"content":[{"type":"text","text":value.to_string()}]})
 }
+/// Refuse an argument the tool does not have, and say which one.
+///
+/// Every schema here declares `additionalProperties: false` and the server was
+/// not enforcing it, so a field aimed at the wrong tool was accepted, ignored,
+/// and answered with a perfectly ordinary-looking result. `presentation` sent
+/// to `studio_screenshot` -- it belongs to `studio_canvas` -- returned a
+/// capture of the editor's own window described as the player's scene, and
+/// nothing in the reply said the argument had gone nowhere. A silently dropped
+/// argument is the one failure a caller cannot see.
+fn reject_unknown_arguments(name: &str, args: &Value) -> Result<()> {
+    let Some(object) = args.as_object() else {
+        return Ok(());
+    };
+    // The retired tools are still answered and no longer listed; they have no
+    // schema to check against, so they are left alone.
+    let Some(schema) = tools()
+        .into_iter()
+        .find(|t| t["name"] == name)
+        .and_then(|t| t["inputSchema"]["properties"].as_object().cloned())
+    else {
+        return Ok(());
+    };
+    let unknown: Vec<&str> = object
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !schema.contains_key(*k))
+        .collect();
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    let mut known: Vec<&str> = schema.keys().map(String::as_str).collect();
+    known.sort_unstable();
+    let elsewhere: Vec<String> = unknown
+        .iter()
+        .filter_map(|field| {
+            tools()
+                .into_iter()
+                .find(|t| {
+                    t["name"] != name && t["inputSchema"]["properties"].get(field).is_some()
+                })
+                .map(|t| format!("{field} is {}'s", t["name"].as_str().unwrap_or_default()))
+        })
+        .collect();
+    bail!(
+        "{name} has no {}{}. It takes: {}",
+        unknown.join(", "),
+        if elsewhere.is_empty() {
+            String::new()
+        } else {
+            format!(" -- {}", elsewhere.join("; "))
+        },
+        known.join(", ")
+    );
+}
 pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
+    reject_unknown_arguments(name, &args)?;
     // GPU capture must run without holding the document lock: the UI needs it to draw.
     if name == "studio_screenshot" {
-        let revision = shared
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Studio document lock"))?
-            .revision;
+        // The window shows either the editor's canvas or the live player, and
+        // this call captures whichever it is. Its description promised the
+        // player's scene, the result said nothing about which one arrived, and
+        // there was no way to ask for the player -- so a caller that had not
+        // read the prose got a picture of the editor's own chrome and no hint
+        // that it had.
+        let (revision, playlist_height) = {
+            let mut doc = shared
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Studio document lock"))?;
+            if args["presentation"] == json!(true) && !doc.view.presentation {
+                doc.state(json!({"presentation": true}))?;
+            }
+            (doc.revision, doc.view.preview_playlist_height)
+        };
         let mut im = super::capture_scene(revision)?;
-        if let Some(crop) = args.get("crop") {
+        let mut crop = args.get("crop").cloned();
+        if let Some(panel) = args["panel"].as_str() {
+            let canvas = match panel {
+                "main" => [0, 0, 275, 116],
+                "equalizer" => [0, 116, 275, 116],
+                "playlist" => [0, 232, 275, playlist_height],
+                "all" => [0, 0, 275, 232 + playlist_height],
+                other => bail!("panel is main, equalizer, playlist or all, not {other}"),
+            };
+            let rect = super::player_scene_rect(canvas).context(
+                "The window is showing the editor's canvas, not the player, so there is no \
+                 panel to crop to. Add presentation:true, or turn on Player preview.",
+            )?;
+            crop = Some(json!(rect));
+        }
+        if let Some(crop) = crop {
             let r: [u32; 4] =
                 serde_json::from_value(crop.clone()).context("crop must be [x,y,width,height]")?;
             if r[2] == 0
@@ -188,10 +270,23 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 || r[0].checked_add(r[2]).is_none_or(|v| v > im.width())
                 || r[1].checked_add(r[3]).is_none_or(|v| v > im.height())
             {
-                bail!("Crop must fit inside the captured scene");
+                bail!(
+                    "Crop {r:?} must fit inside the captured scene, which is {}x{}",
+                    im.width(),
+                    im.height()
+                );
             }
             im = image::imageops::crop_imm(&im, r[0], r[1], r[2], r[3]).to_image();
         }
+        // What the capture is of, and where the player sits in it, so a caller
+        // never has to measure a window by eye against a full-scene PNG.
+        let (showing, player) = match super::player_scene() {
+            Some([x, y, zoom]) => (
+                "player",
+                json!({"x":x.round() as i64,"y":y.round() as i64,"zoom":zoom}),
+            ),
+            None => ("editor", Value::Null),
+        };
         let mut bytes = std::io::Cursor::new(Vec::new());
         im.write_to(&mut bytes, image::ImageFormat::Png)?;
         // A `path` means "write it and tell me where". The whole scene is four
@@ -200,11 +295,12 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
         if let Some(path) = args["path"].as_str() {
             std::fs::write(path, bytes.get_ref())?;
             return Ok(text(
-                json!({"path":wrote(path),"size":[im.width(),im.height()],"revision":revision}),
+                json!({"path":wrote(path),"size":[im.width(),im.height()],"revision":revision,
+                       "showing":showing,"player":player}),
             ));
         }
         return Ok(
-            json!({"content":[{"type":"image","mimeType":"image/png","data":base64(bytes.get_ref())},{"type":"text","text":format!("Actual Cranamp GPU scene: {}×{} pixels",im.width(),im.height())}]}),
+            json!({"content":[{"type":"image","mimeType":"image/png","data":base64(bytes.get_ref())},{"type":"text","text":format!("Cranamp GPU scene, showing the {showing}: {}×{} pixels; player {player}",im.width(),im.height())}]}),
         );
     }
     let mut doc = shared
@@ -248,6 +344,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 let sheet = args["sheet"].as_str();
                 let needle = args["id"].as_str().map(str::to_lowercase);
                 let runtime = args["runtime"].as_bool();
+                let hit = args["hit"].as_bool();
                 let all = doc.guides();
                 let total = all.len();
                 let kept = all
@@ -258,9 +355,10 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                                 .as_ref()
                                 .is_none_or(|n| g.id.to_lowercase().contains(n.as_str()))
                             && runtime.is_none_or(|r| g.runtime == r)
+                            && hit.is_none_or(|r| g.hit == r)
                     })
                     .collect::<Vec<_>>();
-                json!({"guides":kept,"of":total})
+                json!({"rectangles":kept,"of":total})
             }
         }
         "studio_patch" => doc.patch(&args)?,
@@ -422,6 +520,9 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 let sheet = args["sheet"].as_str();
                 let needle = args["id"].as_str().map(str::to_lowercase);
                 let variants = args["variants"] == json!(true);
+                // What is still blank, which for a skin being drawn from New
+                // blank is the whole of "what is left to do".
+                let blank = doc.undrawn_sprites();
                 let all = doc.layers();
                 let total = all.len();
                 let sprites = all
@@ -438,9 +539,14 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                             "sheet": l.sheet,
                             "source": l.source,
                             "states": l.variants.len(),
+                            "drawn": !blank.contains(&l.id),
                         });
                         if variants {
                             value["variants"] = json!(l.variants);
+                            // Four rectangles say nothing about which is off
+                            // and which is pressed; twenty-eight say nothing
+                            // about which end of the travel frame 0 is.
+                            value["labels"] = json!(l.labels);
                         }
                         value
                     })
@@ -449,6 +555,13 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             }
         }
         "studio_options" => {
+            // Three of these options are not settings at all: each adds or
+            // removes a drawing surface. Turning one on used to answer with the
+            // option set and no mention of the sheet that had just appeared,
+            // its size, or what its cells are -- which left the new surface
+            // findable only in the documentation.
+            let mut appeared: Vec<String> = Vec::new();
+            let before: Vec<String> = doc.sheets().into_iter().map(|(n, _, _)| n).collect();
             for (key, call) in [
                 ("playlist_background", 0u8),
                 ("eq_handles", 1),
@@ -484,9 +597,26 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             if let Some(colors) = args.get("visualizer_colors") {
                 doc.visualizer_palette(&json!({ "colors": colors }))?;
             }
+            // Both halves of readability live here -- the ink is one of these
+            // palettes or text.bmp's sampled colour -- so this is where the
+            // answer belongs.
+            let readability = doc.readability();
             let (playlist, visualizer) = doc.text_palettes();
             let sheets = doc.sheets();
-            json!({
+            for (name, w, h) in &sheets {
+                if !before.contains(name) {
+                    appeared.push(format!(
+                        "{name} is now a sheet, {w}x{h}: {}",
+                        super::model::Document::new_sheet_note(name)
+                    ));
+                }
+            }
+            for name in &before {
+                if !sheets.iter().any(|(n, _, _)| n == name) {
+                    appeared.push(format!("{name} is gone and will not be exported"));
+                }
+            }
+            let mut value = json!({
                 "layout": doc.layout(),
                 "playlist_background": doc.has_playlist_background(),
                 "eq_handles": sheets.iter().any(|(n, _, _)| n == "eqhandles.bmp"),
@@ -496,7 +626,13 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                     .map(|(k, v)| (k.to_string(), json!(v)))
                     .collect::<serde_json::Map<String, Value>>(),
                 "visualizer_colors": visualizer,
-            })
+                "readability": readability,
+            });
+            if !appeared.is_empty() {
+                doc.message = appeared.join("; ");
+                value["sheets_changed"] = json!(appeared);
+            }
+            value
         }
         "studio_layout" => {
             if args.get("footer").is_some()
@@ -548,14 +684,32 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             // studio_canvas always did. Returning the base64 as well doubled
             // the cost of every look and put a whole PNG in the caller's
             // context after it had already been handed the file.
+            // A contact sheet cannot show that two cells differ by four pixels,
+            // or by none. The numbers can.
+            let differences = (name == "studio_states" && args["differences"] != json!(false))
+                .then(|| doc.variant_differences())
+                .transpose()?;
             if let Some(p) = args["path"].as_str() {
                 std::fs::write(p, bytes.get_ref())?;
-                return Ok(text(
-                    json!({"path":wrote(p),"size":[im.width(),im.height()],"native":[im.width()/zoom,im.height()/zoom],"zoom":zoom,"revision":doc.revision}),
-                ));
+                let mut out = json!({"path":wrote(p),"size":[im.width(),im.height()],"native":[im.width()/zoom,im.height()/zoom],"zoom":zoom,"revision":doc.revision});
+                if let Some(d) = differences {
+                    out["sprite"] = d;
+                }
+                return Ok(text(out));
+            }
+            let mut note = format!(
+                "{}x{} native panel, {}x integer zoom; revision {}",
+                im.width() / zoom,
+                im.height() / zoom,
+                zoom,
+                doc.revision
+            );
+            if let Some(d) = differences {
+                note.push('\n');
+                note.push_str(&d.to_string());
             }
             return Ok(
-                json!({"content":[{"type":"image","mimeType":"image/png","data":base64(bytes.get_ref())},{"type":"text","text":format!("{}x{} native panel, {}x integer zoom; revision {}",im.width()/zoom,im.height()/zoom,zoom,doc.revision)}]}),
+                json!({"content":[{"type":"image","mimeType":"image/png","data":base64(bytes.get_ref())},{"type":"text","text":note}]}),
             );
         }
         _ => bail!("Unknown Studio tool {name}"),
@@ -945,6 +1099,34 @@ mod drawing_tests {
             out["pixels_written"].as_u64().unwrap() > 0,
             "the rest still landed"
         );
+    }
+
+    /// A field aimed at the wrong tool used to be accepted, dropped, and
+    /// answered with an ordinary-looking result -- `presentation` sent to
+    /// `studio_screenshot` captured the editor's own window and called it the
+    /// player's scene. That field is `studio_screenshot`'s own now; a field
+    /// that is still somebody else's has to say so.
+    #[test]
+    fn an_argument_a_tool_does_not_have_is_refused_by_name() {
+        let refusal = reject_unknown_arguments("studio_screenshot", &json!({"brush": "pencil"}))
+            .unwrap_err()
+            .to_string();
+        assert!(refusal.contains("brush"), "{refusal}");
+        assert!(
+            refusal.contains("studio_canvas"),
+            "say where the field does belong: {refusal}"
+        );
+        assert!(refusal.contains("crop"), "and what this one takes: {refusal}");
+        // A field nothing has is still named, with no misleading suggestion.
+        let refusal = reject_unknown_arguments("studio_undo", &json!({"nonesuch": 1}))
+            .unwrap_err()
+            .to_string();
+        assert!(refusal.contains("nonesuch"), "{refusal}");
+        reject_unknown_arguments("studio_screenshot", &json!({"crop":[0,0,8,8],"panel":"main"}))
+            .unwrap();
+        // The retired tools are still answered and no longer listed, so they
+        // have no schema to check against and are left alone.
+        reject_unknown_arguments("studio_layout", &json!({"anything": 1})).unwrap();
     }
 
     /// Checking one sprite should not cost a render of the whole skin.

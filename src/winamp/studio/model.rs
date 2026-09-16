@@ -72,6 +72,24 @@ pub struct View {
     pub grain_size: u32,
     pub opacity: u32,
     pub clean_corners: bool,
+    /// A gradient between the brush colour and a second one, along the shape's
+    /// own axis. The engine has taken exact palette ramps from the start and
+    /// nothing in either panel could ask for one, so every gradient in every
+    /// skin so far came from a recipe -- which meant a flat rectangle was the
+    /// only thing a person drawing by hand could make.
+    pub ramp_to: Option<String>,
+    /// "down" or "across".
+    pub ramp_axis: String,
+    /// The glass lens' own two numbers. They are 1..128 and 0..32 over MCP and
+    /// were fixed at a drag-derived bevel and a refraction of four for a hand
+    /// stroke, so a person got exactly one glass. Zero keeps the old
+    /// behaviour: take the bevel from the height of the drag.
+    pub bevel: u32,
+    pub refraction: u32,
+    /// What the text brush writes, in which of the two faces, at what scale.
+    pub text: String,
+    pub face: String,
+    pub text_scale: u32,
     pub filled: bool,
     pub mirror_x: bool,
     pub mirror_y: bool,
@@ -110,6 +128,13 @@ impl Default for View {
             grain_size: 2,
             opacity: 255,
             clean_corners: false,
+            ramp_to: None,
+            ramp_axis: "down".into(),
+            bevel: 0,
+            refraction: 4,
+            text: "CATAMP".into(),
+            face: "5x7".into(),
+            text_scale: 1,
             filled: false,
             mirror_x: false,
             mirror_y: false,
@@ -537,29 +562,76 @@ impl Document {
         if view.panel == "atlas" && !self.images.contains_key(&view.sheet) {
             bail!("Unknown atlas {}", view.sheet);
         }
-        if !(145..=522).contains(&view.preview_playlist_height)
-            || !(1..=8).contains(&view.zoom)
-            || [view.volume, view.balance, view.position, view.scroll]
-                .iter()
-                .chain(view.eq.iter())
-                .any(|v| *v > 27)
-            || view.digit > 9
-            || view.playback > 2
-        {
-            bail!("preview_playlist_height 145..522; zoom 1..8; slider frames 0..27; digit 0..9; playback 0..2");
+        // One refusal listing every range at once told a caller which ranges
+        // exist and not which field it had got wrong, or what it had sent --
+        // and the field is the whole of what it needs to fix it.
+        for (name, value, low, high) in [
+            (
+                "preview_playlist_height",
+                view.preview_playlist_height,
+                145,
+                522,
+            ),
+            ("zoom", view.zoom, 1, 8),
+            ("volume", u32::from(view.volume), 0, 27),
+            ("balance", u32::from(view.balance), 0, 27),
+            ("position", u32::from(view.position), 0, 27),
+            ("scroll", u32::from(view.scroll), 0, 27),
+            ("digit", u32::from(view.digit), 0, 9),
+            ("playback", u32::from(view.playback), 0, 2),
+        ] {
+            anyhow::ensure!(
+                (low..=high).contains(&value),
+                "{name} is {low}..{high} (got {value})"
+            );
+        }
+        for (band, value) in view.eq.iter().enumerate() {
+            anyhow::ensure!(*value <= 27, "eq[{band}] is 0..27 (got {value})");
         }
         anyhow::ensure!(
             (1..=32).contains(&view.brush_size),
             "brush_size must be 1..32"
         );
         anyhow::ensure!(view.grain <= 64, "grain is an amplitude 0..64");
+        if let Some(to) = &view.ramp_to {
+            parse_color(to).context("ramp_to is the colour a gradient runs to")?;
+        }
+        anyhow::ensure!(
+            ["down", "across"].contains(&view.ramp_axis.as_str()),
+            "ramp_axis is down or across (got {})",
+            view.ramp_axis
+        );
+        anyhow::ensure!(
+            view.bevel <= 128,
+            "bevel is 0..128 native pixels, 0 to take it from the drag (got {})",
+            view.bevel
+        );
+        anyhow::ensure!(
+            view.refraction <= 32,
+            "refraction is 0..32 native pixels (got {})",
+            view.refraction
+        );
+        anyhow::ensure!(
+            ["5x7", "small"].contains(&view.face.as_str()),
+            "face is 5x7 or small (got {})",
+            view.face
+        );
+        anyhow::ensure!(
+            (1..=8).contains(&view.text_scale),
+            "text_scale is 1..8 (got {})",
+            view.text_scale
+        );
+        anyhow::ensure!(view.text.len() <= 256, "text is at most 256 characters");
         anyhow::ensure!(
             (1..=16).contains(&view.grain_size),
             "grain_size is a lattice 1..16 pixels"
         );
         anyhow::ensure!((1..=255).contains(&view.opacity), "opacity is 1..255");
         anyhow::ensure!(
-            ["pencil", "line", "rect", "ellipse", "lift", "stamp", "glass", "curve", "tuft"]
+            [
+                "pencil", "line", "rect", "ellipse", "lift", "stamp", "glass", "curve", "tuft",
+                "text",
+            ]
                 .contains(&view.brush.as_str()),
             "unknown brush"
         );
@@ -584,7 +656,16 @@ impl Document {
         for c in &view.mask_colors {
             parse_color(c)?;
         }
+        // A sheet with something surprising about it says so the moment it is
+        // opened. The note used to arrive only in a draw result, which is one
+        // stroke after it would have been useful.
+        let opened = self.view.panel != "atlas" || self.view.sheet != view.sheet;
         self.view = view;
+        if opened && self.view.panel == "atlas" {
+            if let Some(note) = Self::sheet_note(&self.view.sheet) {
+                self.message = format!("{} · {note}", self.view.sheet);
+            }
+        }
         self.revision += 1;
         Ok(self.brief())
     }
@@ -632,7 +713,45 @@ impl Document {
                  when more than two thirds of the sheet is opaque. Paint it in \
                  the colour the readouts should be.",
             ),
+            "plbg.bmp" => Some(
+                "The player draws one track row every 11 pixels from the top of \
+                 this sheet, and the selection strip is one row of the same \
+                 height. 243x203 covers a tall playlist exactly; a taller one \
+                 tiles this sheet from the top without stretching it, so a \
+                 pattern whose period does not divide 203 steps at the seam.",
+            ),
+            "plselection.bmp" => Some(
+                "One track row, 243x11, drawn under the selected row's text. It \
+                 has to stay clear of the playlist ink: Cranamp writes the row's \
+                 own colours over it, from PLEDIT.TXT.",
+            ),
+            "titlebar.bmp" => Some(
+                "Most of this sheet is classic shade-mode artwork Cranamp does \
+                 not draw. Only the two 275x14 title rows and the four 9x9 \
+                 window buttons are sampled; the rest is reported as unsampled.",
+            ),
             _ => None,
+        }
+    }
+    /// What a sheet that has just come into existence holds.
+    ///
+    /// Three skin options add a drawing surface rather than change a setting,
+    /// and a new surface that nothing names is a surface nobody finds.
+    pub fn new_sheet_note(sheet: &str) -> &'static str {
+        match sheet {
+            "eqhandles.bmp" => {
+                "eleven 14x25 handles, one per band, normal above pressed. \
+                 Equalizer travel is limited to 38 pixels while these exist, \
+                 because the handle itself takes 25 of the 63-pixel groove."
+            }
+            "plbg.bmp" => {
+                "the ground under the track list, one row every 11 pixels, tiled \
+                 from the top without stretching when the list is taller."
+            }
+            "plselection.bmp" => {
+                "one 243x11 track row, drawn under the selected row's text."
+            }
+            _ => "a new drawing surface",
         }
     }
     /// Which pixels of a sheet any sprite samples, in any panel, in any state.
@@ -677,6 +796,7 @@ impl Document {
                         source: rect,
                         destination: rect,
                         variants: vec![rect],
+                        labels: vec!["always".into()],
                     }]
                 })
                 .unwrap_or_default();
@@ -706,6 +826,7 @@ impl Document {
                 source: [0, 114, 275, 1],
                 destination: [0, 115, 275, 1],
                 variants: vec![[0, 114, 275, 1]],
+                labels: vec!["always · the same row as main's last".into()],
             });
             return all;
         }
@@ -717,6 +838,7 @@ impl Document {
                 source: [0, 0, 243, 11],
                 destination: [12, 21, 243, 11],
                 variants: vec![[0, 0, 243, 11]],
+                labels: vec!["always · one track row".into()],
             });
         }
         if view.panel == "equalizer" && self.images.contains_key("eqhandles.bmp") {
@@ -794,6 +916,78 @@ impl Document {
                 self.atlas_writes.insert(key, (colour, at));
             }
         }
+    }
+    /// Variants of one sprite that have come out as the same picture.
+    ///
+    /// Twenty-eight frames of a slider track, drawn by a recipe that forgot to
+    /// offset each frame by its own y, all land on frame 0. Every report says
+    /// the transaction succeeded: `bounds` is sensible, nothing was clipped,
+    /// nothing was unsampled, and `overwrites` is a canvas-to-source measure
+    /// that does not apply to a sheet open on its own. The only thing wrong is
+    /// that twenty-seven frames are now the same picture, so that is the thing
+    /// to say.
+    ///
+    /// An empty cell is not a duplicate, it is an unpainted cell, so fully
+    /// transparent variants are left out -- otherwise the first stroke on a
+    /// blank sheet reports every sprite on it.
+    fn identical_variants(&self) -> Vec<Value> {
+        if self.atlas_writes.is_empty() {
+            return Vec::new();
+        }
+        let names: Vec<String> = self.images.keys().cloned().collect();
+        // The bounding box of what this transaction wrote, per sheet. A box is
+        // enough to ask "did this touch that sprite" and costs one comparison
+        // per variant rather than one per written pixel.
+        let mut touched: BTreeMap<usize, [u32; 4]> = BTreeMap::new();
+        for (sheet, x, y) in self.atlas_writes.keys() {
+            let box_ = touched.entry(*sheet).or_insert([*x, *y, 1, 1]);
+            let (x0, y0) = (box_[0].min(*x), box_[1].min(*y));
+            let (x1, y1) = ((box_[0] + box_[2]).max(*x + 1), (box_[1] + box_[3]).max(*y + 1));
+            *box_ = [x0, y0, x1 - x0, y1 - y0];
+        }
+        let mut view = self.view.clone();
+        view.panel = "canvas".into();
+        let mut out = Vec::new();
+        for layer in self.layers_for(&view) {
+            if layer.variants.len() < 2 {
+                continue;
+            }
+            let Some(index) = names.iter().position(|n| *n == layer.sheet) else {
+                continue;
+            };
+            let Some(box_) = touched.get(&index) else {
+                continue;
+            };
+            if !layer
+                .variants
+                .iter()
+                .any(|r| super::guides::intersection(*r, *box_).is_some())
+            {
+                continue;
+            }
+            let Some(image) = self.images.get(&layer.sheet) else {
+                continue;
+            };
+            let mut same: BTreeMap<Vec<u8>, Vec<usize>> = BTreeMap::new();
+            for (i, r) in layer.variants.iter().enumerate() {
+                let mut pixels = Vec::with_capacity((r[2] * r[3] * 4) as usize);
+                for y in r[1]..(r[1] + r[3]).min(image.height()) {
+                    for x in r[0]..(r[0] + r[2]).min(image.width()) {
+                        pixels.extend_from_slice(&image.get_pixel(x, y).0);
+                    }
+                }
+                if pixels.is_empty() || pixels.chunks(4).all(|p| p[3] == 0) {
+                    continue;
+                }
+                same.entry(pixels).or_default().push(i);
+            }
+            let groups: Vec<Vec<usize>> = same.into_values().filter(|g| g.len() > 1).collect();
+            if !groups.is_empty() {
+                out.push(json!({"id":layer.id,"of":layer.variants.len(),"groups":groups,
+                                "labels":layer.labels}));
+            }
+        }
+        out
     }
     pub fn render(&self) -> RgbaImage {
         let composite = self.composite_images();
@@ -1013,6 +1207,88 @@ impl Document {
         let wanted = &self.view.layer;
         layers.into_iter().find(|l| &l.id == wanted)
     }
+    /// For each variant, the earliest variant it is the same picture as.
+    ///
+    /// A fully transparent cell is left out: it is unpainted, not a copy.
+    fn repeated_variants(source: &RgbaImage, variants: &[[u32; 4]]) -> BTreeMap<usize, usize> {
+        let cell = |r: &[u32; 4]| -> Option<Vec<u8>> {
+            let mut pixels = Vec::with_capacity((r[2] * r[3] * 4) as usize);
+            for y in r[1]..(r[1] + r[3]).min(source.height()) {
+                for x in r[0]..(r[0] + r[2]).min(source.width()) {
+                    pixels.extend_from_slice(&source.get_pixel(x, y).0);
+                }
+            }
+            (!pixels.is_empty() && pixels.chunks(4).any(|p| p[3] > 0)).then_some(pixels)
+        };
+        let mut first: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
+        let mut twins = BTreeMap::new();
+        for (i, r) in variants.iter().enumerate() {
+            let Some(pixels) = cell(r) else { continue };
+            match first.get(&pixels) {
+                Some(earlier) => {
+                    twins.insert(i, *earlier);
+                }
+                None => {
+                    first.insert(pixels, i);
+                }
+            }
+        }
+        twins
+    }
+    /// What each variant of the chosen sprite is, and how far it is from the
+    /// one before it.
+    ///
+    /// Two variants that differ by a hundredth of their pixels are a control
+    /// whose pressed state nobody will see, and two that differ by none are a
+    /// frame that was never drawn. Neither is visible on a contact sheet.
+    pub fn variant_differences(&self) -> Result<Value> {
+        let layer = self.state_sheet_layer().context(
+            "Choose one sprite in Sprite targets first: a state sheet is one sprite's variants",
+        )?;
+        let composite = self.composite_images();
+        let source = &composite[&layer.sheet];
+        let twins = Self::repeated_variants(source, &layer.variants);
+        let at = |r: &[u32; 4], x: u32, y: u32| -> [u8; 4] {
+            if r[0] + x < source.width() && r[1] + y < source.height() {
+                source.get_pixel(r[0] + x, r[1] + y).0
+            } else {
+                [0; 4]
+            }
+        };
+        let mut out = Vec::new();
+        for (i, r) in layer.variants.iter().enumerate() {
+            let mut painted = 0u32;
+            for y in 0..r[3] {
+                for x in 0..r[2] {
+                    painted += u32::from(at(r, x, y)[3] > 0);
+                }
+            }
+            let mut entry = json!({"index":i,"label":layer.labels.get(i),
+                                   "rect":r,"painted_pixels":painted});
+            if let Some(previous) = i.checked_sub(1).and_then(|p| layer.variants.get(p)) {
+                let (mut differing, mut delta) = (0u32, 0i32);
+                for y in 0..r[3].min(previous[3]) {
+                    for x in 0..r[2].min(previous[2]) {
+                        let (a, b) = (at(r, x, y), at(previous, x, y));
+                        if a != b {
+                            differing += 1;
+                            for c in 0..4 {
+                                delta = delta.max((a[c] as i32 - b[c] as i32).abs());
+                            }
+                        }
+                    }
+                }
+                entry["differs_from_previous"] = json!(differing);
+                entry["largest_channel_change"] = json!(delta);
+            }
+            if let Some(first) = twins.get(&i) {
+                entry["same_picture_as"] = json!(first);
+            }
+            out.push(entry);
+        }
+        Ok(json!({"id":layer.id,"sheet":layer.sheet,"of":layer.variants.len(),
+                  "variants":out}))
+    }
     /// Every variant of one sprite, laid out in a grid and numbered.
     pub fn state_sheet(&self) -> Result<RgbaImage> {
         let layer = self.state_sheet_layer().context(
@@ -1028,6 +1304,7 @@ impl Document {
         let mut image = RgbaImage::from_pixel(columns * cw, rows * ch, Rgba([20, 24, 30, 255]));
         let composite = self.composite_images();
         let source = &composite[&layer.sheet];
+        let twins = Self::repeated_variants(source, &layer.variants);
         for (i, r) in layer.variants.iter().enumerate() {
             let ox = (i as u32 % columns) * cw;
             let oy = (i as u32 / columns) * ch;
@@ -1038,8 +1315,20 @@ impl Document {
                     image.put_pixel(ox + x, oy + y, Rgba([34, 40, 50, 255]));
                 }
             }
-            for (k, digit) in (i + 1).to_string().chars().enumerate() {
-                let Some(glyph) = crate::winamp::pixel_text::glyph(digit) else {
+            // The number, and -- when this cell is the same picture as an
+            // earlier one -- which. A contact sheet of 28 frames that differ
+            // by two pixels each looks exactly like one where 27 are copies.
+            let caption = match twins.get(&i) {
+                Some(first) => format!("{} = {}", i + 1, first + 1),
+                None => (i + 1).to_string(),
+            };
+            let ink = if twins.contains_key(&i) {
+                Rgba([214, 138, 104, 255])
+            } else {
+                Rgba([120, 146, 170, 255])
+            };
+            for (k, letter) in caption.chars().enumerate() {
+                let Some(glyph) = crate::winamp::pixel_text::glyph(letter) else {
                     continue;
                 };
                 for (row, bits) in glyph.iter().enumerate() {
@@ -1050,7 +1339,7 @@ impl Document {
                         let px = ox + 3 + k as u32 * 6 + column;
                         let py = oy + 3 + row as u32;
                         if px < ox + cw - 1 && py < oy + ch - 1 {
-                            image.put_pixel(px, py, Rgba([120, 146, 170, 255]));
+                            image.put_pixel(px, py, ink);
                         }
                     }
                 }
@@ -1266,11 +1555,45 @@ impl Document {
             self.planes = before.planes.clone();
         }
         let v = self.view.clone();
-        let op = if ["line", "curve", "tuft"].contains(&v.brush.as_str()) {
+        let mut op = if v.brush == "text" {
+            // A word is placed, not dragged: the gesture's start is where it
+            // begins and the rest of the drag is ignored.
+            json!({"op":"text","x":from[0],"y":from[1],"text":v.text,
+                   "face":v.face,"scale":v.text_scale,"spacing":1})
+        } else if ["line", "curve", "tuft"].contains(&v.brush.as_str()) {
             json!({"op":v.brush,"x":from[0],"y":from[1],"x2":to[0],"y2":to[1],"brush_size":v.brush_size,"curve_bend":v.curve_bend})
         } else {
-            json!({"op":if v.brush=="glass" {"ellipse"}else{&v.brush},"x":from[0].min(to[0]),"y":from[1].min(to[1]),"width":(to[0]-from[0]).abs()+1,"height":(to[1]-from[1]).abs()+1,"brush_size":v.brush_size,"fill":v.filled||v.brush=="glass","material":if v.brush=="glass" {Some("glass")}else{None},"bevel":((from[1]-to[1]).abs() as f64/2.).clamp(1.,24.)})
+            json!({"op":if v.brush=="glass" {"ellipse"}else{&v.brush},"x":from[0].min(to[0]),"y":from[1].min(to[1]),"width":(to[0]-from[0]).abs()+1,"height":(to[1]-from[1]).abs()+1,"brush_size":v.brush_size,"fill":v.filled||v.brush=="glass","material":if v.brush=="glass" {Some("glass")}else{None},
+                   "bevel":if v.bevel > 0 {v.bevel as f64} else {((from[1]-to[1]).abs() as f64/2.).clamp(1.,24.)},
+                   "refraction":v.refraction})
         };
+        // A gradient runs along the shape the gesture drew, so the axis comes
+        // from the drag rather than from anything the artist has to type.
+        if let Some(to_color) = v.ramp_to.as_deref() {
+            if v.brush != "text" {
+                let (a, b) = (parse_color(&v.color)?, parse_color(to_color)?);
+                let stops: Vec<String> = (0..24)
+                    .map(|i| {
+                        let t = i as f64 / 23.;
+                        let mix = |x: u8, y: u8| (x as f64 + (y as f64 - x as f64) * t) as u8;
+                        format!(
+                            "#{:02x}{:02x}{:02x}",
+                            mix(a[0], b[0]),
+                            mix(a[1], b[1]),
+                            mix(a[2], b[2])
+                        )
+                    })
+                    .collect();
+                let (x0, y0) = (from[0].min(to[0]), from[1].min(to[1]));
+                let (x1, y1) = (from[0].max(to[0]), from[1].max(to[1]));
+                op["ramp"] = json!(stops);
+                op["ramp_axis"] = if v.ramp_axis == "across" {
+                    json!([x0, y0, x1, y0])
+                } else {
+                    json!([x0, y0, x0, y1])
+                };
+            }
+        }
         let count = self.paint_shape(
             &op,
             parse_color(&v.color)?,
@@ -1651,43 +1974,26 @@ impl Document {
                             .unwrap_or(1)
                             .clamp(1, 8) as i32;
                         let spacing = op.get("spacing").and_then(Value::as_i64).unwrap_or(1) as i32;
-                        let mut pen = x;
-                        for ch in body.chars() {
-                            if ch == ' ' {
-                                pen += (5 + spacing) * scale;
-                                continue;
+                        // Two faces, because a classic skin has cells a word
+                        // has to fit in and the 5x7 one does not: 14 pixels for
+                        // an equalizer caption, 27 for the mono lamp.
+                        let small = op.get("face").and_then(Value::as_str) == Some("small");
+                        let mut points: Vec<[i32; 2]> = Vec::new();
+                        let missing = crate::winamp::pixel_text::layout(
+                            body,
+                            small,
+                            scale,
+                            spacing,
+                            |dx, dy| points.push([x + dx, y + dy]),
+                        );
+                        for ch in missing {
+                            if !skipped.contains(&ch) {
+                                skipped.push(ch);
                             }
-                            let Some(rows) = crate::winamp::pixel_text::glyph(ch) else {
-                                if !skipped.contains(&ch) {
-                                    skipped.push(ch);
-                                }
-                                pen += (5 + spacing) * scale;
-                                continue;
-                            };
-                            for (row, bits) in rows.iter().enumerate() {
-                                for column in 0..5 {
-                                    if bits & (1 << (4 - column)) == 0 {
-                                        continue;
-                                    }
-                                    for dy in 0..scale {
-                                        for dx in 0..scale {
-                                            let at = [
-                                                pen + column * scale + dx,
-                                                y + row as i32 * scale + dy,
-                                            ];
-                                            count += self.paint_line_untracked(
-                                                at,
-                                                at,
-                                                color,
-                                                layer,
-                                                all,
-                                                &paint_layers,
-                                            )?;
-                                        }
-                                    }
-                                }
-                            }
-                            pen += (5 + spacing) * scale;
+                        }
+                        for at in points {
+                            count += self
+                                .paint_line_untracked(at, at, color, layer, all, &paint_layers)?;
                         }
                     }
                     _ => bail!("Unknown drawing operation {kind}"),
@@ -1798,6 +2104,18 @@ impl Document {
         if !skipped.is_empty() {
             result["unsupported_characters"] =
                 json!(skipped.iter().map(|c| c.to_string()).collect::<Vec<_>>());
+        }
+        let same = self.identical_variants();
+        if !same.is_empty() {
+            let first = &same[0];
+            let biggest = first["groups"][0].as_array().map(Vec::len).unwrap_or(0);
+            self.message.push_str(&format!(
+                "; {} of {}'s {} variants are the same picture",
+                biggest,
+                first["id"].as_str().unwrap_or_default(),
+                first["of"]
+            ));
+            result["identical_variants"] = json!(same);
         }
         if let Some(note) = Self::sheet_note(&self.view.sheet) {
             if self.view.panel == "atlas" {
@@ -2151,15 +2469,25 @@ impl Document {
                     } else {
                         l.id.clone()
                     };
+                    // A rectangle labelled `play:1` says which variant it is
+                    // and not what that variant is for. The mapping knows;
+                    // there is no reason for the canvas hint and the list not
+                    // to say it.
+                    let suffix = l.id.rsplit('.').next().unwrap_or(&l.id);
+                    let label = match l.labels.get(i) {
+                        Some(what) if l.variants.len() > 1 => format!("{suffix} · {what}"),
+                        _ => suffix.to_string(),
+                    };
                     out.push(Guide {
                         id,
-                        label: format!("{}:{i}", l.id.rsplit('.').next().unwrap_or(&l.id)),
+                        label,
                         sheet: l.sheet.clone(),
                         rect,
                         source: *r,
                         variant: i,
                         active: *r == l.source,
                         runtime: false,
+                        hit: false,
                     });
                 }
             }
@@ -2208,6 +2536,52 @@ impl Document {
                     variant: 0,
                     active: true,
                     runtime: true,
+                    hit: false,
+                });
+            }
+            // Controls the player hit-tests and draws nothing for. Every other
+            // button in a classic skin is a sprite and says where it is; the
+            // playlist footer's eleven are not, and an artist drawing a footer
+            // from blank had no way to find them short of reading Cranamp's
+            // own source. A cat was laid across the elapsed-time readout that
+            // way, and a button a pixel out of step with its own hit area is
+            // the same mistake with no cat to show for it.
+            let targets: Vec<(&str, [u32; 4])> = match panel {
+                "main" => vec![("SKIN CHOOSER", [249, 79, 26, 33])],
+                "playlist" => {
+                    let h = if self.view.panel == "canvas" {
+                        self.view.preview_playlist_height
+                    } else {
+                        261
+                    };
+                    vec![
+                        ("ADD", [10, h - 31, 28, 18]),
+                        ("REM", [39, h - 31, 28, 18]),
+                        ("SEL", [69, h - 31, 28, 18]),
+                        ("MISC", [99, h - 31, 36, 18]),
+                        ("LIST", [228, h - 31, 28, 18]),
+                        ("PREV", [139, h - 13, 8, 8]),
+                        ("PLAY", [148, h - 13, 8, 8]),
+                        ("PAUSE", [157, h - 13, 8, 8]),
+                        ("STOP", [166, h - 13, 8, 8]),
+                        ("NEXT", [175, h - 13, 8, 8]),
+                        ("EJECT", [185, h - 13, 12, 8]),
+                    ]
+                }
+                _ => vec![],
+            };
+            for (name, mut r) in targets {
+                r[1] += offset;
+                out.push(Guide {
+                    id: format!("hit.{panel}.{name}"),
+                    label: name.into(),
+                    sheet: sheet.into(),
+                    rect: r,
+                    source: r,
+                    variant: 0,
+                    active: true,
+                    runtime: false,
+                    hit: true,
                 });
             }
         }
@@ -2221,6 +2595,7 @@ impl Document {
                 variant: 0,
                 active: true,
                 runtime: false,
+                hit: false,
             });
         }
         out
@@ -2238,8 +2613,8 @@ impl Document {
         );
         let parts:Vec<_>=self.guides().into_iter().filter_map(|g| {
             let cut=super::guides::intersection(r,g.rect)?;
-            let source=(!g.runtime).then(||[g.source[0]+cut[0]-g.rect[0],g.source[1]+cut[1]-g.rect[1],cut[2],cut[3]]);
-            Some(json!({"id":g.id,"label":g.label,"sheet":g.sheet,"overlap":cut,"source_overlap":source,"runtime":g.runtime,"active":g.active}))
+            let source=(!g.runtime&&!g.hit).then(||[g.source[0]+cut[0]-g.rect[0],g.source[1]+cut[1]-g.rect[1],cut[2],cut[3]]);
+            Some(json!({"id":g.id,"label":g.label,"sheet":g.sheet,"overlap":cut,"source_overlap":source,"runtime":g.runtime,"hit":g.hit,"active":g.active}))
         }).collect();
         Ok(
             json!({"panel":self.view.panel,"rect":r,"parts":parts,"note":"Includes underlays and live reservations. Source overlaps refer to the current preview state; inspect atlas guides for alternate cells."}),
@@ -2255,7 +2630,7 @@ impl Document {
             self.view.clip = Some(g.rect);
             self.view.layers = vec!["sheet".into()];
             self.view.layer = "sheet".into();
-        } else if !g.runtime {
+        } else if !g.runtime && !g.hit {
             self.view.layers = vec![g.id.clone()];
             self.view.layer = g.id.clone();
             self.view.clip = None;
@@ -2269,6 +2644,8 @@ impl Document {
             g.source,
             if g.runtime {
                 " · runtime draws here"
+            } else if g.hit {
+                " · the player hit-tests here and draws nothing"
             } else {
                 ""
             }
@@ -2656,6 +3033,189 @@ impl Document {
         }
         Ok(output.into_inner())
     }
+    /// Sprites with nothing in them at all.
+    ///
+    /// A skin drawn from **New blank** with twelve of its thirteen sheets still
+    /// untouched exports in six kilobytes and answers exactly as a finished one
+    /// does: validating through the loader only proves the archive parses. The
+    /// transport keys, the timer, the title bar and the whole equalizer are
+    /// simply invisible in the player, and nothing said so.
+    ///
+    /// It is a report and never a refusal: a skin with no channel lamps, or no
+    /// playlist selection artwork, is a choice somebody may have made.
+    pub fn undrawn_sprites(&self) -> Vec<String> {
+        let mut view = self.view.clone();
+        view.panel = "canvas".into();
+        let composite = self.composite_images();
+        let mut out = Vec::new();
+        for layer in self.layers_for(&view) {
+            let Some(image) = composite.get(&layer.sheet) else {
+                continue;
+            };
+            let painted = layer.variants.iter().any(|r| {
+                (r[1]..(r[1] + r[3]).min(image.height())).any(|y| {
+                    (r[0]..(r[0] + r[2]).min(image.width()))
+                        .any(|x| image.get_pixel(x, y).0[3] > 0)
+                })
+            });
+            if !painted && !out.contains(&layer.id) {
+                out.push(layer.id.clone());
+            }
+        }
+        out
+    }
+    /// The colour Cranamp will write its readouts in, by the loader's own rule.
+    fn display_ink(&self) -> [u8; 4] {
+        self.images
+            .get("text.bmp")
+            .and_then(|im| {
+                let total = (im.width() as usize).saturating_mul(im.height() as usize);
+                crate::winamp::skin::sample_display_ink(im.as_raw(), total)
+            })
+            .unwrap_or([153, 204, 236, 255])
+    }
+    /// The artwork a canvas rectangle sits on, averaged.
+    ///
+    /// Walked from the topmost sprite down, because that is the order the
+    /// player draws them in and a readout sits on whatever is nearest it.
+    fn ground_under(&self, rect: [u32; 4]) -> Option<[u8; 4]> {
+        let mut view = self.view.clone();
+        view.panel = "canvas".into();
+        let layers = self.layers_for(&view);
+        let composite = self.composite_images();
+        let (mut sum, mut seen) = ([0u64; 3], 0u64);
+        for y in rect[1]..rect[1] + rect[3] {
+            for x in rect[0]..rect[0] + rect[2] {
+                for layer in layers.iter().rev() {
+                    let Some((sx, sy)) = layer.map(x, y) else {
+                        continue;
+                    };
+                    let Some(image) = composite.get(&layer.sheet) else {
+                        continue;
+                    };
+                    let (px, py) = (layer.source[0] + sx, layer.source[1] + sy);
+                    if px >= image.width() || py >= image.height() {
+                        continue;
+                    }
+                    let pixel = image.get_pixel(px, py).0;
+                    if pixel[3] == 0 {
+                        continue;
+                    }
+                    for c in 0..3 {
+                        sum[c] += pixel[c] as u64;
+                    }
+                    seen += 1;
+                    break;
+                }
+            }
+        }
+        (seen > 0).then(|| {
+            [
+                (sum[0] / seen) as u8,
+                (sum[1] / seen) as u8,
+                (sum[2] / seen) as u8,
+                255,
+            ]
+        })
+    }
+    /// Whether each thing the player writes can be read on the artwork under it.
+    ///
+    /// Studio already knows both halves and never put them together: the
+    /// runtime rectangles say where Cranamp writes, `text.bmp` says what colour
+    /// the display ink will be, and PLEDIT.TXT says what colour the playlist
+    /// text will be. A skin whose title is one shade off its own background is
+    /// the mistake that actually ships, and the only way to catch it was to
+    /// render the player and squint.
+    ///
+    /// The ratio is the WCAG one. Four and a half is comfortable at this size;
+    /// below three is a readout you have to hunt for, and below two is one that
+    /// is not there.
+    pub fn readability(&mut self) -> Vec<Value> {
+        fn luminance(c: [u8; 4]) -> f64 {
+            let channel = |v: u8| {
+                let s = v as f64 / 255.;
+                if s <= 0.03928 {
+                    s / 12.92
+                } else {
+                    ((s + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
+        }
+        let ratio = |a: [u8; 4], b: [u8; 4]| {
+            let (x, y) = (luminance(a), luminance(b));
+            ((x.max(y) + 0.05) / (x.min(y) + 0.05) * 10.).round() / 10.
+        };
+        let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+        let ink = self.display_ink();
+        let (palette, _) = self.text_palettes();
+        let colour = |name: &str| -> Option<[u8; 4]> {
+            palette
+                .iter()
+                .find(|(k, _)| *k == name)
+                .and_then(|(_, v)| parse_color(v).ok())
+        };
+        // The runtime rectangles are the canvas panel's, whatever the editor is
+        // showing at the moment, so the view goes there and straight back.
+        let showing = std::mem::replace(&mut self.view.panel, "canvas".into());
+        let runtime: Vec<(String, [u32; 4])> = self
+            .guides()
+            .into_iter()
+            .filter(|g| g.runtime)
+            .map(|g| (g.id.clone(), g.rect))
+            .collect();
+        self.view.panel = showing;
+        let mut out = Vec::new();
+        let mut check = |what: &str, ink: [u8; 4], ground: [u8; 4]| {
+            let r = ratio(ink, ground);
+            out.push(json!({"reads":what,"ink":hex(ink),"ground":hex(ground),
+                            "contrast":r,"readable":r >= 3.0}));
+        };
+        for (id, rect) in &runtime {
+            let Some(ground) = self.ground_under(*rect) else {
+                continue;
+            };
+            match id.as_str() {
+                "runtime.main.SONG TEXT" => check("the track title", ink, ground),
+                "runtime.main.BITRATE" | "runtime.main.SAMPLE RATE" => {
+                    check(id.rsplit('.').next().unwrap_or(id), ink, ground)
+                }
+                // The footer's two readouts are the one place in the playlist
+                // that does *not* use PLEDIT.TXT: Cranamp writes them in the
+                // display ink, the same colour as the main window's title.
+                // Checking them against `Normal` reported dark-on-dark for a
+                // skin whose footer reads perfectly.
+                "runtime.playlist.TIME / TOTAL" | "runtime.playlist.ELAPSED" => {
+                    check(id.rsplit('.').next().unwrap_or(id), ink, ground)
+                }
+                "runtime.playlist.TRACK ROWS" => {
+                    // The list has a background of its own only when the skin
+                    // gives it one; otherwise the player fills it with NormalBG.
+                    let ground = if self.images.contains_key("plbg.bmp") {
+                        ground
+                    } else {
+                        colour("NormalBG").unwrap_or(ground)
+                    };
+                    if let Some(normal) = colour("Normal") {
+                        check("a playlist row", normal, ground);
+                    }
+                    if let Some(current) = colour("Current") {
+                        check("the playing row", current, ground);
+                    }
+                    let selected = self
+                        .images
+                        .get("plselection.bmp")
+                        .and_then(|_| self.ground_under([12, rect[1], 243, 11]))
+                        .or_else(|| colour("SelectedBG"));
+                    if let (Some(normal), Some(on)) = (colour("Normal"), selected) {
+                        check("a selected row", normal, on);
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
     pub fn export(&mut self, path: &Path) -> Result<Value> {
         self.finish_stroke();
         let bytes = self.archive()?;
@@ -2672,9 +3232,32 @@ impl Document {
         }
         self.dirty = false;
         self.saved = self.snapshot();
+        let undrawn = self.undrawn_sprites();
+        let unreadable: Vec<Value> = self
+            .readability()
+            .into_iter()
+            .filter(|r| r["readable"] == false)
+            .collect();
         self.message = format!("Saved {}", path.display());
+        if !undrawn.is_empty() {
+            self.message
+                .push_str(&format!("; {} sprites are still blank", undrawn.len()));
+        }
+        if !unreadable.is_empty() {
+            self.message.push_str(&format!(
+                "; {} readouts are hard to read on the artwork",
+                unreadable.len()
+            ));
+        }
         self.revision += 1;
-        Ok(json!({"path":path,"bytes":bytes.len()}))
+        let mut out = json!({"path":path,"bytes":bytes.len()});
+        if !undrawn.is_empty() {
+            out["undrawn_sprites"] = json!(undrawn);
+        }
+        if !unreadable.is_empty() {
+            out["hard_to_read"] = json!(unreadable);
+        }
+        Ok(out)
     }
 }
 pub fn parse_color(s: &str) -> Result<[u8; 4]> {
@@ -3568,6 +4151,72 @@ mod tests {
             .is_err());
     }
     #[test]
+    fn a_hand_stroke_can_make_a_gradient_a_word_and_a_glass_of_its_own() {
+        // Every one of these was an engine capability with no control anywhere
+        // in either panel, so it existed for a recipe with a Python script and
+        // for nobody drawing by hand, on Android, or in a browser.
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"main.bmp","layer":"sheet"}))
+            .unwrap();
+
+        // A gradient: the same pixels an MCP ramp puts down.
+        d.state(json!({"brush":"rect","filled":true,"color":"#ffffff",
+                       "ramp_to":"#000000","ramp_axis":"down"}))
+            .unwrap();
+        d.checkpoint();
+        d.shape_stroke([0, 0], [39, 39]).unwrap();
+        d.finish_stroke();
+        let top = d.images["main.bmp"].get_pixel(20, 1).0;
+        let bottom = d.images["main.bmp"].get_pixel(20, 38).0;
+        assert!(top[0] > 200 && bottom[0] < 60, "{top:?} -> {bottom:?}");
+        // Off means off, and a flat fill comes back.
+        d.state(json!({"ramp_to":null})).unwrap();
+        d.checkpoint();
+        d.shape_stroke([0, 0], [39, 39]).unwrap();
+        d.finish_stroke();
+        assert_eq!(
+            d.images["main.bmp"].get_pixel(20, 1).0,
+            d.images["main.bmp"].get_pixel(20, 38).0
+        );
+
+        // A word, in the face the cell has room for.
+        d.state(json!({"brush":"text","text":"16K","face":"small","text_scale":1,
+                       "color":"#ff0000"}))
+            .unwrap();
+        d.checkpoint();
+        d.shape_stroke([50, 50], [50, 50]).unwrap();
+        d.finish_stroke();
+        let painted = (50..64)
+            .flat_map(|x| (50..56).map(move |y| (x, y)))
+            .filter(|(x, y)| d.images["main.bmp"].get_pixel(*x, *y).0 == [255, 0, 0, 255])
+            .count();
+        assert!(painted > 10, "the word landed: {painted} pixels");
+        assert_eq!(
+            d.images["main.bmp"].get_pixel(64, 52).0[3],
+            0,
+            "and it fits the fourteen pixels an equalizer caption has"
+        );
+
+        // A glass lens with its own bevel rather than one taken from the drag.
+        d.state(json!({"brush":"glass","color":"#66ccff","bevel":4,"refraction":0}))
+            .unwrap();
+        d.checkpoint();
+        d.shape_stroke([100, 20], [160, 80]).unwrap();
+        d.finish_stroke();
+        let narrow = d.archive().unwrap();
+        d.undo();
+        d.state(json!({"bevel":32})).unwrap();
+        d.checkpoint();
+        d.shape_stroke([100, 20], [160, 80]).unwrap();
+        d.finish_stroke();
+        assert_ne!(
+            d.archive().unwrap(),
+            narrow,
+            "a bevel the artist chose has to change the glass"
+        );
+    }
+
+    #[test]
     fn clean_curve_gui_preview_matches_mcp_and_undo() {
         let mut d = Document::blank();
         d.state(json!({"panel":"atlas","sheet":"main.bmp","layer":"sheet","brush":"curve","brush_size":1,"curve_bend":45,"clean_corners":true,"color":"#abcdef"})).unwrap();
@@ -3817,6 +4466,200 @@ mod tests {
         assert_eq!(
             d.composite_images()["cbuttons.bmp"].get_pixel(24, 2).0,
             [224, 208, 192, 255]
+        );
+    }
+    #[test]
+    fn the_footer_buttons_that_have_no_sprite_still_say_where_they_are() {
+        // The playlist footer's five menus and six transport keys are drawn by
+        // the artist and hit-tested by the player, and nothing owns their
+        // pixels. Until they were listed here the only way to find them was to
+        // read Cranamp's own source, and a cat got laid across the elapsed
+        // readout for want of a rectangle.
+        let mut d = Document::blank();
+        d.state(json!({"panel":"canvas","preview_playlist_height":145}))
+            .unwrap();
+        let guides = d.guides();
+        let add = guides.iter().find(|g| g.id == "hit.playlist.ADD").unwrap();
+        assert!(add.hit && !add.runtime);
+        assert_eq!(add.rect, [10, 346, 28, 18]);
+        let eject = guides.iter().find(|g| g.id == "hit.playlist.EJECT").unwrap();
+        assert_eq!(eject.rect, [185, 364, 12, 8]);
+        // They move with the playlist, like every other footer rectangle.
+        let elapsed = guides
+            .iter()
+            .find(|g| g.id == "runtime.playlist.ELAPSED")
+            .unwrap();
+        assert_eq!(elapsed.rect[1] + 1, eject.rect[1]);
+        assert!(guides.iter().any(|g| g.id == "hit.main.SKIN CHOOSER"));
+        // Choosing one clips painting to it rather than targeting a sprite
+        // that does not exist.
+        d.select_guide("hit.playlist.ADD").unwrap();
+        assert_eq!(d.view.clip, Some([10, 346, 28, 18]));
+    }
+    #[test]
+    fn a_skin_that_was_never_drawn_says_so_when_it_is_exported() {
+        // Validating through the loader proves the archive parses. A blank skin
+        // with one sheet painted exports in six kilobytes and answers exactly
+        // as a finished one does.
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"main.bmp","layer":"sheet"}))
+            .unwrap();
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":275,"height":115,"color":"#204060"}]}))
+            .unwrap();
+        let blank = d.undrawn_sprites();
+        assert!(blank.contains(&"main.play".to_string()), "{blank:?}");
+        assert!(blank.contains(&"equalizer.background".to_string()));
+        assert!(
+            !blank.contains(&"main.background".to_string()),
+            "the one sheet that was painted is not blank"
+        );
+        let dir = std::env::temp_dir().join("cranamp-undrawn-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("blank.wsz");
+        let out = d.export(&path).unwrap();
+        assert!(
+            out["undrawn_sprites"].as_array().unwrap().len() > 50,
+            "export has to say so: {out}"
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn ink_that_cannot_be_read_on_its_own_artwork_is_reported() {
+        let mut d = Document::blank();
+        // A dark main window, and a display ink sampled from text.bmp that is
+        // nearly the same colour: the title is there and nobody can read it.
+        d.state(json!({"panel":"atlas","sheet":"main.bmp","layer":"sheet"}))
+            .unwrap();
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":275,"height":115,"color":"#202430"}]}))
+            .unwrap();
+        d.state(json!({"panel":"atlas","sheet":"text.bmp","layer":"sheet"}))
+            .unwrap();
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":155,"height":18,"color":"#2a2f3c"}]}))
+            .unwrap();
+        let title = d
+            .readability()
+            .into_iter()
+            .find(|r| r["reads"] == "the track title")
+            .expect("the title is checked");
+        assert_eq!(title["readable"], false, "{title}");
+        assert!(title["contrast"].as_f64().unwrap() < 1.5, "{title}");
+        // Paint the ink pale and the same readout passes.
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":155,"height":18,"color":"#f4ecd4"}]}))
+            .unwrap();
+        let title = d
+            .readability()
+            .into_iter()
+            .find(|r| r["reads"] == "the track title")
+            .unwrap();
+        assert_eq!(title["readable"], true, "{title}");
+    }
+
+    #[test]
+    fn frames_that_came_out_the_same_picture_are_reported() {
+        // The bug this exists for: a recipe draws 28 slider frames and forgets
+        // to offset each by its own y, so 27 of them keep whatever the last
+        // full-width pass left and only frame 0 gets the work. Bounds, clipped,
+        // unsampled and overwrites are all clean; the frames are just the same
+        // picture now.
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"volume.bmp","layer":"sheet"}))
+            .unwrap();
+        // Every frame gets a band, and only frame 0 gets the stitches.
+        let mut ops: Vec<Value> = (0..28)
+            .map(|f| json!({"op":"rect","x":0,"y":f*15,"width":68,"height":13,"color":"#203040"}))
+            .collect();
+        ops.push(json!({"op":"rect","x":2,"y":3,"width":30,"height":3,"color":"#ffcc00"}));
+        let out = d.draw(&json!({ "operations": ops })).unwrap();
+        assert_eq!(out["overwrites"], 0, "nothing else reports this");
+        assert_eq!(out["clipped_pixels"], 0);
+        let same = out["identical_variants"].as_array().expect("a report");
+        let track = same
+            .iter()
+            .find(|v| v["id"] == "main.volume.track")
+            .expect("the track");
+        assert_eq!(track["of"], 28);
+        assert_eq!(track["groups"][0].as_array().unwrap().len(), 27);
+        assert_eq!(track["labels"][0], "0 · silent");
+        assert_eq!(track["labels"][27], "27 · full volume");
+        // And it is silent once every frame is different.
+        let ops: Vec<Value> = (0..28)
+            .map(|f| json!({"op":"rect","x":2,"y":f*15+3,"width":2+f,"height":3,"color":"#ffcc00"}))
+            .collect();
+        let out = d.draw(&json!({ "operations": ops })).unwrap();
+        assert!(
+            out["identical_variants"]
+                .as_array()
+                .is_none_or(|v| v.iter().all(|s| s["id"] != "main.volume.track")),
+            "28 different frames are not a defect: {}",
+            out["identical_variants"]
+        );
+    }
+
+    #[test]
+    fn an_unpainted_cell_is_not_a_duplicate() {
+        // On a blank sheet every variant is transparent and identical. Saying
+        // so on the first stroke would fire on every sprite of every sheet for
+        // the whole early part of a skin.
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"cbuttons.bmp","layer":"sheet"}))
+            .unwrap();
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":23,"y":0,"width":23,"height":18,"color":"#2f6b64"}]}))
+            .unwrap();
+        assert!(
+            out["identical_variants"].is_null(),
+            "the untouched pressed cell is empty, not a duplicate: {}",
+            out["identical_variants"]
+        );
+        // Paint the pressed cell the same and it is a duplicate, which is the
+        // other half of the same defect.
+        let out = d
+            .draw(&json!({"operations":[
+                {"op":"rect","x":23,"y":18,"width":23,"height":18,"color":"#2f6b64"}]}))
+            .unwrap();
+        let play = out["identical_variants"]
+            .as_array()
+            .expect("a report")
+            .iter()
+            .find(|v| v["id"] == "main.play")
+            .expect("play");
+        assert_eq!(play["groups"][0], json!([0, 1]));
+        assert_eq!(play["labels"], json!(["released", "pressed"]));
+    }
+
+    #[test]
+    fn the_small_face_fits_a_word_in_a_cell_the_large_one_overruns() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"eqmain.bmp","layer":"sheet"}))
+            .unwrap();
+        let wide = d
+            .draw(&json!({"operations":[{"op":"text","x":0,"y":0,"text":"16K","color":"#ffffff"}]}))
+            .unwrap();
+        assert!(d.undo());
+        let narrow = d
+            .draw(&json!({"operations":[{"op":"text","x":0,"y":0,"text":"16K","color":"#ffffff","face":"small"}]}))
+            .unwrap();
+        let width = |v: &Value| v["bounds"][2].as_i64().unwrap() - v["bounds"][0].as_i64().unwrap();
+        assert!(width(&wide) > 14, "the 5x7 face overruns a band caption");
+        assert!(
+            width(&narrow) < 14,
+            "the small face has to fit one: {}",
+            narrow["bounds"]
+        );
+        // No lower case at five pixels tall, so a-z are capitals, not gaps.
+        let lower = d
+            .draw(&json!({"operations":[{"op":"text","x":0,"y":40,"text":"khz","color":"#ffffff","face":"small"}]}))
+            .unwrap();
+        assert!(
+            lower["unsupported_characters"].is_null(),
+            "a-z must be drawn as capitals, not reported missing: {}",
+            lower["unsupported_characters"]
         );
     }
     #[test]

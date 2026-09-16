@@ -221,6 +221,23 @@ pub fn rasterize(op: &Value) -> Result<Vec<Point>> {
                 [x, y],
             ]);
         }
+        // A word is a set of pixels like any other shape, so the text brush
+        // takes the same colour, mirrors, masks, grain and opacity a rectangle
+        // does rather than needing a path of its own.
+        "text" => {
+            let body = op.get("text").and_then(Value::as_str).unwrap_or_default();
+            let small = op.get("face").and_then(Value::as_str) == Some("small");
+            let scale = op
+                .get("scale")
+                .and_then(Value::as_i64)
+                .unwrap_or(1)
+                .clamp(1, 8) as i32;
+            let spacing = op.get("spacing").and_then(Value::as_i64).unwrap_or(1) as i32;
+            crate::winamp::pixel_text::layout(body, small, scale, spacing, |dx, dy| {
+                out.insert([x + dx, y + dy]);
+            });
+            return Ok(out.into_iter().collect());
+        }
         _ => bail!("unsupported brush shape {kind}"),
     }
     if contour.len() == 1 {

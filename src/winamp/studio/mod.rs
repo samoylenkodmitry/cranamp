@@ -265,6 +265,34 @@ mod presentation_tests {
 static CAPTURE: std::sync::OnceLock<Mutex<cranpose::Robot>> = std::sync::OnceLock::new();
 
 static COMPOSED_REVISION: AtomicU64 = AtomicU64::new(0);
+/// Where the live player last landed inside the captured scene, and at what
+/// integer zoom.
+///
+/// A screenshot crop is in scene pixels. Without this the only way to cut one
+/// window out of a capture is to measure it by eye against a full-scene PNG --
+/// and to measure it again after any resize, because the window is centred in
+/// whatever room it has. The player's own layout is the canvas layout, main at
+/// y=0, equalizer at y=116, playlist at y=232, so one origin and one zoom turn
+/// any canvas rectangle into a scene one.
+static PLAYER_SCENE: Mutex<Option<[f32; 3]>> = Mutex::new(None);
+fn note_player_scene(origin: [f32; 2], zoom: f32) {
+    if let Ok(mut at) = PLAYER_SCENE.lock() {
+        *at = Some([origin[0], origin[1], zoom]);
+    }
+}
+/// The scene rectangle a canvas rectangle occupies, if the player is on screen.
+pub fn player_scene_rect(canvas: [u32; 4]) -> Option<[u32; 4]> {
+    let [x, y, zoom] = (*PLAYER_SCENE.lock().ok()?)?;
+    Some([
+        (x + canvas[0] as f32 * zoom).round().max(0.) as u32,
+        (y + canvas[1] as f32 * zoom).round().max(0.) as u32,
+        (canvas[2] as f32 * zoom).round().max(1.) as u32,
+        (canvas[3] as f32 * zoom).round().max(1.) as u32,
+    ])
+}
+pub fn player_scene() -> Option<[f32; 3]> {
+    *PLAYER_SCENE.lock().ok()?
+}
 /// The document revision whose status line is a failure rather than a report.
 /// Errors and stroke reports share one line, so the line has to be able to
 /// look different when it is carrying bad news.
@@ -1207,6 +1235,11 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
         })
         .unwrap_or_else(|| "Control art and background\nalike, in one stroke.".into());
     if !view.presentation && !live.get() {
+        // The window is showing the editor's own canvas, not the player, so
+        // there is no player rectangle to crop against any more.
+        if let Ok(mut at) = PLAYER_SCENE.lock() {
+            *at = None;
+        }
         cranpose_core::SideEffect(move || {
             COMPOSED_REVISION.fetch_max(revision, Ordering::Release);
         });
@@ -1242,6 +1275,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         [constraints.max_width, constraints.max_height],
                         player_size,
                     );
+                    note_player_scene(origin, presentation_zoom);
                     Box(
                         Modifier::empty()
                             .absolute_offset(origin[0], origin[1])
@@ -2077,6 +2111,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                             }
                         }
                         let d = canvas_doc.clone();
+                        note_player_scene([canvas_x + ox, canvas_y + oy], zoom);
                         Box(
                             Modifier::empty().absolute_offset(ox, oy).required_size(
                                 cranpose_ui::Size::new(275. * zoom, viewport_h as f32 * zoom),
@@ -2601,7 +2636,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         } else if drawer.get() == 5 {
                             StudyChooser(d.clone(), revision, room, studied);
                         } else if drawer.get() == 4 {
-                            BrushChooser(d.clone(), revision);
+                            BrushChooser(d.clone(), revision, room);
                         } else if drawer.get() == 8 {
                             ColorChooser(d.clone(), revision, room);
                         } else if drawer.get() == 9 {
@@ -2671,148 +2706,315 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     );
 }
 #[composable]
-fn BrushChooser(shared: SharedDocument, _revision: u64) {
-    let v = shared.lock().unwrap().view.clone();
-    Label("DRAWING TOOLS".into(), 12., 17., 270., 14., FG);
-    Label(
-        "Solid native pixels. One shared undo history.".into(),
-        12.,
-        51.,
-        355.,
-        11.,
-        DIM,
-    );
-    for (i, (tool, label)) in [
-        ("pencil", "Pencil"),
-        ("line", "Line"),
-        ("rect", "Rectangle"),
-        ("ellipse", "Ellipse"),
-        ("lift", "Lift pixels"),
-        ("stamp", "Stamp"),
-        ("glass", "Glass lens"),
-        ("curve", "Curve"),
-        ("tuft", "Fur / taper"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let d = shared.clone();
-        Choice(
-            label.into(),
-            12. + (i % 3) as f32 * 118.,
-            82. + (i / 3) as f32 * 45.,
-            110.,
-            v.brush == tool,
-            move || state(&d, json!({"brush":tool})),
-        );
-    }
-    Label("STROKE WIDTH".into(), 12., 210., 172., 12., DIM);
-    for (i, size) in [1, 2, 3, 4, 8, 16].into_iter().enumerate() {
-        let d = shared.clone();
-        Choice(
-            format!("{size}px"),
-            12. + i as f32 * 59.,
-            232.,
-            52.,
-            v.brush_size == size,
-            move || state(&d, json!({"brush_size":size})),
-        );
-    }
-    if ["curve", "tuft"].contains(&v.brush.as_str()) {
-        for (x, delta, label) in [(12., -10, "− Bend"), (248., 10, "+ Bend")] {
-            let d = shared.clone();
-            let bend = v.curve_bend;
-            Action(label.into(), x, 271., 110., move || {
-                state(&d, json!({"curve_bend":(bend+delta).clamp(-100,100)}))
-            });
-        }
-        Label(
-            format!("Bend {}%", v.curve_bend),
-            137.,
-            280.,
-            108.,
-            12.,
-            DIM,
-        );
-    }
-    Label("PAPER GRAIN".into(), 12., 300., 172., 12., DIM);
-    for (i, (amount, label)) in [(0u32, "Smooth"), (5, "Fine"), (9, "Paper"), (16, "Coarse")]
-        .into_iter()
-        .enumerate()
-    {
-        let d = shared.clone();
-        Choice(
-            label.into(),
-            12. + i as f32 * 89.,
-            322.,
-            82.,
-            v.grain == amount,
-            move || state(&d, json!({"grain":amount})),
-        );
-    }
-    Label("STRENGTH".into(), 12., 360., 172., 12., DIM);
-    for (i, (amount, label)) in [(255u32, "Solid"), (190, "75%"), (128, "50%"), (64, "25%")]
-        .into_iter()
-        .enumerate()
-    {
-        let d = shared.clone();
-        Choice(
-            label.into(),
-            12. + i as f32 * 89.,
-            382.,
-            82.,
-            v.opacity == amount,
-            move || state(&d, json!({"opacity":amount})),
-        );
-    }
-    for (i, (field, label, on)) in [
-        ("filled", "Fill shapes", v.filled),
-        ("mirror_x", "Mirror left / right", v.mirror_x),
-        ("mirror_y", "Mirror top / bottom", v.mirror_y),
-        ("grid", "Pixel grid at 4× and up", v.grid),
-        ("alpha_lock", "Lock transparent pixels", v.alpha_lock),
-        ("clean_corners", "Clean 1px corners", v.clean_corners),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let d = shared.clone();
-        Toggle(
-            label.into(),
-            12. + (i % 2) as f32 * 178.,
-            420. + (i / 2) as f32 * 48.,
-            170.,
-            on,
-            move || state(&d, json!({field:!on})),
-        );
-    }
-    let d = shared.clone();
-    let mask_on = !v.mask_colors.is_empty();
-    let picked = v.color.clone();
-    Toggle(
-        if mask_on {
-            "Clear color mask".into()
-        } else {
-            "Mask picked color".into()
-        },
-        12.,
-        595.,
-        348.,
-        mask_on,
+fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
+    // Taller than the column on a short window now that the glass lens, the
+    // gradient and the text brush have their own numbers, so the whole block
+    // scrolls rather than losing them off the bottom edge.
+    let scroll = cranpose_ui::rememberScrollState!(0.0);
+    let word = cranpose_core::remember(|| TextFieldState::new("CATAMP")).with(|f| *f);
+    let to_color = cranpose_core::remember(|| TextFieldState::new("#000000")).with(|f| *f);
+    let shared = shared.clone();
+    cranpose_ui::Column(
+        Modifier::empty()
+            .absolute_offset(0., 0.)
+            .size_points(room.0 + 24., room.1)
+            .clip_to_bounds()
+            .vertical_scroll(scroll, false),
+        cranpose_ui::ColumnSpec::default(),
         move || {
-            state(
-                &d,
-                json!({"mask_colors":if mask_on {vec![]}else{vec![picked.clone()]}}),
-            )
+            let shared = shared.clone();
+            Box(
+                Modifier::empty().size_points(room.0 + 24., 800.),
+                BoxSpec::default(),
+                move || {
+                    let v = shared.lock().unwrap().view.clone();
+                    Label("DRAWING TOOLS".into(), 12., 17., 270., 14., FG);
+                    Label(
+                        "Solid native pixels. One shared undo history.".into(),
+                        12.,
+                        51.,
+                        355.,
+                        11.,
+                        DIM,
+                    );
+                    for (i, (tool, label)) in [
+                        ("pencil", "Pencil"),
+                        ("line", "Line"),
+                        ("rect", "Rectangle"),
+                        ("ellipse", "Ellipse"),
+                        ("lift", "Lift pixels"),
+                        ("stamp", "Stamp"),
+                        ("glass", "Glass lens"),
+                        ("curve", "Curve"),
+                        ("tuft", "Fur / taper"),
+                        ("text", "Text"),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let d = shared.clone();
+                        Choice(
+                            label.into(),
+                            12. + (i % 3) as f32 * 118.,
+                            82. + (i / 3) as f32 * 45.,
+                            110.,
+                            v.brush == tool,
+                            move || state(&d, json!({"brush":tool})),
+                        );
+                    }
+                    Label("STROKE WIDTH".into(), 12., 255., 172., 12., DIM);
+                    for (i, size) in [1, 2, 3, 4, 8, 16].into_iter().enumerate() {
+                        let d = shared.clone();
+                        Choice(
+                            format!("{size}px"),
+                            12. + i as f32 * 59.,
+                            277.,
+                            52.,
+                            v.brush_size == size,
+                            move || state(&d, json!({"brush_size":size})),
+                        );
+                    }
+                    // The controls a brush needs and no other brush does, in
+                    // the two rows under the widths.
+                    if ["curve", "tuft"].contains(&v.brush.as_str()) {
+                        for (x, delta, label) in [(12., -10, "− Bend"), (248., 10, "+ Bend")] {
+                            let d = shared.clone();
+                            let bend = v.curve_bend;
+                            Action(label.into(), x, 316., 110., move || {
+                                state(&d, json!({"curve_bend":(bend + delta).clamp(-100, 100)}))
+                            });
+                        }
+                        Label(
+                            format!("{}%", v.curve_bend),
+                            170.,
+                            322.,
+                            60.,
+                            12.,
+                            FG,
+                        );
+                    } else if v.brush == "glass" {
+                        // Both of the lens' numbers. They have been 1..128 and
+                        // 0..32 over MCP from the day the brush landed and were
+                        // fixed for a hand stroke, so a person got one glass.
+                        Label("BEVEL".into(), 12., 316., 172., 11., DIM);
+                        for (i, (amount, label)) in [
+                            (0u32, "Drag"),
+                            (4, "4px"),
+                            (8, "8px"),
+                            (16, "16px"),
+                            (32, "32px"),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            let d = shared.clone();
+                            Choice(
+                                label.into(),
+                                12. + i as f32 * 71.,
+                                334.,
+                                64.,
+                                v.bevel == amount,
+                                move || state(&d, json!({ "bevel": amount })),
+                            );
+                        }
+                        Label("REFRACTION".into(), 12., 372., 172., 11., DIM);
+                        for (i, amount) in [0u32, 2, 4, 8, 16].into_iter().enumerate() {
+                            let d = shared.clone();
+                            Choice(
+                                format!("{amount}px"),
+                                12. + i as f32 * 71.,
+                                390.,
+                                64.,
+                                v.refraction == amount,
+                                move || state(&d, json!({ "refraction": amount })),
+                            );
+                        }
+                    } else if v.brush == "text" {
+                        Label("WORD".into(), 12., 316., 60., 11., DIM);
+                        cranpose_ui::BasicTextField(
+                            word,
+                            Modifier::empty()
+                                .absolute_offset(12., 332.)
+                                .size_points(238., 26.)
+                                .background(BG),
+                            text_style(12., FG),
+                        );
+                        let d = shared.clone();
+                        Action("Set".into(), 258., 331., 104., move || {
+                            state(&d, json!({ "text": word.text() }))
+                        });
+                        Label("FACE".into(), 12., 372., 60., 11., DIM);
+                        for (i, (face, label)) in
+                            [("5x7", "5×7"), ("small", "4×5 small caps")]
+                                .into_iter()
+                                .enumerate()
+                        {
+                            let d = shared.clone();
+                            Choice(
+                                label.into(),
+                                12. + i as f32 * 122.,
+                                390.,
+                                114.,
+                                v.face == face,
+                                move || state(&d, json!({ "face": face })),
+                            );
+                        }
+                        for (i, scale) in [1u32, 2, 3].into_iter().enumerate() {
+                            let d = shared.clone();
+                            Choice(
+                                format!("{scale}×"),
+                                258. + i as f32 * 36.,
+                                390.,
+                                32.,
+                                v.text_scale == scale,
+                                move || state(&d, json!({ "text_scale": scale })),
+                            );
+                        }
+                        Label(
+                            format!("Click the canvas to place “{}”.", v.text),
+                            12.,
+                            424.,
+                            353.,
+                            10.,
+                            DIM,
+                        );
+                    }
+                    // A gradient. The engine has taken exact palette ramps from
+                    // the start and neither panel could ask for one, so every
+                    // gradient in every skin so far came out of a recipe -- and
+                    // a flat rectangle was the only thing a hand could draw.
+                    Label("GRADIENT".into(), 12., 455., 172., 12., DIM);
+                    let ramping = v.ramp_to.is_some();
+                    for (i, (axis, label, on)) in [
+                        ("", "Off", !ramping),
+                        ("down", "Down", ramping && v.ramp_axis == "down"),
+                        ("across", "Across", ramping && v.ramp_axis == "across"),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let d = shared.clone();
+                        Choice(
+                            label.into(),
+                            12. + i as f32 * 89.,
+                            477.,
+                            82.,
+                            on,
+                            move || {
+                                if axis.is_empty() {
+                                    state(&d, json!({"ramp_to":serde_json::Value::Null}))
+                                } else {
+                                    let to = to_color.text();
+                                    state(&d, json!({"ramp_to":to,"ramp_axis":axis}))
+                                }
+                            },
+                        );
+                    }
+                    Label("TO".into(), 279., 483., 22., 11., DIM);
+                    cranpose_ui::BasicTextField(
+                        to_color,
+                        Modifier::empty()
+                            .absolute_offset(300., 477.)
+                            .size_points(72., 26.)
+                            .background(BG),
+                        text_style(12., FG),
+                    );
+                    Label(
+                        if ramping {
+                            format!("{} → {}, {}", v.color, v.ramp_to.clone().unwrap_or_default(), v.ramp_axis)
+                        } else {
+                            "A filled shape runs from the brush colour to this one.".into()
+                        },
+                        12.,
+                        511.,
+                        353.,
+                        10.,
+                        DIM,
+                    );
+                    Label("PAPER GRAIN".into(), 12., 538., 172., 12., DIM);
+                    for (i, (amount, label)) in
+                        [(0u32, "Smooth"), (5, "Fine"), (9, "Paper"), (16, "Coarse")]
+                            .into_iter()
+                            .enumerate()
+                    {
+                        let d = shared.clone();
+                        Choice(
+                            label.into(),
+                            12. + i as f32 * 89.,
+                            560.,
+                            82.,
+                            v.grain == amount,
+                            move || state(&d, json!({ "grain": amount })),
+                        );
+                    }
+                    Label("STRENGTH".into(), 12., 598., 172., 12., DIM);
+                    for (i, (amount, label)) in
+                        [(255u32, "Solid"), (190, "75%"), (128, "50%"), (64, "25%")]
+                            .into_iter()
+                            .enumerate()
+                    {
+                        let d = shared.clone();
+                        Choice(
+                            label.into(),
+                            12. + i as f32 * 89.,
+                            620.,
+                            82.,
+                            v.opacity == amount,
+                            move || state(&d, json!({ "opacity": amount })),
+                        );
+                    }
+                    for (i, (field, label, on)) in [
+                        ("filled", "Fill shapes", v.filled),
+                        ("mirror_x", "Mirror left / right", v.mirror_x),
+                        ("mirror_y", "Mirror top / bottom", v.mirror_y),
+                        ("grid", "Pixel grid at 4× and up", v.grid),
+                        ("alpha_lock", "Lock transparent pixels", v.alpha_lock),
+                        ("clean_corners", "Clean 1px corners", v.clean_corners),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let d = shared.clone();
+                        Toggle(
+                            label.into(),
+                            12. + (i % 2) as f32 * 178.,
+                            658. + (i / 2) as f32 * 42.,
+                            170.,
+                            on,
+                            move || state(&d, json!({field:!on})),
+                        );
+                    }
+                    let d = shared.clone();
+                    let mask_on = !v.mask_colors.is_empty();
+                    let picked = v.color.clone();
+                    Toggle(
+                        if mask_on {
+                            "Clear color mask".into()
+                        } else {
+                            "Mask picked color".into()
+                        },
+                        12.,
+                        790. - 46.,
+                        348.,
+                        mask_on,
+                        move || {
+                            state(
+                                &d,
+                                json!({"mask_colors":if mask_on {vec![]}else{vec![picked.clone()]}}),
+                            )
+                        },
+                    );
+                    Label(
+                        "Lift a region; Stamp places its exact pixels.".into(),
+                        12.,
+                        780.,
+                        353.,
+                        10.,
+                        DIM,
+                    );
+                },
+            );
         },
-    );
-    Label(
-        "Lift a region; Stamp places its exact pixels.".into(),
-        12.,
-        630.,
-        353.,
-        10.,
-        DIM,
     );
 }
 /// Everything about the skin itself rather than about painting it.

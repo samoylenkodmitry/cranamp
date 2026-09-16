@@ -10,6 +10,12 @@ pub struct Layer {
     pub source: [u32; 4],
     pub destination: [u32; 4],
     pub variants: Vec<[u32; 4]>,
+    /// What each variant is, in the same order. Four rectangles for a switch
+    /// say nothing about which is off and which is pressed, and twenty-eight
+    /// say nothing about which end of the travel frame 0 is; both used to be
+    /// answerable only by reading this file. Guessing wrong paints the pressed
+    /// art into the released cell, and nothing reports it.
+    pub labels: Vec<String>,
 }
 fn rect(r: SpriteRect) -> [u32; 4] {
     [r.0 as u32, r.1 as u32, r.2 as u32, r.3 as u32]
@@ -38,6 +44,56 @@ pub fn size(panel: &str) -> (u32, u32) {
         (275, 116)
     }
 }
+/// What each of a sprite's variants is.
+///
+/// Two rectangles are released and pressed almost everywhere, four are a switch
+/// that is also off or on, and twenty-eight are a slider's travel -- but which
+/// end of the travel frame 0 sits at differs per slider, and three of the
+/// two-variant sprites are not pressed states at all. None of that was visible
+/// from outside this file.
+fn variant_labels(id: &str, sheet: &str, count: usize) -> Vec<String> {
+    let ends = |low: &str, high: &str| -> Vec<String> {
+        (0..count)
+            .map(|i| match i {
+                0 => format!("0 · {low}"),
+                i if i + 1 == count => format!("{i} · {high}"),
+                i => i.to_string(),
+            })
+            .collect()
+    };
+    let named =
+        |names: &[&str]| -> Vec<String> { names.iter().map(|s| (*s).to_string()).collect() };
+    // The playlist header is the trap. Classic pledit.bmp keeps two rows of it
+    // and Cranamp draws the lower one always -- there is no unfocused playlist
+    // -- so art put in the upper row is never seen by anybody.
+    if sheet == "pledit" && matches!(id, "top.left" | "top.tile" | "top.right" | "title") {
+        return named(&[
+            "unfocused · classic only; Cranamp never draws this row",
+            "focused · what the player always draws",
+        ]);
+    }
+    if id == "title" {
+        return named(&["focused", "unfocused"]);
+    }
+    if id.starts_with("band") && id.ends_with(".track") {
+        return ends(
+            "full cut · handle at the bottom",
+            "full boost · handle at the top",
+        );
+    }
+    match (id, count) {
+        ("status", 3) => named(&["stopped", "playing", "paused"]),
+        ("mono" | "stereo", 2) => named(&["off · not this channel mode", "on"]),
+        ("volume.track", _) => ends("silent", "full volume"),
+        ("balance.track", _) => ends("hard left", "hard right"),
+        ("position.thumb", 2) | ("scroll.thumb", 2) => named(&["released", "dragged"]),
+        (_, 4) => named(&["off", "off pressed", "on", "on pressed"]),
+        (_, 10) => (0..10).map(|d| d.to_string()).collect(),
+        (_, 2) => named(&["released", "pressed"]),
+        (_, 1) => named(&["always"]),
+        _ => ends("first", "last"),
+    }
+}
 pub fn layers(v: &View, layout: crate::winamp::skin::SkinLayout) -> Vec<Layer> {
     let mut out = Vec::new();
     let mut add = |id: &str,
@@ -54,6 +110,7 @@ pub fn layers(v: &View, layout: crate::winamp::skin::SkinLayout) -> Vec<Layer> {
             sheet: format!("{sheet}.bmp"),
             source,
             destination: [x, y, w, h],
+            labels: variant_labels(id, sheet, variants.len()),
             variants: variants.into_iter().map(rect).collect(),
         });
     };

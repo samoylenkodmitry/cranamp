@@ -116,6 +116,137 @@ pub(crate) fn glyph(ch: char) -> Option<[u8; 7]> {
         _ => return None,
     })
 }
+/// Walk a word's pixels, in either face, at an integer scale.
+///
+/// One implementation, because there are two callers -- an MCP `text`
+/// operation and the editor's own text brush -- and two copies of a glyph walk
+/// drift in exactly the way that puts a word a pixel out of step with itself.
+/// Emits offsets from the word's origin and answers with the characters the
+/// face does not have, which are skipped rather than fatal.
+pub(crate) fn layout(
+    text: &str,
+    small: bool,
+    scale: i32,
+    spacing: i32,
+    mut emit: impl FnMut(i32, i32),
+) -> Vec<char> {
+    let cell = if small { 4 } else { 5 };
+    let mut skipped: Vec<char> = Vec::new();
+    let mut pen = 0;
+    for ch in text.chars() {
+        if ch == ' ' {
+            pen += (cell + spacing) * scale;
+            continue;
+        }
+        let rows = if small {
+            small_glyph(ch).map(Vec::from)
+        } else {
+            glyph(ch).map(Vec::from)
+        };
+        let Some(rows) = rows else {
+            if !skipped.contains(&ch) {
+                skipped.push(ch);
+            }
+            pen += (cell + spacing) * scale;
+            continue;
+        };
+        for (row, bits) in rows.iter().enumerate() {
+            for column in 0..cell {
+                if bits & (1 << (cell - 1 - column)) == 0 {
+                    continue;
+                }
+                for dy in 0..scale {
+                    for dx in 0..scale {
+                        emit(pen + column * scale + dx, row as i32 * scale + dy);
+                    }
+                }
+            }
+        }
+        pen += (cell + spacing) * scale;
+    }
+    skipped
+}
+/// A four-by-five small-caps face, for the cells a classic skin gives a word
+/// and no room for one.
+///
+/// The mono and stereo lamps are 27 and 29 pixels wide, an equalizer band
+/// caption is 14, and a playlist footer button is 28: the 5x7 face runs
+/// straight off the end of all of them. Every skin that has wanted a word in
+/// one of those cells has carried its own glyph table in its build script --
+/// which meant the capability existed only for a recipe with a script, and not
+/// for anyone drawing by hand, on Android, or in a browser.
+///
+/// Five pixels tall has no room for a descender, so there is no lower case: it
+/// is a small-caps face and `a` is drawn as `A` rather than skipped.
+pub(crate) fn small_glyph(ch: char) -> Option<[u8; 5]> {
+    Some(match ch.to_ascii_uppercase() {
+        'A' => [6, 9, 15, 9, 9],
+        'B' => [14, 9, 14, 9, 14],
+        'C' => [7, 8, 8, 8, 7],
+        'D' => [14, 9, 9, 9, 14],
+        'E' => [15, 8, 14, 8, 15],
+        'F' => [15, 8, 14, 8, 8],
+        'G' => [7, 8, 11, 9, 7],
+        'H' => [9, 9, 15, 9, 9],
+        'I' => [14, 4, 4, 4, 14],
+        'J' => [3, 1, 1, 9, 6],
+        'K' => [9, 10, 12, 10, 9],
+        'L' => [8, 8, 8, 8, 15],
+        // M, H and W are the same four columns with the bar in a different
+        // place, so one bar is not enough to tell them apart at this size: M
+        // fills the two rows under the apex, W the two above the point, and H
+        // keeps the single crossbar in the middle. With one bar each, MISC
+        // came out of the playlist footer reading HISC.
+        'M' => [9, 15, 15, 9, 9],
+        'N' => [9, 13, 11, 9, 9],
+        'O' => [6, 9, 9, 9, 6],
+        'P' => [14, 9, 14, 8, 8],
+        'Q' => [6, 9, 9, 11, 7],
+        'R' => [14, 9, 14, 10, 9],
+        'S' => [7, 8, 6, 1, 14],
+        'T' => [15, 4, 4, 4, 4],
+        'U' => [9, 9, 9, 9, 6],
+        'V' => [9, 9, 9, 6, 6],
+        'W' => [9, 9, 15, 15, 9],
+        'X' => [9, 9, 6, 9, 9],
+        'Y' => [9, 9, 6, 4, 4],
+        'Z' => [15, 1, 6, 8, 15],
+        '0' => [6, 9, 9, 9, 6],
+        '1' => [2, 6, 2, 2, 7],
+        '2' => [6, 9, 2, 4, 15],
+        '3' => [14, 1, 6, 1, 14],
+        '4' => [9, 9, 15, 1, 1],
+        '5' => [15, 8, 14, 1, 14],
+        '6' => [6, 8, 14, 9, 6],
+        '7' => [15, 1, 2, 4, 4],
+        '8' => [6, 9, 6, 9, 6],
+        '9' => [6, 9, 7, 1, 6],
+        '.' => [0, 0, 0, 0, 4],
+        ',' => [0, 0, 0, 4, 8],
+        '-' => [0, 0, 14, 0, 0],
+        ':' => [0, 4, 0, 4, 0],
+        '/' => [1, 2, 4, 8, 0],
+        '\\' => [8, 4, 2, 1, 0],
+        '+' => [0, 4, 14, 4, 0],
+        '=' => [0, 14, 0, 14, 0],
+        '_' => [0, 0, 0, 0, 15],
+        '!' => [4, 4, 4, 0, 4],
+        '?' => [14, 1, 6, 0, 4],
+        '(' => [2, 4, 4, 4, 2],
+        ')' => [4, 2, 2, 2, 4],
+        '[' => [6, 4, 4, 4, 6],
+        ']' => [12, 4, 4, 4, 12],
+        '<' => [1, 2, 4, 2, 1],
+        '>' => [8, 4, 2, 4, 8],
+        '*' => [0, 10, 4, 10, 0],
+        '#' => [10, 15, 10, 15, 10],
+        '%' => [9, 1, 2, 4, 9],
+        '&' => [6, 8, 6, 9, 7],
+        '"' => [10, 10, 0, 0, 0],
+        '|' => [4, 4, 4, 4, 4],
+        _ => return None,
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,6 +255,22 @@ mod tests {
         assert_ne!(glyph('a'), glyph('A'));
         for ch in 'a'..='z' {
             assert!(glyph(ch).is_some());
+        }
+    }
+    #[test]
+    fn the_small_face_is_four_wide_and_has_no_lower_case() {
+        for ch in ('A'..='Z').chain('0'..='9') {
+            let rows = small_glyph(ch).expect("every letter and digit");
+            assert!(rows.iter().all(|bits| *bits < 16), "{ch} is wider than 4px");
+            assert_eq!(small_glyph(ch.to_ascii_lowercase()), Some(rows));
+        }
+        assert_eq!(small_glyph('@'), None);
+        for (a, b) in [('M', 'H'), ('W', 'H'), ('M', 'W')] {
+            assert_ne!(
+                small_glyph(a),
+                small_glyph(b),
+                "{a} and {b} have to be told apart at four pixels"
+            );
         }
     }
     #[test]
