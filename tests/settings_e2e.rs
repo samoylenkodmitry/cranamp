@@ -84,6 +84,10 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         "the fourth bundled skin should be listed too; visible={after:?}"
     );
     assert!(
+        contains(&after, "Catamp Salvage (Bundled)"),
+        "the fifth bundled skin should be listed too; visible={after:?}"
+    );
+    assert!(
         contains(&after, "SYNC"),
         "sync section should appear; visible={after:?}"
     );

@@ -427,6 +427,16 @@ fn count(texts: &[String], needle: &str) -> usize {
 #[test]
 fn every_painting_layer_is_listed_and_no_row_sits_under_delete() {
     let document = cranamp::winamp::studio::open_document(None).expect("bundled document");
+    for plane in 1..=7 {
+        document
+            .lock()
+            .unwrap()
+            .paint_layer_command(
+                &serde_json::json!({"action":"add","name":format!("plane {plane}")}),
+                "test",
+            )
+            .expect("a painting plane");
+    }
     let mut shell = studio(document);
 
     click(&mut shell, PANEL_ROW[1]);
@@ -434,7 +444,7 @@ fn every_painting_layer_is_listed_and_no_row_sits_under_delete() {
     let planes = count(&texts, "Shown") + count(&texts, "Hidden");
     assert_eq!(
         planes, 7,
-        "the bundled skin has seven painting layers and all of them belong in the list"
+        "seven painting layers, and all of them belong in the list"
     );
 
     // The seventh row, at the depth the old pinned Delete button occupied.
@@ -560,4 +570,44 @@ fn the_sprite_under_the_pointer_is_outlined_and_named() {
             .any(|t| t.starts_with("main.") && t.contains(" × ")),
         "the sprite under the pointer should be named with its size; visible={texts:?}"
     );
+}
+
+/// One editor at every size. The touch surfaces used to get a different one --
+/// different buttons, different names, a subset of the panels -- so a
+/// capability that reached the desktop panel had not reached Android or the
+/// web. The same composable lays out on a handset now: the chrome wraps, the
+/// quick-access sidebar goes away because every control on it is also in a
+/// panel, and the canvas takes what is left.
+#[test]
+fn the_same_editor_lays_out_on_a_handset() {
+    for size in [(393u32, 780u32), (820, 1180), (1160, 850), (1680, 1050)] {
+        let document = cranamp::winamp::studio::open_document(None).expect("bundled document");
+        let root_key = location_key(file!(), line!(), column!());
+        let mut shell = AppShell::new(HitGraphRenderer::default(), root_key, {
+            let document = document.clone();
+            move || cranamp::winamp::studio::SkinStudio(document.clone(), None)
+        });
+        shell.set_buffer_size(size.0, size.1);
+        shell.set_viewport(size.0 as f32, size.1 as f32);
+        pump(&mut shell);
+        let texts = visible_texts(&mut shell);
+        for button in [
+            "Drawing tools",
+            "Painting layers",
+            "Sprite targets",
+            "Sprite rectangles",
+            "Skin atlases",
+            "Edit history",
+            "Pixel study",
+            "Skin options",
+            "Undo",
+            "New blank",
+        ] {
+            assert!(
+                contains(&texts, button),
+                "{button:?} belongs to this editor at every size; at {size:?} \
+                 visible={texts:?}"
+            );
+        }
+    }
 }

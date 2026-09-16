@@ -15,6 +15,82 @@ use std::{
 /// Shared capacity for human edits, isolated patches, and layered projects.
 const MAX_PAINT_LAYERS: usize = 64;
 
+/// The tool panels, by name, in the one vocabulary both layouts answer to.
+///
+/// The desktop calls them Drawing tools, Painting layers, Sprite targets,
+/// Sprite rectangles, Skin atlases, Edit history, Pixel study, Skin options
+/// and the colour picker; the touch layout calls its six Tools, Layers, Parts,
+/// States, Sheets and Files. A name that a layout does not have simply opens
+/// nothing there.
+pub const DRAWERS: &[&str] = &[
+    "none",
+    "tools",
+    "layers",
+    "targets",
+    "rectangles",
+    "atlases",
+    "history",
+    "study",
+    "options",
+    "picker",
+    "files",
+    "states",
+];
+
+/// The composed skin over one rectangle. `at` takes surface coordinates, so a
+/// caller that asked for a small region reads it with the same numbers it
+/// would have read a whole render with, and gets `None` outside it rather than
+/// a wrong pixel from the wrong place.
+pub(super) struct Patch {
+    pub(super) image: RgbaImage,
+    origin: (i32, i32),
+}
+
+impl Patch {
+    pub(super) fn at(&self, x: i32, y: i32) -> Option<[u8; 4]> {
+        let (ox, oy) = self.origin;
+        if x < ox || y < oy {
+            return None;
+        }
+        self.image
+            .get_pixel_checked((x - ox) as u32, (y - oy) as u32)
+            .map(|p| p.0)
+    }
+}
+
+/// A sheet and the painting planes over it, as `composite_images` would leave
+/// it but answered one pixel at a time.
+struct SheetStack<'a> {
+    base: &'a RgbaImage,
+    planes: Vec<(Option<&'a RgbaImage>, u8, bool)>,
+}
+
+impl SheetStack<'_> {
+    fn at(&self, x: u32, y: u32) -> Option<Rgba<u8>> {
+        let mut out = *self.base.get_pixel_checked(x, y)?;
+        // What `clip_below` masks against is the plane immediately below --
+        // the base sheet for the lowest one -- after that plane's own clip and
+        // opacity have been applied, which is what `effective_planes` walks.
+        let mut below = out.0[3];
+        for (image, opacity, clip_below) in &self.planes {
+            let Some(pixel) = image.and_then(|im| im.get_pixel_checked(x, y)) else {
+                below = 0;
+                continue;
+            };
+            let mut pixel = *pixel;
+            let alpha = (pixel.0[3] as u32 * *opacity as u32 + 127) / 255;
+            pixel.0[3] = if *clip_below {
+                ((alpha * below as u32 + 127) / 255) as u8
+            } else {
+                alpha as u8
+            };
+            out.blend(&pixel);
+            below = pixel.0[3];
+        }
+        Some(out)
+    }
+}
+
 /// One pixel of one atlas sheet: the sheet's position in `images`, then x, y.
 type AtlasPixel = (usize, u32, u32);
 
@@ -86,10 +162,31 @@ pub struct View {
     /// behaviour: take the bevel from the height of the drag.
     pub bevel: u32,
     pub refraction: u32,
-    /// What the text brush writes, in which of the two faces, at what scale.
+    /// What the text brush writes, in which of the two faces, at what scale
+    /// and at what letter spacing.
+    ///
+    /// Spacing is the one of the four that decides whether a word *fits*. The
+    /// `text` operation has taken it from the day it landed and the brush did
+    /// not, so it was fixed at one for every hand and for every operation that
+    /// did not name it: `STEREO` in the small face is six cells at five
+    /// pixels each, twenty-nine pixels of ink, and the stereo lamp is
+    /// twenty-nine pixels wide. At spacing zero it is twenty-three and sits in
+    /// the cell with room either side. Without this the only way to label that
+    /// lamp was to carry a glyph table in a build script, which is the mistake
+    /// the small face was added to stop.
     pub text: String,
     pub face: String,
     pub text_scale: u32,
+    pub text_spacing: i32,
+    /// Which tool panel is open, shared by both layouts.
+    ///
+    /// It is on the document rather than in each layout's own local state so
+    /// that a panel can be opened by a caller that has no pointer: every
+    /// capability this editor grows has to appear in both panels, and until
+    /// this existed the only way to see that it had was to be a person sitting
+    /// in front of one of them. An agent could add a control and screenshot
+    /// everything except the drawer it was in.
+    pub drawer: String,
     pub filled: bool,
     pub mirror_x: bool,
     pub mirror_y: bool,
@@ -139,6 +236,8 @@ impl Default for View {
             text: "CATAMP".into(),
             face: "5x7".into(),
             text_scale: 1,
+            text_spacing: 1,
+            drawer: "tools".into(),
             filled: false,
             mirror_x: false,
             mirror_y: false,
@@ -665,6 +764,17 @@ impl Document {
             "text_scale is 1..8 (got {})",
             view.text_scale
         );
+        anyhow::ensure!(
+            (-2..=8).contains(&view.text_spacing),
+            "text_spacing is -2..8 (got {})",
+            view.text_spacing
+        );
+        anyhow::ensure!(
+            DRAWERS.contains(&view.drawer.as_str()),
+            "drawer is one of {} (got {})",
+            DRAWERS.join(", "),
+            view.drawer
+        );
         anyhow::ensure!(view.text.len() <= 256, "text is at most 256 characters");
         anyhow::ensure!(
             (1..=16).contains(&view.grain_size),
@@ -706,9 +816,21 @@ impl Document {
         let opened = self.view.panel != "atlas" || self.view.sheet != view.sheet;
         self.view = view;
         if opened && self.view.panel == "atlas" {
-            if let Some(note) = Self::sheet_note(&self.view.sheet) {
-                self.message = format!("{} · {note}", self.view.sheet);
-            }
+            // Always this call's own note, never the document's last message.
+            // A sheet with nothing surprising about it used to leave the
+            // message alone, so opening `main.bmp` answered with whatever the
+            // call before it had said -- for a recipe that had just turned on
+            // three sheets, opening one answered with a paragraph about the
+            // other three, which reads exactly like the note this field is for.
+            let (w, h) = self
+                .images
+                .get(&self.view.sheet)
+                .map(|im| im.dimensions())
+                .unwrap_or((0, 0));
+            self.message = match Self::sheet_note(&self.view.sheet) {
+                Some(note) => format!("{} · {note}", self.view.sheet),
+                None => format!("{} · {w}x{h}", self.view.sheet),
+            };
         }
         self.revision += 1;
         Ok(self.brief())
@@ -807,6 +929,72 @@ impl Document {
     /// footer flaps and `titlebar.bmp` is mostly shade-mode bars Cranamp does
     /// not use, so a band painted straight across either one quietly loses
     /// part of itself.
+    /// The parts of a sheet no sprite ever samples, as rectangles.
+    ///
+    /// A sheet is a bag of cells and the space between them is never drawn:
+    /// `pledit.bmp` column 125 falls between the two footer flaps, so a band
+    /// painted straight across the sheet loses a column and a button laid over
+    /// it lands a pixel out of step with its own hit area. `unsampled_pixels`
+    /// reports that after the ink is down, which is one stroke later than it is
+    /// useful; this is the same mask asked before drawing into it.
+    pub fn sheet_gaps(&self, sheet: &str) -> Result<Value> {
+        let (mask, width) = self
+            .sampled_mask(sheet)
+            .with_context(|| format!("no sheet called {sheet}"))?;
+        let height = mask.len() as u32 / width.max(1);
+        if !mask.iter().any(|sampled| *sampled) {
+            return Ok(json!({"sheet":sheet,"size":[width,height],
+                             "never_drawn":true,"gaps":[],"of":0,
+                             "note":Self::sheet_note(sheet)}));
+        }
+        // Maximal horizontal runs, then merged downward while they line up, so
+        // a column nothing draws is one rectangle rather than thirty-eight.
+        let mut rows: Vec<Vec<(u32, u32)>> = Vec::with_capacity(height as usize);
+        for y in 0..height {
+            let mut runs = Vec::new();
+            let mut x = 0;
+            while x < width {
+                if mask[(y * width + x) as usize] {
+                    x += 1;
+                    continue;
+                }
+                let start = x;
+                while x < width && !mask[(y * width + x) as usize] {
+                    x += 1;
+                }
+                runs.push((start, x - start));
+            }
+            rows.push(runs);
+        }
+        let mut gaps: Vec<[u32; 4]> = Vec::new();
+        let mut open: Vec<(u32, u32, u32)> = Vec::new(); // x, w, top
+        for (y, runs) in rows.iter().enumerate() {
+            let y = y as u32;
+            open.retain(|(x, w, top)| {
+                if runs.contains(&(*x, *w)) {
+                    true
+                } else {
+                    gaps.push([*x, *top, *w, y - top]);
+                    false
+                }
+            });
+            for run in runs {
+                if !open.iter().any(|(x, w, _)| (*x, *w) == *run) {
+                    open.push((run.0, run.1, y));
+                }
+            }
+        }
+        for (x, w, top) in open {
+            gaps.push([x, top, w, height - top]);
+        }
+        gaps.sort_by_key(|g| (g[1], g[0]));
+        let of = gaps.iter().map(|g| (g[2] * g[3]) as u64).sum::<u64>();
+        gaps.truncate(64);
+        Ok(
+            json!({"sheet":sheet,"size":[width,height],"gaps":gaps,"of":of,
+                  "note":Self::sheet_note(sheet)}),
+        )
+    }
     fn sampled_mask(&self, sheet: &str) -> Option<(Vec<bool>, u32)> {
         let (w, h) = self.images.get(sheet)?.dimensions();
         let mut mask = vec![false; (w as usize) * (h as usize)];
@@ -959,16 +1147,33 @@ impl Document {
             .collect()
     }
     pub(super) fn canvas_size(&self) -> (u32, u32) {
-        if self.view.panel == "canvas" {
-            (275, 232 + self.view.preview_playlist_height)
-        } else if self.view.panel == "atlas" {
+        self.canvas_size_for(&self.view)
+    }
+    fn canvas_size_for(&self, view: &View) -> (u32, u32) {
+        if view.panel == "canvas" {
+            (275, 232 + view.preview_playlist_height)
+        } else if view.panel == "atlas" {
             self.images
-                .get(&self.view.sheet)
+                .get(&view.sheet)
                 .map(|im| im.dimensions())
                 .unwrap_or((1, 1))
         } else {
-            mapping::size(&self.view.panel)
+            mapping::size(&view.panel)
         }
+    }
+    /// The whole skin, whatever surface the editor has open.
+    ///
+    /// The always-on preview is a picture of the *skin*, not of the workspace:
+    /// with one sheet open the canvas is that sheet, and a corner of the window
+    /// that claims to show how everything looks has to keep showing how
+    /// everything looks.
+    pub fn skin_render(&self) -> RgbaImage {
+        let mut view = self.view.clone();
+        view.panel = "canvas".into();
+        view.layers.clear();
+        let (w, h) = self.canvas_size_for(&view);
+        self.render_patch_for(&view, [0, 0, w as i32, h as i32])
+            .image
     }
     fn forget_atlas_writes(&mut self) {
         self.atlas_writes.clear();
@@ -1138,51 +1343,113 @@ impl Document {
         out
     }
     pub fn render(&self) -> RgbaImage {
-        let composite = self.composite_images();
         let (w, h) = self.canvas_size();
-        let mut image = RgbaImage::from_pixel(w, h, Rgba([30, 34, 42, 255]));
-        if self.view.panel == "playlist" {
-            let palette = self
-                .files
+        self.render_patch([0, 0, w as i32, h as i32]).image
+    }
+    /// The composed surface over one rectangle, and nothing outside it.
+    ///
+    /// `opacity`, a half-transparent `image` and `material: "glass"` all have
+    /// to read the artwork as it stands, and the artwork as it stands is
+    /// thirteen sheets composed under every painting plane and then assembled
+    /// into the canvas. Composing all of it to answer for one pixel of marine
+    /// snow costs exactly what composing it for the whole playlist costs, and
+    /// a skin whose light is made of many small blended marks pays that once
+    /// per mark: Catamp Salvage's caustic net is 886 one-pixel blends and took
+    /// nineteen seconds to write 1,537 pixels, all of it re-rendering the
+    /// whole skin 886 times. A blended operation reads the artwork only where
+    /// it is about to write.
+    ///
+    /// Freshness is unchanged -- this is composed per operation like the whole
+    /// render was, so a glow laid over a picture still blends into the picture
+    /// that is there rather than into the one that was.
+    pub(super) fn render_patch(&self, bounds: [i32; 4]) -> Patch {
+        self.render_patch_for(&self.view, bounds)
+    }
+    fn render_patch_for(&self, view: &View, bounds: [i32; 4]) -> Patch {
+        let (w, h) = self.canvas_size_for(view);
+        let x0 = bounds[0].clamp(0, w as i32) as u32;
+        let y0 = bounds[1].clamp(0, h as i32) as u32;
+        let x1 = bounds[0]
+            .saturating_add(bounds[2])
+            .clamp(0, w as i32)
+            .max(x0 as i32) as u32;
+        let y1 = bounds[1]
+            .saturating_add(bounds[3])
+            .clamp(0, h as i32)
+            .max(y0 as i32) as u32;
+        let ground = if view.panel == "playlist" {
+            self.files
                 .get("pledit.txt")
                 .map(|bytes| crate::winamp::skin::parse_pledit_txt(bytes).normal_bg)
-                .unwrap_or([0, 0, 0, 255]);
-            image = RgbaImage::from_pixel(w, h, Rgba(palette));
+                .unwrap_or([0, 0, 0, 255])
+        } else {
+            [30, 34, 42, 255]
+        };
+        let origin = (x0 as i32, y0 as i32);
+        if x1 <= x0 || y1 <= y0 {
+            return Patch {
+                image: RgbaImage::new(0, 0),
+                origin,
+            };
         }
-        if self.view.panel == "canvas" {
+        let mut image = RgbaImage::from_pixel(x1 - x0, y1 - y0, Rgba(ground));
+        if view.panel == "canvas" {
             let bg = self
                 .files
                 .get("pledit.txt")
                 .map(|b| crate::winamp::skin::parse_pledit_txt(b).normal_bg)
                 .unwrap_or([0, 0, 0, 255]);
-            for y in 252..h - 38 {
-                for x in 12..255 {
-                    image.put_pixel(x, y, Rgba(bg));
+            for y in y0.max(252)..y1.min(h - 38) {
+                for x in x0.max(12)..x1.min(255) {
+                    image.put_pixel(x - x0, y - y0, Rgba(bg));
                 }
             }
         }
-        for layer in self.layers() {
-            if let Some(sheet) = composite.get(&layer.sheet) {
-                let [dx, dy, dw, dh] = layer.destination;
-                for y in dy..(dy + dh).min(h) {
-                    for x in dx..(dx + dw).min(w) {
-                        let Some((sx, sy)) = layer.map(x, y) else {
-                            continue;
-                        };
-                        if let Some(pixel) =
-                            sheet.get_pixel_checked(layer.source[0] + sx, layer.source[1] + sy)
+        for layer in self.layers_for(view) {
+            let [dx, dy, dw, dh] = layer.destination;
+            let (lx0, ly0) = (dx.max(x0), dy.max(y0));
+            let (lx1, ly1) = ((dx + dw).min(w).min(x1), (dy + dh).min(h).min(y1));
+            if lx1 <= lx0 || ly1 <= ly0 {
+                continue;
+            }
+            let Some(stack) = self.sheet_stack(&layer.sheet) else {
+                continue;
+            };
+            for y in ly0..ly1 {
+                for x in lx0..lx1 {
+                    let Some((sx, sy)) = layer.map(x, y) else {
+                        continue;
+                    };
+                    if let Some(pixel) = stack.at(layer.source[0] + sx, layer.source[1] + sy) {
+                        if pixel.0[3] > 0
+                            && (view.panel == "atlas" || pixel.0[..3] != [255, 0, 255])
                         {
-                            if pixel.0[3] > 0
-                                && (self.view.panel == "atlas" || pixel.0[..3] != [255, 0, 255])
-                            {
-                                image.put_pixel(x, y, *pixel);
-                            }
+                            image.put_pixel(x - x0, y - y0, pixel);
                         }
                     }
                 }
             }
         }
-        image
+        Patch { image, origin }
+    }
+    /// One sheet's base bitmap and every painting plane's copy of it, resolved
+    /// once so that composing a pixel is an index rather than a map lookup per
+    /// plane per pixel.
+    fn sheet_stack(&self, sheet: &str) -> Option<SheetStack<'_>> {
+        Some(SheetStack {
+            base: self.images.get(sheet)?,
+            planes: self
+                .planes
+                .iter()
+                .map(|plane| {
+                    (
+                        plane.images.get(sheet),
+                        if plane.visible { plane.opacity } else { 0 },
+                        plane.clip_below,
+                    )
+                })
+                .collect(),
+        })
     }
     /// Transparent composition of only selected sprites; Auto uses the visible canvas.
     pub fn selected_image(&self) -> RgbaImage {
@@ -1392,18 +1659,83 @@ impl Document {
     /// There is no such thing as the state sheet of "every sprite under the
     /// brush", and the arbitrary sprite this used to fall back to meant the
     /// first press of the button always showed something nobody asked for.
+    ///
+    /// A named sprite is looked up in the whole skin, whatever surface is
+    /// open. A sprite's variants are a fact about the skin rather than about
+    /// the surface: a recipe that draws twenty-eight slider frames draws them
+    /// in `studio_atlas` at the sheet's own coordinates, and that was the one
+    /// place it could not then ask whether they had come out twenty-eight
+    /// different pictures -- the catalogue there is a single pseudo-sprite
+    /// called `sheet`, so `studio_states` answered with the whole sheet as one
+    /// variant and said nothing was repeated. Leaving the sheet to ask is the
+    /// one thing having the sheet open was avoiding. `studio_targets` and
+    /// `studio_pixel` were both fixed for this same sentence.
     pub(super) fn state_sheet_layer(&self) -> Option<Layer> {
-        let layers = self.layers();
+        let named = |wanted: &str| self.layers().into_iter().find(|l| l.id == wanted);
         // One sprite picked by hand is a target as much as a named one is.
         if self.view.layers.len() == 1 {
-            let wanted = &self.view.layers[0];
-            return layers.into_iter().find(|l| &l.id == wanted);
+            return named(&self.view.layers[0]);
         }
         if self.view.layer == "auto" || self.view.layer.is_empty() {
             return None;
         }
-        let wanted = &self.view.layer;
-        layers.into_iter().find(|l| &l.id == wanted)
+        named(&self.view.layer)
+    }
+    /// The sprite a state sheet is being asked for: the one this call names,
+    /// or the one the view has chosen.
+    ///
+    /// A named one is looked up in the whole skin whatever surface is open,
+    /// because a sprite's variants are a fact about the skin rather than about
+    /// the surface. A recipe draws twenty-eight slider frames in
+    /// `studio_atlas` at the sheet's own coordinates, because that is where
+    /// the frames are -- and that was the one place it could not then ask
+    /// whether they had come out twenty-eight different pictures. Opening a
+    /// sheet puts the catalogue on a single pseudo-sprite called `sheet`, so
+    /// the answer was the whole sheet as one variant with nothing repeated: a
+    /// clean report about a question nobody asked. Leaving the sheet to ask
+    /// was the one thing having the sheet open was avoiding, and
+    /// `studio_targets` and `studio_pixel` were both fixed for this same
+    /// sentence.
+    pub(super) fn state_sheet_asked(&self, id: Option<&str>) -> Result<Layer> {
+        let Some(id) = id else {
+            return self.state_sheet_layer().context(
+                // Naming only the GUI panel leaves an MCP caller with the right
+                // diagnosis and no call to make: the panel is a tool.
+                "A state sheet is one sprite's variants, so choose one sprite first: \
+                 studio_states {\"id\":\"main.play\"}, studio_targets \
+                 {\"solo\":\"main.play\"}, or the editor's Sprite targets panel",
+            );
+        };
+        let wanted = id.to_ascii_lowercase();
+        let skin = self.skin_layers();
+        let mut hit: Vec<Layer> = skin
+            .iter()
+            .filter(|l| l.id.eq_ignore_ascii_case(id))
+            .cloned()
+            .collect();
+        if hit.is_empty() {
+            hit = skin
+                .iter()
+                .filter(|l| l.id.to_ascii_lowercase().contains(&wanted))
+                .cloned()
+                .collect();
+        }
+        match hit.len() {
+            1 => Ok(hit.remove(0)),
+            0 => bail!(
+                "no sprite matching {id} in this skin's {} -- studio_targets lists them",
+                skin.len()
+            ),
+            _ => bail!(
+                "{id} matches {} sprites ({}); name one exactly",
+                hit.len(),
+                hit.iter()
+                    .take(4)
+                    .map(|l| l.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
     }
     /// For each variant, the earliest variant it is the same picture as.
     ///
@@ -1439,13 +1771,8 @@ impl Document {
     /// Two variants that differ by a hundredth of their pixels are a control
     /// whose pressed state nobody will see, and two that differ by none are a
     /// frame that was never drawn. Neither is visible on a contact sheet.
-    pub fn variant_differences(&self) -> Result<Value> {
-        let layer = self.state_sheet_layer().context(
-            // Naming only the GUI panel leaves an MCP caller with the right
-            // diagnosis and no call to make: the panel is a tool.
-            "A state sheet is one sprite's variants, so choose one sprite first: \
-             studio_targets {\"solo\":\"main.play\"}, or the editor's Sprite targets panel",
-        )?;
+    pub fn variant_differences(&self, id: Option<&str>) -> Result<Value> {
+        let layer = self.state_sheet_asked(id)?;
         let composite = self.composite_images();
         let source = &composite[&layer.sheet];
         let twins = Self::repeated_variants(source, &layer.variants);
@@ -1493,13 +1820,8 @@ impl Document {
         )
     }
     /// Every variant of one sprite, laid out in a grid and numbered.
-    pub fn state_sheet(&self) -> Result<RgbaImage> {
-        let layer = self.state_sheet_layer().context(
-            // Naming only the GUI panel leaves an MCP caller with the right
-            // diagnosis and no call to make: the panel is a tool.
-            "A state sheet is one sprite's variants, so choose one sprite first: \
-             studio_targets {\"solo\":\"main.play\"}, or the editor's Sprite targets panel",
-        )?;
+    pub fn state_sheet(&self, id: Option<&str>) -> Result<RgbaImage> {
+        let layer = self.state_sheet_asked(id)?;
         let columns = layer.variants.len().clamp(1, 7) as u32;
         // A band above each cell for its number, and a margin so neighbouring
         // sprites do not read as one piece of artwork.
@@ -1649,14 +1971,22 @@ impl Document {
             .and_then(Value::as_u64)
             .unwrap_or(self.view.opacity as u64);
         anyhow::ensure!((1..=255).contains(&opacity), "opacity is 1..255");
-        // Rendered per operation, so it cannot go stale the way the image
-        // operation's backdrop once did.
-        let under = (opacity < 255).then(|| self.render());
         let mut geometry = op.clone();
         if geometry.get("clean_corners").is_none() {
             geometry["clean_corners"] = json!(self.view.clean_corners);
         }
         let points = super::brush::rasterize(&geometry)?;
+        // Composed per operation, so it cannot go stale the way the image
+        // operation's backdrop once did -- and composed over the operation's
+        // own bounds, because a blend reads the artwork only where it is about
+        // to write it.
+        let under = (opacity < 255 && !points.is_empty()).then(|| {
+            let x0 = points.iter().map(|p| p[0]).min().unwrap_or(0);
+            let y0 = points.iter().map(|p| p[1]).min().unwrap_or(0);
+            let x1 = points.iter().map(|p| p[0]).max().unwrap_or(0);
+            let y1 = points.iter().map(|p| p[1]).max().unwrap_or(0);
+            self.render_patch([x0, y0, x1 - x0 + 1, y1 - y0 + 1])
+        });
         let material = op.get("material").and_then(Value::as_str);
         anyhow::ensure!(
             material.is_none() || material == Some("glass"),
@@ -1704,11 +2034,7 @@ impl Document {
             }
             if let Some(base) = under.as_ref() {
                 let a = opacity as f64 / 255.0;
-                let beneath = base
-                    .get_pixel_checked(x.max(0) as u32, y.max(0) as u32)
-                    .filter(|_| x >= 0 && y >= 0)
-                    .map(|p| p.0)
-                    .unwrap_or([0, 0, 0, 255]);
+                let beneath = base.at(x, y).unwrap_or([0, 0, 0, 255]);
                 if beneath[3] == 0 || beneath[..3] == [255, 0, 255] {
                     self.keyed_blend.push([x, y]);
                 }
@@ -1778,7 +2104,7 @@ impl Document {
             // A word is placed, not dragged: the gesture's start is where it
             // begins and the rest of the drag is ignored.
             json!({"op":"text","x":from[0],"y":from[1],"text":v.text,
-                   "face":v.face,"scale":v.text_scale,"spacing":1})
+                   "face":v.face,"scale":v.text_scale,"spacing":v.text_spacing})
         } else if ["line", "curve", "tuft"].contains(&v.brush.as_str()) {
             json!({"op":v.brush,"x":from[0],"y":from[1],"x2":to[0],"y2":to[1],"brush_size":v.brush_size,"curve_bend":v.curve_bend})
         } else {
@@ -1957,6 +2283,13 @@ impl Document {
         Ok(count)
     }
     pub fn draw(&mut self, args: &Value) -> Result<Value> {
+        // Every draw says how long it took. Nothing in this surface did, and
+        // the one thing a caller cannot see from the other end of a socket is
+        // which of its own operations is expensive: a caustic net of 886
+        // one-pixel blends took nineteen seconds of a three-second build and
+        // was found by wall-clocking the client, after a day of assuming the
+        // client was the slow half.
+        let started = web_time::Instant::now();
         self.finish_stroke();
         // Per transaction, not per session. A human stroke clears these in
         // checkpoint(); an MCP caller has no equivalent, so without this every
@@ -2061,19 +2394,13 @@ impl Document {
         let previous_unmapped = std::mem::take(&mut self.unmapped_pixels);
         let previous_selection = std::mem::replace(&mut self.view.layers, selected.clone());
         let paint_layers = self.layers();
-        // The backdrop a half-transparent image blends into. It is the whole
-        // composed skin, so it is rendered lazily -- but it also has to be
-        // rendered *again* once this transaction has painted anything, or a
-        // later glow blends into a picture that no longer exists and writes the
-        // old pixels back. `backdrop_at` is the pixel count it was taken at.
-        let mut backdrop: Option<RgbaImage> = None;
-        let mut backdrop_at = usize::MAX;
         // Every cell of the open sheet, and how many places the player draws
         // it. A sheet is a bag of cells and an operation is nearly always
         // aimed at one of them; the one that is worth reporting is the one
         // that crossed out of its own cell into a cell drawn more than once,
         // because that repeats the accident everywhere the tile goes.
         let mut cells: Vec<(String, usize, [u32; 4])> = Vec::new();
+        let sheet_size = self.canvas_size();
         if self.view.panel == "atlas" {
             let mut times: BTreeMap<String, usize> = BTreeMap::new();
             let layers = self.skin_layers();
@@ -2190,21 +2517,22 @@ impl Document {
                         // what it lands on or it arrives as full-strength
                         // colour: soft glows used to stamp as hard speckle.
                         if im.pixels().any(|p| p[3] > 0 && p[3] < 255) {
-                            if backdrop_at != count {
-                                backdrop = Some(self.render());
-                                backdrop_at = count;
-                            }
-                            let base = backdrop.as_ref().unwrap();
+                            // The artwork a half-transparent image blends
+                            // into, composed now rather than reused: a glow
+                            // placed after the picture beneath it used to
+                            // blend into the picture that was there *before*
+                            // and write that back, which silently undid the
+                            // work underneath it. Only the image's own
+                            // footprint is composed, because that is all it
+                            // reads.
+                            let base =
+                                self.render_patch([x, y, im.width() as i32, im.height() as i32]);
                             for (ix, iy, p) in im.enumerate_pixels_mut() {
                                 if p[3] == 0 || p[3] == 255 {
                                     continue;
                                 }
                                 let (bx, by) = (x + ix as i32, y + iy as i32);
-                                let under = base
-                                    .get_pixel_checked(bx.max(0) as u32, by.max(0) as u32)
-                                    .filter(|_| bx >= 0 && by >= 0)
-                                    .map(|q| q.0)
-                                    .unwrap_or([0, 0, 0, 255]);
+                                let under = base.at(bx, by).unwrap_or([0, 0, 0, 255]);
                                 if under[3] == 0 || under[..3] == [255, 0, 255] {
                                     self.keyed_blend.push([bx, by]);
                                 }
@@ -2233,7 +2561,11 @@ impl Document {
                             .and_then(Value::as_u64)
                             .unwrap_or(1)
                             .clamp(1, 8) as i32;
-                        let spacing = op.get("spacing").and_then(Value::as_i64).unwrap_or(1) as i32;
+                        let spacing = op
+                            .get("spacing")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(self.view.text_spacing as i64)
+                            as i32;
                         // Two faces, because a classic skin has cells a word
                         // has to fit in and the 5x7 one does not: 14 pixels for
                         // an equalizer caption, 27 for the mono lamp.
@@ -2265,7 +2597,23 @@ impl Document {
                     _ => bail!("Unknown drawing operation {kind}"),
                 }
                 if let Some((_, box_)) = self.operation_box {
-                    if let Some(note) = crossed_into_repeat(&cells, box_, index, kind) {
+                    // An operation that covers the whole sheet has no cell of
+                    // its own to have crossed out of. Clearing one to the
+                    // transparency key is how a recipe starts a sheet, and a
+                    // wash over the whole of one is how it starts a
+                    // background; both touch every cell, so both answered
+                    // "crossed into a cell the player draws nine times" --
+                    // true, not a spill, and printed above the one spill that
+                    // was real. It is the same distinction `unsampled_pixels`
+                    // draws when it counts ink rather than clearing.
+                    let whole_sheet = box_[0] == 0
+                        && box_[1] == 0
+                        && box_[2] >= sheet_size.0
+                        && box_[3] >= sheet_size.1;
+                    if let Some(note) = (!whole_sheet)
+                        .then(|| crossed_into_repeat(&cells, box_, index, kind))
+                        .flatten()
+                    {
                         if crossed.len() < 8 && !crossed.iter().any(|c| c["cell"] == note["cell"]) {
                             crossed.push(note);
                         }
@@ -2298,7 +2646,7 @@ impl Document {
         // rasteriser in an image library and hope the two agreed.
         if args.get("preview") == Some(&json!(true)) {
             let bounds = self.painted_bounds;
-            let report = json!({"preview":true,"bounds":bounds,
+            let mut report = json!({"preview":true,"bounds":bounds,
                 "pixels_written":count,"surface":self.surface(),
                 "clipped_pixels":self.clipped_pixels,
                 "overwrites":self.overwrites,
@@ -2310,6 +2658,7 @@ impl Document {
             self.dirty = before_dirty;
             self.unmapped_pixels = previous_unmapped;
             self.painted_bounds = bounds;
+            report["ms"] = json!(started.elapsed().as_millis() as u64);
             return Ok(report);
         }
         if before != self.snapshot() {
@@ -2432,6 +2781,7 @@ impl Document {
                 result["note"] = json!(note);
             }
         }
+        result["ms"] = json!(started.elapsed().as_millis() as u64);
         Ok(result)
     }
     pub fn recolor(&mut self, args: &Value) -> Result<Value> {
@@ -3715,6 +4065,91 @@ mod tests {
             .unwrap();
         assert_eq!(d.render().get_pixel(23, 0), &Rgba([255, 0, 255, 255]));
     }
+    /// A blended operation composes the artwork under the pixels it is about
+    /// to write and nowhere else, which is the difference between a caustic
+    /// net taking a tenth of a second and taking twenty.
+    ///
+    /// Two things can go wrong with composing a window instead of everything.
+    /// The window can be read at the wrong offset, which the crop half of this
+    /// checks; and the per-pixel walk over a sheet's painting planes, which is
+    /// what replaced compositing whole sheets, can disagree with
+    /// `composite_images` -- the same arithmetic the export writes with, which
+    /// is why it is the reference here. Hidden planes, partial opacity and
+    /// `clip_below` are the three things that walk has to reproduce, and each
+    /// plane is offset from the one under it so a clipped plane has ink both
+    /// on and off its own mask. Drawn in the same place they agree however the
+    /// mask is applied and the assertion stops being one.
+    #[test]
+    fn a_patch_of_the_canvas_is_the_same_picture_as_the_whole_render_of_it() {
+        let mut d = Document::blank();
+        d.state(json!({"panel":"atlas","sheet":"main.bmp","layer":"sheet"}))
+            .unwrap();
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":275,"height":115,"color":"#204050"},
+        ]}))
+        .unwrap();
+        d.state(json!({"panel":"canvas"})).unwrap();
+        for (i, (opacity, clip_below, visible)) in
+            [(255u8, false, true), (140, true, true), (255, false, false)]
+                .into_iter()
+                .enumerate()
+        {
+            let made = d
+                .paint_layer_command(&json!({"action":"add","name":"plane"}), "MCP")
+                .unwrap();
+            let id = made["active"].as_str().unwrap().to_string();
+            let left = 20 + i as i64 * 34;
+            d.draw(&json!({"operations":[
+                {"op":"ellipse","x":left,"y":20,"width":90,"height":60,"color":"#c08040","fill":true},
+                {"op":"rect","x":left + 20,"y":30,"width":30,"height":10,"color":"#ffffff","opacity":128},
+            ]}))
+            .unwrap();
+            d.paint_layer_command(
+                &json!({"action":"set","id":id,"opacity":opacity,
+                        "clip_below":clip_below,"visible":visible}),
+                "MCP",
+            )
+            .unwrap();
+        }
+
+        let composite = d.composite_images();
+        let mut differs = 0;
+        for (name, sheet) in &composite {
+            let stack = d.sheet_stack(name).expect("every sheet has a stack");
+            for (x, y, pixel) in sheet.enumerate_pixels() {
+                assert_eq!(stack.at(x, y), Some(*pixel), "{name} at {x},{y}");
+                if d.images[name].get_pixel(x, y) != pixel {
+                    differs += 1;
+                }
+            }
+        }
+        assert!(
+            differs > 2000,
+            "the planes have to actually change the sheets or this proves nothing: {differs}"
+        );
+
+        let whole = d.render();
+        for area in [
+            [0, 0, 275, 377],
+            [30, 25, 40, 30],
+            [-6, -6, 20, 20],
+            [260, 360, 40, 40],
+        ] {
+            let patch = d.render_patch(area);
+            for y in area[1].max(0)..(area[1] + area[3]).min(377) {
+                for x in area[0].max(0)..(area[0] + area[2]).min(275) {
+                    assert_eq!(
+                        patch.at(x, y),
+                        Some(whole.get_pixel(x as u32, y as u32).0),
+                        "patch {area:?} disagrees at {x},{y}"
+                    );
+                }
+            }
+        }
+        // And outside its own bounds it says nothing rather than something
+        // from the wrong place.
+        assert_eq!(d.render_patch([30, 25, 4, 4]).at(29, 25), None);
+    }
     /// A half-transparent image blends into the skin as it stands. The backdrop
     /// it blends into used to be rendered once per transaction and then reused,
     /// so a glow placed after the picture beneath it was painted blended into
@@ -4193,7 +4628,7 @@ mod tests {
         assert!(!d.has_playlist_background());
         assert_eq!(original, d.archive().unwrap());
         // A selected optional layer disappearing through undo must remain safe.
-        let _ = d.state_sheet();
+        let _ = d.state_sheet(None);
         d.state(json!({"pressed":true})).unwrap();
         d.redo();
         d.redo();

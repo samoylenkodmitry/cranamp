@@ -298,10 +298,10 @@ fn operation_schema() -> Value {
 /// editing this editor no longer has.
 fn tools() -> Vec<Value> {
     vec![
- tool("studio_canvas","The whole skin as one canvas -- main, equalizer and playlist joined at their own positions -- and the only drawing surface. Reads it back as a PNG at an integer zoom, optionally cropped to [x,y,width,height]; with path it writes the file and returns where. Also sets what the canvas shows: zoom, brush, colour, width, the state every sprite is drawn in, and whether rectangles are outlined.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8,"description":"The editor's own canvas zoom, and the returned image's enlargement when magnify is not given."},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"measure":{"type":["string","array"],"items":{"type":"string"},"description":"Answer how wide these words come out in the current face and scale instead of reading the canvas back: width and height are the ink, advance is where the pen ends. The engine's own glyph walk, so a recipe stops carrying its own copy of the arithmetic -- the pen advances (cell+spacing)*scale, which is not cell*scale+spacing above scale 1."},"spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for measure only; it is not stored in the view."},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft","text"]},"ramp_to":{"type":["string","null"],"description":"A gradient from the brush colour to this one, along the shape the gesture drew. null turns it off."},"ramp_axis":{"enum":["down","across"]},"bevel":{"type":"integer","minimum":0,"maximum":128,"description":"Glass lens bevel; 0 takes it from the height of the drag, as it always did."},"refraction":{"type":"integer","minimum":0,"maximum":32},"text":{"type":"string","description":"What the text brush writes."},"face":{"enum":["5x7","small"]},"text_scale":{"type":"integer","minimum":1,"maximum":8},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"grain":{"type":"integer","minimum":0,"maximum":64},"grain_size":{"type":"integer","minimum":1,"maximum":16},"opacity":{"type":"integer","minimum":1,"maximum":255},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean","description":"Which variant the canvas shows -- and so which variant a stroke lands in. Drawing a four-state switch is the same code run with active and pressed set four ways, clipped and reported by layers; the alternative is computing four rectangles by hand in studio_atlas, where nothing clips and nothing reports."},"active":{"type":"boolean","description":"Focused titles, and on/off for the channel lamps, shuffle, repeat and the equalizer switches. Chooses the variant a stroke lands in, as pressed does."},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}),&[]),
+ tool("studio_canvas","The whole skin as one canvas -- main, equalizer and playlist joined at their own positions -- and the only drawing surface. Reads it back as a PNG at an integer zoom, optionally cropped to [x,y,width,height]; with path it writes the file and returns where. Also sets what the canvas shows: zoom, brush, colour, width, the state every sprite is drawn in, and whether rectangles are outlined.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8,"description":"The editor's own canvas zoom, and the returned image's enlargement when magnify is not given."},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"measure":{"type":["string","array"],"items":{"type":"string"},"description":"Answer how wide these words come out in the current face and scale instead of reading the canvas back: width and height are the ink, advance is where the pen ends. The engine's own glyph walk, so a recipe stops carrying its own copy of the arithmetic -- the pen advances (cell+spacing)*scale, which is not cell*scale+spacing above scale 1."},"spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for this measure only; text_spacing is the one the brush and the operations use."},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft","text"]},"ramp_to":{"type":["string","null"],"description":"A gradient from the brush colour to this one, along the shape the gesture drew. null turns it off."},"ramp_axis":{"enum":["down","across"]},"bevel":{"type":"integer","minimum":0,"maximum":128,"description":"Glass lens bevel; 0 takes it from the height of the drag, as it always did."},"refraction":{"type":"integer","minimum":0,"maximum":32},"text":{"type":"string","description":"What the text brush writes."},"face":{"enum":["5x7","small"]},"text_scale":{"type":"integer","minimum":1,"maximum":8},"drawer":{"enum":["none","tools","layers","targets","rectangles","atlases","history","study","options","picker","files","states"],"description":"Which tool panel is open. It is on the document rather than in each layout's own state so a panel can be opened by a caller with no pointer -- every capability this editor grows has to appear in both panels, and without this the only way to see that it had was to be sitting in front of one. A name a layout does not have opens nothing there."},"text_spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for the text brush and for every text operation that does not name its own. It is the setting that decides whether a word fits: STEREO in the small face is 29 pixels of ink at spacing 1 and the stereo lamp is 29 pixels wide."},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"grain":{"type":"integer","minimum":0,"maximum":64},"grain_size":{"type":"integer","minimum":1,"maximum":16},"opacity":{"type":"integer","minimum":1,"maximum":255},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean","description":"Which variant the canvas shows -- and so which variant a stroke lands in. Drawing a four-state switch is the same code run with active and pressed set four ways, clipped and reported by layers; the alternative is computing four rectangles by hand in studio_atlas, where nothing clips and nothing reports."},"active":{"type":"boolean","description":"Focused titles, and on/off for the channel lamps, shuffle, repeat and the equalizer switches. Chooses the variant a stroke lands in, as pressed does."},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}),&[]),
  tool("studio_atlas","One BMP on its own, at its own native coordinates, sharing the pencil and the history. path/crop/zoom read it back exactly as studio_canvas reads the skin -- the only way to see a sheet the canvas never shows: numbers.bmp, text.bmp, a pressed variant. Omit sheet to go back to the whole skin, where drawing normally happens.",json!({"sheet":{"type":"string"},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4}}),&[]),
  tool("studio_targets","Which sprites a stroke is routed into. It lists the whole skin whatever surface is open, so a recipe drawing one sheet at its own coordinates can ask where that sheet's cells are without leaving it. Omit everything to list them; narrow with sheet or id (case-insensitive substring). Every sprite says whether it has been drawn at all, so a skin started from New blank can be asked what is left. Add variants for every source rectangle a sprite has -- all 28 frames of one slider track -- which also answers labels, saying what each variant is: which of a switch's four is pressed, which end of a slider's twenty-eight is silence, and that the classic playlist header keeps a row Cranamp never draws. Auto, the default, paints every sprite under the brush, as a human stroke does. Solo one, or choose any combination.",json!({"layers":{"type":"array","items":{"type":"string"}},"solo":{"type":"string"},"auto":{"type":"boolean"},"paint_layer":{"type":["string","null"]},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One case-insensitive substring, or several -- six transport keys in one call rather than six."},"variants":{"type":"boolean"}}),&[]),
- tool("studio_rectangles","Where every sprite variant lives in the joined canvas, plus the two kinds of rectangle that have no sprite at all. Narrow with at (everything overlapping a box), sheet, id (one case-insensitive substring or several), runtime -- the live readouts Cranamp draws over the artwork -- or hit: controls Cranamp hit-tests and draws nothing for, which is the classic playlist footer\'s five menus and six transport keys, and the main window\'s skin-chooser corner. Those eleven footer buttons have to be drawn by the artist and used to be findable only in the player\'s source. select clips painting to one rectangle; otherwise read-only. Rectangles are an overlay, never pixels in the artwork.",json!({"select":{"type":"string"},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One case-insensitive substring, or several."},"at":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4,"description":"Everything overlapping this [x,y,width,height] box on the surface in hand -- what a band about to be painted would cross. A list of rectangles says where each one is and nothing about what is next to what."},"runtime":{"type":"boolean"},"hit":{"type":"boolean"}}),&[]),
+ tool("studio_rectangles","Where every sprite variant lives in the joined canvas, plus the two kinds of rectangle that have no sprite at all. Narrow with at (everything overlapping a box), sheet, id (one case-insensitive substring or several), runtime -- the live readouts Cranamp draws over the artwork -- or hit: controls Cranamp hit-tests and draws nothing for, which is the classic playlist footer\'s five menus and six transport keys, and the main window\'s skin-chooser corner. Those eleven footer buttons have to be drawn by the artist and used to be findable only in the player\'s source. select clips painting to one rectangle; otherwise read-only. Rectangles are an overlay, never pixels in the artwork.",json!({"select":{"type":"string"},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One case-insensitive substring, or several."},"at":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4,"description":"Everything overlapping this [x,y,width,height] box on the surface in hand -- what a band about to be painted would cross. A list of rectangles says where each one is and nothing about what is next to what."},"runtime":{"type":"boolean"},"gaps":{"type":"boolean","description":"Instead of rectangles: the parts of one sheet no sprite ever samples, as rectangles, so ink that will never be shown can be avoided rather than counted afterwards. pledit.bmp column 125 falls between the two footer flaps. Takes sheet; defaults to the open one."},"hit":{"type":"boolean"}}),&[]),
  tool("studio_layers","Painting planes over the original atlases -- the editor's Painting layers panel. Add, select, rename, show, hide, lock, set opacity, clip to the plane below, move, merge down or delete. WSZ exports the composite; a project file keeps the planes.",json!({"action":{"enum":["list","add","select","set","move","merge_down","delete"]},"id":{"type":"string"},"name":{"type":"string"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"clip_below":{"type":"boolean"},"opacity":{"type":"integer","minimum":0,"maximum":255},"index":{"type":"integer","minimum":0}}),&[]),
  tool("studio_options","Everything about the skin that is not painted into a sheet. Three of these add or remove a drawing surface rather than change a setting -- playlist_background, playlist_selection and eq_handles -- and the answer names any sheet that appeared or went away, with its size and what its cells are -- the editor's Skin options panel. The time readout, the equalizer's slider travel, whether the playlist, equalizer sliders, playlist selection and visualizer carry their own artwork, the six PLEDIT.TXT text colours and the 24 VISCOLOR.TXT visualizer colours. It also answers readability: the contrast of every colour Cranamp writes against the artwork it will be written on, which is the one thing a skin cannot be looked at to check. Omit everything to read them all.",json!({"footer":{"enum":["classic","time-total"]},"eq_travel":{"type":"integer","minimum":1,"maximum":52},"visualizer_glass":{"type":"boolean","description":"Unlit visualizer pixels are transparent. Off, the player fills the spectrum's whole rectangle with the first VISCOLOR entry, so a dark skin gets an opaque box in the middle of its main window that no sheet contains and no canvas render shows -- it appears only when the live player draws."},"playlist_background":{"type":"boolean"},"eq_handles":{"type":"boolean"},"playlist_selection":{"type":"boolean"},"playlist_colors":{"type":"object","additionalProperties":{"type":"string"}},"visualizer_colors":{"type":"array","items":{"type":"string"},"minItems":24,"maxItems":24}}),&[]),
  tool("studio_status","The shared document: path, revision, unsaved edits, history depth, sheets, painting planes and the whole view -- panel, brush, colour, width, sprite state. surface is what a stroke's coordinates mean now (\"canvas\", or \"atlas <sheet>\"). Only this call carries the sheet list; the sprites are studio_targets and studio_rectangles.",json!({}),&[]),
@@ -312,7 +312,7 @@ fn tools() -> Vec<Value> {
  tool("studio_cluster","Pick up a native pixel region from the selected sprites; Auto captures the visible canvas. Omit rect to read the clipboard back as stamp rows and a palette. flip_x, flip_y and quarter_turns transform it losslessly. Paint it with studio_draw op cluster, or the human Stamp brush. The clipboard never enters a WSZ.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"flip_x":{"type":"boolean"},"flip_y":{"type":"boolean"},"quarter_turns":{"type":"integer","minimum":0,"maximum":3}}),&[]),
  tool("studio_study","Read-only study board: a native crop above an integer enlargement, optionally as grayscale values, with sprite geometry, a pixel grid and a reference image alongside. rect defaults to the last lifted region; reference pixels are never imported. With path, written there instead of returned inline. Changes nothing.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"selected":{"type":"boolean"},"values":{"type":"boolean"},"grid":{"type":"boolean"},"geometry":{"type":"boolean"},"reference":{"type":"string"},"reference_rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"path":{"type":"string"}}),&[]),
  tool("studio_pixel","Ask the artwork a question at a place, on whichever surface the view is on -- the answer names it. Three answers: hits, every sprite under the pixel with where each keeps it in its sheet, its rgba there and what shares it, which settles a mapping instead of deriving one; ground, the artwork itself averaged over the rectangle's opaque pixels, which is what a stroke has to be chosen against and otherwise costs a render and a look; and with ink, contrast and readable -- the export check's own WCAG arithmetic pointed at any rectangle rather than only at the eight readouts Cranamp writes, which is most of what a hand-drawn skin needs checked. width and height default to 1.",json!({"x":{"type":"integer","minimum":0},"y":{"type":"integer","minimum":0},"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1},"ink":{"type":"string","description":"#rrggbb: how well would this colour read on what is there?"}}),&["x","y"]),
- tool("studio_states","Every source variant of the selected sprite as one nearest-neighbour contact sheet -- all 28 track frames, or both pressed states -- numbered, with a cell that repeats an earlier one marked `4 = 1`. It also answers what each variant is, how many pixels it differs from the one before it by, and the largest channel change between them: a contact sheet cannot show that two cells differ by four pixels, or by none. Pass differences:false for the image alone. With path, the PNG is written there instead of returned inline.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"differences":{"type":"boolean"},"path":{"type":"string"}}),&[]),
+ tool("studio_states","Every source variant of the selected sprite as one nearest-neighbour contact sheet -- all 28 track frames, or both pressed states -- numbered, with a cell that repeats an earlier one marked `4 = 1`. It also answers what each variant is, how many pixels it differs from the one before it by, and the largest channel change between them: a contact sheet cannot show that two cells differ by four pixels, or by none. Pass differences:false for the image alone. With path, the PNG is written there instead of returned inline.",json!({"id":{"type":"string","description":"The sprite to show, exact or a case-insensitive substring, looked up in the whole skin whatever surface is open -- a recipe draws a slider's 28 frames in studio_atlas, which is the one place the view's own catalogue is a single pseudo-sprite called `sheet`. Omit it for the sprite the view has chosen."},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"differences":{"type":"boolean"},"image":{"type":"boolean","description":"false answers the numbers alone. Whether 28 frames came out 28 different pictures is a question about the numbers, and answering it used to mean rendering a contact sheet and writing it to a file nobody would look at."},"path":{"type":"string"}}),&[]),
  tool("studio_history","The shared human and MCP history, the cursor, and how many steps are retained -- and with cursor, the way back to one of them. Every entry carries the label its transaction was given, so re-running one stage of a recipe is a seek to the entry before it rather than a guessed number of studio_undo calls. The editor's History drawer does exactly this when a row is clicked.",json!({"cursor":{"type":"integer","minimum":0,"description":"Move the document to this entry's cursor, undoing or redoing as far as needed."}}),&[]),
  tool("studio_undo","Undo the last human or MCP drawing transaction.",json!({}),&[]),
  tool("studio_redo","Redo the last undone transaction.",json!({}),&[]),
@@ -357,6 +357,8 @@ fn only_the_pencil(args: &Value) -> bool {
         "text",
         "face",
         "text_scale",
+        "text_spacing",
+        "drawer",
         "curve_bend",
         "grain",
         "grain_size",
@@ -550,6 +552,15 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
         "studio_guides" | "studio_rectangles" => {
             if let Some(id) = args["select"].as_str() {
                 doc.select_guide(id)?
+            } else if args["gaps"] == json!(true) {
+                // Where a sheet is not a picture. Asked before the ink goes
+                // down rather than counted after it: `unsampled_pixels` reports
+                // the same mask one stroke too late.
+                let sheet = args["sheet"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| doc.view.sheet.clone());
+                doc.sheet_gaps(&sheet)?
             } else {
                 // Unfiltered this is fifteen kilobytes, which is most of what
                 // an agent ever reads it for: one sheet, or one sprite.
@@ -733,11 +744,10 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             let crop = view.as_object_mut().and_then(|v| v.remove("crop"));
             let magnify = view.as_object_mut().and_then(|v| v.remove("magnify"));
             let measure = view.as_object_mut().and_then(|v| v.remove("measure"));
-            let spacing = view
+            let asked_spacing = view
                 .as_object_mut()
                 .and_then(|v| v.remove("spacing"))
-                .and_then(|v| v.as_i64())
-                .unwrap_or(1) as i32;
+                .and_then(|v| v.as_i64());
             let _ = &magnify;
             let zoom_out = view.as_object_mut().and_then(|v| v.remove("zoom"));
             if let Some(zoom) = zoom_out.clone() {
@@ -765,6 +775,11 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 anyhow::ensure!(words.len() <= 256, "at most 256 words per measure");
                 let small = doc.view.face == "small";
                 let scale = doc.view.text_scale as i32;
+                // Measure what the brush would actually set, unless this call
+                // names a spacing of its own: a caption measured at a spacing
+                // nothing draws at is the mistake `measure` exists to stop,
+                // made by `measure`.
+                let spacing = asked_spacing.unwrap_or(doc.view.text_spacing as i64) as i32;
                 let mut missing: Vec<char> = Vec::new();
                 let measured: Vec<Value> = words
                     .iter()
@@ -819,6 +834,21 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             if args.get("auto") == Some(&json!(true)) {
                 doc.state(json!({"layers":[],"layer":"auto"}))?
             } else if let Some(solo) = args.get("solo").and_then(Value::as_str) {
+                // Sprite targets are a property of the joined canvas: they clip
+                // a stroke to named sprites and report what fell outside. With
+                // a sheet open there are no sprites to name -- the catalogue is
+                // one pseudo-sprite called `sheet` -- so this used to be
+                // accepted, do nothing anything could see, and answer like an
+                // ordinary success.
+                if doc.view.panel == "atlas" && !doc.layers().iter().any(|l| l.id == solo) {
+                    bail!(
+                        "sprite targets are the joined canvas, and {} is open: \
+                         studio_atlas {{}} to go back to it, or set clip to keep \
+                         a stroke inside one cell of this sheet. studio_states \
+                         takes an id and needs neither.",
+                        doc.view.sheet
+                    );
+                }
                 doc.state(json!({ "layers": [solo] }))?
             } else if args.get("layers").is_some() || args.get("paint_layer").is_some() {
                 doc.state(args.clone())?
@@ -933,6 +963,12 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                     .map(|(k, v)| (k.to_string(), json!(v)))
                     .collect::<serde_json::Map<String, Value>>(),
                 "visualizer_colors": visualizer,
+                // What each of the twenty-four is. The layout is Winamp's and
+                // it is in `skin.rs`, which is where it was invisible from:
+                // `studio_options` took an array of twenty-four strings and
+                // said nothing about which one is the background, which sixteen
+                // are the analyzer and which way up they run.
+                "visualizer_slots": VISUALIZER_SLOTS,
                 "readability": readability,
             });
             if !appeared.is_empty() {
@@ -980,10 +1016,20 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             if !(1..=8).contains(&zoom) {
                 bail!("integer zoom 1..8");
             }
+            // The numbers without the picture. A caller that wants to know
+            // whether twenty-eight frames came out twenty-eight different
+            // pictures does not want a contact sheet, and until this existed it
+            // had to render one and write it to a file it would never look at.
+            if name == "studio_states" && args["image"] == json!(false) {
+                return Ok(text(json!({
+                    "sprite": doc.variant_differences(args["id"].as_str())?,
+                    "revision": doc.revision,
+                })));
+            }
             let im = if name == "studio_study" {
                 super::study::board(&doc, &args)?
             } else if name == "studio_states" {
-                doc.state_sheet()?
+                doc.state_sheet(args["id"].as_str())?
             } else {
                 doc.render()
             };
@@ -1003,7 +1049,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             // A contact sheet cannot show that two cells differ by four pixels,
             // or by none. The numbers can.
             let differences = (name == "studio_states" && args["differences"] != json!(false))
-                .then(|| doc.variant_differences())
+                .then(|| doc.variant_differences(args["id"].as_str()))
                 .transpose()?;
             if let Some(p) = args["path"].as_str() {
                 std::fs::write(p, bytes.get_ref())?;
@@ -1032,6 +1078,36 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
     };
     Ok(text(value))
 }
+/// What each entry of VISCOLOR.TXT is, in order. Winamp's layout: background,
+/// the dot grid, sixteen analyzer bands from the top of a bar down to its foot,
+/// five oscilloscope colours, and the peak dot.
+pub(super) const VISUALIZER_SLOTS: [&str; 24] = [
+    "background",
+    "grid dots",
+    "analyzer 1 (top of the bar)",
+    "analyzer 2",
+    "analyzer 3",
+    "analyzer 4",
+    "analyzer 5",
+    "analyzer 6",
+    "analyzer 7",
+    "analyzer 8",
+    "analyzer 9",
+    "analyzer 10",
+    "analyzer 11",
+    "analyzer 12",
+    "analyzer 13",
+    "analyzer 14",
+    "analyzer 15",
+    "analyzer 16 (foot of the bar)",
+    "oscilloscope 1",
+    "oscilloscope 2",
+    "oscilloscope 3",
+    "oscilloscope 4",
+    "oscilloscope 5",
+    "analyzer peak dot",
+];
+
 /// Where a file actually landed. A relative path is resolved against the
 /// Studio process's directory, not the caller's, so echoing back what was asked
 /// for is how a render ends up somewhere nobody looks.
@@ -1751,6 +1827,24 @@ mod drawing_tests {
             inside.get("crossed_cells").is_none(),
             "a cell painted on its own is not a crossing: {inside}"
         );
+        // And neither is an operation that covers the whole sheet: it has no
+        // cell of its own to have crossed out of. Clearing one to the
+        // transparency key is how a recipe starts a sheet and a wash over the
+        // whole of one is how it starts a background, and both touch every
+        // cell there is -- so both used to answer "crossed into a cell the
+        // player draws nine times", above whichever spill was real.
+        for color in ["#ff00ff", "#203040"] {
+            let whole = result(
+                &shared,
+                "studio_draw",
+                json!({"operations":[{"op":"rect","x":0,"y":0,"width":280,"height":190,
+                                     "color":color}]}),
+            );
+            assert!(
+                whole.get("crossed_cells").is_none(),
+                "clearing or washing a whole sheet is not a crossing: {whole}"
+            );
+        }
     }
 
     /// "Will anything ever show this pixel" is a question about the skin, not
@@ -1781,6 +1875,59 @@ mod drawing_tests {
         assert_eq!(out["unsampled_pixels"], json!(0));
     }
 
+    /// A state sheet is one sprite's variants, and that is a fact about the
+    /// skin rather than about the surface that happens to be open.
+    ///
+    /// A recipe draws twenty-eight slider frames in `studio_atlas` at the
+    /// sheet's own coordinates, because that is where the frames are -- and
+    /// that was the one place it could not then ask whether they had come out
+    /// twenty-eight different pictures. The catalogue in atlas mode is a
+    /// single pseudo-sprite called `sheet`, so the answer was the whole sheet
+    /// as one variant with nothing repeated: a clean report about a question
+    /// nobody asked. Leaving the sheet to ask was the one thing having the
+    /// sheet open was avoiding.
+    #[test]
+    fn a_state_sheet_answers_for_a_named_sprite_whatever_surface_is_open() {
+        let shared = blank();
+        let dir = std::env::temp_dir().join("cranamp-state-sheet-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        result(
+            &shared,
+            "studio_targets",
+            json!({"solo":"main.volume.track"}),
+        );
+        let on_canvas = result(
+            &shared,
+            "studio_states",
+            json!({"path":dir.join("a.png").to_str().unwrap()}),
+        );
+        assert_eq!(on_canvas["sprite"]["id"], "main.volume.track");
+        assert_eq!(on_canvas["sprite"]["of"], json!(28));
+
+        result(&shared, "studio_atlas", json!({"sheet":"volume.bmp"}));
+        let on_sheet = result(
+            &shared,
+            "studio_states",
+            json!({"id":"volume.track","path":dir.join("b.png").to_str().unwrap()}),
+        );
+        assert_eq!(
+            on_sheet["sprite"]["id"], "main.volume.track",
+            "the sprite is the one that was chosen, not the sheet it lives on"
+        );
+        assert_eq!(on_sheet["sprite"]["of"], json!(28));
+        assert_eq!(on_sheet["native"], on_canvas["native"]);
+        // A name that matches nothing, or several things, says what it looked
+        // in rather than answering with the wrong sprite.
+        let missing = call("studio_states", json!({"id":"kettle"}), &shared)
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("in this skin's"), "{missing}");
+        let several = call("studio_states", json!({"id":"track"}), &shared)
+            .unwrap_err()
+            .to_string();
+        assert!(several.contains("name one exactly"), "{several}");
+    }
+
     /// The width of a word is the one piece of the engine's arithmetic every
     /// recipe had to reimplement, and all three reimplemented it the same way
     /// wrong: the pen advances (cell + spacing) * scale, not cell * scale +
@@ -1795,6 +1942,43 @@ mod drawing_tests {
         );
         assert_eq!(out["measured"][0]["width"], json!(19), "the 27-pixel lamp");
         assert_eq!(out["measured"][1]["width"], json!(29), "the 29-pixel lamp");
+        // Which is exactly the width of the cell it goes in, with nothing left
+        // for the plate's own edge. Spacing is the setting that decides
+        // whether a word fits, and until it was on the view the brush and
+        // every operation that did not name one were fixed at a spacing of
+        // one -- so labelling that lamp meant carrying a glyph table in a
+        // build script, which is the mistake the small face exists to stop.
+        let tight = result(
+            &shared,
+            "studio_canvas",
+            json!({"text_spacing":0,"measure":"STEREO"}),
+        );
+        assert_eq!(tight["measured"][0]["width"], json!(24), "at spacing 0");
+        assert_eq!(tight["spacing"], json!(0), "measure reports what it used");
+        // The view keeps it, so the brush and an operation without its own
+        // spacing both get it...
+        let now = result(&shared, "studio_status", json!({}));
+        assert_eq!(now["view"]["text_spacing"], json!(0));
+        let drawn = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"text","x":0,"y":0,"text":"II","color":"#ffffff",
+                                 "face":"small"}]}),
+        );
+        let narrow = drawn["bounds"][2].as_i64().unwrap();
+        // ...and an operation that names its own still wins.
+        let wider = result(
+            &shared,
+            "studio_draw",
+            json!({"operations":[{"op":"text","x":0,"y":20,"text":"II","color":"#ffffff",
+                                 "face":"small","spacing":2}]}),
+        );
+        assert_eq!(
+            wider["bounds"][2].as_i64().unwrap(),
+            narrow + 2,
+            "an operation that names its own spacing still wins"
+        );
+        result(&shared, "studio_canvas", json!({"text_spacing": 1}));
         assert_eq!(out["measured"][2]["width"], json!(14), "a band caption");
         // ...and the advance is where the pen ends, which is a spacing further.
         assert_eq!(out["measured"][0]["advance"], json!(20));
