@@ -632,7 +632,7 @@ impl Document {
                 "pencil", "line", "rect", "ellipse", "lift", "stamp", "glass", "curve", "tuft",
                 "text",
             ]
-                .contains(&view.brush.as_str()),
+            .contains(&view.brush.as_str()),
             "unknown brush"
         );
         anyhow::ensure!(
@@ -748,9 +748,7 @@ impl Document {
                 "the ground under the track list, one row every 11 pixels, tiled \
                  from the top without stretching when the list is taller."
             }
-            "plselection.bmp" => {
-                "one 243x11 track row, drawn under the selected row's text."
-            }
+            "plselection.bmp" => "one 243x11 track row, drawn under the selected row's text.",
             _ => "a new drawing surface",
         }
     }
@@ -942,7 +940,10 @@ impl Document {
         for (sheet, x, y) in self.atlas_writes.keys() {
             let box_ = touched.entry(*sheet).or_insert([*x, *y, 1, 1]);
             let (x0, y0) = (box_[0].min(*x), box_[1].min(*y));
-            let (x1, y1) = ((box_[0] + box_[2]).max(*x + 1), (box_[1] + box_[3]).max(*y + 1));
+            let (x1, y1) = (
+                (box_[0] + box_[2]).max(*x + 1),
+                (box_[1] + box_[3]).max(*y + 1),
+            );
             *box_ = [x0, y0, x1 - x0, y1 - y0];
         }
         let mut view = self.view.clone();
@@ -983,8 +984,10 @@ impl Document {
             }
             let groups: Vec<Vec<usize>> = same.into_values().filter(|g| g.len() > 1).collect();
             if !groups.is_empty() {
-                out.push(json!({"id":layer.id,"of":layer.variants.len(),"groups":groups,
-                                "labels":layer.labels}));
+                out.push(
+                    json!({"id":layer.id,"of":layer.variants.len(),"groups":groups,
+                                "labels":layer.labels}),
+                );
             }
         }
         out
@@ -1286,8 +1289,10 @@ impl Document {
             }
             out.push(entry);
         }
-        Ok(json!({"id":layer.id,"sheet":layer.sheet,"of":layer.variants.len(),
-                  "variants":out}))
+        Ok(
+            json!({"id":layer.id,"sheet":layer.sheet,"of":layer.variants.len(),
+                  "variants":out}),
+        )
     }
     /// Every variant of one sprite, laid out in a grid and numbered.
     pub fn state_sheet(&self) -> Result<RgbaImage> {
@@ -1992,8 +1997,14 @@ impl Document {
                             }
                         }
                         for at in points {
-                            count += self
-                                .paint_line_untracked(at, at, color, layer, all, &paint_layers)?;
+                            count += self.paint_line_untracked(
+                                at,
+                                at,
+                                color,
+                                layer,
+                                all,
+                                &paint_layers,
+                            )?;
                         }
                     }
                     _ => bail!("Unknown drawing operation {kind}"),
@@ -3054,8 +3065,7 @@ impl Document {
             };
             let painted = layer.variants.iter().any(|r| {
                 (r[1]..(r[1] + r[3]).min(image.height())).any(|y| {
-                    (r[0]..(r[0] + r[2]).min(image.width()))
-                        .any(|x| image.get_pixel(x, y).0[3] > 0)
+                    (r[0]..(r[0] + r[2]).min(image.width())).any(|x| image.get_pixel(x, y).0[3] > 0)
                 })
             });
             if !painted && !out.contains(&layer.id) {
@@ -4180,9 +4190,11 @@ mod tests {
         );
 
         // A word, in the face the cell has room for.
-        d.state(json!({"brush":"text","text":"16K","face":"small","text_scale":1,
-                       "color":"#ff0000"}))
-            .unwrap();
+        d.state(
+            json!({"brush":"text","text":"16K","face":"small","text_scale":1,
+                       "color":"#ff0000"}),
+        )
+        .unwrap();
         d.checkpoint();
         d.shape_stroke([50, 50], [50, 50]).unwrap();
         d.finish_stroke();
@@ -4482,7 +4494,10 @@ mod tests {
         let add = guides.iter().find(|g| g.id == "hit.playlist.ADD").unwrap();
         assert!(add.hit && !add.runtime);
         assert_eq!(add.rect, [10, 346, 28, 18]);
-        let eject = guides.iter().find(|g| g.id == "hit.playlist.EJECT").unwrap();
+        let eject = guides
+            .iter()
+            .find(|g| g.id == "hit.playlist.EJECT")
+            .unwrap();
         assert_eq!(eject.rect, [185, 364, 12, 8]);
         // They move with the playlist, like every other footer rectangle.
         let elapsed = guides

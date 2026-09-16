@@ -2784,14 +2784,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                                 state(&d, json!({"curve_bend":(bend + delta).clamp(-100, 100)}))
                             });
                         }
-                        Label(
-                            format!("{}%", v.curve_bend),
-                            170.,
-                            322.,
-                            60.,
-                            12.,
-                            FG,
-                        );
+                        Label(format!("{}%", v.curve_bend), 170., 322., 60., 12., FG);
                     } else if v.brush == "glass" {
                         // Both of the lens' numbers. They have been 1..128 and
                         // 0..32 over MCP from the day the brush landed and were
@@ -2844,10 +2837,9 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                             state(&d, json!({ "text": word.text() }))
                         });
                         Label("FACE".into(), 12., 372., 60., 11., DIM);
-                        for (i, (face, label)) in
-                            [("5x7", "5×7"), ("small", "4×5 small caps")]
-                                .into_iter()
-                                .enumerate()
+                        for (i, (face, label)) in [("5x7", "5×7"), ("small", "4×5 small caps")]
+                            .into_iter()
+                            .enumerate()
                         {
                             let d = shared.clone();
                             Choice(
@@ -2921,7 +2913,12 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                     );
                     Label(
                         if ramping {
-                            format!("{} → {}, {}", v.color, v.ramp_to.clone().unwrap_or_default(), v.ramp_axis)
+                            format!(
+                                "{} → {}, {}",
+                                v.color,
+                                v.ramp_to.clone().unwrap_or_default(),
+                                v.ramp_axis
+                            )
                         } else {
                             "A filled shape runs from the brush colour to this one.".into()
                         },

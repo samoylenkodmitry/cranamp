@@ -360,16 +360,21 @@ pub fn MobileSkinStudio(
                             // started from New blank is drawn sheet by sheet,
                             // and until this existed the touch layout could
                             // start one and had no way to finish it.
-                            TouchButton("Sheets".into(), col, drawer.get() == "Sheets", move || {
-                                drawer.set(
-                                    if drawer.get_non_reactive() == "Sheets" {
-                                        ""
-                                    } else {
-                                        "Sheets"
-                                    }
-                                    .into(),
-                                )
-                            });
+                            TouchButton(
+                                "Sheets".into(),
+                                col,
+                                drawer.get() == "Sheets",
+                                move || {
+                                    drawer.set(
+                                        if drawer.get_non_reactive() == "Sheets" {
+                                            ""
+                                        } else {
+                                            "Sheets"
+                                        }
+                                        .into(),
+                                    )
+                                },
+                            );
                             TouchButton("Parts".into(), col, drawer.get() == "Parts", move || {
                                 drawer.set(
                                     if drawer.get_non_reactive() == "Parts" {
@@ -797,10 +802,11 @@ pub fn MobileSkinStudio(
                                         .background(BG),
                                     text_style(14., FG),
                                 );
-                                for (axis, label) in
-                                    [("", "Gradient off"), ("down", "Gradient down"),
-                                     ("across", "Gradient across")]
-                                {
+                                for (axis, label) in [
+                                    ("", "Gradient off"),
+                                    ("down", "Gradient down"),
+                                    ("across", "Gradient across"),
+                                ] {
                                     let c = d.clone();
                                     let on = if axis.is_empty() {
                                         view.ramp_to.is_none()

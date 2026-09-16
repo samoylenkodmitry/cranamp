@@ -123,6 +123,9 @@ pub(crate) fn glyph(ch: char) -> Option<[u8; 7]> {
 /// drift in exactly the way that puts a word a pixel out of step with itself.
 /// Emits offsets from the word's origin and answers with the characters the
 /// face does not have, which are skipped rather than fatal.
+/// Only the Skin Studio writes text into a sheet, and iOS has no editor to
+/// build, so this and the small face it walks have no caller in that build.
+#[cfg(not(target_os = "ios"))]
 pub(crate) fn layout(
     text: &str,
     small: bool,
@@ -178,6 +181,7 @@ pub(crate) fn layout(
 ///
 /// Five pixels tall has no room for a descender, so there is no lower case: it
 /// is a small-caps face and `a` is drawn as `A` rather than skipped.
+#[cfg(not(target_os = "ios"))]
 pub(crate) fn small_glyph(ch: char) -> Option<[u8; 5]> {
     Some(match ch.to_ascii_uppercase() {
         'A' => [6, 9, 15, 9, 9],
@@ -258,6 +262,7 @@ mod tests {
         }
     }
     #[test]
+    #[cfg(not(target_os = "ios"))]
     fn the_small_face_is_four_wide_and_has_no_lower_case() {
         for ch in ('A'..='Z').chain('0'..='9') {
             let rows = small_glyph(ch).expect("every letter and digit");

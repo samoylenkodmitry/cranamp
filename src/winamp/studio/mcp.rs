@@ -210,9 +210,7 @@ fn reject_unknown_arguments(name: &str, args: &Value) -> Result<()> {
         .filter_map(|field| {
             tools()
                 .into_iter()
-                .find(|t| {
-                    t["name"] != name && t["inputSchema"]["properties"].get(field).is_some()
-                })
+                .find(|t| t["name"] != name && t["inputSchema"]["properties"].get(field).is_some())
                 .map(|t| format!("{field} is {}'s", t["name"].as_str().unwrap_or_default()))
         })
         .collect();
@@ -1116,14 +1114,20 @@ mod drawing_tests {
             refusal.contains("studio_canvas"),
             "say where the field does belong: {refusal}"
         );
-        assert!(refusal.contains("crop"), "and what this one takes: {refusal}");
+        assert!(
+            refusal.contains("crop"),
+            "and what this one takes: {refusal}"
+        );
         // A field nothing has is still named, with no misleading suggestion.
         let refusal = reject_unknown_arguments("studio_undo", &json!({"nonesuch": 1}))
             .unwrap_err()
             .to_string();
         assert!(refusal.contains("nonesuch"), "{refusal}");
-        reject_unknown_arguments("studio_screenshot", &json!({"crop":[0,0,8,8],"panel":"main"}))
-            .unwrap();
+        reject_unknown_arguments(
+            "studio_screenshot",
+            &json!({"crop":[0,0,8,8],"panel":"main"}),
+        )
+        .unwrap();
         // The retired tools are still answered and no longer listed, so they
         // have no schema to check against and are left alone.
         reject_unknown_arguments("studio_layout", &json!({"anything": 1})).unwrap();
