@@ -757,6 +757,11 @@ const BUNDLED_SKINS: &[BundledSkin] = &[
         label: "Catamp Cat Scan (Bundled)",
         bytes: include_bytes!("../../assets/skins/Catamp Cat Scan.wsz"),
     },
+    BundledSkin {
+        id: "seance",
+        label: "Catamp Seance (Bundled)",
+        bytes: include_bytes!("../../assets/skins/Catamp Seance.wsz"),
+    },
 ];
 
 /// A saved skin path naming a bundled skin instead of a file on disk.
@@ -9477,6 +9482,11 @@ mod tests {
         assert_eq!(
             listed[2].path.as_deref(),
             Some(std::path::Path::new("bundled:cat-scan"))
+        );
+        assert_eq!(listed[3].label, "Catamp Seance (Bundled)");
+        assert_eq!(
+            listed[3].path.as_deref(),
+            Some(std::path::Path::new("bundled:seance"))
         );
     }
 
