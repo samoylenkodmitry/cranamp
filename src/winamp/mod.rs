@@ -1,31 +1,14 @@
-//! Winamp skin renderer and Cranamp player surface.
-//!
-//! UI is intentionally split into per-control composables instead of a
-//! monolithic draw pass so interactions and sprite mapping stay explicit.
-
 #![allow(non_snake_case)]
-// Clippy 1.98 diagnoses std's Android TLS fallback even for the const
-// initializers below; desktop Clippy still checks these same declarations.
 #![cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
-
 #[cfg(any(target_arch = "wasm32", test))]
 mod browser_skins;
 mod pixel_grid;
 mod pixel_text;
-mod skin;
+pub mod skin;
 mod sprites;
 #[cfg(not(target_os = "ios"))]
 pub mod studio;
-
-use std::cell::Cell;
-use std::collections::HashSet;
-use std::rc::Rc;
-#[cfg(target_os = "android")]
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
-
+use crate::audio::{self, Track};
 #[cfg(target_os = "android")]
 use cranpose::{rememberAndroidHostWindowState, AndroidHostWindowState};
 use cranpose::{
@@ -43,10 +26,16 @@ use cranpose_ui::{
 };
 use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
-
-use crate::audio::{self, Track};
 use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
+use std::cell::Cell;
+use std::collections::HashSet;
+use std::rc::Rc;
+#[cfg(target_os = "android")]
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 #[cfg(target_os = "android")]
 pub(crate) const ANDROID_OVERLAY_INITIAL_X: i32 = 26;
 #[cfg(target_os = "android")]
@@ -54,7 +43,6 @@ pub(crate) const ANDROID_OVERLAY_INITIAL_Y: i32 = 22;
 #[cfg(target_os = "android")]
 static ANDROID_FLOATING_OVERLAY_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
-
 #[cfg(target_os = "android")]
 pub fn set_android_floating_overlay_enabled(enabled: bool) {
     ANDROID_FLOATING_OVERLAY_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
@@ -62,26 +50,22 @@ pub fn set_android_floating_overlay_enabled(enabled: bool) {
         set_android_winamp_surface_origin(Point::new(0.0, 0.0));
     }
 }
-
 #[cfg(target_os = "android")]
 fn android_floating_overlay_enabled() -> bool {
     ANDROID_FLOATING_OVERLAY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
 }
-
 #[cfg(target_os = "android")]
 fn set_android_winamp_surface_origin(origin: Point) {
     *android_winamp_surface_origin_state()
         .lock()
         .expect("Android Winamp surface origin state poisoned") = origin;
 }
-
 #[cfg(target_os = "android")]
 fn android_winamp_surface_origin() -> Point {
     *android_winamp_surface_origin_state()
         .lock()
         .expect("Android Winamp surface origin state poisoned")
 }
-
 #[cfg(target_os = "android")]
 fn android_winamp_surface_origin_state() -> &'static Mutex<Point> {
     static ORIGIN: OnceLock<Mutex<Point>> = OnceLock::new();
@@ -92,27 +76,22 @@ fn android_winamp_surface_origin_state() -> &'static Mutex<Point> {
         ))
     })
 }
-
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 enum PlaybackState {
     Stopped,
     Playing,
     Paused,
 }
-
-/// A pending file/folder selection driven by `CranposePickerEffect`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct PendingPick {
     folder: bool,
     append: bool,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum PendingDocument {
     ImportPlaylist,
     ExportPlaylist(String),
 }
-
 #[derive(Clone, Debug)]
 struct WinampState {
     closed: bool,
@@ -126,9 +105,6 @@ struct WinampState {
     eq_preset_menu_open: bool,
     settings_open: bool,
     studio_open: bool,
-    /// Cross-device (and same-device) resume cue: `(playlist_index, seconds)`.
-    /// Set when a synced resume point matches a restored track; consumed by the
-    /// next playback tick to seek once the track is playing. See [`crate::sync`].
     pending_resume: Option<(usize, f32)>,
     eq_values: [f32; 11],
     skin_path: Option<String>,
@@ -156,11 +132,9 @@ struct WinampState {
     pending_document: Option<PendingDocument>,
     pending_pick: Option<PendingPick>,
     pending_skin_pick: bool,
-    /// `true` while awaiting the cross-platform writable sync-folder picker.
     #[cfg(not(target_arch = "wasm32"))]
     pending_sync_folder_pick: bool,
 }
-
 impl PartialEq for WinampState {
     fn eq(&self, other: &Self) -> bool {
         self.closed == other.closed
@@ -204,21 +178,16 @@ impl PartialEq for WinampState {
             && self.pending_sync_pick_eq(other)
     }
 }
-
 impl WinampState {
-    /// Cross-device sync is a native feature, so its pending pick only takes
-    /// part in equality where the field exists.
     #[cfg(not(target_arch = "wasm32"))]
     fn pending_sync_pick_eq(&self, other: &Self) -> bool {
         self.pending_sync_folder_pick == other.pending_sync_folder_pick
     }
-
     #[cfg(target_arch = "wasm32")]
     fn pending_sync_pick_eq(&self, _other: &Self) -> bool {
         true
     }
 }
-
 impl Default for WinampState {
     fn default() -> Self {
         Self {
@@ -265,15 +234,11 @@ impl Default for WinampState {
         }
     }
 }
-
 fn initial_winamp_state() -> WinampState {
     let mut state = load_saved_player_state()
         .map(restore_saved_player_state)
         .unwrap_or_default();
     if state.playlist.is_empty() {
-        // The bundled demo files, plus the station as one more entry. Startup
-        // touches the network for neither: the station is an address that is
-        // resolved if and when it is played.
         let mut tracks = audio::demo_playlist_tracks();
         tracks.push(audio::track_from_title_path(
             DEFAULT_STATION_TITLE,
@@ -288,27 +253,21 @@ fn initial_winamp_state() -> WinampState {
     let _ = audio::set_equalizer(state.eq_enabled, state.eq_values);
     state
 }
-
 fn set_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     state.playlist = Rc::new(tracks);
 }
-
 fn playlist_tracks_mut(state: &mut WinampState) -> &mut Vec<Track> {
     Rc::make_mut(&mut state.playlist)
 }
-
 thread_local! {
     static PLAYLIST_SCROLL_DRAG_ACTIVE: Cell<bool> = const { Cell::new(false) };
 }
-
 fn set_playlist_scroll_drag_active(active: bool) {
     PLAYLIST_SCROLL_DRAG_ACTIVE.with(|dragging| dragging.set(active));
 }
-
 fn playlist_scroll_drag_active() -> bool {
     PLAYLIST_SCROLL_DRAG_ACTIVE.with(Cell::get)
 }
-
 #[derive(Clone, Copy, PartialEq)]
 enum WinampDragTarget {
     Inline(MutableState<Point>),
@@ -321,19 +280,16 @@ enum WinampDragTarget {
     },
     NativeGroup,
 }
-
 #[derive(Clone, Copy, PartialEq)]
 enum WinampCloseAction {
     SetStatus,
     CloseApp,
 }
-
 #[derive(Clone, Copy, PartialEq)]
 enum WinampWindowSize {
     Fixed(Size),
     State(WindowState),
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlaylistFooterMenu {
     Add,
@@ -342,33 +298,28 @@ enum PlaylistFooterMenu {
     Misc,
     List,
 }
-
 #[derive(Clone, Copy, PartialEq)]
 struct PlaylistScrollHandles {
     thumb: MutableState<f32>,
     entries: MutableState<f32>,
     dragging: MutableState<bool>,
 }
-
 #[derive(Clone, Copy)]
 struct PlaylistMenuItem {
     label: &'static str,
     action: fn(MutableState<WinampState>),
 }
-
 #[derive(Clone, Copy, PartialEq)]
 struct PressableSpriteLayout {
     sprite_x: f32,
     sprite_y: f32,
     hit_area: SpriteRect,
 }
-
 #[derive(Clone, Copy)]
 struct EqPreset {
     label: &'static str,
     values: [f32; 11],
 }
-
 const MAIN_TITLE_DRAG_HIT_AREA: SpriteRect = (16.0, 0.0, 228.0, 14.0);
 const EQ_TITLE_DRAG_HIT_AREA: SpriteRect = (0.0, 0.0, 264.0, 14.0);
 const MAIN_SKIN_CHOOSER_HIT_AREA: SpriteRect = (249.0, 79.0, 26.0, 33.0);
@@ -460,32 +411,25 @@ const WINAMP_PLAYLIST_TEXT_Y: f32 = 1.0;
 const WINAMP_PLAYLIST_SELECTION_HEIGHT: f32 = 11.0;
 const WINAMP_PLAYLIST_SELECTION_Y_OFFSET: f32 = 0.0;
 const WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH: f32 = 6.0;
-
 #[derive(Clone, Copy, PartialEq)]
 struct SystemTextMetrics {
     font_size: f32,
     line_height: f32,
     y_adjust: f32,
 }
-
 const WINAMP_SYSTEM_TEXT_METRICS: SystemTextMetrics = SystemTextMetrics {
     font_size: WINAMP_SYSTEM_FONT_SIZE,
     line_height: WINAMP_SYSTEM_LINE_HEIGHT,
     y_adjust: WINAMP_SYSTEM_TEXT_Y_ADJUST,
 };
-
 const WINAMP_PLAYLIST_TEXT_METRICS: SystemTextMetrics = SystemTextMetrics {
     font_size: WINAMP_PLAYLIST_FONT_SIZE,
     line_height: WINAMP_PLAYLIST_LINE_HEIGHT,
     y_adjust: WINAMP_PLAYLIST_TEXT_Y_ADJUST,
 };
-
 fn skin_color(rgba: [u8; 4]) -> Color {
-    // Use the same color representation as bitmap and text colors. Converting
-    // these bytes to linear here makes light playlist palettes too dark.
     Color::from_rgba_u8(rgba[0], rgba[1], rgba[2], rgba[3])
 }
-
 #[derive(Clone, Copy, PartialEq)]
 struct ControlRect {
     x: f32,
@@ -494,7 +438,6 @@ struct ControlRect {
     height: f32,
     scale: f32,
 }
-
 impl ControlRect {
     fn new(x: f32, y: f32, width: f32, height: f32, scale: f32) -> Self {
         Self {
@@ -505,26 +448,20 @@ impl ControlRect {
             scale,
         }
     }
-
     fn scaled_width(self) -> f32 {
         scaled(self.width, self.scale)
     }
-
     fn scaled_height(self) -> f32 {
         scaled(self.height, self.scale)
     }
-
     fn scaled_x(self) -> f32 {
         scaled(self.x, self.scale)
     }
-
     fn scaled_y(self) -> f32 {
         scaled(self.y, self.scale)
     }
 }
-
 type WinampSkinState = MutableState<Result<WinampSkin, String>>;
-
 impl WinampWindowSize {
     fn get(self) -> Size {
         match self {
@@ -533,7 +470,6 @@ impl WinampWindowSize {
         }
     }
 }
-
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct WinampTabState {
     player: MutableState<WinampState>,
@@ -541,35 +477,30 @@ pub(crate) struct WinampTabState {
     inline_windows: WinampInlineWindowStates,
     peer_windows: WinampPeerWindowStates,
 }
-
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct WinampInlineWindowStates {
     main: MutableState<Point>,
     equalizer: MutableState<Point>,
     playlist: MutableState<Point>,
 }
-
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct WinampPeerWindowStates {
     main: WindowState,
     equalizer: WindowState,
     playlist: WindowState,
 }
-
 #[derive(Clone, Copy)]
 struct WinampWindowPlacement {
     title: &'static str,
     initial_position: WinampInitialWindowPosition,
     state: WindowState,
 }
-
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
 enum WinampInitialWindowPosition {
     Host(Point),
     Screen(Point),
 }
-
 #[composable]
 pub(crate) fn remember_winamp_tab_state() -> WinampTabState {
     let peer_windows = WinampPeerWindowStates {
@@ -578,7 +509,6 @@ pub(crate) fn remember_winamp_tab_state() -> WinampTabState {
         playlist: rememberWindowState(PLAYLIST_WIDTH, PLAYLIST_HEIGHT),
     };
     remember_saved_window_config(peer_windows);
-
     WinampTabState {
         player: cranpose_core::rememberMutableStateOf(initial_winamp_state),
         detached: cranpose_core::rememberMutableStateOf(native_winamp_windows_available),
@@ -590,7 +520,6 @@ pub(crate) fn remember_winamp_tab_state() -> WinampTabState {
         peer_windows,
     }
 }
-
 #[composable]
 pub(crate) fn WinampTab(tab_state: WinampTabState) {
     let scale = ui_scale();
@@ -607,7 +536,6 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
             return;
         }
     };
-
     Column(
         Modifier::empty()
             .fill_max_size()
@@ -627,11 +555,9 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
                 Modifier::empty().padding(8.0),
                 TextStyle::default(),
             );
-
             if native_available {
                 DockToggleButton(tab_state.detached, detached);
             }
-
             if !detached {
                 WinampInlineStage(
                     skin.clone(),
@@ -654,7 +580,6 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
         },
     );
 }
-
 fn remember_winamp_skin(_state: MutableState<WinampState>) -> WinampSkinState {
     let skin_state = cranpose_core::rememberMutableStateOf(bundled_skin);
     #[cfg(not(target_arch = "wasm32"))]
@@ -696,7 +621,6 @@ fn remember_winamp_skin(_state: MutableState<WinampState>) -> WinampSkinState {
     }
     skin_state
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn load_skin_file_background(
     state: MutableState<WinampState>,
@@ -732,15 +656,11 @@ fn load_skin_file_background(
         },
     );
 }
-
-/// A skin compiled into the binary. The first is what a fresh install wears.
 struct BundledSkin {
-    /// Stable, so a saved `bundled:` path survives a rename of the label.
     id: &'static str,
     label: &'static str,
     bytes: &'static [u8],
 }
-
 const BUNDLED_SKINS: &[BundledSkin] = &[
     BundledSkin {
         id: "silverplay",
@@ -767,70 +687,51 @@ const BUNDLED_SKINS: &[BundledSkin] = &[
         label: "Catamp Salvage (Bundled)",
         bytes: include_bytes!("../../assets/skins/Catamp Salvage.wsz"),
     },
+    BundledSkin {
+        id: "freefall",
+        label: "Catamp Freefall (Bundled)",
+        bytes: include_bytes!("../../assets/skins/Catamp Freefall.wsz"),
+    },
 ];
-
-/// A saved skin path naming a bundled skin instead of a file on disk.
 const BUNDLED_PREFIX: &str = "bundled:";
-
 fn bundled_skin_entry(path: &str) -> Option<&'static BundledSkin> {
     let id = path.strip_prefix(BUNDLED_PREFIX)?;
     BUNDLED_SKINS.iter().find(|skin| skin.id == id)
 }
-
-/// A saved skin path the Studio can open. A bundled skin has no file, so the
-/// Studio starts from its own document, exactly as it does with no skin saved.
-/// Only where the Studio itself is built: iOS has no editor to hand it to.
 #[cfg(not(target_os = "ios"))]
 fn studio_skin_path(path: Option<String>) -> Option<String> {
     path.filter(|path| bundled_skin_entry(path).is_none())
 }
-
 fn bundled_skin() -> Result<WinampSkin, String> {
     load_skin(BUNDLED_SKINS[0].bytes).map_err(|err| format!("{err:#}"))
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn load_skin_file(path: &std::path::Path) -> Result<WinampSkin, String> {
     let bytes = std::fs::read(path).map_err(|error| format!("{error}"))?;
     load_skin(&bytes).map_err(|err| format!("{err:#}"))
 }
-
 const BUNDLED_SKIN_LABEL: &str = "Catamp Silverplay (Bundled)";
-
-/// A skin entry shown in the Settings skin list. `path` is `None` for the
-/// built-in bundled skin and `Some` for a `.wsz`/`.zip` file copied into the
-/// library directory.
 #[derive(Clone, PartialEq)]
 struct LibrarySkin {
     label: String,
     path: Option<std::path::PathBuf>,
 }
-
-/// On-disk skin library: `~/.config/cranamp/skins` (desktop) or the app config
-/// dir under the Android bridge directory. Added skins are copied here so they
-/// persist and appear in the Settings list.
 #[cfg(not(target_arch = "wasm32"))]
 fn skins_library_dir() -> std::path::PathBuf {
     app_config_dir().join("skins")
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn ensure_skins_library_dir() -> std::io::Result<std::path::PathBuf> {
     let dir = skins_library_dir();
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
-
-/// Lists every applyable skin: the bundled skin first, then each `.wsz`/`.zip`
-/// in the library directory sorted by file name.
 fn list_library_skins() -> Vec<LibrarySkin> {
     let mut skins: Vec<LibrarySkin> = BUNDLED_SKINS
         .iter()
         .enumerate()
         .map(|(i, skin)| LibrarySkin {
             label: skin.label.to_string(),
-            // The first keeps `None`, so player state written before there was
-            // a second bundled skin still resolves to the one it meant.
             path: (i > 0).then(|| std::path::PathBuf::from(format!("{BUNDLED_PREFIX}{}", skin.id))),
         })
         .collect();
@@ -864,7 +765,6 @@ fn list_library_skins() -> Vec<LibrarySkin> {
     );
     skins
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn is_skin_archive(path: &std::path::Path) -> bool {
     matches!(
@@ -875,8 +775,6 @@ fn is_skin_archive(path: &std::path::Path) -> bool {
         Some("wsz") | Some("zip")
     )
 }
-
-/// Keeps a validated archive in the platform library; persistence errors are visible.
 fn store_skin_in_library(bytes: &[u8], file_name: &str) -> Result<String, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -889,9 +787,6 @@ fn store_skin_in_library(bytes: &[u8], file_name: &str) -> Result<String, String
         browser_skins::save(cranpose_services::preferences().as_ref(), file_name, bytes)
     }
 }
-
-/// Copies picked skin bytes into the library directory so the skin persists and
-/// shows up in the Settings list. Returns the stored path.
 #[cfg(not(target_arch = "wasm32"))]
 fn copy_into_library(bytes: &[u8], file_name: &str) -> std::io::Result<std::path::PathBuf> {
     let dir = ensure_skins_library_dir()?;
@@ -899,9 +794,6 @@ fn copy_into_library(bytes: &[u8], file_name: &str) -> std::io::Result<std::path
     std::fs::write(&path, bytes)?;
     Ok(path)
 }
-
-/// Strips any directory components from a picked skin name and forces a
-/// `.wsz`/`.zip` extension so the copy lands as a single library file.
 fn sanitize_skin_file_name(file_name: &str) -> String {
     let base = file_name
         .rsplit(['/', '\\'])
@@ -920,9 +812,6 @@ fn sanitize_skin_file_name(file_name: &str) -> String {
         format!("{cleaned}.wsz")
     }
 }
-
-/// Applies a library skin: loads the file in the background (and persists its
-/// path) for a real skin, or restores the bundled skin for the `None` entry.
 fn apply_library_skin(
     state: MutableState<WinampState>,
     skin_state: WinampSkinState,
@@ -983,15 +872,8 @@ fn apply_library_skin(
         },
     }
 }
-
-/// The station Cranamp offers out of the box.
-///
-/// It is a playlist *entry*, not playlist *content*: only this address ships,
-/// and nothing is fetched until someone presses play on it. A track added on
-/// the host therefore reaches every client with no build and no release.
 const DEFAULT_STATION_URL: &str = "https://fm.dmitrysamoylenko.in/cranamp-fm-playlist.m3u";
 const DEFAULT_STATION_TITLE: &str = "Cranamp FM";
-
 #[composable]
 fn WinampRuntimeEffects(
     state: MutableState<WinampState>,
@@ -1011,24 +893,6 @@ fn WinampRuntimeEffects(
     #[cfg(not(target_arch = "wasm32"))]
     SyncEffect(state);
 }
-
-/// Opens a picker on startup when the launch arguments ask for one.
-///
-/// Which providers the iOS document picker enables is decided by the content
-/// type the app asks for, and the app cannot read that decision back -- the
-/// picker is a system view and offers no list of what it greyed out. Looking at
-/// the dialog is the only check there is, and a UI test is the only way to look
-/// at it without a person holding the phone. `XCUIApplication`'s
-/// `launchArguments` arrive as process arguments, which is exactly where
-/// `launch_args` reads them from on iOS, so a test can start the app with the
-/// picker already open and assert on what it shows.
-///
-/// Deliberately not gated on `is_debuggable`: the answer only counts for the
-/// build that ships, and a release build is not debuggable. Gating it would
-/// mean checking a different binary from the one on the phone. Nothing is
-/// exposed by leaving it in -- iOS gives no way to pass arguments to an app
-/// launched from the home screen, and the worst a passed argument can do is
-/// open a file picker the user can cancel.
 #[composable]
 fn LaunchArgPickEffect(state: MutableState<WinampState>) {
     cranpose_core::remember(move || {
@@ -1040,7 +904,6 @@ fn LaunchArgPickEffect(state: MutableState<WinampState>) {
         }
     });
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 #[composable]
 fn PlaylistDurationHydrationEffect(state: MutableState<WinampState>) {
@@ -1048,16 +911,9 @@ fn PlaylistDurationHydrationEffect(state: MutableState<WinampState>) {
         hydrate_playlist_durations_background(state);
     });
 }
-
 #[cfg(target_arch = "wasm32")]
 #[composable]
 fn PlaylistDurationHydrationEffect(_state: MutableState<WinampState>) {}
-
-/// Drives playlist import/export through keyed launchers, the same
-/// composition-owned pattern as `CranposePickerEffect`: the request key is
-/// what a grant comes back to, so a chooser that outlives the activity — or
-/// the whole process — is redelivered to the launcher that asked for it,
-/// rather than being dropped by an abandoned `LaunchedEffectAsync` future.
 #[composable]
 fn DocumentPickerEffect(state: MutableState<WinampState>) {
     let import_playlist =
@@ -1068,32 +924,21 @@ fn DocumentPickerEffect(state: MutableState<WinampState>) {
         cranpose_services::rememberSaveDocumentLauncher("cranamp.export-playlist", move |result| {
             receive_playlist_export(state, result)
         });
-
     let pending = state.get().pending_document;
-    cranpose_core::LaunchedEffect(pending.clone(), move |_scope| {
-        match pending {
-            None => {}
-            Some(PendingDocument::ImportPlaylist) => {
-                let options = cranpose::FilePickerOptions::default()
-                    .with_title("Import playlist")
-                    .with_filter(cranpose::FileFilter::new("Playlist", &["m3u", "m3u8"]));
-                import_playlist.launch(options);
-            }
-            Some(PendingDocument::ExportPlaylist(_)) => {
-                // The request carries only the destination's name and MIME
-                // type: saving opens a sink on whatever the user chose and
-                // streams to it, rather than handing the whole document to
-                // the picker up front, so the bytes never have to exist
-                // twice. The text itself is read back from `pending_document`
-                // once the sink is granted (see `receive_playlist_export`).
-                let request = cranpose::SaveDocumentRequest::new("playlist.m3u", "audio/x-mpegurl");
-                export_playlist.launch(request);
-            }
+    cranpose_core::LaunchedEffect(pending.clone(), move |_scope| match pending {
+        None => {}
+        Some(PendingDocument::ImportPlaylist) => {
+            let options = cranpose::FilePickerOptions::default()
+                .with_title("Import playlist")
+                .with_filter(cranpose::FileFilter::new("Playlist", &["m3u", "m3u8"]));
+            import_playlist.launch(options);
+        }
+        Some(PendingDocument::ExportPlaylist(_)) => {
+            let request = cranpose::SaveDocumentRequest::new("playlist.m3u", "audio/x-mpegurl");
+            export_playlist.launch(request);
         }
     });
 }
-
-/// Takes a chosen file and imports it as the playlist.
 fn receive_playlist_import(
     state: MutableState<WinampState>,
     result: cranpose_services::LauncherResult<Option<cranpose::ContentHandle>>,
@@ -1127,10 +972,6 @@ fn receive_playlist_import(
         }),
     }
 }
-
-/// Writes the pending playlist text to a chosen save destination. The text
-/// lives in `pending_document`, not in the launcher's request, so it is read
-/// back here rather than threaded through the picker.
 fn receive_playlist_export(
     state: MutableState<WinampState>,
     result: cranpose_services::LauncherResult<Option<cranpose::ContentSinkRef>>,
@@ -1164,24 +1005,11 @@ fn receive_playlist_export(
         }),
     }
 }
-
-/// Plays audio another application hands to Cranamp: a file named on the command
-/// line ("Open with" on desktop), a file dropped on the window or the web
-/// canvas, or an Android share. The framework publishes every one of those into
-/// a single inbox and backlogs whatever arrives before a collector exists, so a
-/// file passed at launch is not lost to startup ordering.
-///
-/// Items append rather than replace — a drop onto a running player must not
-/// discard the playlist — and playback starts only when nothing is already
-/// playing, so opening a file while stopped plays it while dropping one
-/// mid-song just queues it.
 #[composable]
 fn IncomingContentEffect(state: MutableState<WinampState>) {
     let incoming = cranpose_services::rememberIncomingContent();
     cranpose_core::CollectEvents(incoming, (), move |item| {
         let name = item.display_name();
-        // A `Uri` item resolves through the content resolver, which returns
-        // nothing if the provider that granted it is already gone.
         let Some(content) = item.content() else {
             log::warn!(target: "cranamp::incoming", "no readable content for {name:?}");
             state.update(|s| s.status = "Cannot Open Item".to_string());
@@ -1198,12 +1026,6 @@ fn IncomingContentEffect(state: MutableState<WinampState>) {
         });
     });
 }
-
-/// Appends handed-over tracks, starting the first of them when the player is
-/// idle. Unlike [`append_playlist_and_play`], which only starts on an empty
-/// playlist, this also plays into a playlist restored from a previous run —
-/// opening a file and hearing nothing because old tracks were restored is not
-/// what "Open with" means.
 fn receive_incoming_tracks(state: MutableState<WinampState>, tracks: Vec<Track>) {
     let snapshot = state.get_non_reactive();
     let idle = snapshot.playback != PlaybackState::Playing;
@@ -1219,14 +1041,6 @@ fn receive_incoming_tracks(state: MutableState<WinampState>, tracks: Vec<Track>)
         state.update(move |s| s.status = format!("Added {added} Track(s)"));
     }
 }
-
-/// The directory a picked playlist came from, when the provider named one
-/// that exists on this filesystem.
-///
-/// Relative entries can only be resolved when the playlist's own location is a
-/// real directory. A `content://` URI, an iOS security-scoped URL or a browser
-/// blob name is not one, and those deliberately fall back to leaving entries
-/// as written rather than inventing a path that would not open.
 fn playlist_source_directory(source: &str) -> Option<std::path::PathBuf> {
     let path = std::path::Path::new(source);
     if !path.is_absolute() {
@@ -1236,7 +1050,6 @@ fn playlist_source_directory(source: &str) -> Option<std::path::PathBuf> {
         .filter(|parent| parent.is_dir())
         .map(std::path::Path::to_path_buf)
 }
-
 fn apply_imported_playlist(state: MutableState<WinampState>, text: &str, source: &str) {
     let base_directory = playlist_source_directory(source);
     let tracks = parse_m3u_playlist(
@@ -1261,16 +1074,6 @@ fn apply_imported_playlist(state: MutableState<WinampState>, text: &str, source:
     });
     hydrate_playlist_durations_background(state);
 }
-
-/// Drives the Cranpose file/folder launchers when a selection is requested (see
-/// `request_pick`), then loads the chosen audio into the playlist. Works on
-/// desktop, Android (SAF) and iOS (UIDocumentPicker), so folders served by system
-/// providers such as a mounted WebDAV share can be opened anywhere.
-///
-/// One launcher per request shape, because the request key *is* the request: a
-/// grant that comes back after the activity — or the whole process — was
-/// destroyed is delivered to the launcher whose key asked for it, and that
-/// launcher already knows whether it was replacing or appending.
 #[composable]
 fn CranposePickerEffect(state: MutableState<WinampState>) {
     let folder_replace = cranpose_services::rememberOpenFolderLauncher(
@@ -1289,7 +1092,6 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
         cranpose_services::rememberOpenFilesLauncher("cranamp.open-files.append", move |result| {
             receive_files(state, result, true)
         });
-
     let pending = state.get().pending_pick;
     cranpose_core::LaunchedEffect(pending, move |_scope| {
         let Some(request) = pending else {
@@ -1308,8 +1110,6 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
         }
     });
 }
-
-/// Takes a chosen folder and walks it into the playlist.
 fn receive_folder(
     state: MutableState<WinampState>,
     result: cranpose_services::LauncherResult<Option<cranpose::ContentFolderRef>>,
@@ -1332,8 +1132,6 @@ fn receive_folder(
         }),
     }
 }
-
-/// Takes a chosen file and loads it into the playlist.
 fn receive_files(
     state: MutableState<WinampState>,
     result: cranpose_services::LauncherResult<Vec<cranpose::ContentHandle>>,
@@ -1361,9 +1159,6 @@ fn receive_files(
         }),
     }
 }
-
-/// Puts a selection into the playlist, replacing or appending as the request
-/// asked.
 fn load_recovered_tracks(state: MutableState<WinampState>, tracks: Vec<Track>, append: bool) {
     if tracks.is_empty() {
         state.update(|s| s.status = "No audio files found".to_string());
@@ -1373,12 +1168,6 @@ fn load_recovered_tracks(state: MutableState<WinampState>, tracks: Vec<Track>, a
         replace_playlist_and_play(state, tracks);
     }
 }
-
-/// Drains an already-resolved [`cranpose::ContentStream`] into the playlist as
-/// the provider yields files, until the walk finishes. Shared by the live folder
-/// pick and the recovered one, which both receive a stream the same way — one
-/// from a fresh SAF prompt, one re-walked from a grant the framework recovered
-/// after the activity was destroyed mid-pick.
 async fn consume_folder_stream(
     state: MutableState<WinampState>,
     stream: cranpose::ContentStreamRef,
@@ -1386,20 +1175,12 @@ async fn consume_folder_stream(
 ) {
     state.update(|s| s.status = "Scanning folder".to_string());
     log::info!(target: "cranamp::picker", "folder stream started (append={append})");
-
-    // The provider wakes this future when it has the next file, so the walk
-    // costs nothing while it is quiet. Polling a ready queue once a frame
-    // instead would wake the whole application sixty times a second for as long
-    // as the folder took to walk, whether or not anything had been discovered.
-    // Tracks are handed over in batches so a huge folder starts playing before
-    // the walk finishes.
     const BATCH: usize = 24;
     let replace = !append;
     let mut started = false;
     let mut total = 0usize;
     let mut seen = 0usize;
     let mut batch: Vec<Track> = Vec::with_capacity(BATCH);
-
     let flush = |batch: &mut Vec<Track>, total: &mut usize, started: &mut bool| {
         if batch.is_empty() {
             return;
@@ -1414,7 +1195,6 @@ async fn consume_folder_stream(
         }
         *started = true;
     };
-
     loop {
         match stream.next().await {
             Ok(Some(entry)) => {
@@ -1423,9 +1203,6 @@ async fn consume_folder_stream(
                 if let Some(track) = audio::track_from_picked_file(entry).await {
                     batch.push(track);
                 } else {
-                    // Surface why a discovered file was skipped — a provider that
-                    // reports display names without extensions (some WebDAV
-                    // shares) would otherwise silently drop every track.
                     log::info!(target: "cranamp::picker", "skipped non-audio entry: {name:?}");
                 }
                 if batch.len() >= BATCH {
@@ -1458,19 +1235,12 @@ async fn consume_folder_stream(
         }
     }
 }
-
-/// Drives the skin picker through a keyed launcher, the same
-/// composition-owned pattern as `CranposePickerEffect`, so picking a `.wsz`
-/// never blocks the event loop with a nested modal and a grant that outlives
-/// the activity is redelivered rather than dropped. The chosen file is read
-/// as bytes and applied directly.
 #[composable]
 fn SkinPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinState) {
     let skin_picker =
         cranpose_services::rememberOpenFileLauncher("cranamp.open-skin", move |result| {
             receive_skin_pick(state, skin_state, result)
         });
-
     let pending = state.get().pending_skin_pick;
     cranpose_core::LaunchedEffect(pending, move |_scope| {
         if !pending {
@@ -1482,8 +1252,6 @@ fn SkinPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinStat
         skin_picker.launch(options);
     });
 }
-
-/// Takes a chosen skin file and applies it.
 fn receive_skin_pick(
     state: MutableState<WinampState>,
     skin_state: WinampSkinState,
@@ -1496,7 +1264,6 @@ fn receive_skin_pick(
                 match entry.read_all().await {
                     Ok(bytes) => {
                         state.update(|s| s.pending_skin_pick = false);
-                        // Validate before writing: a bad import must never overwrite a good skin.
                         if let Err(error) = load_skin(&bytes) {
                             state.update(|s| s.status = format!("Skin Load Failed: {error:#}"));
                             return;
@@ -1536,23 +1303,8 @@ fn receive_skin_pick(
         }),
     }
 }
-
-/// The browser page is the stage, not a frame drawn around the player.
-///
-/// This used to ask the host to shrink its surface to the stacked player's
-/// exact size. That is what kept the web build a 275-pixel column: the canvas
-/// was resized to the artwork, so there was nowhere for a window to be moved
-/// to, and any page CSS that grew the canvas afterwards only stretched the
-/// smaller surface across it. The browser now keeps the whole viewport and the
-/// player floats on it, exactly as it does on the desktop.
 #[composable]
 fn WebSurfaceSizeEffect(_state: MutableState<WinampState>) {}
-
-/// Follows the open item: where it is, and when it ends.
-///
-/// Both are published by the media backend as they happen, so there is nothing
-/// here on a timer. A track that reaches its end says so, rather than being
-/// found to have ended by the next sample.
 #[composable]
 fn PlaybackProgressEffect(state: MutableState<WinampState>) {
     let progress = cranpose_services::rememberPlaybackProgress();
@@ -1560,10 +1312,6 @@ fn PlaybackProgressEffect(state: MutableState<WinampState>) {
     let position = progress.get();
     let media = media_state.get();
     let ended = matches!(media, cranpose_services::PlaybackState::Ended);
-    // A refusal arrives here and nowhere else. Opening an item only submits
-    // the request -- whether the backend can decode the container is settled
-    // later, off this thread -- so the call that started the track returns
-    // `Ok` and has nothing to report.
     let failure = match &media {
         cranpose_services::PlaybackState::Failed(error) => Some(error.to_string()),
         _ => None,
@@ -1576,7 +1324,6 @@ fn PlaybackProgressEffect(state: MutableState<WinampState>) {
         None => sync_playback_progress(state, &position, ended),
     });
 }
-
 #[composable]
 fn PlayerStatePersistence(state: MutableState<WinampState>) {
     let last_saved = cranpose_core::remember(|| None::<SavedPlayerState>);
@@ -1589,8 +1336,6 @@ fn PlayerStatePersistence(state: MutableState<WinampState>) {
         let config = SavedPlayerState::from_state(&snapshot);
         Some((key, config))
     };
-    // When player state changes, also publish the playlist to the sync folder.
-    // `set_playlist` no-ops when the list is unchanged, so this is cheap.
     #[cfg(not(target_arch = "wasm32"))]
     let sync_tracks = config.as_ref().map(|_| sync_tracks_from_state(&snapshot));
     cranpose_core::SideEffect(move || {
@@ -1608,9 +1353,6 @@ fn PlayerStatePersistence(state: MutableState<WinampState>) {
         });
     });
 }
-
-/// Builds the cross-device playlist payload (title + path/URI + duration) from
-/// the current playlist, dropping entries with no usable path.
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_tracks_from_state(state: &WinampState) -> Vec<crate::sync::SyncTrack> {
     state
@@ -1626,9 +1368,6 @@ fn sync_tracks_from_state(state: &WinampState) -> Vec<crate::sync::SyncTrack> {
         })
         .collect()
 }
-
-/// Records the current playback position for cross-device resume. Cheap (mutates
-/// in-memory state under a brief lock); the worker debounces the folder write.
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_record_resume(state: &WinampState) {
     let Some(track) = state
@@ -1647,9 +1386,6 @@ fn sync_record_resume(state: &WinampState) {
         state.elapsed_seconds,
     );
 }
-
-/// Records a completed play into this device's history (counts merge across
-/// devices by track fingerprint).
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_record_play(state: &WinampState) {
     let Some(track) = state
@@ -1663,9 +1399,6 @@ fn sync_record_play(state: &WinampState) {
     };
     crate::sync::runtime::record_play(path, &track.title, track.duration_seconds);
 }
-
-/// Seeks to a pending resume position once the cued track is playing and its
-/// duration is known (needed to convert seconds → fraction for `seek_fraction`).
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_apply_pending_resume(state: MutableState<WinampState>, snap: &WinampState) {
     let Some((index, seconds)) = snap.pending_resume else {
@@ -1689,16 +1422,11 @@ fn sync_apply_pending_resume(state: MutableState<WinampState>, snap: &WinampStat
         s.position = fraction;
     });
 }
-
-/// Cues the newest resume point onto the matching restored track. The merge has
-/// already chosen the most recent across all devices (this one included), so it
-/// also gives same-device "continue where I left off" on relaunch.
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_try_apply_resume(state: MutableState<WinampState>, merged: &crate::sync::MergedSync) {
     let Some(resume) = merged.resume.as_ref() else {
         return;
     };
-    // Skip near-start / just-finished positions — nothing worth resuming.
     if resume.position_s < 5.0 {
         return;
     }
@@ -1723,15 +1451,10 @@ fn sync_try_apply_resume(state: MutableState<WinampState>, merged: &crate::sync:
         s.status = format!("Resume available at {stamp}");
     });
 }
-
-/// Native effect: starts the background sync worker, applies the newest resume
-/// point to the restored playlist exactly once after launch, and owns the
-/// writable sync-folder pick.
 #[cfg(not(target_arch = "wasm32"))]
 #[composable]
 fn SyncEffect(state: MutableState<WinampState>) {
     cranpose_core::remember(crate::sync::runtime::start_worker);
-
     cranpose_core::LaunchedEffectAsync(0u8, move |_scope| {
         Box::pin(async move {
             if let Some(merged) = crate::sync::runtime::first_merged().wait().await {
@@ -1739,15 +1462,10 @@ fn SyncEffect(state: MutableState<WinampState>) {
             }
         })
     });
-
-    // The request key is what the grant comes back to, so a SAF prompt that
-    // outlives the activity - or the whole process - is redelivered to this
-    // callback. The application marks nothing on disk and polls no inbox.
     let folder =
         cranpose_services::rememberWritableFolderLauncher("cranamp.sync-folder", move |result| {
             receive_sync_folder(state, result)
         });
-
     let pending_folder_pick = state.get().pending_sync_folder_pick;
     cranpose_core::LaunchedEffect(pending_folder_pick, move |_scope| {
         if pending_folder_pick {
@@ -1755,9 +1473,6 @@ fn SyncEffect(state: MutableState<WinampState>) {
         }
     });
 }
-
-/// Applies a chosen sync folder. The probe and first flush are folder I/O that
-/// can hit a network mount, so they run off the UI executor.
 #[cfg(not(target_arch = "wasm32"))]
 fn receive_sync_folder(
     state: MutableState<WinampState>,
@@ -1781,16 +1496,9 @@ fn receive_sync_folder(
         s.status = status.clone();
     });
 }
-
-/// A track the backend would not play, said out loud.
-///
-/// Without this the screen keeps the refused track loaded, its bitrate filled
-/// in and its clock at zero, which is indistinguishable from a player that has
-/// stopped working -- and is how "CranAmp plays no music" was reported.
 fn sync_playback_failure(state: MutableState<WinampState>, error: &str) {
     state.update(|s| apply_playback_failure_in_state(s, error));
 }
-
 fn apply_playback_failure_in_state(state: &mut WinampState, error: &str) {
     state.playback = PlaybackState::Stopped;
     state.elapsed_seconds = 0.0;
@@ -1804,7 +1512,6 @@ fn apply_playback_failure_in_state(state: &mut WinampState, error: &str) {
         None => format!("Cannot Play: {error}"),
     };
 }
-
 fn sync_playback_progress(
     state: MutableState<WinampState>,
     progress: &cranpose_services::PlaybackProgress,
@@ -1814,7 +1521,6 @@ fn sync_playback_progress(
     if snapshot.playback != PlaybackState::Playing || playlist_scroll_drag_active() {
         return;
     }
-
     {
         {
             let elapsed_seconds = progress.position.as_secs_f32();
@@ -1850,7 +1556,6 @@ fn sync_playback_progress(
         }
     }
 }
-
 fn normalized_elapsed_seconds(elapsed: f32, duration: Option<f32>) -> f32 {
     let elapsed = elapsed.max(0.0);
     let Some(duration) = duration.filter(|duration| *duration > 0.0) else {
@@ -1858,47 +1563,26 @@ fn normalized_elapsed_seconds(elapsed: f32, duration: Option<f32>) -> f32 {
     };
     elapsed.min(duration)
 }
-
 fn progress_fraction(elapsed: f32, duration: Option<f32>) -> f32 {
     duration
         .filter(|duration| *duration > 0.0)
         .map(|duration| (elapsed / duration).clamp(0.0, 1.0))
         .unwrap_or(0.0)
 }
-
-/// The widget embedded in a page. On the web that is the stacked
-/// presentation; off it, this entry point only exists so the same call
-/// compiles for a native test, where the desktop surface is what there is.
 #[composable]
 pub fn WinampWidgetApp() {
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
     {
         WinampSurfaceApp();
     }
-
     #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
     {
         WinampSurfaceApp();
     }
 }
-
-/// Every touch presentation of the player: the three windows stacked, scaled
-/// to fill the surface they were given.
-///
-/// Android, iOS and the web widget all want this and all had their own copy of
-/// it -- except iOS, which had none and fell back to the desktop's floating
-/// windows on a black screen. What genuinely differs between them is two
-/// things, and neither is the stacking: which layout policy applies, and
-/// whether a window can be dragged. Both are named seams below.
-/// The in-app editor, for the surfaces that cannot open a second window:
-/// Android, the browser, and the desktop touch preview. Composes nothing unless
-/// the player asked for it, but is always called so the session map below keeps
-/// its identity across trips back to playback.
 #[cfg(not(target_os = "ios"))]
 #[composable]
 fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinState) {
-    // Keep editable documents and their undo stacks alive while the player
-    // is visible. Opening another selected skin gets its own session.
     let sessions = cranpose_core::remember(|| {
         std::collections::BTreeMap::<Option<String>, studio::SharedDocument>::new()
     });
@@ -1953,7 +1637,6 @@ fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinS
         }
     }
 }
-
 #[composable]
 pub fn WinampStackedApp() {
     let tab_state = remember_winamp_tab_state();
@@ -1973,7 +1656,6 @@ pub fn WinampStackedApp() {
             return;
         }
     };
-
     Box(
         Modifier::empty()
             .fill_max_size()
@@ -1999,20 +1681,11 @@ pub fn WinampStackedApp() {
                     layout,
                     drag,
                 );
-
-                // SettingsModal must live INSIDE the BoxWithConstraints subcompose
-                // layer: a SubcomposeLayout paints its content over later siblings,
-                // so a modal mounted as a sibling after this block renders underneath
-                // the stage and is invisible on real devices. Inside the closure,
-                // source order (last child = on top) applies again.
                 SettingsModal(tab_state.player, skin_state, display_color, ui_scale());
             });
         },
     );
 }
-
-/// Android alone can float the stack in a host window over other apps, so it
-/// alone has a second layout to choose between.
 #[cfg(target_os = "android")]
 fn stacked_layout(
     available_width: f32,
@@ -2033,9 +1706,6 @@ fn stacked_layout(
         fullscreen_stacked_layout(available_width, available_height, snapshot, fallback_scale)
     }
 }
-
-/// The web widget is measured by the canvas the page gave it, which is not
-/// what its own constraints describe.
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn stacked_layout(
     _available_width: f32,
@@ -2045,7 +1715,6 @@ fn stacked_layout(
 ) -> StackedLayout {
     web_stacked_layout(snapshot)
 }
-
 #[cfg(not(any(target_os = "android", all(feature = "web", target_arch = "wasm32"))))]
 fn stacked_layout(
     available_width: f32,
@@ -2055,9 +1724,6 @@ fn stacked_layout(
 ) -> StackedLayout {
     fullscreen_stacked_layout(available_width, available_height, snapshot, fallback_scale)
 }
-
-/// How a stacked window answers a drag: nowhere, or by moving the Android host
-/// window it is drawn into.
 #[derive(Clone, Copy, PartialEq)]
 enum StackedDrag {
     Fixed,
@@ -2067,7 +1733,6 @@ enum StackedDrag {
         overlay_position: MutableState<Point>,
     },
 }
-
 impl StackedDrag {
     fn target(self, position: Point) -> WinampDragTarget {
         match self {
@@ -2084,9 +1749,6 @@ impl StackedDrag {
         }
     }
 }
-
-/// Android also publishes where the stack sits, because its pointer events
-/// arrive in screen space and have to be brought back into the surface.
 #[cfg(target_os = "android")]
 #[composable]
 fn stacked_drag(layout: StackedLayout, snapshot: WinampState) -> StackedDrag {
@@ -2118,7 +1780,6 @@ fn stacked_drag(layout: StackedLayout, snapshot: WinampState) -> StackedDrag {
             let _ = host_window.set_size(host_window_size);
         }
     });
-
     if overlay_enabled {
         StackedDrag::Host {
             host_window,
@@ -2128,13 +1789,11 @@ fn stacked_drag(layout: StackedLayout, snapshot: WinampState) -> StackedDrag {
         StackedDrag::Fixed
     }
 }
-
 #[cfg(not(target_os = "android"))]
 #[composable]
 fn stacked_drag(_layout: StackedLayout, _snapshot: WinampState) -> StackedDrag {
     StackedDrag::Fixed
 }
-
 #[composable]
 pub fn WinampSurfaceApp() {
     let tab_state = remember_winamp_tab_state();
@@ -2154,7 +1813,6 @@ pub fn WinampSurfaceApp() {
             return;
         }
     };
-
     Box(
         Modifier::empty()
             .fill_max_size()
@@ -2172,7 +1830,6 @@ pub fn WinampSurfaceApp() {
         },
     );
 }
-
 #[composable]
 fn WinampSkinError(error: String) {
     Column(
@@ -2188,7 +1845,6 @@ fn WinampSkinError(error: String) {
         },
     );
 }
-
 #[composable]
 fn DockToggleButton(detached_state: MutableState<bool>, detached: bool) {
     Button(
@@ -2210,7 +1866,6 @@ fn DockToggleButton(detached_state: MutableState<bool>, detached: bool) {
         },
     );
 }
-
 #[composable]
 fn WinampInlineStage(
     skin: WinampSkin,
@@ -2235,7 +1890,6 @@ fn WinampInlineStage(
                 WinampCloseAction::SetStatus,
                 scale,
             );
-
             if state.get().eq_visible {
                 EqualizerWindow(
                     skin.clone(),
@@ -2244,35 +1898,21 @@ fn WinampInlineStage(
                     scale,
                 );
             }
-
             if state.get().playlist_visible {
                 PlaylistWindow(
                     skin.pledit.clone(),
-                    skin.playlist_background.clone(),
-                    skin.playlist_selection.clone(),
                     skin.palette,
                     skin.display_text_color,
-                    skin.layout.footer,
                     state,
                     WinampDragTarget::Inline(windows.playlist),
                     WinampWindowSize::Fixed(Size::new(PLAYLIST_WIDTH, PLAYLIST_HEIGHT)),
                     scale,
                 );
             }
-
             SettingsModal(state, skin_state, skin.display_text_color, scale);
         },
     );
 }
-
-/// The three windows stacked and scaled, drawn into whatever surface the
-/// platform gave them.
-///
-/// It takes how a window drags rather than deciding it: that decision is the
-/// only thing that ever differed between the platforms here, and writing it as
-/// `cfg` blocks inside this function is what made the function itself
-/// per-platform -- which left iOS, never enumerated, with no stacked stage at
-/// all and the desktop's floating windows on a black screen instead.
 #[composable]
 fn WinampStackedStage(
     skin: WinampSkin,
@@ -2294,11 +1934,9 @@ fn WinampStackedStage(
     if snapshot.playlist_visible {
         y += layout.playlist_height;
     }
-
     let main_drag_target = drag.target(Point::new(0.0, main_y));
     let equalizer_drag_target = drag.target(Point::new(0.0, equalizer_y));
     let playlist_drag_target = drag.target(Point::new(0.0, playlist_y));
-
     Box(
         Modifier::empty()
             .size_points(scaled(MAIN_WIDTH, scale), scaled(y, scale))
@@ -2318,22 +1956,17 @@ fn WinampStackedStage(
                 WinampCloseAction::SetStatus,
                 scale,
             );
-
             if snapshot.eq_visible {
                 pixel_grid::provide([0., equalizer_y], || {
                     EqualizerWindow(skin.clone(), state, equalizer_drag_target, scale);
                 });
             }
-
             if snapshot.playlist_visible {
                 pixel_grid::provide([0., playlist_y], || {
                     PlaylistWindow(
                         skin.pledit.clone(),
-                        skin.playlist_background.clone(),
-                        skin.playlist_selection.clone(),
                         skin.palette,
                         skin.display_text_color,
-                        skin.layout.footer,
                         state,
                         playlist_drag_target,
                         WinampWindowSize::Fixed(Size::new(
@@ -2347,7 +1980,6 @@ fn WinampStackedStage(
         },
     );
 }
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct StackedLayout {
     scale: f32,
@@ -2355,7 +1987,6 @@ struct StackedLayout {
     content_left_inset: f32,
     content_top_inset: f32,
 }
-
 #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 fn resizable_stacked_layout(
     available_width: f32,
@@ -2370,7 +2001,6 @@ fn resizable_stacked_layout(
     } else {
         fallback_scale
     };
-
     let base_height = MAIN_HEIGHT + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
     let content_top_inset = if available_height.is_finite() && available_height > 0.0 {
         content_top_inset.clamp(0.0, available_height)
@@ -2419,7 +2049,6 @@ fn resizable_stacked_layout(
     } else {
         PLAYLIST_HEIGHT
     };
-
     StackedLayout {
         scale,
         playlist_height,
@@ -2427,11 +2056,6 @@ fn resizable_stacked_layout(
         content_top_inset,
     }
 }
-
-/// The window sized to fill what it was given. Both `stacked_layout` seams
-/// that measure their own space use it; the web one does not, because a canvas
-/// is sized by the page rather than by constraints, so this does not compile
-/// there.
 #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
 fn fullscreen_stacked_layout(
     available_width: f32,
@@ -2465,7 +2089,6 @@ fn fullscreen_stacked_layout(
     } else {
         PLAYLIST_HEIGHT
     };
-
     StackedLayout {
         scale,
         playlist_height,
@@ -2473,7 +2096,6 @@ fn fullscreen_stacked_layout(
         content_top_inset: 0.0,
     }
 }
-
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn web_stacked_layout(snapshot: &WinampState) -> StackedLayout {
     let fallback_height = stacked_skin_height(snapshot, PLAYLIST_HEIGHT);
@@ -2488,17 +2110,12 @@ fn web_stacked_layout(snapshot: &WinampState) -> StackedLayout {
         ui_scale(),
     )
 }
-
-/// The surface the host last reported, when it has measured one. Before the
-/// first frame there is nothing to read and the caller falls back to the skin's
-/// own size.
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn web_current_surface_size() -> Option<Size> {
     let size = cranpose_services::host_surface_size();
     (size.width.is_finite() && size.width > 0.0 && size.height.is_finite() && size.height > 0.0)
         .then(|| Size::new(size.width, size.height))
 }
-
 #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 fn stacked_skin_height(snapshot: &WinampState, playlist_height: f32) -> f32 {
     MAIN_HEIGHT
@@ -2509,23 +2126,19 @@ fn stacked_skin_height(snapshot: &WinampState, playlist_height: f32) -> f32 {
             0.0
         }
 }
-
 #[cfg(target_os = "android")]
 fn stacked_surface_width(layout: StackedLayout) -> f32 {
     MAIN_WIDTH * layout.scale
 }
-
 #[cfg(target_os = "android")]
 fn stacked_surface_height(snapshot: &WinampState, layout: StackedLayout) -> f32 {
     stacked_skin_height(snapshot, layout.playlist_height) * layout.scale
 }
-
 #[cfg(target_os = "android")]
 fn android_pointer_screen_position(global_position: Point) -> Point {
     let origin = android_winamp_surface_origin();
     Point::new(origin.x + global_position.x, origin.y + global_position.y)
 }
-
 #[composable]
 fn WinampNativeWindows(
     skin: WinampSkin,
@@ -2559,7 +2172,6 @@ fn WinampNativeWindows(
                 }
             },
         );
-
         if snapshot.eq_visible {
             WindowNode(
                 winamp_equalizer_window_id(),
@@ -2578,7 +2190,6 @@ fn WinampNativeWindows(
                 },
             );
         }
-
         if snapshot.playlist_visible {
             WindowNode(
                 winamp_playlist_window_id(),
@@ -2596,19 +2207,13 @@ fn WinampNativeWindows(
                 ),
                 {
                     let pledit = skin.pledit.clone();
-                    let playlist_background = skin.playlist_background.clone();
-                    let playlist_selection = skin.playlist_selection.clone();
                     let palette = skin.palette;
                     let display_text_color = skin.display_text_color;
-                    let footer_layout = skin.layout.footer;
                     move || {
                         PlaylistWindow(
                             pledit.clone(),
-                            playlist_background.clone(),
-                            playlist_selection.clone(),
                             palette,
                             display_text_color,
-                            footer_layout,
                             state,
                             WinampDragTarget::NativeGroup,
                             WinampWindowSize::State(peer_windows.playlist),
@@ -2618,7 +2223,6 @@ fn WinampNativeWindows(
                 },
             );
         }
-
         if snapshot.settings_open {
             WindowNode(
                 settings_window_id(),
@@ -2637,7 +2241,6 @@ fn WinampNativeWindows(
         }
     });
 }
-
 #[composable]
 pub fn WinampStandaloneApp() {
     let state = cranpose_core::rememberMutableStateOf(initial_winamp_state);
@@ -2661,7 +2264,6 @@ pub fn WinampStandaloneApp() {
             return;
         }
     };
-
     WindowGroup("cranamp-winamp", winamp_attach_policy(), move || {
         WindowNode(
             winamp_main_window_id(),
@@ -2684,7 +2286,6 @@ pub fn WinampStandaloneApp() {
                 }
             },
         );
-
         if snapshot.eq_visible {
             WindowNode(
                 winamp_equalizer_window_id(),
@@ -2708,7 +2309,6 @@ pub fn WinampStandaloneApp() {
                 },
             );
         }
-
         if snapshot.playlist_visible {
             WindowNode(
                 winamp_playlist_window_id(),
@@ -2723,19 +2323,13 @@ pub fn WinampStandaloneApp() {
                 .with_min_size(PLAYLIST_WIDTH, playlist_min_height()),
                 {
                     let pledit = skin.pledit.clone();
-                    let playlist_background = skin.playlist_background.clone();
-                    let playlist_selection = skin.playlist_selection.clone();
                     let palette = skin.palette;
                     let display_text_color = skin.display_text_color;
-                    let footer_layout = skin.layout.footer;
                     move || {
                         PlaylistWindow(
                             pledit.clone(),
-                            playlist_background.clone(),
-                            playlist_selection.clone(),
                             palette,
                             display_text_color,
-                            footer_layout,
                             state,
                             WinampDragTarget::NativeGroup,
                             WinampWindowSize::State(peer_windows.playlist),
@@ -2745,7 +2339,6 @@ pub fn WinampStandaloneApp() {
                 },
             );
         }
-
         if snapshot.settings_open {
             WindowNode(
                 settings_window_id(),
@@ -2774,7 +2367,6 @@ pub fn WinampStandaloneApp() {
         }
     });
 }
-
 #[composable]
 fn MainWindow(
     skin: WinampSkin,
@@ -2785,13 +2377,11 @@ fn MainWindow(
     scale: f32,
 ) {
     let snapshot = state.get();
-
     Box(
         winamp_window_modifier(MAIN_WIDTH, MAIN_HEIGHT, scale, drag_target),
         BoxSpec::default(),
         move || {
             Sprite(skin.main.clone(), MAIN_WINDOW, 0.0, 0.0, scale);
-            Sprite(skin.main.clone(), MAIN_DOCK_EDGE, 0.0, 115.0, scale);
             Sprite(
                 skin.titlebar.clone(),
                 MAIN_TITLE_BAR_SELECTED,
@@ -2799,9 +2389,7 @@ fn MainWindow(
                 0.0,
                 scale,
             );
-
             WindowDragHandle(drag_target, MAIN_TITLE_DRAG_HIT_AREA, scale);
-
             {
                 let state_click = state;
                 let skin_click = skin_state;
@@ -2867,7 +2455,6 @@ fn MainWindow(
                     },
                 );
             }
-
             let status_sprite = match snapshot.playback {
                 PlaybackState::Stopped => STATUS_STOPPED,
                 PlaybackState::Playing => STATUS_PLAYING,
@@ -2880,19 +2467,11 @@ fn MainWindow(
                 POS_STATUS.1,
                 scale,
             );
-
             Visualizer(
                 snapshot.playback == PlaybackState::Playing,
-                if skin.layout.visualizer_glass {
-                    let mut palette = skin.viscolor;
-                    palette.0[0][3] = 0;
-                    palette
-                } else {
-                    skin.viscolor
-                },
+                skin.viscolor,
                 scale,
             );
-
             let digits = time_digits(snapshot.elapsed_seconds);
             for (i, digit) in digits.iter().enumerate() {
                 let pos = POS_TIME_DIGITS[i];
@@ -2904,7 +2483,6 @@ fn MainWindow(
                     scale,
                 );
             }
-
             let title = main_display_title(&snapshot);
             let title_description = title.clone();
             let title = if snapshot.playback == PlaybackState::Playing {
@@ -2937,7 +2515,6 @@ fn MainWindow(
                 WINAMP_SYSTEM_TEXT_METRICS,
             );
             MainMetaReadouts(snapshot.clone(), scale, skin.display_text_color);
-
             Sprite(
                 skin.monoster.clone(),
                 MONO_OFF,
@@ -2956,7 +2533,6 @@ fn MainWindow(
                 POS_STEREO.1,
                 scale,
             );
-
             Sprite(
                 skin.posbar.clone(),
                 POSBAR_BG,
@@ -3011,9 +2587,7 @@ fn MainWindow(
                     },
                 );
             }
-
             TransportButtons(skin.cbuttons.clone(), state, scale);
-
             let volume_pressed = cranpose_core::rememberMutableStateOf(|| false);
             let volume_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
             let display_volume = volume_drag.get().unwrap_or(snapshot.volume);
@@ -3076,7 +2650,6 @@ fn MainWindow(
                     },
                 );
             }
-
             let balance_pressed = cranpose_core::rememberMutableStateOf(|| false);
             let balance_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
             let display_balance = balance_drag.get().unwrap_or(snapshot.balance);
@@ -3135,7 +2708,6 @@ fn MainWindow(
                     },
                 );
             }
-
             let shuffle_normal = if snapshot.shuffle {
                 SHUFFLE_ON
             } else {
@@ -3172,7 +2744,6 @@ fn MainWindow(
                     },
                 );
             }
-
             let repeat_normal = if snapshot.repeat {
                 REPEAT_ON
             } else {
@@ -3204,7 +2775,6 @@ fn MainWindow(
                     },
                 );
             }
-
             let eq_normal = if snapshot.eq_visible {
                 EQ_BUTTON_ON
             } else {
@@ -3239,7 +2809,6 @@ fn MainWindow(
                     },
                 );
             }
-
             let pl_normal = if snapshot.playlist_visible {
                 PL_BUTTON_ON
             } else {
@@ -3271,7 +2840,6 @@ fn MainWindow(
                     },
                 );
             }
-
             {
                 let state_click = state;
                 ClickTarget(
@@ -3295,7 +2863,6 @@ fn MainWindow(
         },
     );
 }
-
 #[composable]
 fn EqualizerWindow(
     skin: WinampSkin,
@@ -3304,7 +2871,6 @@ fn EqualizerWindow(
     scale: f32,
 ) {
     let snapshot = state.get();
-
     Box(
         winamp_window_modifier(EQ_WIDTH, EQ_HEIGHT, scale, drag_target),
         BoxSpec::default(),
@@ -3328,9 +2894,7 @@ fn EqualizerWindow(
             if snapshot.eq_enabled {
                 EqCurve(snapshot.eq_values, skin.display_text_color, scale);
             }
-
             WindowDragHandle(drag_target, EQ_TITLE_DRAG_HIT_AREA, scale);
-
             {
                 let state_click = state;
                 PressableSprite(
@@ -3349,7 +2913,6 @@ fn EqualizerWindow(
                     },
                 );
             }
-
             let eq_on_normal = if snapshot.eq_enabled {
                 EQ_ON_BUTTON_ON
             } else {
@@ -3388,7 +2951,6 @@ fn EqualizerWindow(
                     },
                 );
             }
-
             let eq_auto_normal = if snapshot.eq_auto {
                 EQ_AUTO_BUTTON_ON
             } else {
@@ -3423,7 +2985,6 @@ fn EqualizerWindow(
                     },
                 );
             }
-
             {
                 let state_click = state;
                 PressableSpriteHitArea(
@@ -3448,17 +3009,14 @@ fn EqualizerWindow(
                     },
                 );
             }
-
             for (index, slider_x) in EQ_SLIDER_XS.iter().copied().enumerate() {
                 let thumb_x = EQ_THUMB_XS[index];
                 let eq_pressed = cranpose_core::rememberMutableStateOf(|| false);
                 let eq_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
                 let value = eq_drag.get().unwrap_or(snapshot.eq_values[index]);
-                // The body lives in a discrete atlas frame. Keep the shared face
-                // locked to that same frame during continuous pointer drags.
                 let artwork_value = slider_frame(value, EQ_SLIDER_BG_FRAMES) as f32
                     / (EQ_SLIDER_BG_FRAMES - 1) as f32;
-                let thumb_extent = EQ_SLIDER_TRACK_HEIGHT - skin.layout.eq_travel as f32;
+                let thumb_extent = EQ_SLIDER_TRACK_HEIGHT - EQ_SLIDER_THUMB_TRAVEL;
                 let thumb_y = EQ_SLIDER_BG_Y
                     + vertical_slider_thumb_y(artwork_value, EQ_SLIDER_TRACK_HEIGHT, thumb_extent);
                 let eq_thumb_sprite = if eq_pressed.get() {
@@ -3466,7 +3024,6 @@ fn EqualizerWindow(
                 } else {
                     EQ_SLIDER_THUMB
                 };
-
                 Sprite(
                     skin.eqmain.clone(),
                     eq_slider_bg_rect(value),
@@ -3474,29 +3031,13 @@ fn EqualizerWindow(
                     EQ_SLIDER_BG_Y,
                     scale,
                 );
-                if let Some(handles) = skin.eq_handles.clone() {
-                    Sprite(
-                        handles,
-                        (
-                            index as f32 * 14.,
-                            if eq_pressed.get() { 25. } else { 0. },
-                            14.,
-                            25.,
-                        ),
-                        slider_x,
-                        thumb_y,
-                        scale,
-                    );
-                } else {
-                    Sprite(
-                        skin.eqmain.clone(),
-                        eq_thumb_sprite,
-                        thumb_x,
-                        thumb_y + EQ_SLIDER_THUMB_Y_OFFSET,
-                        scale,
-                    );
-                }
-
+                Sprite(
+                    skin.eqmain.clone(),
+                    eq_thumb_sprite,
+                    thumb_x,
+                    thumb_y + EQ_SLIDER_THUMB_Y_OFFSET,
+                    scale,
+                );
                 let eq_drag_change = eq_drag;
                 let eq_drag_commit = eq_drag;
                 let state_drag = state;
@@ -3539,14 +3080,12 @@ fn EqualizerWindow(
                     },
                 );
             }
-
             if snapshot.eq_preset_menu_open {
                 EqPresetMenu(state, skin.display_text_color, scale);
             }
         },
     );
 }
-
 #[composable]
 fn EqPresetMenu(state: MutableState<WinampState>, display_text_color: [u8; 4], scale: f32) {
     let rows = eq_preset_menu_rows();
@@ -3555,7 +3094,6 @@ fn EqPresetMenu(state: MutableState<WinampState>, display_text_color: [u8; 4], s
     let height = row_height * rows as f32;
     let x = EQ_PRESET_MENU_X;
     let y = EQ_PRESET_MENU_Y;
-
     FilledRect(x, y, width, height, scale, Color(0.01, 0.015, 0.012, 1.0));
     FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
     FilledRect(
@@ -3566,7 +3104,6 @@ fn EqPresetMenu(state: MutableState<WinampState>, display_text_color: [u8; 4], s
         scale,
         Color(0.12, 0.20, 0.24, 1.0),
     );
-
     for (index, preset) in EQ_PRESETS.iter().copied().enumerate() {
         let column = index / rows;
         let row = index % rows;
@@ -3582,7 +3119,6 @@ fn EqPresetMenu(state: MutableState<WinampState>, display_text_color: [u8; 4], s
                 Color(0.12, 0.20, 0.24, 1.0),
             );
         }
-
         SystemWinampText(
             preset.label.to_string(),
             row_x + 5.0,
@@ -3592,7 +3128,6 @@ fn EqPresetMenu(state: MutableState<WinampState>, display_text_color: [u8; 4], s
             scale,
             display_text_color,
         );
-
         let state_click = state;
         ClickTarget(
             row_x,
@@ -3606,7 +3141,6 @@ fn EqPresetMenu(state: MutableState<WinampState>, display_text_color: [u8; 4], s
         );
     }
 }
-
 fn apply_eq_preset(state: MutableState<WinampState>, preset: EqPreset) {
     state.update(|s| {
         s.eq_enabled = true;
@@ -3619,16 +3153,11 @@ fn apply_eq_preset(state: MutableState<WinampState>, preset: EqPreset) {
         s.status = format!("EQ Preset {}", preset.label);
     });
 }
-
 fn eq_preset_menu_rows() -> usize {
     EQ_PRESETS.len().div_ceil(EQ_PRESET_MENU_COLUMNS)
 }
-
 const SETTINGS_WIDTH: f32 = 300.0;
 const SETTINGS_HEIGHT: f32 = 500.0;
-
-// Modern (non-Winamp) Settings palette. The main player stays skinned; this
-// panel is a clean flat-design surface built from cranpose-ui widgets.
 const SETTINGS_BG: Color = Color(0.07, 0.08, 0.11, 1.0);
 const SETTINGS_CARD: Color = Color(0.13, 0.15, 0.19, 1.0);
 const SETTINGS_CARD_ACTIVE: Color = Color(0.16, 0.31, 0.54, 1.0);
@@ -3641,8 +3170,6 @@ const SETTINGS_WARN: Color = Color(0.92, 0.70, 0.30, 1.0);
 const SETTINGS_DANGER: Color = Color(0.90, 0.42, 0.42, 1.0);
 const SETTINGS_TEXT: Color = Color(0.93, 0.95, 0.98, 1.0);
 const SETTINGS_TEXT_DIM: Color = Color(0.60, 0.65, 0.73, 1.0);
-
-/// Text style helper for the modern Settings panel.
 fn settings_text_style(size_sp: f32, color: Color) -> TextStyle {
     TextStyle::from_span_style(SpanStyle {
         color: Some(color),
@@ -3650,8 +3177,6 @@ fn settings_text_style(size_sp: f32, color: Color) -> TextStyle {
         ..SpanStyle::default()
     })
 }
-
-/// A full-width pill button used across the Settings sections.
 #[composable]
 fn SettingsActionButton(label: String, fill: Color, on_click: impl Fn() + 'static) {
     Button(
@@ -3671,8 +3196,6 @@ fn SettingsActionButton(label: String, fill: Color, on_click: impl Fn() + 'stati
         },
     );
 }
-
-/// Settings header: title + close button.
 #[composable]
 fn SettingsHeader(state: MutableState<WinampState>) {
     Row(
@@ -3703,31 +3226,21 @@ fn SettingsHeader(state: MutableState<WinampState>) {
         },
     );
 }
-
-/// How often the sync panel re-reads the worker's cached view while it is open.
 #[cfg(not(target_arch = "wasm32"))]
 const SYNC_PANEL_REFRESH: Duration = Duration::from_millis(1500);
-
-/// Cross-device sync section: status, enable toggle, folder picker, and the
-/// list of devices currently in the shared folder. Reads cheap cached state
-/// (no folder I/O) and re-reads it on a slow ticker while the panel is open.
 #[cfg(not(target_arch = "wasm32"))]
 #[composable]
 fn SettingsSyncSection(state: MutableState<WinampState>) {
     let refresh = cranpose_core::rememberMutableStateOf(|| 0u64);
     cranpose_core::LaunchedEffectAsync(0u8, move |_scope| {
         Box::pin(async move {
-            // The timer costs nothing between ticks; counting frames to reach
-            // the same cadence would keep the clock awake for as long as the
-            // panel is open.
             cranpose_core::interval(SYNC_PANEL_REFRESH, move || {
                 refresh.update(|value| *value += 1);
             })
             .await;
         })
     });
-    let _ = refresh.get(); // subscribe so worker updates re-render the section
-
+    let _ = refresh.get();
     let status = crate::sync::runtime::status();
     let config = crate::sync::runtime::config_snapshot();
     let merged = crate::sync::runtime::latest_merged();
@@ -3737,7 +3250,6 @@ fn SettingsSyncSection(state: MutableState<WinampState>) {
         .as_ref()
         .map(|c| c.device_id.clone())
         .unwrap_or_default();
-
     Column(
         Modifier::empty().fill_max_width(),
         ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(6.0)),
@@ -3747,10 +3259,8 @@ fn SettingsSyncSection(state: MutableState<WinampState>) {
                 Modifier::empty(),
                 settings_text_style(11.0, SETTINGS_TEXT_DIM),
             );
-
             let (color, line) = sync_status_display(&status);
             Text(line, Modifier::empty(), settings_text_style(12.0, color));
-
             {
                 let state_toggle = state;
                 let label = if enabled {
@@ -3768,7 +3278,6 @@ fn SettingsSyncSection(state: MutableState<WinampState>) {
                     state_toggle.update(|s| s.status = status.summary());
                 });
             }
-
             Text(
                 match &folder {
                     Some(path) => format!("Folder: {}", shorten_sync_folder(path)),
@@ -3786,7 +3295,6 @@ fn SettingsSyncSection(state: MutableState<WinampState>) {
                 };
                 SettingsActionButton(label, SETTINGS_CARD, move || sync_pick_folder(state_pick));
             }
-
             if let Some(merged) = merged.as_ref() {
                 if !merged.devices.is_empty() {
                     Text(
@@ -3811,8 +3319,6 @@ fn SettingsSyncSection(state: MutableState<WinampState>) {
         },
     );
 }
-
-/// Color + one-line summary for a sync status, used in the section header.
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_status_display(status: &crate::sync::SyncStatus) -> (Color, String) {
     use crate::sync::SyncStatus;
@@ -3827,8 +3333,6 @@ fn sync_status_display(status: &crate::sync::SyncStatus) -> (Color, String) {
         SyncStatus::Error(message) => (SETTINGS_DANGER, format!("● {message}")),
     }
 }
-
-/// Trims a folder handle to its last couple of path components for display.
 #[cfg(not(target_arch = "wasm32"))]
 fn shorten_sync_folder(path: &str) -> String {
     let parts: Vec<&str> = path
@@ -3842,10 +3346,6 @@ fn shorten_sync_folder(path: &str) -> String {
         _ => path.to_string(),
     }
 }
-
-/// Triggers cranpose's cross-platform writable sync-folder picker (desktop native
-/// dialog / Android SAF). The pick is asynchronous; `SyncEffect` awaits it and
-/// applies the chosen folder via the sync runtime.
 #[cfg(not(target_arch = "wasm32"))]
 fn sync_pick_folder(state: MutableState<WinampState>) {
     state.update(|s| {
@@ -3853,14 +3353,10 @@ fn sync_pick_folder(state: MutableState<WinampState>) {
         s.status = "Choose a sync folder…".to_string();
     });
 }
-
-/// Skins section: the bundled skin plus every library file as tappable cards,
-/// with an "Add skin" button that routes through the existing native picker.
 #[composable]
 fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkinState) {
     let active_path = state.get().skin_path.clone();
     let skins = list_library_skins();
-
     Column(
         Modifier::empty().fill_max_width(),
         ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(5.0)),
@@ -3870,7 +3366,6 @@ fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkin
                 Modifier::empty(),
                 settings_text_style(11.0, SETTINGS_TEXT_DIM),
             );
-
             for skin in &skins {
                 let is_active = match &skin.path {
                     Some(path) => active_path.as_deref() == Some(path.to_string_lossy().as_ref()),
@@ -3902,7 +3397,6 @@ fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkin
                     },
                 );
             }
-
             #[cfg(target_arch = "wasm32")]
             if let Some(path) = active_path
                 .as_ref()
@@ -3925,7 +3419,6 @@ fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkin
                     }
                 });
             }
-
             let state_add = state;
             let skin_add = skin_state;
             SettingsActionButton("+ Add skin…".to_string(), SETTINGS_ACCENT, move || {
@@ -3934,12 +3427,10 @@ fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkin
         },
     );
 }
-
 #[cfg(target_os = "android")]
 #[composable]
 fn SettingsUpdateSection(_state: MutableState<WinampState>) {
     let update_status = cranpose::rememberAppUpdateState();
-
     Column(
         Modifier::empty().fill_max_width(),
         ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(6.0)),
@@ -3960,12 +3451,6 @@ fn SettingsUpdateSection(_state: MutableState<WinampState>) {
                         format!("Download & install v{}", package.version),
                         SETTINGS_ACCENT,
                         move || {
-                            // The whole package, not just its URL: the framework
-                            // checks the bytes against the digest the release
-                            // feed published before any installer sees them. It
-                            // publishes every outcome into the status this
-                            // screen already reads, so there is nothing to
-                            // record here that reading it would not show.
                             let _ = cranpose::install_app_update(&package);
                         },
                     );
@@ -3993,7 +3478,6 @@ fn SettingsUpdateSection(_state: MutableState<WinampState>) {
         },
     );
 }
-
 #[cfg(target_os = "android")]
 fn app_update_status_line(status: &cranpose::AppUpdateStatus) -> String {
     match status {
@@ -4026,9 +3510,6 @@ fn app_update_status_line(status: &cranpose::AppUpdateStatus) -> String {
         cranpose::AppUpdateStatus::Error(error) => format!("Update error: {error}"),
     }
 }
-
-/// Desktop/iOS update section: no in-app HTTP client, so this just opens the
-/// GitHub releases page in the default browser.
 #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 #[composable]
 fn SettingsUpdateSection(state: MutableState<WinampState>) {
@@ -4064,7 +3545,6 @@ fn SettingsUpdateSection(state: MutableState<WinampState>) {
         },
     );
 }
-
 #[cfg(target_arch = "wasm32")]
 #[composable]
 fn SettingsUpdateSection(_state: MutableState<WinampState>) {
@@ -4085,9 +3565,6 @@ fn SettingsUpdateSection(_state: MutableState<WinampState>) {
         },
     );
 }
-
-/// Opens the GitHub releases page in the platform browser. Best-effort: returns
-/// false if no opener is available (e.g. iOS, where there is no shell).
 #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 fn open_releases_page() -> bool {
     const URL: &str = "https://github.com/samoylenkodmitry/cranamp/releases";
@@ -4114,12 +3591,6 @@ fn open_releases_page() -> bool {
         false
     }
 }
-
-/// The modern Settings content. Layout-driven (no coordinate math), so it fills
-/// whatever container it is mounted in: a dedicated desktop window or the
-/// centered full-surface modal on Android/mobile/web. `origin_*` are unused now
-/// that layout handles placement; `with_drag` adds a window drag region over the
-/// desktop title area.
 #[composable]
 fn SettingsPanel(
     state: MutableState<WinampState>,
@@ -4210,12 +3681,6 @@ fn SettingsPanel(
         },
     );
 }
-
-/// Full-surface modal that dims the player and centers the Settings panel. It
-/// is layout-driven — a `fill_max_size` dim backdrop and a fixed-size centered
-/// panel box — so it covers the whole surface without any coordinate math.
-/// Mounted as the last child of the surface-based roots (Android, inline/iOS,
-/// web); desktop uses a dedicated window instead (see `WinampStandaloneApp`).
 #[composable]
 fn SettingsModal(
     state: MutableState<WinampState>,
@@ -4230,7 +3695,6 @@ fn SettingsModal(
         Modifier::empty().fill_max_size(),
         BoxSpec::default().content_alignment(Alignment::CENTER),
         move || {
-            // Dim backdrop that fills the surface and dismisses on tap-outside.
             {
                 let state_dismiss = state;
                 Box(
@@ -4244,8 +3708,6 @@ fn SettingsModal(
                     || {},
                 );
             }
-            // Centered fixed-size panel. Its own `clickable` swallows taps so
-            // they do not fall through to the dismiss backdrop below.
             {
                 let state_panel = state;
                 let skin_panel = skin_state;
@@ -4265,13 +3727,6 @@ fn SettingsModal(
         },
     );
 }
-
-/// Keep every background texel at its native size, including partial edge tiles.
-fn playlist_background_tiles(width: f32, height: f32) -> Vec<(SpriteRect, f32, f32)> {
-    native_sprite_tiles((0., 0., 243., 203.), width, height)
-}
-
-/// Repeat source cells without resampling; crop the final row/column at the edge.
 fn native_sprite_tiles(source: SpriteRect, width: f32, height: f32) -> Vec<(SpriteRect, f32, f32)> {
     let mut tiles = Vec::new();
     if source.2 <= 0. || source.3 <= 0. {
@@ -4297,17 +3752,12 @@ fn native_sprite_tiles(source: SpriteRect, width: f32, height: f32) -> Vec<(Spri
     }
     tiles
 }
-
-// The skin's optional footer layout travels alongside its bitmap and palette.
 #[allow(clippy::too_many_arguments)]
 #[composable]
 fn PlaylistWindow(
     pledit: ImageBitmap,
-    playlist_background: Option<ImageBitmap>,
-    playlist_selection: Option<ImageBitmap>,
     palette: SkinPalette,
     display_text_color: [u8; 4],
-    footer_layout: skin::FooterLayout,
     state: MutableState<WinampState>,
     drag_target: WinampDragTarget,
     window_size: WinampWindowSize,
@@ -4347,12 +3797,10 @@ fn PlaylistWindow(
     let list_height = (bottom_y - PLAYLIST_LIST_BG.1).max(1.0);
     let title_min_x = PLAYLIST_TOP_LEFT_CORNER.2;
     let title_max_x = (width - PLAYLIST_TOP_RIGHT_CORNER.2 - PLAYLIST_TITLE_BAR.2).max(title_min_x);
-    // Classic 275-pixel skins place the 100-pixel title at x=87.
     let title_x = ((width - PLAYLIST_TITLE_BAR.2) * 0.5)
         .floor()
         .clamp(title_min_x, title_max_x);
     let scroll_track_x = width - 15.0;
-
     Box(
         winamp_window_modifier(width, height, scale, drag_target),
         BoxSpec::default(),
@@ -4372,13 +3820,6 @@ fn PlaylistWindow(
                 BoxSpec::default(),
                 || {},
             );
-
-            if let Some(background) = playlist_background.clone() {
-                for (source, x, y) in playlist_background_tiles(list_width, list_height) {
-                    Sprite(background.clone(), source, 12. + x, 20. + y, scale);
-                }
-            }
-
             Sprite(pledit.clone(), PLAYLIST_TOP_LEFT_CORNER, 0.0, 0.0, scale);
             TiledSprite(
                 pledit.clone(),
@@ -4397,7 +3838,6 @@ fn PlaylistWindow(
                 0.0,
                 scale,
             );
-
             TiledSprite(
                 pledit.clone(),
                 PLAYLIST_LEFT_TILE,
@@ -4416,7 +3856,6 @@ fn PlaylistWindow(
                 bottom_y - PLAYLIST_TOP_RIGHT_CORNER.3,
                 scale,
             );
-
             StretchSprite(
                 pledit.clone(),
                 PLAYLIST_BOTTOM_LEFT_CORNER,
@@ -4445,9 +3884,8 @@ fn PlaylistWindow(
                 },
                 scale,
             );
-
             PlaylistEntries(
-                (palette, playlist_selection.clone()),
+                palette,
                 state,
                 snapshot.clone(),
                 playlist_entries_scroll_state,
@@ -4455,14 +3893,8 @@ fn PlaylistWindow(
                 list_height,
                 scale,
             );
-            PlaylistFooterReadouts(
-                snapshot.clone(),
-                bottom_y,
-                scale,
-                display_text_color,
-                footer_layout,
-            );
-            PlaylistFooterControls(state, footer_menu, bottom_y, scale, footer_layout);
+            PlaylistFooterReadouts(snapshot.clone(), bottom_y, scale, display_text_color);
+            PlaylistFooterControls(state, footer_menu, bottom_y, scale);
             if snapshot.playlist_search_visible {
                 PlaylistSearchOverlay(
                     palette,
@@ -4483,7 +3915,6 @@ fn PlaylistWindow(
                     scale,
                 );
             }
-
             if let Some(menu) = footer_menu.get() {
                 PlaylistMenu(
                     palette,
@@ -4497,7 +3928,6 @@ fn PlaylistWindow(
                     },
                 );
             }
-
             PlaylistWheelScrollTarget(
                 state,
                 PLAYLIST_LIST_BG.0,
@@ -4519,7 +3949,6 @@ fn PlaylistWindow(
         },
     );
 }
-
 #[composable]
 fn PlaylistScrollbar(
     pledit: ImageBitmap,
@@ -4554,7 +3983,6 @@ fn PlaylistScrollbar(
         scale,
     );
 }
-
 #[composable]
 fn PlaylistScrollbarInput(
     scroll_track_x: f32,
@@ -4633,10 +4061,9 @@ fn PlaylistScrollbarInput(
         );
     }
 }
-
 #[composable]
 fn PlaylistEntries(
-    appearance: (SkinPalette, Option<ImageBitmap>),
+    palette: SkinPalette,
     state: MutableState<WinampState>,
     snapshot: WinampState,
     playlist_scroll: MutableState<f32>,
@@ -4644,7 +4071,6 @@ fn PlaylistEntries(
     list_height: f32,
     scale: f32,
 ) {
-    let (palette, selection_art) = appearance;
     let playlist_scroll = playlist_scroll.get();
     Box(
         Modifier::empty()
@@ -4658,15 +4084,13 @@ fn PlaylistEntries(
         move || {
             let row_height = WINAMP_PLAYLIST_LINE_HEIGHT;
             let max_rows = playlist_visible_row_capacity(list_height);
-            let x = WINAMP_PLAYLIST_TEXT_X + if selection_art.is_some() { 8. } else { 0. };
+            let x = WINAMP_PLAYLIST_TEXT_X;
             let y = WINAMP_PLAYLIST_TEXT_Y;
-
             cranpose_core::SideEffect(move || {
                 if state.get_non_reactive().playlist_visible_rows != max_rows {
                     state.update(|s| s.playlist_visible_rows = max_rows);
                 }
             });
-
             if snapshot.playlist.is_empty() {
                 PlaylistWinampText(
                     snapshot.status.clone(),
@@ -4679,13 +4103,11 @@ fn PlaylistEntries(
                 );
                 return;
             }
-
             let max_start = snapshot.playlist.len().saturating_sub(max_rows);
             let start = ((playlist_scroll * max_start as f32).round() as usize).min(max_start);
             let line_width = (list_width - x - 4.0).max(1.0);
             let visible_line_count =
                 visible_playlist_line_count(snapshot.playlist.len(), start, max_rows);
-
             let selection_height = WINAMP_PLAYLIST_SELECTION_HEIGHT.min(row_height).max(1.0);
             for row in start..start + visible_line_count {
                 if snapshot.selected_indices.contains(&row) {
@@ -4702,18 +4124,8 @@ fn PlaylistEntries(
                         scale,
                         skin_color(palette.selected_bg),
                     );
-                    if let Some(art) = selection_art.clone() {
-                        Sprite(
-                            art,
-                            (0., 0., list_width.min(243.), 11.),
-                            0.,
-                            selection_y,
-                            scale,
-                        );
-                    }
                 }
             }
-
             for (row, track) in snapshot
                 .playlist
                 .iter()
@@ -4767,7 +4179,6 @@ fn PlaylistEntries(
                         secondary,
                     );
                 }
-
                 {
                     let state_click = state;
                     PlaylistRowClickTarget(
@@ -4786,38 +4197,16 @@ fn PlaylistEntries(
         },
     );
 }
-
 fn playlist_min_height() -> f32 {
     145.0
 }
-
 #[composable]
 fn PlaylistFooterReadouts(
     snapshot: WinampState,
     bottom_y: f32,
     scale: f32,
     display_text_color: [u8; 4],
-    layout: skin::FooterLayout,
 ) {
-    if layout == skin::FooterLayout::TimeTotal {
-        let elapsed = format_duration_compact(snapshot.elapsed_seconds);
-        let total = playlist_total_duration_seconds(snapshot.playlist.as_slice())
-            .map(format_duration_compact)
-            .unwrap_or_else(|| "0:00".into());
-        for (text, center) in [(elapsed, 152.0_f32), (total, 202.0_f32)] {
-            let width = (system_text_width(&text) - 1.0).clamp(1.0, 44.0);
-            SystemWinampText(
-                text,
-                (center - width / 2.0).round(),
-                bottom_y + 17.0,
-                width,
-                WINAMP_SYSTEM_LINE_HEIGHT,
-                scale,
-                display_text_color,
-            );
-        }
-        return;
-    }
     let summary = playlist_footer_summary(&snapshot);
     SystemWinampText(
         summary,
@@ -4840,7 +4229,6 @@ fn PlaylistFooterReadouts(
         display_text_color,
     );
 }
-
 #[composable]
 fn PlaylistSearchOverlay(
     palette: SkinPalette,
@@ -4856,7 +4244,6 @@ fn PlaylistSearchOverlay(
     let height = 40.0;
     let query = search_field.text();
     let last_revision = cranpose_core::rememberMutableStateOf(|| 0u64);
-
     {
         let state_for_sync = state;
         let field_for_sync = search_field;
@@ -4878,7 +4265,6 @@ fn PlaylistSearchOverlay(
             }
         });
     }
-
     FilledRect(x, y, width, height, scale, Color(0.01, 0.015, 0.012, 1.0));
     FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
     FilledRect(
@@ -4907,7 +4293,6 @@ fn PlaylistSearchOverlay(
         scale,
         palette.normal,
     );
-
     FilledRect(
         x + 6.0,
         y + 18.0,
@@ -4927,7 +4312,6 @@ fn PlaylistSearchOverlay(
             ..SpanStyle::default()
         }),
     );
-
     {
         let state_click = state;
         ClickTarget(x + width - 38.0, y, 38.0, 15.0, scale, move || {
@@ -4937,7 +4321,6 @@ fn PlaylistSearchOverlay(
         });
     }
 }
-
 #[composable]
 fn UrlInputOverlay(
     palette: SkinPalette,
@@ -4962,7 +4345,6 @@ fn UrlInputOverlay(
     let y = PLAYLIST_LIST_BG.1 + 34.0;
     let width = (list_width - 28.0).clamp(150.0, 260.0);
     let height = 40.0;
-
     FilledRect(x, y, width, height, scale, Color(0.01, 0.015, 0.012, 1.0));
     FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
     FilledRect(
@@ -5000,7 +4382,6 @@ fn UrlInputOverlay(
         scale,
         palette.normal,
     );
-
     FilledRect(
         x + 6.0,
         y + 18.0,
@@ -5020,7 +4401,6 @@ fn UrlInputOverlay(
             ..SpanStyle::default()
         }),
     );
-
     {
         let state_open = state;
         let field = url_field;
@@ -5035,29 +4415,13 @@ fn UrlInputOverlay(
         });
     }
 }
-
 #[composable]
 fn PlaylistFooterControls(
     state: MutableState<WinampState>,
     footer_menu: MutableState<Option<PlaylistFooterMenu>>,
     bottom_y: f32,
     scale: f32,
-    layout: skin::FooterLayout,
 ) {
-    if layout == skin::FooterLayout::TimeTotal {
-        for (area, menu) in [
-            ((12., 7., 24., 23.), PlaylistFooterMenu::Add),
-            ((41., 7., 24., 23.), PlaylistFooterMenu::Remove),
-            ((70., 7., 24., 23.), PlaylistFooterMenu::Select),
-            ((99., 7., 24., 23.), PlaylistFooterMenu::Misc),
-            ((230., 7., 31., 23.), PlaylistFooterMenu::List),
-        ] {
-            PlaylistFooterClickTarget(area, bottom_y, scale, move || {
-                toggle_playlist_footer_menu(footer_menu, menu)
-            });
-        }
-        return;
-    }
     {
         let menu_state = footer_menu;
         PlaylistFooterClickTarget(PLAYLIST_ADD_BUTTON_HIT_AREA, bottom_y, scale, move || {
@@ -5137,7 +4501,6 @@ fn PlaylistFooterControls(
         });
     }
 }
-
 fn toggle_playlist_footer_menu(
     menu_state: MutableState<Option<PlaylistFooterMenu>>,
     menu: PlaylistFooterMenu,
@@ -5150,7 +4513,6 @@ fn toggle_playlist_footer_menu(
         };
     });
 }
-
 #[composable]
 fn PlaylistFooterClickTarget(
     area: SpriteRect,
@@ -5173,7 +4535,6 @@ fn PlaylistFooterClickTarget(
     }
     PressableClickArea(area, interaction_source, on_click);
 }
-
 #[composable]
 fn PressableClickArea(
     area: ControlRect,
@@ -5183,7 +4544,6 @@ fn PressableClickArea(
     let on_click = Rc::new(on_click);
     let w = area.scaled_width();
     let h = area.scaled_height();
-
     Box(
         Modifier::empty()
             .size_points(w, h)
@@ -5194,7 +4554,6 @@ fn PressableClickArea(
         || {},
     );
 }
-
 #[composable]
 fn PlaylistWheelScrollTarget(
     state: MutableState<WinampState>,
@@ -5226,7 +4585,6 @@ fn PlaylistWheelScrollTarget(
         || {},
     );
 }
-
 fn playlist_footer_summary(state: &WinampState) -> String {
     let current = state
         .current_index
@@ -5237,10 +4595,8 @@ fn playlist_footer_summary(state: &WinampState) -> String {
     let total = playlist_total_duration_seconds(state.playlist.as_slice())
         .map(format_duration_compact)
         .unwrap_or_else(|| "0:00".to_string());
-
     format!("{current}/{total}")
 }
-
 fn playlist_total_duration_seconds(playlist: &[Track]) -> Option<f32> {
     let mut total = 0.0;
     let mut found = false;
@@ -5252,29 +4608,24 @@ fn playlist_total_duration_seconds(playlist: &[Track]) -> Option<f32> {
     }
     found.then_some(total)
 }
-
 fn playlist_duration_text(duration_seconds: Option<f32>) -> Option<String> {
     duration_seconds
         .filter(|duration| *duration > 0.0)
         .map(format_duration_compact)
 }
-
 fn visible_playlist_line_count(total_rows: usize, start: usize, max_rows: usize) -> usize {
     total_rows.saturating_sub(start).min(max_rows).max(1)
 }
-
 fn playlist_visible_row_capacity(list_height: f32) -> usize {
     ((list_height - WINAMP_PLAYLIST_TEXT_Y) / WINAMP_PLAYLIST_LINE_HEIGHT)
         .floor()
         .max(1.0) as usize
 }
-
 fn playlist_duration_column_width(duration: &str) -> f32 {
     (duration.chars().count() as f32 * WINAMP_PLAYLIST_ROW_CHAR_WIDTH)
         .ceil()
         .max(30.0)
 }
-
 fn playlist_title_column_width(line_width: f32, duration_width: f32) -> f32 {
     if duration_width <= 0.0 {
         return line_width.max(1.0);
@@ -5282,7 +4633,6 @@ fn playlist_title_column_width(line_width: f32, duration_width: f32) -> f32 {
     (line_width - duration_width - WINAMP_PLAYLIST_ROW_CHAR_WIDTH * 2.0)
         .max(WINAMP_PLAYLIST_ROW_CHAR_WIDTH)
 }
-
 fn format_duration_compact(seconds: f32) -> String {
     let seconds = seconds.max(0.0).round() as u32;
     let hours = seconds / 3600;
@@ -5294,18 +4644,15 @@ fn format_duration_compact(seconds: f32) -> String {
         format!("{minutes}:{seconds:02}")
     }
 }
-
 fn system_text_width(text: &str) -> f32 {
     text.chars().count() as f32 * WINAMP_SYSTEM_MEASURE_CHAR_WIDTH
 }
-
 #[derive(Clone, Copy, PartialEq)]
 struct PlaylistMenuLayout {
     window_width: f32,
     bottom_y: f32,
     scale: f32,
 }
-
 #[composable]
 fn PlaylistMenu(
     palette: SkinPalette,
@@ -5321,16 +4668,13 @@ fn PlaylistMenu(
     let x = playlist_footer_menu_x(menu, layout.window_width, width);
     let y = (layout.bottom_y - height - 3.0).max(PLAYLIST_TOP_LEFT_CORNER.3);
     let scale = layout.scale;
-
     FilledRect(x, y, width, height, scale, Color(0.01, 0.015, 0.012, 1.0));
     FilledRect(x, y, width, 1.0, scale, Color(0.30, 0.42, 0.50, 1.0));
-
     for (index, item) in items.iter().copied().enumerate() {
         let row_y = y + row_height * index as f32;
         if index > 0 {
             FilledRect(x, row_y, width, 1.0, scale, Color(0.12, 0.20, 0.24, 1.0));
         }
-
         SystemWinampText(
             item.label.to_string(),
             x + 5.0,
@@ -5340,7 +4684,6 @@ fn PlaylistMenu(
             scale,
             palette.normal,
         );
-
         let state_click = state;
         let menu_state = menu_open;
         ClickTarget(x, row_y, width, row_height, scale, move || {
@@ -5349,7 +4692,6 @@ fn PlaylistMenu(
         });
     }
 }
-
 fn playlist_footer_menu_items(menu: PlaylistFooterMenu) -> Vec<PlaylistMenuItem> {
     match menu {
         PlaylistFooterMenu::Add => vec![
@@ -5456,7 +4798,6 @@ fn playlist_footer_menu_items(menu: PlaylistFooterMenu) -> Vec<PlaylistMenuItem>
         ],
     }
 }
-
 fn playlist_footer_menu_width(menu: PlaylistFooterMenu) -> f32 {
     match menu {
         PlaylistFooterMenu::Misc => 78.0,
@@ -5465,7 +4806,6 @@ fn playlist_footer_menu_width(menu: PlaylistFooterMenu) -> f32 {
         PlaylistFooterMenu::Select | PlaylistFooterMenu::Add => 72.0,
     }
 }
-
 fn playlist_footer_menu_x(menu: PlaylistFooterMenu, window_width: f32, menu_width: f32) -> f32 {
     let button_x = match menu {
         PlaylistFooterMenu::Add => PLAYLIST_ADD_BUTTON_HIT_AREA.0,
@@ -5476,7 +4816,6 @@ fn playlist_footer_menu_x(menu: PlaylistFooterMenu, window_width: f32, menu_widt
     };
     button_x.clamp(4.0, (window_width - menu_width - 4.0).max(4.0))
 }
-
 #[composable]
 fn FilledRect(x: f32, y: f32, width: f32, height: f32, scale: f32, color: Color) {
     let bounds = pixel_grid::rect(x, y, width, height, scale);
@@ -5489,7 +4828,6 @@ fn FilledRect(x: f32, y: f32, width: f32, height: f32, scale: f32, color: Color)
         || {},
     );
 }
-
 #[composable]
 fn SystemWinampText(
     text: String,
@@ -5514,7 +4852,6 @@ fn SystemWinampText(
         WINAMP_SYSTEM_TEXT_METRICS,
     );
 }
-
 #[composable]
 fn PlaylistWinampText(
     text: String,
@@ -5550,7 +4887,6 @@ fn PlaylistWinampText(
         WINAMP_PLAYLIST_TEXT_METRICS,
     );
 }
-
 #[composable]
 fn StyledSystemWinampText(
     text: String,
@@ -5636,7 +4972,6 @@ fn StyledSystemWinampText(
         },
     );
 }
-
 #[derive(Clone, Copy, PartialEq)]
 struct SystemTextBox {
     x: f32,
@@ -5645,24 +4980,20 @@ struct SystemTextBox {
     height: f32,
     scale: f32,
 }
-
 fn marquee_system_text(text: String, width: f32, phase: f32) -> String {
     let max_chars = (width / WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH).ceil().max(1.0) as usize;
     let char_count = text.chars().count();
     if char_count <= max_chars {
         return text;
     }
-
     let max_offset = char_count - max_chars;
     let offset = ping_pong_offset(phase, max_offset);
     text.chars().skip(offset).collect()
 }
-
 fn ping_pong_offset(position: f32, max_offset: usize) -> usize {
     if max_offset == 0 {
         return 0;
     }
-
     let span = max_offset as f32;
     let cycle = span * 2.0;
     let position = position.max(0.0) % cycle;
@@ -5672,7 +5003,6 @@ fn ping_pong_offset(position: f32, max_offset: usize) -> usize {
         (cycle - position).floor() as usize
     }
 }
-
 fn main_display_title(state: &WinampState) -> String {
     state
         .current_index
@@ -5680,7 +5010,6 @@ fn main_display_title(state: &WinampState) -> String {
         .map(|track| track.display_title().to_string())
         .unwrap_or_else(|| state.status.clone())
 }
-
 #[composable]
 fn MainMetaReadouts(state: WinampState, scale: f32, display_text_color: [u8; 4]) {
     if state
@@ -5708,7 +5037,6 @@ fn MainMetaReadouts(state: WinampState, scale: f32, display_text_color: [u8; 4])
         );
         return;
     }
-
     SystemWinampText(
         main_display_meta(&state),
         POS_MAIN_META_TEXT.0,
@@ -5719,7 +5047,6 @@ fn MainMetaReadouts(state: WinampState, scale: f32, display_text_color: [u8; 4])
         display_text_color,
     );
 }
-
 fn main_display_meta(state: &WinampState) -> String {
     let prefix = match state.playback {
         PlaybackState::Playing => "PLAY",
@@ -5730,11 +5057,9 @@ fn main_display_meta(state: &WinampState) -> String {
     if count == 0 {
         return prefix.to_string();
     }
-
     let index = state.current_index.map(|index| index + 1).unwrap_or(1);
     format!("{prefix} {index:02}/{count:02}")
 }
-
 #[composable]
 fn Visualizer(playing: bool, viscolor: VisColor, scale: f32) {
     let refresh_tick = cranpose_core::rememberMutableStateOf(|| 0_u64);
@@ -5749,7 +5074,6 @@ fn Visualizer(playing: bool, viscolor: VisColor, scale: f32) {
             .await;
         })
     });
-
     let tick = if playing { refresh_tick.value() } else { 0 };
     let width = scaled(VISUALIZER_WIDTH, scale);
     let height = scaled(VISUALIZER_HEIGHT, scale);
@@ -5771,7 +5095,6 @@ fn Visualizer(playing: bool, viscolor: VisColor, scale: f32) {
         },
     );
 }
-
 fn draw_visualizer(
     scope: &mut dyn cranpose_ui_graphics::DrawScope,
     playing: bool,
@@ -5781,18 +5104,15 @@ fn draw_visualizer(
 ) {
     let bg = color_from_rgba_u8(viscolor.background());
     scope.draw_rect(Brush::solid(bg));
-
     if !playing {
         return;
     }
-
     let max_segments = 5;
     let bar_width = scaled(3.0, scale);
     let bar_pitch = scaled(4.0, scale);
     let segment_height = scaled(2.0, scale);
     let segment_pitch = scaled(3.0, scale);
     let height = scaled(VISUALIZER_HEIGHT, scale);
-
     for bar in 0..VISUALIZER_BARS {
         let value = visualizer_band_height(bands, bar);
         let x = bar as f32 * bar_pitch;
@@ -5813,17 +5133,14 @@ fn draw_visualizer(
         }
     }
 }
-
 fn color_from_rgba_u8(color: [u8; 4]) -> Color {
     Color::from_rgba_u8(color[0], color[1], color[2], color[3])
 }
-
 #[composable]
 fn EqCurve(values: [f32; 11], display_text_color: [u8; 4], scale: f32) {
     let bitmap = eq_curve_bitmap(values, display_text_color);
     let width = scaled(EQ_GRAPH_BG.2, scale);
     let height = scaled(EQ_GRAPH_BG.3, scale);
-
     cranpose_ui::Image(
         cranpose_ui::BitmapRegionPainter(
             bitmap.clone(),
@@ -5848,14 +5165,12 @@ fn EqCurve(values: [f32; 11], display_text_color: [u8; 4], scale: f32) {
         None,
     );
 }
-
 fn eq_curve_bitmap(values: [f32; 11], display_text_color: [u8; 4]) -> ImageBitmap {
     let width = EQ_GRAPH_BG.2 as u32;
     let height = EQ_GRAPH_BG.3 as u32;
     let mut pixels = vec![0u8; width as usize * height as usize * 4];
     let band_values = &values[1..];
     let mut points = Vec::with_capacity(band_values.len());
-
     for (index, value) in band_values.iter().copied().enumerate() {
         let x = if band_values.len() <= 1 {
             0
@@ -5866,17 +5181,14 @@ fn eq_curve_bitmap(values: [f32; 11], display_text_color: [u8; 4]) -> ImageBitma
         let y = 2 + ((1.0 - clamp01(value)) * (height - 5) as f32).round() as i32;
         points.push((x, y));
     }
-
     for pair in points.windows(2) {
         let from = pair[0];
         let to = pair[1];
         draw_bitmap_line(&mut pixels, width, height, from, to, display_text_color);
     }
-
     ImageBitmap::from_rgba8(width, height, pixels)
         .expect("rendered EQ curve bitmap should be valid")
 }
-
 fn draw_bitmap_line(
     pixels: &mut [u8],
     width: u32,
@@ -5892,7 +5204,6 @@ fn draw_bitmap_line(
     let dy = -(y1 - y0).abs();
     let sy = if y0 < y1 { 1 } else { -1 };
     let mut err = dx + dy;
-
     loop {
         set_bitmap_pixel(pixels, width, height, x0, y0, color);
         if x0 == x1 && y0 == y1 {
@@ -5909,7 +5220,6 @@ fn draw_bitmap_line(
         }
     }
 }
-
 fn set_bitmap_pixel(pixels: &mut [u8], width: u32, height: u32, x: i32, y: i32, color: [u8; 4]) {
     if x < 0 || y < 0 {
         return;
@@ -5919,11 +5229,9 @@ fn set_bitmap_pixel(pixels: &mut [u8], width: u32, height: u32, x: i32, y: i32, 
     if x >= width || y >= height {
         return;
     }
-
     let offset = ((y * width + x) * 4) as usize;
     pixels[offset..offset + 4].copy_from_slice(&color);
 }
-
 #[cfg(test)]
 fn visualizer_bitmap(
     playing: bool,
@@ -5937,12 +5245,10 @@ fn visualizer_bitmap(
     for pixel in pixels.as_chunks_mut::<4>().0 {
         *pixel = bg;
     }
-
     if !playing {
         return ImageBitmap::from_rgba8(width, height, pixels)
             .expect("rendered visualizer bitmap should be valid");
     }
-
     let max_segments = 5;
     let bar_width = 3;
     let bar_pitch = 4;
@@ -5965,11 +5271,9 @@ fn visualizer_bitmap(
             );
         }
     }
-
     ImageBitmap::from_rgba8(width, height, pixels)
         .expect("rendered visualizer bitmap should be valid")
 }
-
 #[cfg(test)]
 fn fill_visualizer_rect(
     pixels: &mut [u8],
@@ -5986,12 +5290,10 @@ fn fill_visualizer_rect(
         }
     }
 }
-
 fn visualizer_band_height(bands: audio::VisualizerBands, bar: usize) -> f32 {
     let level = bands.get(bar).copied().unwrap_or(0.0).clamp(0.0, 1.0);
     level * 16.0
 }
-
 fn visualizer_segment_rgba(
     segment: usize,
     max_segments: usize,
@@ -6008,7 +5310,6 @@ fn visualizer_segment_rgba(
     let index = ((from_top * last) + denom / 2) / denom;
     gradient[index.min(last)]
 }
-
 #[composable]
 fn Sprite(image: ImageBitmap, source: SpriteRect, x: f32, y: f32, scale: f32) {
     let bounds = pixel_grid::rect(x, y, source.2, source.3, scale);
@@ -6028,7 +5329,6 @@ fn Sprite(image: ImageBitmap, source: SpriteRect, x: f32, y: f32, scale: f32) {
         None,
     );
 }
-
 #[composable]
 fn TiledSprite(
     image: ImageBitmap,
@@ -6043,7 +5343,6 @@ fn TiledSprite(
         Sprite(image.clone(), cell, x + dx, y + dy, scale);
     }
 }
-
 #[composable]
 fn StretchSprite(
     image: ImageBitmap,
@@ -6071,7 +5370,6 @@ fn StretchSprite(
         None,
     );
 }
-
 #[composable]
 fn PressableSprite(
     image: ImageBitmap,
@@ -6095,7 +5393,6 @@ fn PressableSprite(
         on_click,
     );
 }
-
 #[composable]
 fn PressableSpriteHitArea(
     image: ImageBitmap,
@@ -6108,7 +5405,6 @@ fn PressableSpriteHitArea(
     let interaction_source = cranpose_ui::rememberMutableInteractionSource();
     let is_pressed = cranpose_ui::collect_is_pressed_as_state(&interaction_source);
     let on_click = Rc::new(on_click);
-
     let current = if is_pressed.get() { pressed } else { normal };
     let bounds = pixel_grid::rect(
         layout.sprite_x,
@@ -6119,7 +5415,6 @@ fn PressableSpriteHitArea(
     );
     let hit_w = scaled(layout.hit_area.2, scale);
     let hit_h = scaled(layout.hit_area.3, scale);
-
     cranpose_ui::Image(
         cranpose_ui::BitmapRegionPainter(
             image,
@@ -6135,7 +5430,6 @@ fn PressableSpriteHitArea(
         1.0,
         None,
     );
-
     Box(
         Modifier::empty()
             .size_points(hit_w, hit_h)
@@ -6149,13 +5443,11 @@ fn PressableSpriteHitArea(
         || {},
     );
 }
-
 #[composable]
 fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: impl Fn() + 'static) {
     let on_click = Rc::new(on_click);
     let w = scaled(width, scale);
     let h = scaled(height, scale);
-
     Box(
         Modifier::empty()
             .size_points(w, h)
@@ -6165,24 +5457,6 @@ fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: im
         || {},
     );
 }
-
-/// A click target that also reports the keyboard modifiers held at click
-/// time, for shift/ctrl-click multi-select.
-///
-/// `.clickable()` only ever hands back the click's local [`Point`] -- it has
-/// no channel for keyboard state -- so this pairs it with a `.pointer_input()`
-/// that does nothing but remember the most recent pointer event's `modifiers`
-/// (never consuming, so `.clickable()`'s own press/drag-threshold detection is
-/// untouched). Reading `event.modifiers` is the framework's own answer to "what
-/// is held right now": every desktop platform's event loop stamps it onto each
-/// `PointerEvent` via `AppShell::set_modifiers`, so this needs no platform-
-/// specific keyboard query of its own -- unlike the raw X11 connection this
-/// replaced, which silently reported "nothing held" on every non-X11 desktop.
-///
-/// `row_key` only identifies the pointer-input node (so the tracked modifiers
-/// reset instead of leaking stale state when the same screen position starts
-/// tracking a different playlist row after a scroll); callers that need the
-/// row index in `on_click` capture it themselves.
 #[composable]
 pub fn PlaylistRowClickTarget(
     x: f32,
@@ -6196,7 +5470,6 @@ pub fn PlaylistRowClickTarget(
     let modifiers = cranpose_core::rememberMutableStateOf(|| Modifiers::NONE);
     let w = scaled(width, scale);
     let h = scaled(height, scale);
-
     Box(
         Modifier::empty()
             .size_points(w, h)
@@ -6216,7 +5489,6 @@ pub fn PlaylistRowClickTarget(
         || {},
     );
 }
-
 #[composable]
 fn DragSlider(
     area: ControlRect,
@@ -6252,7 +5524,6 @@ fn DragSlider(
         |_| {},
     );
 }
-
 #[composable]
 fn VerticalDragSlider(
     area: ControlRect,
@@ -6292,13 +5563,11 @@ fn VerticalDragSlider(
         |_| {},
     );
 }
-
 #[composable]
 fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32) {
     let modifier = Modifier::empty()
         .size_points(scaled(area.2, scale), scaled(area.3, scale))
         .absolute_offset(scaled(area.0, scale), scaled(area.1, scale));
-
     match drag_target {
         WinampDragTarget::NativeGroup => {
             Box(modifier.window_drag_area(), BoxSpec::default(), || {});
@@ -6311,7 +5580,6 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
         } => {
             let drag_origin = cranpose_core::rememberMutableStateOf(|| None::<(Point, Point)>);
             let drag_active = cranpose_core::rememberMutableStateOf(|| false);
-
             Box(
                 modifier.pointer_input((), {
                     move |scope: PointerInputScope| async move {
@@ -6382,7 +5650,6 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
         }
         WinampDragTarget::Inline(window_position) => {
             let drag_offset = cranpose_core::rememberMutableStateOf(|| None::<Point>);
-
             Box(
                 modifier.pointer_input((), {
                     move |scope: PointerInputScope| async move {
@@ -6437,7 +5704,6 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
         }
     }
 }
-
 #[composable]
 fn WindowResizeHandle(
     drag_target: WinampDragTarget,
@@ -6451,7 +5717,6 @@ fn WindowResizeHandle(
     if !matches!(drag_target, WinampDragTarget::NativeGroup) {
         return;
     }
-
     Box(
         Modifier::empty()
             .size_points(scaled(width, scale), scaled(height, scale))
@@ -6461,7 +5726,6 @@ fn WindowResizeHandle(
         || {},
     );
 }
-
 #[composable]
 fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, scale: f32) {
     {
@@ -6478,7 +5742,6 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
             },
         );
     }
-
     {
         let state_click = state;
         PressableSprite(
@@ -6493,7 +5756,6 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
             },
         );
     }
-
     {
         let state_click = state;
         PressableSprite(
@@ -6508,7 +5770,6 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
             },
         );
     }
-
     {
         let state_click = state;
         PressableSprite(
@@ -6523,7 +5784,6 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
             },
         );
     }
-
     {
         let state_click = state;
         PressableSprite(
@@ -6538,7 +5798,6 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
             },
         );
     }
-
     {
         let state_click = state;
         PressableSprite(
@@ -6554,7 +5813,6 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
         );
     }
 }
-
 fn apply_loaded_skin(
     state: MutableState<WinampState>,
     skin_state: WinampSkinState,
@@ -6579,23 +5837,15 @@ fn apply_loaded_skin(
         }
     }
 }
-
-// Every target picks a skin through the Cranpose file picker;
-// `SkinPickerEffect` runs it and applies the selection.
 fn open_skin_file(state: MutableState<WinampState>, _skin_state: WinampSkinState) {
     state.update(|s| {
         s.pending_skin_pick = true;
         s.status = "Opening skin picker".to_string();
     });
 }
-
-// Every target picks through the Cranpose file picker;
-// `CranposePickerEffect` runs it and loads the selection. The folder picker
-// uses the system document provider, so cloud/WebDAV folders work too.
 fn open_audio_files(state: MutableState<WinampState>) {
     request_pick(state, false, false);
 }
-
 fn request_pick(state: MutableState<WinampState>, folder: bool, append: bool) {
     let pick = PendingPick { folder, append };
     state.update(|s| {
@@ -6608,15 +5858,12 @@ fn request_pick(state: MutableState<WinampState>, folder: bool, append: bool) {
         .to_string();
     });
 }
-
 fn add_audio_files(state: MutableState<WinampState>) {
     request_pick(state, false, true);
 }
-
 fn add_audio_folder(state: MutableState<WinampState>) {
     request_pick(state, true, true);
 }
-
 fn replace_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
     if tracks.is_empty() {
         state.update(|s| {
@@ -6624,14 +5871,12 @@ fn replace_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track
         });
         return;
     }
-
     state.update(|s| {
         replace_playlist_tracks(s, tracks);
     });
     hydrate_playlist_durations_background(state);
     start_track(state, 0);
 }
-
 fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
     if tracks.is_empty() {
         state.update(|s| {
@@ -6639,7 +5884,6 @@ fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>
         });
         return;
     }
-
     let should_start = state.get_non_reactive().playlist.is_empty();
     state.update(|s| {
         append_playlist_tracks(s, tracks);
@@ -6649,7 +5893,6 @@ fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>
         start_track(state, 0);
     }
 }
-
 fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
     let jobs = state
         .get_non_reactive()
@@ -6662,7 +5905,6 @@ fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
     if jobs.is_empty() {
         return;
     }
-
     cranpose_core::launchBlocking(
         move || {
             jobs.into_iter()
@@ -6692,7 +5934,6 @@ fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
         },
     );
 }
-
 fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     set_playlist_tracks(state, tracks);
     state.current_index = Some(0);
@@ -6705,7 +5946,6 @@ fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     state.status = format!("Loaded {} Track(s)", state.playlist.len());
     refresh_shuffle_order(state);
 }
-
 #[cfg(any(
     not(target_arch = "wasm32"),
     all(feature = "web", target_arch = "wasm32"),
@@ -6714,7 +5954,6 @@ fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
 fn append_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) -> bool {
     let was_empty = state.playlist.is_empty();
     let added_count = tracks.len();
-
     playlist_tracks_mut(state).extend(tracks);
     if was_empty {
         state.current_index = Some(0);
@@ -6730,10 +5969,8 @@ fn append_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) -> bool {
         state.status = format!("Added {added_count} Track(s)");
     }
     refresh_shuffle_order(state);
-
     was_empty
 }
-
 fn set_playlist_selection<I>(state: &mut WinampState, indices: I)
 where
     I: IntoIterator<Item = usize>,
@@ -6742,7 +5979,6 @@ where
     normalize_playlist_selection(state);
     state.selection_anchor = state.selected_indices.last().copied();
 }
-
 fn normalize_playlist_selection(state: &mut WinampState) {
     state.selected_indices.sort_unstable();
     state.selected_indices.dedup();
@@ -6755,7 +5991,6 @@ fn normalize_playlist_selection(state: &mut WinampState) {
         state.selection_anchor = state.selected_indices.last().copied();
     }
 }
-
 fn selected_playlist_indices_or_current(state: &WinampState) -> Vec<usize> {
     let mut indices = state
         .selected_indices
@@ -6775,7 +6010,6 @@ fn selected_playlist_indices_or_current(state: &WinampState) -> Vec<usize> {
     indices.dedup();
     indices
 }
-
 fn remove_all_tracks(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     if snapshot.playlist.is_empty() {
@@ -6789,7 +6023,6 @@ fn remove_all_tracks(state: MutableState<WinampState>) {
         clear_playlist_state(s);
     });
 }
-
 fn clear_playlist_state(state: &mut WinampState) {
     set_playlist_tracks(state, Vec::new());
     state.current_index = None;
@@ -6804,13 +6037,11 @@ fn clear_playlist_state(state: &mut WinampState) {
     state.title_marquee_phase = 0.0;
     state.status = "Playlist Empty".to_string();
 }
-
 fn remove_selected_tracks(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     let indices = selected_playlist_indices_or_current(&snapshot);
     remove_playlist_indices_action(state, indices);
 }
-
 fn remove_unselected_tracks(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     let selected = selected_playlist_indices_or_current(&snapshot)
@@ -6824,13 +6055,11 @@ fn remove_unselected_tracks(state: MutableState<WinampState>) {
         .collect::<Vec<_>>();
     remove_playlist_indices_action(state, indices);
 }
-
 fn remove_duplicate_tracks(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     let indices = duplicate_playlist_indices(snapshot.playlist.as_slice());
     remove_playlist_indices_action(state, indices);
 }
-
 fn duplicate_playlist_indices(playlist: &[Track]) -> Vec<usize> {
     let mut seen = HashSet::new();
     let mut indices = Vec::new();
@@ -6841,7 +6070,6 @@ fn duplicate_playlist_indices(playlist: &[Track]) -> Vec<usize> {
     }
     indices
 }
-
 fn duplicate_track_key(track: &Track) -> String {
     track
         .path
@@ -6850,7 +6078,6 @@ fn duplicate_track_key(track: &Track) -> String {
         .unwrap_or_else(|| track.display_title())
         .to_ascii_lowercase()
 }
-
 fn remove_playlist_indices_action(state: MutableState<WinampState>, indices: Vec<usize>) {
     let snapshot = state.get_non_reactive();
     if snapshot.playlist.is_empty() {
@@ -6868,7 +6095,6 @@ fn remove_playlist_indices_action(state: MutableState<WinampState>, indices: Vec
     {
         let _ = audio::stop();
     }
-
     state.update(|s| {
         let removed = remove_playlist_indices(s, &indices);
         if removed > 0 && !s.playlist.is_empty() {
@@ -6876,14 +6102,12 @@ fn remove_playlist_indices_action(state: MutableState<WinampState>, indices: Vec
         }
     });
 }
-
 fn remove_playlist_indices(state: &mut WinampState, indices: &[usize]) -> usize {
     let len = state.playlist.len();
     if len == 0 {
         clear_playlist_state(state);
         return 0;
     }
-
     let mut remove = vec![false; len];
     for index in indices.iter().copied().filter(|index| *index < len) {
         remove[index] = true;
@@ -6892,14 +6116,12 @@ fn remove_playlist_indices(state: &mut WinampState, indices: &[usize]) -> usize 
     if removed_count == 0 {
         return 0;
     }
-
     let old_current = state.current_index.filter(|index| *index < len);
     let removed_current = old_current.is_some_and(|index| remove[index]);
     let old_selected = state.selected_indices.clone();
     let old_playlist = Rc::clone(&state.playlist);
     let mut old_to_new = vec![None; len];
     let mut new_playlist = Vec::with_capacity(len - removed_count);
-
     for (old_index, track) in old_playlist.iter().cloned().enumerate() {
         if remove[old_index] {
             continue;
@@ -6907,18 +6129,15 @@ fn remove_playlist_indices(state: &mut WinampState, indices: &[usize]) -> usize 
         old_to_new[old_index] = Some(new_playlist.len());
         new_playlist.push(track);
     }
-
     set_playlist_tracks(state, new_playlist);
     if state.playlist.is_empty() {
         clear_playlist_state(state);
         return removed_count;
     }
-
     state.current_index = old_current
         .and_then(|index| old_to_new[index])
         .or_else(|| nearest_surviving_playlist_index(old_current.unwrap_or(0), &old_to_new))
         .or(Some(0));
-
     if removed_current {
         state.playback = PlaybackState::Stopped;
         state.position = 0.0;
@@ -6926,7 +6145,6 @@ fn remove_playlist_indices(state: &mut WinampState, indices: &[usize]) -> usize 
         state.duration_seconds = None;
         state.title_marquee_phase = 0.0;
     }
-
     state.selected_indices = old_selected
         .into_iter()
         .filter_map(|index| old_to_new.get(index).copied().flatten())
@@ -6943,7 +6161,6 @@ fn remove_playlist_indices(state: &mut WinampState, indices: &[usize]) -> usize 
     refresh_shuffle_order(state);
     removed_count
 }
-
 fn nearest_surviving_playlist_index(
     old_index: usize,
     old_to_new: &[Option<usize>],
@@ -6960,14 +6177,12 @@ fn nearest_surviving_playlist_index(
                 .find_map(|index| *index)
         })
 }
-
 #[cfg(test)]
 fn remove_playlist_track_at(state: &mut WinampState, index: usize) -> bool {
     if index >= state.playlist.len() {
         state.status = "Track Missing".to_string();
         return false;
     }
-
     let removed_number = index + 1;
     remove_playlist_indices(state, &[index]);
     if !state.playlist.is_empty() {
@@ -6975,7 +6190,6 @@ fn remove_playlist_track_at(state: &mut WinampState, index: usize) -> bool {
     }
     true
 }
-
 fn select_no_tracks(state: MutableState<WinampState>) {
     state.update(|s| {
         s.selected_indices.clear();
@@ -6983,7 +6197,6 @@ fn select_no_tracks(state: MutableState<WinampState>) {
         s.status = "Selection Cleared".to_string();
     });
 }
-
 fn select_all_tracks(state: MutableState<WinampState>) {
     state.update(|s| {
         let len = s.playlist.len();
@@ -6991,7 +6204,6 @@ fn select_all_tracks(state: MutableState<WinampState>) {
         s.status = format!("Selected {} Track(s)", s.selected_indices.len());
     });
 }
-
 fn invert_track_selection(state: MutableState<WinampState>) {
     state.update(|s| {
         let selected = s.selected_indices.iter().copied().collect::<HashSet<_>>();
@@ -7002,7 +6214,6 @@ fn invert_track_selection(state: MutableState<WinampState>) {
         s.status = format!("Selected {} Track(s)", s.selected_indices.len());
     });
 }
-
 fn select_search_matches(state: MutableState<WinampState>) {
     state.update(|s| {
         if !s.playlist_search_visible {
@@ -7015,7 +6226,6 @@ fn select_search_matches(state: MutableState<WinampState>) {
         s.status = format!("Selected {} Match(es)", s.selected_indices.len());
     });
 }
-
 fn apply_playlist_search_filter_in_state(state: &mut WinampState, query: &str) {
     let query = query.trim().to_ascii_lowercase();
     if query.is_empty() {
@@ -7035,7 +6245,6 @@ fn apply_playlist_search_filter_in_state(state: &mut WinampState, query: &str) {
         .collect::<Vec<_>>();
     set_playlist_selection(state, matches);
 }
-
 fn set_text_field_text(field: &TextFieldState, text: &str) {
     if field.text() == text {
         return;
@@ -7046,7 +6255,6 @@ fn set_text_field_text(field: &TextFieldState, text: &str) {
         buffer.place_cursor_at_end();
     });
 }
-
 fn playlist_search_query(state: &WinampState) -> Option<String> {
     let index = state
         .selection_anchor
@@ -7058,7 +6266,6 @@ fn playlist_search_query(state: &WinampState) -> Option<String> {
     let query = query.trim();
     (!query.is_empty()).then(|| query.to_string())
 }
-
 fn sort_playlist_by_title(state: MutableState<WinampState>) {
     state.update(
         |s| {
@@ -7066,12 +6273,10 @@ fn sort_playlist_by_title(state: MutableState<WinampState>) {
         },
     );
 }
-
 #[cfg(test)]
 fn sort_playlist_tracks_by_title(state: &mut WinampState) -> bool {
     sort_playlist_tracks_by_field(state, PlaylistSortField::Title)
 }
-
 fn sort_playlist_by_artist(state: MutableState<WinampState>) {
     state.update(
         |s| {
@@ -7079,7 +6284,6 @@ fn sort_playlist_by_artist(state: MutableState<WinampState>) {
         },
     );
 }
-
 fn sort_playlist_by_file_name(state: MutableState<WinampState>) {
     state.update(
         |s| {
@@ -7087,7 +6291,6 @@ fn sort_playlist_by_file_name(state: MutableState<WinampState>) {
         },
     );
 }
-
 fn sort_playlist_by_path(state: MutableState<WinampState>) {
     state.update(
         |s| {
@@ -7095,7 +6298,6 @@ fn sort_playlist_by_path(state: MutableState<WinampState>) {
         },
     );
 }
-
 fn sort_playlist_by_extension(state: MutableState<WinampState>) {
     state.update(
         |s| {
@@ -7103,7 +6305,6 @@ fn sort_playlist_by_extension(state: MutableState<WinampState>) {
         },
     );
 }
-
 fn sort_playlist_by_duration(state: MutableState<WinampState>) {
     state.update(
         |s| {
@@ -7111,7 +6312,6 @@ fn sort_playlist_by_duration(state: MutableState<WinampState>) {
         },
     );
 }
-
 fn sort_playlist_by_genre(state: MutableState<WinampState>) {
     state.update(
         |s| {
@@ -7119,7 +6319,6 @@ fn sort_playlist_by_genre(state: MutableState<WinampState>) {
         },
     );
 }
-
 fn sort_playlist_by_tag(state: MutableState<WinampState>) {
     state.update(
         |s| {
@@ -7127,7 +6326,6 @@ fn sort_playlist_by_tag(state: MutableState<WinampState>) {
         },
     );
 }
-
 #[derive(Clone, Copy)]
 enum PlaylistSortField {
     Title,
@@ -7139,19 +6337,16 @@ enum PlaylistSortField {
     Duration,
     Tag,
 }
-
 fn sort_playlist_tracks_by_field(state: &mut WinampState, field: PlaylistSortField) -> bool {
     if state.playlist.len() < 2 {
         state.status = "Playlist Sorted".to_string();
         return false;
     }
-
     let current_track = state
         .current_index
         .and_then(|index| state.playlist.get(index))
         .cloned();
     let selected_tracks = selected_tracks_snapshot(state);
-
     playlist_tracks_mut(state).sort_by(|left, right| {
         compare_tracks_by_field(left, right, field)
             .then_with(|| left.title.cmp(&right.title))
@@ -7162,7 +6357,6 @@ fn sort_playlist_tracks_by_field(state: &mut WinampState, field: PlaylistSortFie
     refresh_shuffle_order(state);
     true
 }
-
 fn compare_tracks_by_field(
     left: &Track,
     right: &Track,
@@ -7176,7 +6370,6 @@ fn compare_tracks_by_field(
         _ => playlist_sort_key(left, field).cmp(&playlist_sort_key(right, field)),
     }
 }
-
 fn playlist_sort_key(track: &Track, field: PlaylistSortField) -> String {
     match field {
         PlaylistSortField::Title => track.display_title().to_ascii_lowercase(),
@@ -7197,14 +6390,12 @@ fn playlist_sort_key(track: &Track, field: PlaylistSortField) -> String {
         .to_ascii_lowercase(),
     }
 }
-
 fn parsed_track_artist(title: &str) -> Option<&str> {
     title
         .split_once(" - ")
         .map(|(artist, _)| artist.trim())
         .filter(|artist| !artist.is_empty())
 }
-
 fn parsed_track_title(title: &str) -> &str {
     title
         .split_once(" - ")
@@ -7212,7 +6403,6 @@ fn parsed_track_title(title: &str) -> &str {
         .filter(|title| !title.is_empty())
         .unwrap_or(title)
 }
-
 fn playlist_file_stem(track: &Track) -> String {
     track
         .path
@@ -7226,7 +6416,6 @@ fn playlist_file_stem(track: &Track) -> String {
         .unwrap_or_else(|| track.display_title())
         .to_string()
 }
-
 fn playlist_parent_folder(track: &Track) -> String {
     track
         .path
@@ -7237,7 +6426,6 @@ fn playlist_parent_folder(track: &Track) -> String {
         .unwrap_or("")
         .to_string()
 }
-
 fn playlist_path_extension(track: &Track) -> String {
     track
         .path
@@ -7247,7 +6435,6 @@ fn playlist_path_extension(track: &Track) -> String {
         .unwrap_or("")
         .to_string()
 }
-
 fn selected_tracks_snapshot(state: &WinampState) -> Vec<Track> {
     state
         .selected_indices
@@ -7255,7 +6442,6 @@ fn selected_tracks_snapshot(state: &WinampState) -> Vec<Track> {
         .filter_map(|index| state.playlist.get(*index).cloned())
         .collect()
 }
-
 fn restore_current_and_selection_after_reorder(
     state: &mut WinampState,
     current_track: Option<Track>,
@@ -7278,7 +6464,6 @@ fn restore_current_and_selection_after_reorder(
         scroll_playlist_to_track(state, index);
     }
 }
-
 fn indices_for_tracks(playlist: &[Track], targets: &[Track]) -> Vec<usize> {
     let mut used = vec![false; targets.len()];
     let mut indices = Vec::new();
@@ -7296,17 +6481,14 @@ fn indices_for_tracks(playlist: &[Track], targets: &[Track]) -> Vec<usize> {
     }
     indices
 }
-
 fn randomize_playlist(state: MutableState<WinampState>) {
     state.update(|s| if randomize_playlist_tracks(s) {});
 }
-
 fn randomize_playlist_tracks(state: &mut WinampState) -> bool {
     if state.playlist.len() < 2 {
         state.status = "Playlist Randomized".to_string();
         return false;
     }
-
     let current_track = state
         .current_index
         .and_then(|index| state.playlist.get(index))
@@ -7327,7 +6509,6 @@ fn randomize_playlist_tracks(state: &mut WinampState) -> bool {
     refresh_shuffle_order(state);
     true
 }
-
 fn new_playlist(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     if snapshot.playback != PlaybackState::Stopped {
@@ -7338,39 +6519,28 @@ fn new_playlist(state: MutableState<WinampState>) {
         s.status = "New Playlist".to_string();
     });
 }
-
 fn import_playlist(state: MutableState<WinampState>) {
     state.update(|app| {
         app.pending_document = Some(PendingDocument::ImportPlaylist);
         app.status = "Importing Playlist".to_string();
     });
 }
-
-/// Opens the URL prompt over the playlist.
 fn open_url_prompt(state: MutableState<WinampState>) {
     state.update(|s| {
         s.url_input_visible = true;
-        // Bumping the revision empties the field: pasting is how a URL gets
-        // entered, and paste inserts at the caret, so a retained URL would
-        // silently concatenate with the new one.
         s.url_input_revision = s.url_input_revision.wrapping_add(1);
         s.status = "Enter A URL".to_string();
     });
 }
-
-/// What a pasted URL turned out to address.
 enum UrlContent {
     Playlist(Vec<Track>),
     Track(Track),
 }
-
-/// The playlist formats a URL can hand back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlaylistFormat {
     M3u,
     Pls,
 }
-
 fn playlist_format_for_extension(extension: &str) -> Option<PlaylistFormat> {
     match extension {
         "m3u" | "m3u8" => Some(PlaylistFormat::M3u),
@@ -7378,8 +6548,6 @@ fn playlist_format_for_extension(extension: &str) -> Option<PlaylistFormat> {
         _ => None,
     }
 }
-
-/// The playlist format a `Content-Type` names, ignoring any `; charset=`.
 fn playlist_format_for_content_type(content_type: &str) -> Option<PlaylistFormat> {
     let value = content_type
         .split(';')
@@ -7396,19 +6564,12 @@ fn playlist_format_for_content_type(content_type: &str) -> Option<PlaylistFormat
         _ => None,
     }
 }
-
 fn parse_playlist(input: &str, format: PlaylistFormat, base: PlaylistBase<'_>) -> Vec<Track> {
     match format {
         PlaylistFormat::M3u => parse_m3u_playlist(input, base),
         PlaylistFormat::Pls => parse_pls_playlist(input, base),
     }
 }
-
-/// Opens whatever a URL addresses: a playlist is fetched and parsed, a single
-/// audio file is appended and played.
-///
-/// One entry point rather than two menu items, because the user should not
-/// have to classify the link before pasting it.
 fn open_url(state: MutableState<WinampState>, url: String) {
     let url = url.trim().to_string();
     if url.is_empty() {
@@ -7441,13 +6602,6 @@ fn open_url(state: MutableState<WinampState>, url: String) {
         }
     });
 }
-
-/// Decides what `url` is and returns it as tracks.
-///
-/// The extension decides when it can, because that costs no request. Only a
-/// URL whose extension says nothing -- a stream endpoint, a redirect, a path
-/// that is all query string -- is asked about over the wire, and a URL that is
-/// still unrecognised after that is reported rather than silently dropped.
 async fn url_content(url: &str) -> Result<UrlContent, String> {
     if let Some(format) = media_extension(url)
         .as_deref()
@@ -7466,7 +6620,6 @@ async fn url_content(url: &str) -> Result<UrlContent, String> {
             url,
         )));
     }
-
     let response = cranpose_services::default_http_client()
         .send(
             &cranpose_services::HttpRequest::get(url),
@@ -7504,21 +6657,12 @@ async fn url_content(url: &str) -> Result<UrlContent, String> {
         format!("Not Audio: {content_type}")
     })
 }
-
 async fn fetch_text(url: &str) -> Result<String, String> {
     cranpose_services::default_http_client()
         .get_text(url)
         .await
         .map_err(describe_http_error)
 }
-
-/// Turns a transport failure into something the status line can say.
-///
-/// A browser reports a cross-origin fetch the server did not allow as an
-/// opaque failure indistinguishable from being offline, so that case names
-/// both possibilities: a host without `Access-Control-Allow-Origin` is the
-/// single most common reason a pasted URL does not load, and the player would
-/// otherwise sit there looking like it had simply done nothing.
 fn describe_http_error(error: cranpose_services::HttpError) -> String {
     match error {
         cranpose_services::HttpError::HttpStatus { status, .. } => format!("URL Returned {status}"),
@@ -7528,25 +6672,21 @@ fn describe_http_error(error: cranpose_services::HttpError) -> String {
         other => format!("URL Error: {other}"),
     }
 }
-
 fn export_playlist(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     if snapshot.playlist.is_empty() {
         state.update(|s| s.status = "Playlist Empty".to_string());
         return;
     }
-
     let text = format_m3u_playlist(snapshot.playlist.as_slice());
     state.update(|app| {
         app.pending_document = Some(PendingDocument::ExportPlaylist(text));
         app.status = "Exporting Playlist".to_string();
     });
 }
-
 fn parse_m3u_playlist(input: &str, base: PlaylistBase<'_>) -> Vec<Track> {
     let mut tracks = Vec::new();
     let mut pending_extinf = None::<(Option<f32>, String)>;
-
     for line in input.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -7559,7 +6699,6 @@ fn parse_m3u_playlist(input: &str, base: PlaylistBase<'_>) -> Vec<Track> {
         if line.starts_with('#') {
             continue;
         }
-
         let resolved_path = resolve_playlist_path(line, base);
         if !is_supported_playlist_path(&resolved_path) {
             pending_extinf = None;
@@ -7578,10 +6717,8 @@ fn parse_m3u_playlist(input: &str, base: PlaylistBase<'_>) -> Vec<Track> {
             duration_seconds,
         });
     }
-
     tracks
 }
-
 fn parse_extinf(input: &str) -> Option<(Option<f32>, String)> {
     let (duration, title) = input.split_once(',').unwrap_or((input, ""));
     let duration_seconds = duration
@@ -7591,27 +6728,12 @@ fn parse_extinf(input: &str) -> Option<(Option<f32>, String)> {
         .filter(|duration| *duration > 0.0);
     Some((duration_seconds, title.trim().to_string()))
 }
-
-/// Where a playlist's relative entries are resolved from.
-///
-/// A playlist arrives from three places and each resolves relative lines
-/// differently, which one `Option<&Path>` could not express: joining a remote
-/// playlist's entries onto a local directory produced paths like
-/// `/home/you/https:/host/track.mp3`, which is why the remote case needs the
-/// playlist's own URL rather than a directory.
 #[derive(Clone, Copy, Debug)]
 enum PlaylistBase<'a> {
-    /// Entries stand alone: absolute paths and absolute URLs survive as
-    /// written and a bare relative name is left for the caller to make sense
-    /// of. This is what an imported playlist uses, and it is what keeps the
-    /// absolute URLs in a hand-written playlist intact.
     None,
-    /// The directory of a playlist file read from disk.
     Directory(&'a std::path::Path),
-    /// The URL a playlist was fetched from.
     Url(&'a str),
 }
-
 fn resolve_playlist_path(path: &str, base: PlaylistBase<'_>) -> String {
     let path = path.trim();
     if let Some(stripped) = path.strip_prefix("file://") {
@@ -7633,13 +6755,6 @@ fn resolve_playlist_path(path: &str, base: PlaylistBase<'_>) -> String {
         PlaylistBase::None => path.to_string(),
     }
 }
-
-/// Resolves `relative` against the URL a playlist was fetched from.
-///
-/// As much of RFC 3986 as a playlist needs: an absolute URL wins, a
-/// root-relative path replaces the base's path, and anything else hangs off
-/// the base's directory. The base's own query and fragment never carry over,
-/// because they described the playlist and not its tracks.
 fn join_url(base: &str, relative: &str) -> String {
     if audio::has_uri_scheme(relative) {
         return relative.to_string();
@@ -7660,13 +6775,6 @@ fn join_url(base: &str, relative: &str) -> String {
         .map_or(authority_end, |offset| authority_end + offset);
     format!("{}/{}", &base[..directory_end], relative)
 }
-
-/// The extension a path or URL addresses, lowercased, with any query string
-/// and fragment removed first.
-///
-/// `Path::extension` alone reads `https://host/track.mp3?token=abc` as the
-/// extension `mp3?token=abc`, so a perfectly playable signed URL was dropped
-/// as an unsupported type.
 fn media_extension(path: &str) -> Option<String> {
     let trimmed = path.split(['?', '#']).next().unwrap_or(path);
     std::path::Path::new(trimmed)
@@ -7674,7 +6782,6 @@ fn media_extension(path: &str) -> Option<String> {
         .and_then(|extension| extension.to_str())
         .map(|extension| extension.to_ascii_lowercase())
 }
-
 fn is_supported_playlist_path(path: &str) -> bool {
     media_extension(path).is_some_and(|extension| {
         audio::supported_audio_extensions()
@@ -7682,13 +6789,9 @@ fn is_supported_playlist_path(path: &str) -> bool {
             .any(|candidate| *candidate == extension)
     })
 }
-
 fn title_from_url(url: &str) -> String {
     playlist_title_from_path(url.split(['?', '#']).next().unwrap_or(url))
 }
-
-/// Parses the Shoutcast `.pls` form: an INI-ish list of `FileN`, `TitleN` and
-/// `LengthN` keys, ordered by their index rather than by line.
 fn parse_pls_playlist(input: &str, base: PlaylistBase<'_>) -> Vec<Track> {
     type Entry = (Option<String>, Option<String>, Option<f32>);
     let mut entries: std::collections::BTreeMap<u32, Entry> = std::collections::BTreeMap::new();
@@ -7707,7 +6810,6 @@ fn parse_pls_playlist(input: &str, base: PlaylistBase<'_>) -> Vec<Track> {
         } else if let Some(index) = index_of("title") {
             entries.entry(index).or_default().1 = Some(value.to_string());
         } else if let Some(index) = index_of("length") {
-            // `-1` is the format's "unknown", and a stream reports it.
             entries.entry(index).or_default().2 =
                 value.parse::<f32>().ok().filter(|seconds| *seconds > 0.0);
         }
@@ -7729,7 +6831,6 @@ fn parse_pls_playlist(input: &str, base: PlaylistBase<'_>) -> Vec<Track> {
         })
         .collect()
 }
-
 fn playlist_title_from_path(path: &str) -> String {
     std::path::Path::new(path)
         .file_stem()
@@ -7739,7 +6840,6 @@ fn playlist_title_from_path(path: &str) -> String {
         .unwrap_or("Untitled")
         .to_string()
 }
-
 fn format_m3u_playlist(playlist: &[Track]) -> String {
     let mut lines = vec!["#EXTM3U".to_string()];
     for track in playlist {
@@ -7759,11 +6859,9 @@ fn format_m3u_playlist(playlist: &[Track]) -> String {
     }
     lines.join("\n") + "\n"
 }
-
 fn scroll_playlist_by_rows(state: MutableState<WinampState>, rows: i32) {
     state.update(|s| scroll_playlist_by_rows_in_state(s, rows));
 }
-
 fn scroll_playlist_by_rows_in_state(state: &mut WinampState, rows: i32) {
     let max_start = state
         .playlist
@@ -7772,12 +6870,10 @@ fn scroll_playlist_by_rows_in_state(state: &mut WinampState, rows: i32) {
     if max_start == 0 {
         state.playlist_scroll = 0.0;
     }
-
     let start = (state.playlist_scroll.clamp(0.0, 1.0) * max_start as f32).round() as i32;
     let next = (start + rows).clamp(0, max_start as i32);
     state.playlist_scroll = next as f32 / max_start as f32;
 }
-
 fn scroll_playlist_to_track(state: &mut WinampState, index: usize) {
     state.playlist_scroll = playlist_scroll_for_track(
         index,
@@ -7786,7 +6882,6 @@ fn scroll_playlist_to_track(state: &mut WinampState, index: usize) {
         state.playlist_scroll,
     );
 }
-
 fn playlist_scroll_for_track(
     index: usize,
     len: usize,
@@ -7796,13 +6891,11 @@ fn playlist_scroll_for_track(
     if len <= 1 {
         return 0.0;
     }
-
     let visible_rows = visible_rows.max(1).min(len);
     let max_start = len.saturating_sub(visible_rows);
     if max_start == 0 {
         return 0.0;
     }
-
     let first_visible =
         ((current_scroll.clamp(0.0, 1.0) * max_start as f32).round() as usize).min(max_start);
     let last_visible = first_visible + visible_rows - 1;
@@ -7810,42 +6903,34 @@ fn playlist_scroll_for_track(
     if (first_visible..=last_visible).contains(&index) {
         return current_scroll.clamp(0.0, 1.0);
     }
-
     let centered_start = index.saturating_sub(visible_rows / 2).min(max_start);
     centered_start as f32 / max_start as f32
 }
-
 fn refresh_shuffle_order(state: &mut WinampState) {
     if !state.shuffle {
         state.shuffle_order.clear();
     }
-
     let len = state.playlist.len();
     if len == 0 {
         state.shuffle_order.clear();
         return;
     }
-
     let current = state.current_index.unwrap_or(0).min(len - 1);
     state.shuffle_order = shuffled_order(len, current);
 }
-
 fn sync_shuffle_order_to_current(state: &mut WinampState, index: usize) {
     if !state.shuffle {
         state.shuffle_order.clear();
         return;
     }
-
     if !valid_shuffle_order(&state.shuffle_order, state.playlist.len()) {
         state.shuffle_order = shuffled_order(state.playlist.len(), index);
     }
 }
-
 fn valid_shuffle_order(order: &[usize], len: usize) -> bool {
     if order.len() != len {
         return false;
     }
-
     let mut seen = vec![false; len];
     for &index in order {
         if index >= len || seen[index] {
@@ -7855,26 +6940,21 @@ fn valid_shuffle_order(order: &[usize], len: usize) -> bool {
     }
     true
 }
-
 fn shuffled_order(len: usize, first: usize) -> Vec<usize> {
     shuffled_order_with_seed(len, first, random_shuffle_seed())
 }
-
 fn shuffled_order_with_seed(len: usize, first: usize, seed: u64) -> Vec<usize> {
     if len == 0 {
         return Vec::new();
     }
-
     let first = first.min(len - 1);
     let mut rest = (0..len).filter(|index| *index != first).collect::<Vec<_>>();
     shuffle_indices(&mut rest, seed);
-
     let mut order = Vec::with_capacity(len);
     order.push(first);
     order.extend(rest);
     order
 }
-
 fn shuffle_indices(indices: &mut [usize], mut seed: u64) {
     for i in (1..indices.len()).rev() {
         seed = next_shuffle_seed(seed);
@@ -7882,16 +6962,13 @@ fn shuffle_indices(indices: &mut [usize], mut seed: u64) {
         indices.swap(i, j);
     }
 }
-
 fn next_shuffle_seed(seed: u64) -> u64 {
     seed.wrapping_mul(6_364_136_223_846_793_005)
         .wrapping_add(1_442_695_040_888_963_407)
 }
-
 fn random_shuffle_seed() -> u64 {
     getrandom::u64().unwrap_or(0x9e37_79b9_7f4a_7c15)
 }
-
 fn play_or_resume(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     if snapshot.playback == PlaybackState::Paused {
@@ -7906,7 +6983,6 @@ fn play_or_resume(state: MutableState<WinampState>) {
         }
         return;
     }
-
     let Some(index) = snapshot
         .current_index
         .or_else(|| (!snapshot.playlist.is_empty()).then_some(0))
@@ -7914,7 +6990,6 @@ fn play_or_resume(state: MutableState<WinampState>) {
         state.update(|s| s.status = "Open File".to_string());
         return;
     };
-
     #[cfg(target_arch = "wasm32")]
     if snapshot
         .playlist
@@ -7933,10 +7008,8 @@ fn play_or_resume(state: MutableState<WinampState>) {
         }
         return;
     }
-
     start_track(state, index);
 }
-
 fn pause_playback(state: MutableState<WinampState>) {
     match audio::pause() {
         Ok(()) => {
@@ -7948,7 +7021,6 @@ fn pause_playback(state: MutableState<WinampState>) {
         Err(error) => state.update(|s| s.status = error),
     }
 }
-
 fn stop_playback(state: MutableState<WinampState>) {
     match audio::stop() {
         Ok(()) => {
@@ -7963,35 +7035,27 @@ fn stop_playback(state: MutableState<WinampState>) {
         Err(error) => state.update(|s| s.status = error),
     }
 }
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TrackDirection {
     Next,
     Previous,
 }
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TrackAdvanceMode {
     Manual,
     Automatic,
 }
-
 fn next_track(state: MutableState<WinampState>) {
     advance_track(state, TrackDirection::Next, TrackAdvanceMode::Manual);
 }
-
 fn previous_track(state: MutableState<WinampState>) {
     advance_track(state, TrackDirection::Previous, TrackAdvanceMode::Manual);
 }
-
 fn advance_finished_track(state: MutableState<WinampState>) {
-    // The just-finished track is still `current_index` here, with its duration
-    // known — the ideal moment to record a completed play.
     #[cfg(not(target_arch = "wasm32"))]
     sync_record_play(&state.get_non_reactive());
     advance_track(state, TrackDirection::Next, TrackAdvanceMode::Automatic);
 }
-
 fn advance_track(
     state: MutableState<WinampState>,
     direction: TrackDirection,
@@ -8004,24 +7068,20 @@ fn advance_track(
         });
         return;
     }
-
     let Some(plan) = playlist_advance_plan(&snapshot, direction, mode) else {
         finish_playlist(state);
         return;
     };
-
     if let Some(order) = plan.shuffle_order {
         state.update(|s| s.shuffle_order = order);
     }
     start_track(state, plan.index);
 }
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TrackAdvancePlan {
     index: usize,
     shuffle_order: Option<Vec<usize>>,
 }
-
 fn playlist_advance_plan(
     state: &WinampState,
     direction: TrackDirection,
@@ -8031,20 +7091,17 @@ fn playlist_advance_plan(
     if len == 0 {
         return None;
     }
-
     let current = state.current_index.unwrap_or(0).min(len - 1);
     let should_wrap = mode == TrackAdvanceMode::Manual || state.repeat;
     if state.shuffle {
         return shuffled_advance_plan(state, direction, should_wrap);
     }
-
     let index = sequential_advance_index(len, current, direction, should_wrap)?;
     Some(TrackAdvancePlan {
         index,
         shuffle_order: None,
     })
 }
-
 fn sequential_advance_index(
     len: usize,
     current: usize,
@@ -8059,7 +7116,6 @@ fn sequential_advance_index(
         _ => None,
     }
 }
-
 fn shuffled_advance_plan(
     state: &WinampState,
     direction: TrackDirection,
@@ -8075,7 +7131,6 @@ fn shuffled_advance_plan(
         replacement_order = Some(order.clone());
         order
     };
-
     let cursor = order
         .iter()
         .position(|index| *index == current)
@@ -8092,13 +7147,11 @@ fn shuffled_advance_plan(
         TrackDirection::Previous if should_wrap => order[order.len() - 1],
         _ => return None,
     };
-
     Some(TrackAdvancePlan {
         index,
         shuffle_order: replacement_order,
     })
 }
-
 fn finish_playlist(state: MutableState<WinampState>) {
     let stop_result = audio::stop();
     state.update(|s| {
@@ -8110,13 +7163,6 @@ fn finish_playlist(state: MutableState<WinampState>) {
         };
     });
 }
-
-/// The URL an entry addresses when that URL names a playlist rather than a
-/// track, which is the one case that has to be fetched before it can play.
-///
-/// Extension only: an entry cannot be classified without a request otherwise,
-/// and a bare stream URL is handed to the audio backend, which is exactly what
-/// should happen to an Icecast or SHOUTcast endpoint.
 fn playlist_entry_url(track: &Track) -> Option<&str> {
     let path = track.path.as_deref()?;
     if !(path.starts_with("http://") || path.starts_with("https://")) {
@@ -8127,13 +7173,6 @@ fn playlist_entry_url(track: &Track) -> Option<&str> {
         .and_then(playlist_format_for_extension)
         .map(|_| path)
 }
-
-/// Fetches a playlist entry and expands it in place, then plays the first
-/// track it yielded.
-///
-/// Nothing is remembered about the attempt. A failure leaves the entry exactly
-/// where it was with the reason on the status line, so pressing play again
-/// retries, and being offline at the wrong moment costs nothing permanently.
 fn resolve_playlist_entry(state: MutableState<WinampState>, index: usize, url: String) {
     state.update(|s| s.status = "Connecting".to_string());
     cranpose_core::spawn_ui_task(async move {
@@ -8148,8 +7187,6 @@ fn resolve_playlist_entry(state: MutableState<WinampState>, index: usize, url: S
                 return;
             }
         };
-        // The playlist can move under a slow fetch, so the entry is found by
-        // its URL rather than by the index it had when the request started.
         let Some(at) = playlist_entry_index(&state.get_non_reactive(), &url) else {
             state.update(|s| s.status = "Entry Removed".to_string());
             return;
@@ -8166,11 +7203,6 @@ fn resolve_playlist_entry(state: MutableState<WinampState>, index: usize, url: S
         start_track(state, at);
     });
 }
-
-/// Reports a resolution that did not work, the same way a track that would not
-/// play is reported: the entry stays put, selected and stopped, with the reason
-/// on the status line. Nothing is recorded, so pressing play again just tries
-/// again.
 fn fail_playlist_entry(state: MutableState<WinampState>, index: usize, url: &str, message: &str) {
     let url = url.to_string();
     let message = message.to_string();
@@ -8184,39 +7216,28 @@ fn fail_playlist_entry(state: MutableState<WinampState>, index: usize, url: &str
         s.status = message.clone();
     });
 }
-
 fn playlist_entry_index(state: &WinampState, url: &str) -> Option<usize> {
     state
         .playlist
         .iter()
         .position(|track| track.path.as_deref() == Some(url))
 }
-
 fn start_track(state: MutableState<WinampState>, index: usize) {
-    // A pending resume cue only applies to its own track; playing anything else
-    // cancels it.
     #[cfg(not(target_arch = "wasm32"))]
     state.update(|s| {
         if !matches!(s.pending_resume, Some((cued, _)) if cued == index) {
             s.pending_resume = None;
         }
     });
-
     let snapshot = state.get_non_reactive();
     let Some(track) = snapshot.playlist.get(index).cloned() else {
         state.update(|s| s.status = "Track Missing".to_string());
         return;
     };
-
-    // A playlist URL is an address, not audio. Resolve it now -- the way
-    // Winamp connected when you pressed play rather than when you added the
-    // entry -- so a station that was unreachable a minute ago is simply
-    // playable the next time it is pressed.
     if let Some(url) = playlist_entry_url(&track) {
         resolve_playlist_entry(state, index, url.to_string());
         return;
     }
-
     #[cfg(target_arch = "wasm32")]
     if track.path.is_none() {
         match audio::seek_fraction(0.0).and_then(|()| audio::resume()) {
@@ -8245,7 +7266,6 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         }
         return;
     }
-
     #[cfg(not(target_arch = "wasm32"))]
     {
         let volume = snapshot.volume;
@@ -8283,7 +7303,6 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
             },
         );
     }
-
     #[cfg(target_arch = "wasm32")]
     match audio::play_track(&track, snapshot.volume, false) {
         Ok(()) => {
@@ -8310,17 +7329,14 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         }),
     }
 }
-
 fn handle_playlist_row_click(state: MutableState<WinampState>, index: usize, modifiers: Modifiers) {
     let now_ms = current_time_ms();
-
     let should_play =
         state.update(|s| handle_playlist_row_click_in_state(s, index, now_ms, modifiers));
     if should_play {
         start_track(state, index);
     }
 }
-
 fn handle_playlist_row_click_in_state(
     state: &mut WinampState,
     index: usize,
@@ -8331,9 +7347,6 @@ fn handle_playlist_row_click_in_state(
         state.status = "Track Missing".to_string();
         return false;
     }
-
-    // Only shift/ctrl (multi-select) suppress the double-click-to-play
-    // gesture; alt/meta held incidentally must not silently break it.
     let should_play = state.playlist_last_click_index == Some(index)
         && now_ms.saturating_sub(state.playlist_last_click_ms) <= PLAYLIST_DOUBLE_CLICK_MS
         && !(modifiers.shift || modifiers.ctrl);
@@ -8342,19 +7355,16 @@ fn handle_playlist_row_click_in_state(
         state.playlist_last_click_ms = 0;
         return true;
     }
-
     select_playlist_row_in_state(state, index, modifiers);
     state.playlist_last_click_index = Some(index);
     state.playlist_last_click_ms = now_ms;
     false
 }
-
 fn select_playlist_row_in_state(state: &mut WinampState, index: usize, modifiers: Modifiers) {
     if index >= state.playlist.len() {
         state.status = "Track Missing".to_string();
         return;
     }
-
     if modifiers.shift {
         let anchor = state
             .selection_anchor
@@ -8387,7 +7397,6 @@ fn select_playlist_row_in_state(state: &mut WinampState, index: usize, modifiers
     } else {
         set_playlist_selection(state, [index]);
     }
-
     scroll_playlist_to_track(state, index);
     state.status = if state.selected_indices.len() == 1 {
         state
@@ -8399,17 +7408,12 @@ fn select_playlist_row_in_state(state: &mut WinampState, index: usize, modifiers
         format!("Selected {} Track(s)", state.selected_indices.len())
     };
 }
-
-/// Wall clock in Unix milliseconds. `web_time` is the standard-library clock on
-/// every native target and the browser's on wasm, so this reads the same time
-/// everywhere instead of one implementation per target.
 fn current_time_ms() -> u64 {
     web_time::SystemTime::now()
         .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
 }
-
 fn current_track_status(state: &WinampState, prefix: &str) -> String {
     state
         .current_index
@@ -8417,14 +7421,12 @@ fn current_track_status(state: &WinampState, prefix: &str) -> String {
         .map(|track| format!("{prefix} {}", track.display_title()))
         .unwrap_or_else(|| prefix.to_string())
 }
-
 #[derive(Clone, Debug, PartialEq)]
 struct SavedTrack {
     title: String,
     path: String,
     duration_seconds: Option<f32>,
 }
-
 #[derive(Clone, Debug, PartialEq)]
 struct SavedPlayerState {
     shuffle: bool,
@@ -8441,7 +7443,6 @@ struct SavedPlayerState {
     current_index: Option<usize>,
     tracks: Vec<SavedTrack>,
 }
-
 #[derive(Clone, Debug, PartialEq)]
 struct SavedPlayerStateKey {
     shuffle: bool,
@@ -8459,7 +7460,6 @@ struct SavedPlayerStateKey {
     playlist_identity: usize,
     playlist_len: usize,
 }
-
 impl SavedPlayerStateKey {
     fn from_state(state: &WinampState) -> Self {
         Self {
@@ -8480,13 +7480,11 @@ impl SavedPlayerStateKey {
         }
     }
 }
-
 impl Default for SavedPlayerState {
     fn default() -> Self {
         Self::from_state(&WinampState::default())
     }
 }
-
 impl SavedPlayerState {
     fn from_state(state: &WinampState) -> Self {
         let mut current_index = None;
@@ -8504,7 +7502,6 @@ impl SavedPlayerState {
                 duration_seconds: track.duration_seconds,
             });
         }
-
         Self {
             shuffle: state.shuffle,
             repeat: state.repeat,
@@ -8522,7 +7519,6 @@ impl SavedPlayerState {
         }
     }
 }
-
 fn restore_saved_player_state(saved: SavedPlayerState) -> WinampState {
     let mut state = WinampState {
         shuffle: saved.shuffle,
@@ -8560,19 +7556,14 @@ fn restore_saved_player_state(saved: SavedPlayerState) -> WinampState {
     }
     state
 }
-
 fn restore_saved_track(track: SavedTrack) -> Option<Track> {
     if track.path.is_empty() {
         return None;
     }
-
-    // A URL is a perfectly good entry that no filesystem will vouch for, so
-    // only real paths are checked for existence.
     #[cfg(not(target_arch = "wasm32"))]
     if !audio::has_uri_scheme(&track.path) && !std::path::Path::new(&track.path).is_file() {
         return None;
     }
-
     let title = if track.title.is_empty() {
         "Untitled".to_string()
     } else {
@@ -8584,18 +7575,15 @@ fn restore_saved_track(track: SavedTrack) -> Option<Track> {
     }
     Some(restored)
 }
-
 fn valid_saved_skin_path(path: Option<String>) -> Option<String> {
     let path = path.filter(|path| !path.is_empty())?;
     if bundled_skin_entry(&path).is_some() {
         return Some(path);
     }
-
     #[cfg(not(target_arch = "wasm32"))]
     {
         std::path::Path::new(&path).is_file().then_some(path)
     }
-
     #[cfg(target_arch = "wasm32")]
     {
         browser_skins::load(cranpose_services::preferences().as_ref(), &path)
@@ -8603,7 +7591,6 @@ fn valid_saved_skin_path(path: Option<String>) -> Option<String> {
             .map(|_| path)
     }
 }
-
 fn serialize_player_state(config: &SavedPlayerState) -> String {
     let mut lines = vec![
         "version=1".to_string(),
@@ -8641,7 +7628,6 @@ fn serialize_player_state(config: &SavedPlayerState) -> String {
                 .join(",")
         ),
     ];
-
     for track in &config.tracks {
         let duration = track
             .duration_seconds
@@ -8655,25 +7641,20 @@ fn serialize_player_state(config: &SavedPlayerState) -> String {
             duration
         ));
     }
-
     lines.join("\n") + "\n"
 }
-
 fn parse_player_state(input: &str) -> SavedPlayerState {
     let mut config = SavedPlayerState::default();
     config.tracks.clear();
     config.current_index = None;
-
     for line in input.lines() {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
         apply_player_state_value(&mut config, key.trim(), value.trim());
     }
-
     config
 }
-
 fn apply_player_state_value(config: &mut SavedPlayerState, key: &str, value: &str) {
     match key {
         "shuffle" => update_bool(&mut config.shuffle, value),
@@ -8700,7 +7681,6 @@ fn apply_player_state_value(config: &mut SavedPlayerState, key: &str, value: &st
         _ => {}
     }
 }
-
 fn bool_value(value: bool) -> &'static str {
     if value {
         "1"
@@ -8708,7 +7688,6 @@ fn bool_value(value: bool) -> &'static str {
         "0"
     }
 }
-
 fn update_bool(target: &mut bool, value: &str) {
     match value {
         "1" | "true" | "on" => *target = true,
@@ -8716,13 +7695,11 @@ fn update_bool(target: &mut bool, value: &str) {
         _ => {}
     }
 }
-
 fn update_f32(target: &mut f32, value: &str) {
     if let Ok(parsed) = value.parse::<f32>() {
         *target = clamp01(parsed);
     }
 }
-
 fn parse_optional_usize(value: &str) -> Option<usize> {
     if value.is_empty() || value == "none" {
         None
@@ -8730,7 +7707,6 @@ fn parse_optional_usize(value: &str) -> Option<usize> {
         value.parse::<usize>().ok()
     }
 }
-
 fn parse_optional_hex_string(value: &str) -> Option<String> {
     if value.is_empty() || value == "none" {
         None
@@ -8738,7 +7714,6 @@ fn parse_optional_hex_string(value: &str) -> Option<String> {
         hex_decode(value)
     }
 }
-
 fn parse_eq_values(value: &str) -> Option<[f32; 11]> {
     let values = value
         .split(',')
@@ -8751,7 +7726,6 @@ fn parse_eq_values(value: &str) -> Option<[f32; 11]> {
         .ok()
         .map(|values: [f32; 11]| values.map(clamp01))
 }
-
 fn parse_saved_track(value: &str) -> Option<SavedTrack> {
     let (title, path) = value.split_once('\t')?;
     let (path, duration) = path.split_once('\t').unwrap_or((path, ""));
@@ -8764,7 +7738,6 @@ fn parse_saved_track(value: &str) -> Option<SavedTrack> {
             .filter(|duration| *duration > 0.0),
     })
 }
-
 fn hex_encode(input: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(input.len() * 2);
@@ -8774,40 +7747,28 @@ fn hex_encode(input: &str) -> String {
     }
     output
 }
-
 fn hex_decode(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     if !bytes.len().is_multiple_of(2) {
         return None;
     }
-
     let mut output = Vec::with_capacity(bytes.len() / 2);
     for pair in bytes.as_chunks::<2>().0 {
         output.push(u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?);
     }
     String::from_utf8(output).ok()
 }
-
-/// Where the restored player state lives. One key on every target: the
-/// framework's preferences store is a file beside the application's data on
-/// desktop and Android, and `localStorage` in the browser.
 const PLAYER_STATE_KEY: &str = "cranamp.player";
-
 fn load_saved_player_state() -> Option<SavedPlayerState> {
     cranpose_services::preferences()
         .get(PLAYER_STATE_KEY)
         .map(|text| parse_player_state(&text))
 }
-
 fn save_player_state(config: &SavedPlayerState) -> Result<(), String> {
     cranpose_services::preferences()
         .set(PLAYER_STATE_KEY, &serialize_player_state(config))
         .map_err(|error| error.to_string())
 }
-
-/// Writes the state off the UI thread. The web has no thread to move it to and
-/// `launchBlocking` runs the work inline there, which is the right answer for a
-/// single small write.
 fn save_player_state_background(config: SavedPlayerState) {
     cranpose_core::launchBlocking(
         move || {
@@ -8816,26 +7777,20 @@ fn save_player_state_background(config: SavedPlayerState) {
         |_| {},
     );
 }
-
-/// Path to the cross-device sync configuration (device id, label, folder). Lives
-/// beside `player.conf`; the sync runtime reads/writes it. See [`crate::sync`].
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn sync_config_path() -> std::path::PathBuf {
     app_config_dir().join("sync.conf")
 }
-
 const WINAMP_NATIVE_HOST_OFFSET_X: f32 = 640.0;
 const WINAMP_NATIVE_HOST_OFFSET_Y: f32 = 118.0;
 const WINAMP_ATTACH_EPSILON: f32 = 3.0;
 const WINAMP_SNAP_DISTANCE: f32 = 8.0;
-
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SavedWindowConfig {
     position: Option<Point>,
     size: Option<Size>,
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SavedWinampWindowConfig {
@@ -8843,7 +7798,6 @@ struct SavedWinampWindowConfig {
     equalizer: SavedWindowConfig,
     playlist: SavedWindowConfig,
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 impl SavedWinampWindowConfig {
     fn from_states(peer_windows: WinampPeerWindowStates) -> Self {
@@ -8863,7 +7817,6 @@ impl SavedWinampWindowConfig {
         }
     }
 }
-
 #[composable]
 fn remember_saved_window_config(peer_windows: WinampPeerWindowStates) {
     #[cfg(not(target_arch = "wasm32"))]
@@ -8874,13 +7827,11 @@ fn remember_saved_window_config(peer_windows: WinampPeerWindowStates) {
             }
         });
     }
-
     #[cfg(target_arch = "wasm32")]
     {
         let _ = peer_windows;
     }
 }
-
 #[composable]
 fn NativeWindowPersistence(peer_windows: WinampPeerWindowStates) {
     #[cfg(not(target_arch = "wasm32"))]
@@ -8896,13 +7847,11 @@ fn NativeWindowPersistence(peer_windows: WinampPeerWindowStates) {
             });
         });
     }
-
     #[cfg(target_arch = "wasm32")]
     {
         let _ = peer_windows;
     }
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn apply_saved_window_config(
     peer_windows: WinampPeerWindowStates,
@@ -8923,7 +7872,6 @@ fn apply_saved_window_config(
             .set_size(clamp_playlist_window_size(size));
     }
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn clamp_playlist_window_size(size: Size) -> Size {
     Size::new(
@@ -8931,7 +7879,6 @@ fn clamp_playlist_window_size(size: Size) -> Size {
         size.height.max(playlist_min_height()),
     )
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn serialize_window_config(config: SavedWinampWindowConfig) -> String {
     let mut lines = Vec::new();
@@ -8940,7 +7887,6 @@ fn serialize_window_config(config: SavedWinampWindowConfig) -> String {
     push_window_config_lines(&mut lines, "playlist", config.playlist);
     lines.join("\n") + "\n"
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn push_window_config_lines(lines: &mut Vec<String>, name: &str, config: SavedWindowConfig) {
     if let Some(position) = config.position {
@@ -8952,7 +7898,6 @@ fn push_window_config_lines(lines: &mut Vec<String>, name: &str, config: SavedWi
         lines.push(format!("{name}.height={:.3}", size.height));
     }
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn parse_window_config(input: &str) -> SavedWinampWindowConfig {
     let mut config = SavedWinampWindowConfig::default();
@@ -8967,7 +7912,6 @@ fn parse_window_config(input: &str) -> SavedWinampWindowConfig {
     }
     config
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn apply_window_config_value(config: &mut SavedWinampWindowConfig, key: &str, value: f32) {
     let Some((window, field)) = key.split_once('.') else {
@@ -8976,7 +7920,6 @@ fn apply_window_config_value(config: &mut SavedWinampWindowConfig, key: &str, va
     let Some(target) = saved_window_mut(config, window) else {
         return;
     };
-
     match field {
         "x" => target.position.get_or_insert(Point::ZERO).x = value,
         "y" => target.position.get_or_insert(Point::ZERO).y = value,
@@ -8985,7 +7928,6 @@ fn apply_window_config_value(config: &mut SavedWinampWindowConfig, key: &str, va
         _ => {}
     }
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn saved_window_mut<'a>(
     config: &'a mut SavedWinampWindowConfig,
@@ -8998,14 +7940,12 @@ fn saved_window_mut<'a>(
         _ => None,
     }
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn load_saved_window_config() -> Option<SavedWinampWindowConfig> {
     std::fs::read_to_string(window_config_path())
         .ok()
         .map(|text| parse_window_config(&text))
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn save_window_config(config: SavedWinampWindowConfig) -> Result<(), String> {
     let path = window_config_path();
@@ -9016,7 +7956,6 @@ fn save_window_config(config: SavedWinampWindowConfig) -> Result<(), String> {
     std::fs::write(&path, serialize_window_config(config))
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn save_window_config_background(config: SavedWinampWindowConfig) {
     cranpose_core::launchBlocking(
@@ -9026,44 +7965,37 @@ fn save_window_config_background(config: SavedWinampWindowConfig) {
         |_| {},
     );
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn window_config_path() -> std::path::PathBuf {
     app_config_dir().join("windows.conf")
 }
-
 #[cfg(not(target_arch = "wasm32"))]
 fn app_config_dir() -> std::path::PathBuf {
     cranpose::application_directories()
         .map(|directories| directories.config)
         .unwrap_or_else(|_| std::env::temp_dir().join("cranamp-config"))
 }
-
 fn default_main_position() -> Point {
     WINAMP_DEFAULT_SCREEN_POSITION
 }
-
 fn default_equalizer_position() -> Point {
     Point::new(
         WINAMP_DEFAULT_SCREEN_POSITION.x,
         WINAMP_DEFAULT_SCREEN_POSITION.y + MAIN_HEIGHT,
     )
 }
-
 fn default_playlist_position() -> Point {
     Point::new(
         WINAMP_DEFAULT_SCREEN_POSITION.x,
         WINAMP_DEFAULT_SCREEN_POSITION.y + MAIN_HEIGHT + EQ_HEIGHT,
     )
 }
-
 fn default_settings_position() -> Point {
     Point::new(
         WINAMP_DEFAULT_SCREEN_POSITION.x + MAIN_WIDTH + 16.0,
         WINAMP_DEFAULT_SCREEN_POSITION.y,
     )
 }
-
 fn native_winamp_windows_available() -> bool {
     #[cfg(all(
         not(target_arch = "wasm32"),
@@ -9073,13 +8005,11 @@ fn native_winamp_windows_available() -> bool {
     {
         std::env::var_os("CRANPOSE_WINAMP_INLINE").is_none()
     }
-
     #[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
     {
         false
     }
 }
-
 fn base_winamp_window_config(placement: WinampWindowPlacement) -> WindowConfig {
     let state_size = placement.state.size();
     let config = WindowConfig::borderless(placement.title, state_size.width, state_size.height);
@@ -9097,12 +8027,10 @@ fn base_winamp_window_config(placement: WinampWindowPlacement) -> WindowConfig {
         .with_resizable(false)
         .with_visible(true)
 }
-
 fn winamp_window_config(placement: WinampWindowPlacement) -> WindowConfig {
     let state = placement.state;
     base_winamp_window_config(placement).with_state(state)
 }
-
 fn winamp_attach_policy() -> WindowAttachPolicy {
     WindowAttachPolicy::new(
         WINAMP_SNAP_DISTANCE,
@@ -9110,23 +8038,18 @@ fn winamp_attach_policy() -> WindowAttachPolicy {
         WindowMoveMode::DragLeaderOnly(vec![winamp_main_window_id()]),
     )
 }
-
 fn winamp_main_window_id() -> WindowId {
     WindowId::from_static("cranamp-winamp-main")
 }
-
 fn winamp_equalizer_window_id() -> WindowId {
     WindowId::from_static("cranamp-winamp-equalizer")
 }
-
 fn winamp_playlist_window_id() -> WindowId {
     WindowId::from_static("cranamp-winamp-playlist")
 }
-
 fn settings_window_id() -> WindowId {
     WindowId::from_static("cranamp-winamp-settings")
 }
-
 fn winamp_window_modifier(
     width: f32,
     height: f32,
@@ -9150,14 +8073,9 @@ fn winamp_window_modifier(
         WinampDragTarget::NativeGroup => modifier,
     }
 }
-
 fn ui_scale() -> f32 {
-    // Skin pixel coordinates map directly to dp.  On high-density screens the
-    // renderer upscales automatically, keeping the skin at the same visual
-    // size as on a 1× desktop display.
     1.0
 }
-
 fn snap_to_pixel(value: f32) -> f32 {
     let density = current_density();
     if density > 0.0 {
@@ -9166,19 +8084,15 @@ fn snap_to_pixel(value: f32) -> f32 {
         value.round()
     }
 }
-
 fn scaled(value: f32, scale: f32) -> f32 {
     snap_to_pixel(value * scale)
 }
-
 fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
 }
-
 fn slider_thumb_x(value: f32, bar_width: f32, knob_width: f32) -> f32 {
     (clamp01(value) * (bar_width - knob_width)).round()
 }
-
 fn slider_frame(value: f32, frames: u32) -> u32 {
     if frames <= 1 {
         return 0;
@@ -9186,7 +8100,6 @@ fn slider_frame(value: f32, frames: u32) -> u32 {
     let max_index = frames - 1;
     (clamp01(value) * max_index as f32).round() as u32
 }
-
 fn eq_slider_bg_rect(value: f32) -> SpriteRect {
     let frame = slider_frame(value, EQ_SLIDER_BG_FRAMES);
     let row = (frame / EQ_SLIDER_BG_FRAMES_PER_ROW) as usize;
@@ -9198,15 +8111,12 @@ fn eq_slider_bg_rect(value: f32) -> SpriteRect {
         EQ_SLIDER_BG.3,
     )
 }
-
 fn vertical_slider_thumb_y(value: f32, track_height: f32, knob_height: f32) -> f32 {
     ((1.0 - clamp01(value)) * (track_height - knob_height)).round()
 }
-
 fn vertical_slider_thumb_y_down(value: f32, track_height: f32, knob_height: f32) -> f32 {
     (clamp01(value) * (track_height - knob_height)).round()
 }
-
 fn time_digits(elapsed_seconds: f32) -> [u8; 4] {
     let seconds = elapsed_seconds.max(0.0).round() as u32;
     let minutes = (seconds / 60) % 100;
@@ -9218,25 +8128,8 @@ fn time_digits(elapsed_seconds: f32) -> [u8; 4] {
         (remainder % 10) as u8,
     ]
 }
-
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn playlist_glass_crops_and_tiles_at_native_size() {
-        assert_eq!(
-            super::playlist_background_tiles(243., 87.),
-            vec![((0., 0., 243., 87.), 0., 0.)]
-        );
-        assert_eq!(
-            super::playlist_background_tiles(250., 210.),
-            vec![
-                ((0., 0., 243., 203.), 0., 0.),
-                ((0., 0., 7., 203.), 243., 0.),
-                ((0., 0., 243., 7.), 0., 203.),
-                ((0., 0., 7., 7.), 243., 203.),
-            ]
-        );
-    }
     #[test]
     fn playlist_border_tiles_preserve_source_texels_and_crop_partial_edges() {
         let source = (31., 42., 20., 29.);
@@ -9259,39 +8152,31 @@ mod tests {
         assert!(super::native_sprite_tiles(source, 0., 0.).is_empty());
     }
     use super::*;
-
     fn test_playlist(tracks: Vec<Track>) -> Rc<Vec<Track>> {
         Rc::new(tracks)
     }
-
     #[test]
     fn time_digits_are_mapped_correctly() {
         assert_eq!(time_digits(0.0), [0, 0, 0, 0]);
         assert_eq!(time_digits(65.0), [0, 1, 0, 5]);
         assert_eq!(time_digits(-1.0), [0, 0, 0, 0]);
     }
-
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn sanitize_skin_file_name_strips_dirs_and_forces_extension() {
-        // Existing skin archive names are kept as-is.
         assert_eq!(sanitize_skin_file_name("base-2.91.wsz"), "base-2.91.wsz");
         assert_eq!(sanitize_skin_file_name("Cool.ZIP"), "Cool.ZIP");
-        // Directory components (from a content:// display path) are dropped.
         assert_eq!(sanitize_skin_file_name("skins/MyTheme.wsz"), "MyTheme.wsz");
         assert_eq!(
             sanitize_skin_file_name("C:\\Downloads\\Theme.wsz"),
             "Theme.wsz"
         );
-        // A name without a recognized extension gains `.wsz`.
         assert_eq!(
             sanitize_skin_file_name("Untitled Skin"),
             "Untitled Skin.wsz"
         );
-        // Empty/blank names fall back to a default.
         assert_eq!(sanitize_skin_file_name("   "), "skin.wsz");
     }
-
     #[test]
     fn slider_helpers_clamp_values() {
         assert_eq!(slider_frame(-1.0, 28), 0);
@@ -9299,14 +8184,12 @@ mod tests {
         assert_eq!(slider_thumb_x(-1.0, 248.0, 29.0), 0.0);
         assert_eq!(slider_thumb_x(2.0, 248.0, 29.0), 219.0);
     }
-
     #[test]
     fn eq_slider_background_uses_skin_frame_for_value() {
         assert_eq!(eq_slider_bg_rect(0.0), (13.0, 164.0, 14.0, 63.0));
         assert_eq!(eq_slider_bg_rect(0.5), (13.0, 229.0, 14.0, 63.0));
         assert_eq!(eq_slider_bg_rect(1.0), (208.0, 229.0, 14.0, 63.0));
     }
-
     #[test]
     fn eq_presets_are_named_and_clamped() {
         assert_eq!(EQ_PRESETS.first().map(|preset| preset.label), Some("FLAT"));
@@ -9319,7 +8202,6 @@ mod tests {
             .flat_map(|preset| preset.values)
             .all(|value| (0.0..=1.0).contains(&value)));
     }
-
     #[test]
     fn playlist_duration_column_width_matches_duration_text() {
         assert_eq!(
@@ -9331,25 +8213,20 @@ mod tests {
             (WINAMP_PLAYLIST_ROW_CHAR_WIDTH * 5.0).ceil().max(30.0)
         );
     }
-
     #[test]
     fn playlist_title_column_leaves_right_duration_gap() {
         let line_width = WINAMP_PLAYLIST_ROW_CHAR_WIDTH * 12.0;
         let duration_width = playlist_duration_column_width("1:23");
         let expected = line_width - duration_width - WINAMP_PLAYLIST_ROW_CHAR_WIDTH * 2.0;
-
         assert!((playlist_title_column_width(line_width, duration_width) - expected).abs() < 0.001);
         assert_eq!(playlist_title_column_width(line_width, 0.0), line_width);
     }
-
     #[test]
     fn playlist_visible_row_capacity_uses_full_list_area() {
         let default_list_height =
             PLAYLIST_HEIGHT - PLAYLIST_BOTTOM_LEFT_CORNER.3 - PLAYLIST_LIST_BG.1;
-
         assert_eq!(playlist_visible_row_capacity(default_list_height), 18);
     }
-
     #[test]
     fn slider_artwork_stays_on_native_pixel_grid_at_all_skin_frames() {
         for frame in 0..=27 {
@@ -9369,7 +8246,6 @@ mod tests {
             }
         }
     }
-
     #[test]
     fn main_display_meta_does_not_include_bitrate_units() {
         let state = WinampState {
@@ -9378,11 +8254,9 @@ mod tests {
             ..WinampState::default()
         };
         let meta = main_display_meta(&state);
-
         assert!(!meta.contains("kbps"));
         assert!(!meta.contains("khz"));
     }
-
     #[test]
     fn vertical_slider_helpers_clamp_values() {
         assert_eq!(vertical_slider_thumb_y(-1.0, 63.0, 11.0), 52.0);
@@ -9390,14 +8264,12 @@ mod tests {
         assert_eq!(vertical_slider_thumb_y_down(-1.0, 145.0, 18.0), 0.0);
         assert_eq!(vertical_slider_thumb_y_down(2.0, 145.0, 18.0), 127.0);
     }
-
     #[test]
     fn progress_fraction_uses_duration_when_known() {
         assert_eq!(progress_fraction(30.0, Some(120.0)), 0.25);
         assert_eq!(progress_fraction(130.0, Some(120.0)), 1.0);
         assert_eq!(progress_fraction(30.0, None), 0.0);
     }
-
     #[test]
     fn playlist_scroll_tracks_current_index() {
         assert_eq!(playlist_scroll_for_track(3, 20, 5, 0.0), 0.0);
@@ -9406,12 +8278,10 @@ mod tests {
         assert_eq!(playlist_scroll_for_track(99, 20, 5, 0.0), 1.0);
         assert_eq!(playlist_scroll_for_track(0, 1, 5, 0.5), 0.0);
     }
-
     #[test]
     fn marquee_text_ping_pongs_long_titles() {
         let title = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string();
         let width = WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH * 14.0;
-
         assert!(marquee_system_text(title.clone(), width, 0.0).starts_with("ABCDEFGHIJKLMN"));
         assert!(marquee_system_text(title.clone(), width, 2.0).starts_with("CDEFGHIJKLMNOP"));
         assert!(marquee_system_text(title, width, 18.0).starts_with("GHIJKLMNOPQRST"));
@@ -9420,7 +8290,6 @@ mod tests {
             "SHORT"
         );
     }
-
     #[test]
     fn visualizer_bitmap_contains_bright_bars() {
         let bitmap = visualizer_bitmap(
@@ -9428,7 +8297,6 @@ mod tests {
             [0.8; audio::VISUALIZER_BAND_COUNT],
             VisColor::default(),
         );
-
         assert_eq!(bitmap.width(), VISUALIZER_WIDTH as u32);
         assert_eq!(bitmap.height(), VISUALIZER_HEIGHT as u32);
         assert!(bitmap
@@ -9438,7 +8306,6 @@ mod tests {
             .iter()
             .any(|pixel| pixel[1] > 180 && pixel[3] == 255));
     }
-
     #[test]
     fn visualizer_bitmap_is_blank_when_stopped() {
         let bitmap = visualizer_bitmap(
@@ -9446,7 +8313,6 @@ mod tests {
             [0.8; audio::VISUALIZER_BAND_COUNT],
             VisColor::default(),
         );
-
         assert!(bitmap
             .pixels()
             .as_chunks::<4>()
@@ -9454,9 +8320,6 @@ mod tests {
             .iter()
             .all(|pixel| *pixel == [0, 0, 0, 255]));
     }
-
-    /// Both preinstalled skins have to survive being compiled in and loaded
-    /// back out; an embed that no longer parses is otherwise found by a user.
     #[test]
     fn every_bundled_skin_loads_from_the_bytes_compiled_into_the_binary() {
         for skin in BUNDLED_SKINS {
@@ -9469,10 +8332,6 @@ mod tests {
             "the list is meant to hold more than one"
         );
     }
-
-    /// The skin list offers every bundled skin. The first keeps the empty path
-    /// it has always had, so a player state saved before there was a second one
-    /// still resolves to the skin it named.
     #[test]
     fn the_skin_list_offers_each_bundled_skin_and_keeps_the_first_addressed_as_none() {
         let listed = list_library_skins();
@@ -9499,10 +8358,6 @@ mod tests {
             Some(std::path::Path::new("bundled:salvage"))
         );
     }
-
-    /// A bundled skin is remembered as an id, not a file, so the check that
-    /// drops saved paths whose file has gone has to let it through -- and the
-    /// Studio, which only opens files, has to be handed nothing instead.
     #[test]
     fn a_bundled_id_survives_saving_but_is_never_handed_to_the_studio() {
         let id = "bundled:feral-night".to_string();
@@ -9517,7 +8372,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn visualizer_uses_viscolor_palette_for_lit_bars() {
         let palette = VisColor([[5; 4]; 24]);
@@ -9529,7 +8383,6 @@ mod tests {
             .iter()
             .all(|pixel| *pixel == [5, 5, 5, 5]));
     }
-
     #[test]
     fn player_state_config_round_trips_settings_and_playlist() {
         let mut eq_values = [0.5; 11];
@@ -9551,13 +8404,10 @@ mod tests {
             current_index: Some(1),
             ..WinampState::default()
         };
-
         let saved = SavedPlayerState::from_state(&state);
         let parsed = parse_player_state(&serialize_player_state(&saved));
-
         assert_eq!(parsed, saved);
     }
-
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn restored_player_state_filters_missing_tracks_and_remaps_current_index() {
@@ -9581,9 +8431,7 @@ mod tests {
             ],
             ..SavedPlayerState::default()
         };
-
         let state = restore_saved_player_state(saved);
-
         assert_eq!(state.playlist.len(), 1);
         assert_eq!(state.playlist[0].title, "Present");
         assert_eq!(state.playlist[0].duration_seconds, Some(1.0));
@@ -9591,13 +8439,11 @@ mod tests {
         assert_eq!(state.volume, 0.25);
         assert_eq!(state.skin_path, None);
     }
-
     #[test]
     fn elapsed_time_is_clamped_to_track_duration() {
         assert_eq!(normalized_elapsed_seconds(130.0, Some(120.0)), 120.0);
         assert_eq!(normalized_elapsed_seconds(30.0, Some(120.0)), 30.0);
     }
-
     #[test]
     fn saved_window_config_round_trips() {
         let config = SavedWinampWindowConfig {
@@ -9614,26 +8460,21 @@ mod tests {
                 size: Some(Size::new(320.0, 240.0)),
             },
         };
-
         assert_eq!(
             parse_window_config(&serialize_window_config(config)),
             config
         );
     }
-
     #[test]
     fn default_native_windows_stack_vertically() {
         assert_eq!(default_main_position(), Point::new(140.0, 120.0));
         assert_eq!(default_equalizer_position(), Point::new(140.0, 236.0));
         assert_eq!(default_playlist_position(), Point::new(140.0, 352.0));
     }
-
     #[test]
     fn append_playlist_tracks_starts_empty_playlist_at_first_added_track() {
         let mut state = WinampState::default();
-
         let should_start = append_playlist_tracks(&mut state, vec![test_track("First")]);
-
         assert!(should_start);
         assert_eq!(state.playlist.as_slice(), &[test_track("First")]);
         assert_eq!(state.current_index, Some(0));
@@ -9642,7 +8483,6 @@ mod tests {
         assert_eq!(state.elapsed_seconds, 0.0);
         assert_eq!(state.status, "Loaded 1 Track(s)");
     }
-
     #[test]
     fn append_playlist_tracks_preserves_current_track_when_playlist_exists() {
         let mut state = WinampState {
@@ -9653,9 +8493,7 @@ mod tests {
             status: "Playing First".to_string(),
             ..WinampState::default()
         };
-
         let should_start = append_playlist_tracks(&mut state, vec![test_track("Second")]);
-
         assert!(!should_start);
         assert_eq!(
             state.playlist.as_slice(),
@@ -9666,7 +8504,6 @@ mod tests {
         assert_eq!(state.playlist_scroll, 0.25);
         assert_eq!(state.status, "Added 1 Track(s)");
     }
-
     #[test]
     fn playlist_single_click_selects_without_playing() {
         let mut state = WinampState {
@@ -9676,9 +8513,7 @@ mod tests {
             selection_anchor: Some(0),
             ..WinampState::default()
         };
-
         let should_play = handle_playlist_row_click_in_state(&mut state, 1, 1000, Modifiers::NONE);
-
         assert!(!should_play);
         assert_eq!(state.current_index, Some(0));
         assert_eq!(state.playback, PlaybackState::Stopped);
@@ -9686,7 +8521,6 @@ mod tests {
         assert_eq!(state.selection_anchor, Some(1));
         assert_eq!(state.playlist_last_click_index, Some(1));
     }
-
     #[test]
     fn playlist_second_plain_click_requests_play() {
         let mut state = WinampState {
@@ -9695,14 +8529,11 @@ mod tests {
             playlist_last_click_ms: 1000,
             ..WinampState::default()
         };
-
         let should_play = handle_playlist_row_click_in_state(&mut state, 1, 1200, Modifiers::NONE);
-
         assert!(should_play);
         assert_eq!(state.playlist_last_click_index, None);
         assert_eq!(state.playlist_last_click_ms, 0);
     }
-
     #[test]
     fn playlist_shift_and_ctrl_click_match_winamp_selection_rules() {
         let mut state = WinampState {
@@ -9716,7 +8547,6 @@ mod tests {
             selection_anchor: Some(1),
             ..WinampState::default()
         };
-
         select_playlist_row_in_state(
             &mut state,
             3,
@@ -9727,7 +8557,6 @@ mod tests {
         );
         assert_eq!(state.selected_indices, vec![1, 2, 3]);
         assert_eq!(state.selection_anchor, Some(1));
-
         select_playlist_row_in_state(
             &mut state,
             2,
@@ -9738,7 +8567,6 @@ mod tests {
         );
         assert_eq!(state.selected_indices, vec![1, 3]);
         assert_eq!(state.selection_anchor, Some(1));
-
         select_playlist_row_in_state(
             &mut state,
             0,
@@ -9750,7 +8578,6 @@ mod tests {
         assert_eq!(state.selected_indices, vec![0, 1, 3]);
         assert_eq!(state.selection_anchor, Some(0));
     }
-
     #[test]
     fn remove_playlist_track_at_stops_removed_current_and_keeps_next_selected() {
         let mut state = WinampState {
@@ -9766,9 +8593,7 @@ mod tests {
             duration_seconds: Some(120.0),
             ..WinampState::default()
         };
-
         assert!(remove_playlist_track_at(&mut state, 1));
-
         assert_eq!(
             state.playlist.as_slice(),
             &[test_track("First"), test_track("Third")]
@@ -9780,7 +8605,6 @@ mod tests {
         assert_eq!(state.duration_seconds, None);
         assert_eq!(state.status, "Removed Track 2");
     }
-
     #[test]
     fn sort_playlist_tracks_by_title_preserves_current_track() {
         let mut state = WinampState {
@@ -9794,9 +8618,7 @@ mod tests {
             selection_anchor: Some(2),
             ..WinampState::default()
         };
-
         assert!(sort_playlist_tracks_by_title(&mut state));
-
         assert_eq!(
             state.playlist.as_slice(),
             &[
@@ -9810,7 +8632,6 @@ mod tests {
         assert_eq!(state.selection_anchor, Some(2));
         assert_eq!(state.status, "Playlist Sorted");
     }
-
     #[test]
     fn remove_playlist_indices_remaps_current_and_selection() {
         let mut state = WinampState {
@@ -9829,9 +8650,7 @@ mod tests {
             duration_seconds: Some(120.0),
             ..WinampState::default()
         };
-
         assert_eq!(remove_playlist_indices(&mut state, &[1, 3]), 2);
-
         assert_eq!(
             state.playlist.as_slice(),
             &[test_track("First"), test_track("Third")]
@@ -9840,7 +8659,6 @@ mod tests {
         assert_eq!(state.selected_indices, vec![1]);
         assert_eq!(state.playback, PlaybackState::Playing);
     }
-
     #[test]
     fn remove_playlist_indices_stops_when_current_is_removed() {
         let mut state = WinampState {
@@ -9853,9 +8671,7 @@ mod tests {
             duration_seconds: Some(120.0),
             ..WinampState::default()
         };
-
         assert_eq!(remove_playlist_indices(&mut state, &[0]), 1);
-
         assert_eq!(state.playlist.as_slice(), &[test_track("Second")]);
         assert_eq!(state.current_index, Some(0));
         assert_eq!(state.selected_indices, vec![0]);
@@ -9864,7 +8680,6 @@ mod tests {
         assert_eq!(state.elapsed_seconds, 0.0);
         assert_eq!(state.duration_seconds, None);
     }
-
     #[test]
     fn duplicate_playlist_indices_uses_path_when_available() {
         let playlist = vec![
@@ -9872,10 +8687,8 @@ mod tests {
             test_track_with_path("Copy", "/tmp/one.mp3"),
             test_track_with_path("Other", "/tmp/two.mp3"),
         ];
-
         assert_eq!(duplicate_playlist_indices(&playlist), vec![1]);
     }
-
     #[test]
     fn select_search_query_uses_current_artist_prefix() {
         let state = WinampState {
@@ -9886,13 +8699,11 @@ mod tests {
             current_index: Some(1),
             ..WinampState::default()
         };
-
         assert_eq!(
             playlist_search_query(&state),
             Some("Celldweller".to_string())
         );
     }
-
     #[test]
     fn playlist_search_filter_selects_matching_title_or_path() {
         let mut state = WinampState {
@@ -9903,13 +8714,10 @@ mod tests {
             ]),
             ..WinampState::default()
         };
-
         apply_playlist_search_filter_in_state(&mut state, "celldweller");
-
         assert_eq!(state.selected_indices, vec![1, 2]);
         assert_eq!(state.selection_anchor, Some(2));
     }
-
     #[test]
     fn parse_m3u_playlist_accepts_plain_paths_and_extinf() {
         let input = "#EXTM3U\n#EXTINF:195,Broods - Heartlines\nrelative/song.mp3\n/home/s/Music/Other.flac\n";
@@ -9917,7 +8725,6 @@ mod tests {
             input,
             PlaylistBase::Directory(std::path::Path::new("/tmp/list")),
         );
-
         assert_eq!(tracks.len(), 2);
         assert_eq!(tracks[0].title, "Broods - Heartlines");
         assert_eq!(tracks[0].duration_seconds, Some(195.0));
@@ -9928,11 +8735,8 @@ mod tests {
         assert_eq!(tracks[1].title, "Other");
         assert_eq!(tracks[1].path.as_deref(), Some("/home/s/Music/Other.flac"));
     }
-
     #[test]
     fn remote_m3u_keeps_absolute_urls_and_resolves_relative_entries() {
-        // The shape a fetched playlist actually has: absolute URLs, a
-        // root-relative entry and a directory-relative one.
         let input = concat!(
             "#EXTM3U\n",
             "#EXTINF:206,Artist - Absolute\n",
@@ -9946,7 +8750,6 @@ mod tests {
             input,
             PlaylistBase::Url("https://host.example/sets/list.m3u?token=abc"),
         );
-
         assert_eq!(tracks.len(), 3);
         assert_eq!(
             tracks[0].path.as_deref(),
@@ -9962,24 +8765,18 @@ mod tests {
         );
         assert_eq!(tracks[0].duration_seconds, Some(206.0));
     }
-
     #[test]
     fn importing_a_playlist_leaves_absolute_urls_alone() {
-        // `apply_imported_playlist` parses with no base, which is the only
-        // reason a hand-written playlist of absolute URLs survives import.
         let input = "#EXTM3U\n#EXTINF:10,A - B\nhttps://host.example/a.mp3\n";
         let tracks = parse_m3u_playlist(input, PlaylistBase::None);
-
         assert_eq!(tracks.len(), 1);
         assert_eq!(
             tracks[0].path.as_deref(),
             Some("https://host.example/a.mp3")
         );
     }
-
     #[test]
     fn a_query_string_does_not_hide_the_extension() {
-        // Path::extension alone reads this as `mp3?token=abc` and drops it.
         assert!(is_supported_playlist_path(
             "https://host.example/track.mp3?token=abc"
         ));
@@ -9990,7 +8787,6 @@ mod tests {
             Some("m3u8".to_string())
         );
     }
-
     #[test]
     fn join_url_follows_the_playlist_not_the_query() {
         let base = "https://host.example/sets/list.m3u?v=2";
@@ -10000,13 +8796,11 @@ mod tests {
             join_url(base, "https://elsewhere.example/a.mp3"),
             "https://elsewhere.example/a.mp3"
         );
-        // A base with no path at all still yields a usable URL.
         assert_eq!(
             join_url("https://host.example", "a.mp3"),
             "https://host.example/a.mp3"
         );
     }
-
     #[test]
     fn pls_playlists_are_read_in_index_order() {
         let input = concat!(
@@ -10021,7 +8815,6 @@ mod tests {
         );
         let tracks =
             parse_pls_playlist(input, PlaylistBase::Url("https://host.example/x/list.pls"));
-
         assert_eq!(tracks.len(), 2);
         assert_eq!(tracks[0].title, "First");
         assert_eq!(
@@ -10030,10 +8823,8 @@ mod tests {
         );
         assert_eq!(tracks[0].duration_seconds, Some(90.0));
         assert_eq!(tracks[1].title, "Second");
-        // -1 is the format's "unknown length", not a real duration.
         assert_eq!(tracks[1].duration_seconds, None);
     }
-
     #[test]
     fn playlist_formats_are_recognised_by_extension_and_content_type() {
         assert_eq!(
@@ -10059,10 +8850,8 @@ mod tests {
         );
         assert_eq!(playlist_format_for_content_type("audio/mpeg"), None);
     }
-
     #[test]
     fn only_playlist_urls_are_resolved_before_playing() {
-        // These have to be fetched and expanded before anything can play.
         for url in [
             "https://host.example/list.m3u",
             "http://host.example/list.m3u8",
@@ -10077,9 +8866,6 @@ mod tests {
                 "should resolve before playing: {url}"
             );
         }
-
-        // These go straight to the audio backend. A bare stream endpoint is
-        // the Icecast/SHOUTcast case and must not be fetched as a playlist.
         for url in [
             "https://host.example/track.mp3",
             "https://host.example/stream",
@@ -10094,7 +8880,6 @@ mod tests {
                 "should play directly: {url}"
             );
         }
-
         assert_eq!(
             playlist_entry_url(&Track {
                 title: "No Path".to_string(),
@@ -10104,19 +8889,13 @@ mod tests {
             None
         );
     }
-
     #[test]
     fn the_shipped_station_is_an_entry_that_resolves_on_play() {
-        // Guards the constant itself: a station URL that did not look like a
-        // playlist would be handed to the audio backend and never expand.
         let station = audio::track_from_title_path(DEFAULT_STATION_TITLE, DEFAULT_STATION_URL);
         assert_eq!(playlist_entry_url(&station), Some(DEFAULT_STATION_URL));
     }
-
     #[test]
     fn a_saved_url_entry_survives_a_restart() {
-        // Restoring used to require an existing file, which silently dropped
-        // every URL entry from a saved playlist on desktop.
         let restored = restore_saved_track(SavedTrack {
             title: "Cranamp FM".to_string(),
             path: DEFAULT_STATION_URL.to_string(),
@@ -10125,8 +8904,6 @@ mod tests {
         .expect("a URL entry should survive being saved and restored");
         assert_eq!(restored.path.as_deref(), Some(DEFAULT_STATION_URL));
         assert_eq!(restored.title, "Cranamp FM");
-
-        // A local path that no longer exists is still dropped.
         assert!(restore_saved_track(SavedTrack {
             title: "Gone".to_string(),
             path: "/definitely/not/here/song.mp3".to_string(),
@@ -10134,7 +8911,6 @@ mod tests {
         })
         .is_none());
     }
-
     #[test]
     fn format_m3u_playlist_writes_extm3u_and_durations() {
         let playlist = vec![Track {
@@ -10142,14 +8918,11 @@ mod tests {
             path: Some("/home/s/Music/Broods - Heartlines.mp3".to_string()),
             duration_seconds: Some(199.0),
         }];
-
         let text = format_m3u_playlist(&playlist);
-
         assert!(text.starts_with("#EXTM3U\n"));
         assert!(text.contains("#EXTINF:199,Broods - Heartlines\n"));
         assert!(text.contains("/home/s/Music/Broods - Heartlines.mp3\n"));
     }
-
     #[test]
     fn scroll_playlist_by_rows_clamps_to_available_rows() {
         let mut state = WinampState {
@@ -10161,25 +8934,13 @@ mod tests {
             playlist_visible_rows: 5,
             ..WinampState::default()
         };
-
         scroll_playlist_by_rows_in_state(&mut state, 3);
         assert!((state.playlist_scroll - (3.0 / 15.0)).abs() < f32::EPSILON);
-
         scroll_playlist_by_rows_in_state(&mut state, 99);
         assert_eq!(state.playlist_scroll, 1.0);
-
         scroll_playlist_by_rows_in_state(&mut state, -99);
         assert_eq!(state.playlist_scroll, 0.0);
     }
-
-    /// Reported as "CranAmp plays no music": a track the backend refuses left
-    /// the screen showing it loaded, with its bitrate filled in and a clock at
-    /// zero, which reads as a player that has stopped working rather than as a
-    /// file that cannot be decoded.
-    ///
-    /// Nothing on the synchronous path can catch it. Opening an item submits
-    /// the request and returns; whether the container can be decoded is
-    /// settled later and arrives as `PlaybackState::Failed`.
     #[test]
     fn a_track_the_backend_refuses_says_so_instead_of_stopping_the_clock() {
         let mut state = WinampState {
@@ -10190,9 +8951,7 @@ mod tests {
             position: 0.5,
             ..WinampState::default()
         };
-
         apply_playback_failure_in_state(&mut state, "unsupported source");
-
         assert_eq!(state.playback, PlaybackState::Stopped);
         assert_eq!(state.elapsed_seconds, 0.0);
         assert_eq!(state.position, 0.0);
@@ -10202,7 +8961,6 @@ mod tests {
             state.status
         );
     }
-
     #[test]
     fn automatic_advance_stops_at_playlist_end_without_repeat() {
         let state = WinampState {
@@ -10210,12 +8968,9 @@ mod tests {
             current_index: Some(1),
             ..WinampState::default()
         };
-
         let plan = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Automatic);
-
         assert_eq!(plan, None);
     }
-
     #[test]
     fn automatic_advance_wraps_at_playlist_end_with_repeat() {
         let state = WinampState {
@@ -10224,9 +8979,7 @@ mod tests {
             current_index: Some(1),
             ..WinampState::default()
         };
-
         let plan = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Automatic);
-
         assert_eq!(
             plan,
             Some(TrackAdvancePlan {
@@ -10235,7 +8988,6 @@ mod tests {
             })
         );
     }
-
     #[test]
     fn manual_advance_wraps_without_repeat() {
         let state = WinampState {
@@ -10243,11 +8995,9 @@ mod tests {
             current_index: Some(1),
             ..WinampState::default()
         };
-
         let next = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Manual);
         let previous =
             playlist_advance_plan(&state, TrackDirection::Previous, TrackAdvanceMode::Manual);
-
         assert_eq!(
             next,
             Some(TrackAdvancePlan {
@@ -10263,7 +9013,6 @@ mod tests {
             })
         );
     }
-
     #[test]
     fn shuffle_advance_follows_the_existing_order() {
         let state = WinampState {
@@ -10277,9 +9026,7 @@ mod tests {
             shuffle_order: vec![0, 2, 1],
             ..WinampState::default()
         };
-
         let plan = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Manual);
-
         assert_eq!(
             plan,
             Some(TrackAdvancePlan {
@@ -10288,7 +9035,6 @@ mod tests {
             })
         );
     }
-
     #[test]
     fn shuffle_repeat_rebuilds_order_after_exhaustion() {
         let state = WinampState {
@@ -10303,28 +9049,23 @@ mod tests {
             shuffle_order: vec![0, 1, 2],
             ..WinampState::default()
         };
-
         let plan = playlist_advance_plan(&state, TrackDirection::Next, TrackAdvanceMode::Automatic)
             .expect("repeat should continue the playlist");
         let replacement = plan
             .shuffle_order
             .as_ref()
             .expect("shuffle should rebuild order on repeat wrap");
-
         assert_ne!(plan.index, 2);
         assert_eq!(replacement.first(), Some(&2));
         assert_eq!(replacement.get(1), Some(&plan.index));
         assert!(valid_shuffle_order(replacement, state.playlist.len()));
     }
-
     #[test]
     fn seeded_shuffle_order_keeps_current_track_first() {
         let order = shuffled_order_with_seed(4, 2, 42);
-
         assert_eq!(order.first(), Some(&2));
         assert!(valid_shuffle_order(&order, 4));
     }
-
     fn test_track(title: &str) -> Track {
         Track {
             title: title.to_string(),
@@ -10332,7 +9073,6 @@ mod tests {
             duration_seconds: None,
         }
     }
-
     fn test_track_with_path(title: &str, path: &str) -> Track {
         Track {
             title: title.to_string(),

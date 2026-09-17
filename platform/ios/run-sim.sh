@@ -1,9 +1,4 @@
 #!/bin/bash
-# Builds, installs and launches Cranamp on a booted iOS simulator.
-#
-# Usage:
-#   ./run-sim.sh
-#   SIMULATOR_DEVICE="iPhone 17 Pro" ./run-sim.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

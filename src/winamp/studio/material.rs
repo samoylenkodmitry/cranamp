@@ -1,10 +1,7 @@
-//! Native, silhouette-driven glass shading. Readback and refraction use nearest
-//! native pixels. This paints colors; it never resizes or filters an image.
 use anyhow::{bail, Result};
 use image::RgbaImage;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-
 type Point = [i32; 2];
 fn unit(v: [f64; 3]) -> [f64; 3] {
     let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
@@ -72,8 +69,6 @@ pub fn glass(
     let back = unit([0.4, 0.65, 0.7]);
     let mut out = BTreeMap::new();
     for p in &inside {
-        // Surface normals come from the unrounded construction curve, not
-        // the staircase of the raster mask. No image/height blur is required.
         let px = p[0] as f64;
         let py = p[1] as f64;
         let mut nearest = (f64::MAX, 0., 0.);

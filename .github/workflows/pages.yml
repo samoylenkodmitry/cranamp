@@ -25,7 +25,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:

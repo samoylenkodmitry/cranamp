@@ -49,7 +49,7 @@ panels with the same controls in them; only the arrangement changes.
 | What | Where there is room | Where there is not |
 | --- | --- | --- |
 | The two toolbar rows | one row each | wrapped at the same left margin |
-| The quick-access sidebar | beside the canvas | gone: everything on it is also in a panel, and its zoom pills and **Fit whole skin** join the toolbar |
+| The quick-access sidebar | beside the canvas | gone: everything on it is also in a panel — the edit scope reads there and is set in **Drawing tools** — and its zoom pills and **Fit whole skin** join the toolbar |
 | The tool column | docked beside the canvas | over the right of it, or over all of it |
 | The whole-skin preview | its own column, right of the canvas | the same column, reduced further to fit |
 | The sprite-state strip | one row and a slider | wrapped |
@@ -81,8 +81,7 @@ A stroke may cross a window boundary; each pixel is routed to whichever BMP
 sheet owns it. Layer IDs are qualified: `main.background`,
 `equalizer.background`, `playlist.bottom.right`.
 
-Main row 115 aliases source row 114 and cannot hold different pixels. Classic
-playlist rails repeat every 29 rows; the header tile is 25×20 and is drawn nine
+Classic playlist rails repeat every 29 rows; the header tile is 25×20 and is drawn nine
 times; the footer follows the final cropped tile at any height. Tiles are drawn
 at native size and cropped, never stretched.
 
@@ -101,8 +100,9 @@ sharing the pencil and the history. `← The whole skin` returns.
 | `volume.bmp` | 68×433 | `pledit.bmp` | 280×190 |
 | | | `text.bmp` | 155×18 |
 
-Plus `pledit.txt` and `viscolor.txt`. Three options add a sheet:
-`plbg.bmp` 243×203, `plselection.bmp` 243×11, `eqhandles.bmp` 154×50.
+Plus `pledit.txt` and `viscolor.txt`. That is the whole skin. Cranamp reads no
+sheet the classic format does not define, so a skin drawn here looks the same in
+any player that reads `.wsz`. `studio_validate` is what keeps it that way.
 
 Sheets with something non-obvious about them carry a note, shown in the status
 line the moment the sheet is opened and repeated in draw results:
@@ -110,8 +110,6 @@ line the moment the sheet is opened and repeated in draw results:
 | Sheet | Note |
 | --- | --- |
 | `text.bmp` | read for one colour, never drawn as artwork |
-| `plbg.bmp` | one track row every 11 pixels; tiles from the top above 203 |
-| `plselection.bmp` | one row of the same height |
 | `titlebar.bmp` | mostly shade-mode art Cranamp never draws |
 
 ## Pointer and touch controls
@@ -230,13 +228,69 @@ both panels, and every drawing operation may override its own.
 | `mirror_x`, `mirror_y` | bool | mirrors |
 | `alpha_lock` | bool | **Lock transparent pixels** |
 | `mask_colors` | list of colours | **Mask picked color** |
-| `all_states` | bool | **Current state only** |
+| `states` | `current`, `onward`, `up-to`, `all` | **EDIT SCOPE** |
+| `stamp_repeat` | 1..64 | **STAMP COPIES ALONG A DRAG** |
+| `stamp_sweep` | bool | **One copy per sprite state** |
 | `clip` | `[x,y,w,h]` or null | selected rectangle / **Clear paint clip** |
 | `grid`, `guides` | bool | pixel grid (4× and up), rectangle outlines |
 
 Brush settings and `measure` are the pencil, not the canvas: setting one does
-not close an open atlas. Asking anything of the canvas, or an empty call,
-returns to it.
+not close an open atlas. Neither does reading the surface back — `crop`, `zoom`,
+`magnify` and `path` alone are a look at the sheet in hand, not a way out of it.
+Asking anything of the canvas, or an empty call, returns to it.
+
+### Edit scope
+
+Which variants of each target a stroke lands in.
+
+| `states` | Writes into |
+| --- | --- |
+| `current` | the variant the canvas is showing |
+| `onward` | that one and every one after it |
+| `up-to` | every one up to and including it |
+| `all` | every variant of every target |
+
+A slider is twenty-eight frames that differ by one object, so the run from the
+frame in hand to an end is the shape its artwork has: the stowage shelf in
+Catamp Freefall is one `all` for the shelf and nine `onward`s, one per object,
+instead of twenty-eight drawings. `all_states: true` is the retired name for
+`all` and still answers, on the way in and in `view`. A draw whose scope is
+wider than one variant answers `states_written` with the scope and how many
+variants each target got.
+
+### Repeating and sweeping
+
+A sheet is a grid of cells that mostly hold the same drawing, and a slider is one
+shape whose numbers walk across its frames. Both used to be loops outside the
+editor emitting the same operations N times.
+
+| Want | Write |
+| --- | --- |
+| the same drawing in five berths | `at: "targets"` with the five sprites in `layers` |
+| the same drawing at chosen places | `at: [[0,0],[23,0],[46,0],…]` |
+| a slider's 28 frames | `states: "all"` and `[from, to]` on the numbers that move |
+
+A numeric operation field written as `[from, to]` is a **sweep**: the operation
+is drawn once per variant the transaction writes, with that number walking from
+the first variant to the last and landing on whole pixels. Sweepable: `x`, `y`,
+`x2`, `y2`, `width`, `height`, `brush_size`, `curve_bend`, `bevel`,
+`refraction`, `opacity`, `grain`, `grain_size`, `grain_seed`, `spacing`,
+`scale` — and `control`, written as two points rather than two numbers. A sweep
+needs a named target to count variants on, and more than one variant to walk
+across; it says so when it has neither.
+
+```json
+{"layers":["main.balance.track"],"states":"all","operations":[
+  {"op":"curve","x":195,"y":65,"x2":[180,210],"y2":58,"curve_bend":[55,-55],"color":"#5d5d6e"}]}
+```
+
+That is one call for all twenty-eight frames of a balance tail.
+
+The pointer does the same two things with one lift and one drag: **STAMP COPIES
+ALONG A DRAG** places N copies of the clipboard evenly between where the drag
+started and where it ended, and **One copy per sprite state** puts one in each
+variant of the edit scope instead — lift a tail, set the scope to All, and drag
+from where frame 0 wants it to where frame 27 does.
 
 ### Text
 
@@ -263,8 +317,8 @@ same walk. Supported characters: `A-Z a-z 0-9 - : . , / \ " ( ) [ ] + = _ ! ? &
 
 A sheet has no alpha channel, so every blend is resolved and written opaque.
 Blending is right for adding light to artwork that is already there and wrong
-for a redraw, which compounds. `#ff00ff` is a colour to `opacity`, to an image's
-alpha and to glass, and blending toward it is reported as `keyed_blends`.
+for a redraw, which compounds. A blend over a clear pixel has nothing to blend
+with and comes out opaque.
 
 ## Sprite targets and rectangles
 
@@ -323,11 +377,6 @@ Some pixels cannot be told apart, and no setting changes that:
 | the timer digit cell | 4 times |
 | the playlist header tile | 9 times |
 | each equalizer band's groove | 11 times (one set of 28 frames) |
-| main row 115 | aliases row 114 |
-
-**Unique EQ art** (`eq_handles`) is the one separation available: eleven
-independent 14×25 handles in `eqhandles.bmp`, which costs 25 pixels of the
-63-pixel track and limits travel to 38. It does not separate the band tracks.
 
 A stroke across a shared cell lands on top of itself and the last colour wins
 in every position; `overwrites` reports it. Name one target in `layers` to cure
@@ -371,17 +420,28 @@ Everything about the skin that is not painted into a sheet.
 
 | Option | Values | Effect |
 | --- | --- | --- |
-| `footer` | `classic`, `time-total` | the time readout |
-| `eq_travel` | 1..52 | equalizer slider travel; default 52 |
-| `visualizer_glass` | bool | off, the player fills the spectrum's whole rectangle with VISCOLOR slot 0 — an opaque box no sheet contains and no canvas render shows |
-| `playlist_background` | bool | adds `plbg.bmp` 243×203 and an editable `list.background` |
-| `playlist_selection` | bool | adds `plselection.bmp` 243×11; the runtime reserves an eight-pixel marker gutter |
-| `eq_handles` | bool | adds `eqhandles.bmp` 154×50, eleven columns, normal above pressed |
 | `playlist_colors` | six keys | `PLEDIT.TXT` |
 | `visualizer_colors` | 24 colours | `VISCOLOR.TXT` |
 
-Turning one of the three surface options on or off answers `sheets_changed`,
-naming the sheet, its size and what its cells are.
+The spectrum sits on VISCOLOR slot 0, which the player paints as an opaque box
+no sheet holds and no canvas render shows. Set it to the colour of the artwork
+behind the spectrum, or the box shows up in every player, this one included.
+
+### studio_validate
+
+Whether the skin looks the same everywhere. It names three things:
+
+| Divergence | Why |
+| --- | --- |
+| an entry no player reads | it is dead weight, and whatever it holds is invisible |
+| a classic sheet the skin lacks | every player needs it |
+| a sheet smaller than its own sprites | part of a state falls outside it |
+| clear pixels a sprite reads | a `.wsz` sheet is opaque; another player draws them flat magenta |
+
+`{"fix": true}` repairs all four. It drops the entries no player reads, grows
+and adds the sheets, and paints every clear pixel the colour the player already
+showed under it, so the skin keeps the face it had. Run it until it answers
+`plays_the_same_elsewhere`; one pass repairs one round of consequences.
 
 ### PLEDIT.TXT
 
@@ -414,9 +474,15 @@ to the brush colour.
 
 ### Readability
 
-`studio_options` answers `readability` — for each of the eight readouts Cranamp
-writes: `reads`, `ink`, `ground`, `contrast`, `readable`. `studio_export`
-repeats anything below 3:1 as `hard_to_read`. 4.5 is comfortable at this size;
+`studio_options` answers `readability` — for each of the nine readouts Cranamp
+writes: `reads`, `ink`, `ground`, `contrast`, `readable`. Eight are words and
+the ninth is a picture: **the equalizer curve is drawn in text.bmp's ink**, the same
+colour as the title, so a skin that wants dark ink on a pale title strip must
+give the graph a pale background too or draw its curve invisibly. The three
+playlist checks use `NormalBG`, which is where they are needed most — the
+playlist fill has no bitmap under it at all.
+
+`studio_export` repeats anything below 3:1 as `hard_to_read`. 4.5 is comfortable at this size;
 below 2 is a readout that is not there. `studio_pixel {"ink": "#..."}` points
 the same WCAG arithmetic at any rectangle.
 
@@ -508,9 +574,9 @@ One tool per panel, named for it.
 | `studio_screenshot` | the GPU scene |
 
 Retired but still answering, for existing scripts: `studio_state`,
-`studio_render`, `studio_guides`, `studio_paint_layers`, `studio_layout`,
-`studio_patch`, `studio_inspect_region`, the one-off skin switches and the
-palette pair. They are not offered in the tool list.
+`studio_render`, `studio_guides`, `studio_paint_layers`, `studio_patch`,
+`studio_inspect_region` and the palette pair. They are not offered in the tool
+list.
 
 ### Conventions
 
@@ -547,6 +613,7 @@ palette pair. They are not offered in the tool list.
 | `color`, `ramp`, `ramp_axis` | `#rrggbb`; exact palette colours along an axis |
 | `rows`, `palette` | one character per pixel; a character absent from the palette is skipped, which is how transparency is spelled |
 | `text`, `face`, `scale`, `spacing` | see **Text** |
+| `align`, `width` | place the word in a box `width` wide starting at `x` — `left`, `center` or `right` — instead of starting it at `x` |
 | `data` | base64 PNG for `image` |
 | `material`, `bevel`, `refraction` | glass |
 | `grain`, `grain_size`, `grain_seed`, `opacity` | materials |
@@ -560,11 +627,13 @@ Transaction-level fields on `studio_draw`:
 | --- | --- |
 | `layers` | sprites to route every pixel into; `[]` is Auto |
 | `origin` | put 0,0 on this sprite's destination as it stands, and target it — the only safe way to aim at a sprite that moves with its frame |
-| `all_states` | write the same local pixels into every variant of each target |
+| `states` | the edit scope for this transaction; `all_states: true` is the retired name for `all` |
 | `mask_colors` | a temporary mask, without replacing the persistent one |
 | `label` | names the history entry |
 | `preview` | dry run: applied, answered, and put back; nothing recorded, revision unmoved |
-| `crop`, `zoom`, `magnify`, `path` | read the surface back, as `studio_canvas` does |
+| `states` | the edit scope: `current`, `onward`, `up-to`, `all` |
+| `at` | run the whole operation list once at each `[x, y]` offset, or at each chosen target's own destination with `"targets"`; at most 256 places |
+| `crop`, `zoom`, `magnify`, `path` | read the surface back, as `studio_canvas` does — on a committed transaction as well as a `preview` |
 
 ### Draw reports
 
@@ -575,13 +644,16 @@ All describe the transaction in hand.
 | `pixels_written`, `bounds` | how much ink, and the rectangle it landed in |
 | `ms` | how long the transaction took |
 | `clipped_pixels` | fell outside the chosen sprites |
-| `unmapped_pixels` | no bitmap source at all — the classic playlist fill. Turn on **List canvas** to paint there |
+| `unmapped_pixels` | no bitmap source at all — the playlist fill, which is one flat PLEDIT.TXT colour and cannot be painted |
 | `unsampled_pixels` | landed in a gap between a sheet's cells, where nothing will ever show it |
 | `overwrites` | two *different* canvas pixels wrote one shared source cell; `overwrite_sample` says which |
-| `keyed_blends` | an `opacity`, an image's alpha or glass read `#ff00ff` as a colour, turning a glow to mud and glass to magenta and taking the cell's transparency with it |
 | `crossed_cells` | ink left its own cell and landed in a **repeated** one, which the player then draws n times. Silent for a cell painted on its own, and for an operation covering the whole sheet |
 | `identical_variants` | variants that came out the same picture — 28 slider frames all on frame 0, or a pressed state identical to its released one. Fully transparent variants are excluded; sprites sharing source cells share one entry, with `also` |
 | `unsupported_characters` | characters the face does not have; the rest of the text still landed |
+| `covered_pixels` | ink hidden, in **every** state it was drawn into, behind another part of the same control — a slider's track and its thumb are read from one value, so a mark that runs to the thumb's position is behind the thumb in every frame. Per-frame coverage is what a slider is and is not reported; a background under a button is not either |
+| `repeated` | how many places `at` ran the operations at |
+| `swept` | which fields walked, and over how many steps |
+| `states_written` | the scope, and how many variants each target got, when it was more than the one in hand |
 | `surface`, `revision`, `note` | which surface, which revision, the sheet's note |
 
 ### Response shapes
@@ -598,13 +670,14 @@ one entry per variant.
 | `studio_rectangles {"gaps":true}` | `{sheet, size, gaps, of, note}`, or `never_drawn: true`; capped at 64 entries |
 | `studio_states` | the contact sheet, plus `sprite`: `id`, `sheet`, `of`, and per variant `index`, `label`, `rect`, `painted_pixels`, `differs_from_previous`, `largest_channel_change`, `same_picture_as`. `image: false` answers the numbers alone |
 | `studio_pixel` | `surface`, `hits` (each sprite under the pixel, where it keeps it, its `rgba`, what shares it), `ground` over the rectangle's opaque pixels, `contrast`/`readable` with `ink`, `nothing_at` when there is no artwork |
-| `studio_options` | every option, `visualizer_slots`, `readability`, and `sheets_changed` when one added or removed a sheet |
+| `studio_options` | every option flat, as this table names them, plus `visualizer_slots` and `readability` |
+| `studio_validate` | `plays_the_same_elsewhere`, and a `divergences` list of entry, problem and fix |
 | `studio_screenshot` | `path`/`size` or the PNG, plus `showing` (`player` or `editor`) and `player` (`x`, `y`, `zoom`) |
 | `studio_export` | `path`, `bytes`, and when there is something to say `undrawn_sprites` and `hard_to_read` |
 | `studio_layers`, `studio_history`, `studio_project` | the planes, the history (seekable with `cursor`), the project file |
 
-`ground` and `readability` treat `#ff00ff` as transparent rather than as a
-colour.
+`ground` and `readability` read every opaque pixel as ink, `#ff00ff` included:
+a `.wsz` sheet is opaque and every player draws magenta as magenta.
 
 ### studio_screenshot
 

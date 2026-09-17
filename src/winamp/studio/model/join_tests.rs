@@ -1,7 +1,4 @@
-//! Compare drawing on the joined atlas against drawing on one unsplit bitmap.
-//! Shared classic pixels may repeat elsewhere; the chosen footprint must survive.
 use super::*;
-
 fn canvas(height: u32) -> Document {
     let mut d = Document::blank();
     d.state(json!({"panel":"canvas","preview_playlist_height":height,
@@ -9,7 +6,6 @@ fn canvas(height: u32) -> Document {
         .unwrap();
     d
 }
-
 fn unsplit(d: &Document) -> Document {
     let mut r = Document::blank();
     r.images.insert("reference.bmp".into(), d.render());
@@ -18,14 +14,11 @@ fn unsplit(d: &Document) -> Document {
         .unwrap();
     r
 }
-
 fn assert_footprint(d: &Document, reference: &Document, before: &RgbaImage, label: &str) {
     let actual = d.render();
     let expected = reference.render();
     let mut checked = 0;
     for (x, y, p) in expected.enumerate_pixels() {
-        // The host deliberately copies row 114 to 115. Two different colours
-        // cannot be stored there; all other native surface rows are independent.
         if y == 114 || y == 115 || p == before.get_pixel(x, y) {
             continue;
         }
@@ -34,7 +27,6 @@ fn assert_footprint(d: &Document, reference: &Document, before: &RgbaImage, labe
     }
     assert!(checked > 0, "{label}: empty verification footprint");
 }
-
 #[test]
 fn every_mcp_instrument_survives_panel_tile_and_footer_joins() {
     for height in [145, 146, 261, 384, 522] {
@@ -73,16 +65,18 @@ fn every_mcp_instrument_survives_panel_tile_and_footer_joins() {
                     if i == 1 {
                         d.view.active = false;
                         assert_footprint(&d, &r, &before, &label);
+                        d.make_portable("test").unwrap();
+                        let flattened = d.render();
                         let mut reopened = Document::open(&d.archive().unwrap(), None).unwrap();
                         reopened.view = d.view.clone();
-                        assert_eq!(reopened.render(), d.render(), "{label}: WSZ reload");
+                        assert_eq!(reopened.render(), flattened, "{label}: WSZ reload");
+                        d.undo();
                     }
                 }
             }
         }
     }
 }
-
 #[test]
 fn gui_brush_preview_lift_stamp_and_cancel_cross_joins() {
     for seam in [116, 130, 232, 252, 281, 339] {
@@ -106,7 +100,7 @@ fn gui_brush_preview_lift_stamp_and_cancel_cross_joins() {
                 }
                 doc.checkpoint();
                 if brush == "pencil" {
-                    doc.paint_line(from, to, [237, 71, 145, 255], "auto", true)
+                    doc.paint_line(from, to, [237, 71, 145, 255], "auto", Scope::All.into())
                         .unwrap();
                 } else if brush == "stamp" {
                     doc.shape_stroke(from, from).unwrap();
@@ -121,7 +115,6 @@ fn gui_brush_preview_lift_stamp_and_cancel_cross_joins() {
         }
     }
 }
-
 #[test]
 fn masks_mirrors_and_selected_parts_preserve_join_coverage() {
     let mut d = canvas(145);
@@ -164,7 +157,6 @@ fn masks_mirrors_and_selected_parts_preserve_join_coverage() {
         }
     }
 }
-
 #[test]
 fn classic_list_holes_are_reported_in_mcp_and_gui_instead_of_silent_success() {
     let mut d = canvas(145);
@@ -181,13 +173,25 @@ fn classic_list_holes_are_reported_in_mcp_and_gui_instead_of_silent_success() {
     }
     d.undo();
     d.checkpoint();
-    d.paint_line([6, 270], [16, 270], [237, 71, 145, 255], "auto", true)
-        .unwrap();
+    d.paint_line(
+        [6, 270],
+        [16, 270],
+        [237, 71, 145, 255],
+        "auto",
+        Scope::All.into(),
+    )
+    .unwrap();
     d.finish_stroke();
     assert!(d.message.contains("5 pixels have no bitmap source"));
     d.checkpoint();
-    d.paint_line([6, 270], [6, 275], [237, 71, 145, 255], "auto", true)
-        .unwrap();
+    d.paint_line(
+        [6, 270],
+        [6, 275],
+        [237, 71, 145, 255],
+        "auto",
+        Scope::All.into(),
+    )
+    .unwrap();
     d.finish_stroke();
     assert!(!d.message.contains("no bitmap source"));
     let clean = d

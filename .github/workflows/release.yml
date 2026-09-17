@@ -25,8 +25,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
             binary: target/x86_64-unknown-linux-gnu/dist-min/cranamp
             archive: tar.gz
-            # lld's --icf=all folds identical functions (ELF-only);
-            # unwind tables are droppable everywhere except MSVC (SEH).
             extra_rustflags: " -Cforce-unwind-tables=no -Clink-arg=-fuse-ld=lld -Clink-arg=-Wl,--icf=all"
           - os: macos-latest
             runner: [self-hosted, macOS, ARM64]
@@ -45,22 +43,10 @@ jobs:
             extra_rustflags: ""
     steps:
       - uses: actions/checkout@v6
-      # dist-min needs nightly cargo with build-std (rust-src).
       - uses: dtolnay/rust-toolchain@nightly
         with:
           targets: ${{ matrix.target }}
           components: rust-src
-      # Only where the filesystem is the runner's own. This action treats
-      # `$CARGO_HOME` as its property: on save it prunes what was not there at
-      # restore time. A self-hosted runner shares that directory with every
-      # other runner on the machine -- the signing Mac carries one for cranamp
-      # and one for Cranpose under the same home -- so the save step deletes
-      # crate sources another repository's job is compiling from. It cost a
-      # Cranpose `wasm build` a half-deleted `zerocopy-0.8.48` on 2026-08-25,
-      # one minute before this workflow's iOS cache save finished, and it took
-      # the host's `cargo`, `rustc` and `rustup` proxies the same afternoon,
-      # which is what `cache-bin: false` is for. Nothing is lost by skipping
-      # it: a self-hosted `~/.cargo` already persists between jobs.
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -87,34 +73,11 @@ jobs:
           trap 'rm -f "$RUNNER_TEMP/devid.p12"' EXIT
           (umask 177; printf '%s' "$P12_BASE64" | base64 -d > "$RUNNER_TEMP/devid.p12")
           security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
-          # `-l` (lock on sleep) is deliberately NOT set. This runner is a
-          # laptop, signing happens in a later step minutes after this one, and
-          # a keychain that locks when the lid closes mid-build takes the
-          # release down with `errSecInternalComponent`.
           security set-keychain-settings -ut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
           security import "$RUNNER_TEMP/devid.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" \
             -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
 
-          # The p12 carries the leaf and its key, not the intermediate that
-          # links it to Apple Root CA. codesign builds the chain out of the
-          # keychains it searches, and this host has no Apple CA in any of
-          # them -- `security find-certificate -c "Developer ID Certification
-          # Authority"` finds it only in SystemRootCertificates, which is the
-          # anchor store and not searched for intermediates. Signing then dies
-          # on
-          #
-          #   Warning: unable to build chain to self-signed root for signer ...
-          #   Cranamp.app: errSecInternalComponent
-          #
-          # which names the chain correctly and gets read as a broken key.
-          # Note `security find-identity -v` still lists the identity as valid,
-          # so the guard below is no protection against this.
-          #
-          # Fetched rather than vendored, and pinned by digest so a swapped
-          # download cannot put an attacker's CA into the keychain we sign
-          # with. G2 is the issuer of current Developer ID leaves and is valid
-          # until 2031-09-17.
           intermediate="$RUNNER_TEMP/DeveloperIDG2CA.cer"
           curl --proto '=https' --tlsv1.2 --retry 5 --retry-connrefused \
             --location --silent --show-error --fail \
@@ -126,8 +89,6 @@ jobs:
             echo "::error::Developer ID G2 intermediate digest mismatch: got $actual" >&2
             exit 1
           fi
-          # Idempotent: the p12 may already carry this certificate, and
-          # `security import` treats a duplicate as an error.
           if ! security import "$intermediate" -k "$KEYCHAIN" -T /usr/bin/codesign \
                > "$RUNNER_TEMP/import.log" 2>&1; then
             if grep -q "already exists" "$RUNNER_TEMP/import.log"; then
@@ -139,11 +100,6 @@ jobs:
           fi
           rm -f "$intermediate"
 
-          # What the keychain actually holds, and whether the chain evaluates.
-          # Printed unconditionally because the failure this guards against
-          # reports "unable to build chain to self-signed root" without saying
-          # which link is missing, and two wrong diagnoses came out of
-          # inferring it instead of looking.
           echo "== certificates in the signing keychain =="
           security find-certificate -a "$KEYCHAIN" \
             | grep -E '"(labl|issu)"' || echo "(none)"
@@ -160,30 +116,8 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
 
-          # AFTER the partition list. Read before it, `find-identity` reports
-          # "0 valid identities found" on a keychain that signs perfectly well
-          # a line later, which is a diagnostic that creates a false lead.
           echo "== codesigning identities =="
           security find-identity -v -p codesigning "$KEYCHAIN" || true
-          # Record the search list so the cleanup step can put it back, then
-          # set it to this keychain plus the entries that still exist.
-          #
-          # Appending the CURRENT list, which is what this did before, re-adds
-          # this very path: `RUNNER_TEMP` is a fixed directory for a given
-          # runner, so the keychain is always
-          # `.../_temp/cranamp-signing.keychain-db`, and the previous run left
-          # that path in the user's search list. The runner then wipes `_temp`
-          # between jobs, so the entry survives as a dangling path pointing at
-          # a keychain that no longer exists. codesign walks the search list to
-          # build the certificate chain, hits the dead entry, and fails with
-          # `errSecInternalComponent` behind the warning "unable to build chain
-          # to self-signed root" -- which reads like a missing intermediate and
-          # is not one. That is why the macOS job failed every other release:
-          # v0.1.37 passed, .38 failed, .39 passed, .40 failed, .41 passed,
-          # .42 failed.
-          #
-          # The search list is USER-level state on a self-hosted runner. It
-          # outlives the job, so a job that changes it has to change it back.
           security list-keychains -d user | tr -d '"' | sed 's/^[[:space:]]*//' \
             > "$RUNNER_TEMP/keychains-before.txt"
           keep=()
@@ -199,15 +133,9 @@ jobs:
           [ -n "$identity" ] || { echo "the p12 holds no Developer ID Application certificate" >&2; exit 1; }
           echo "CRANAMP_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
           echo "CRANAMP_SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
-          # The signing step has to be able to unlock this itself; unlocking
-          # here does not survive the minutes of build between the two steps.
-          # The password is random and lives only as long as this job.
           echo "::add-mask::$KEYCHAIN_PASS"
           echo "CRANAMP_SIGN_KEYCHAIN_PASS=$KEYCHAIN_PASS" >> "$GITHUB_ENV"
           echo "signed=true" >> "$GITHUB_OUTPUT"
-      # Size-minimized distribution build: abort panics without location
-      # strings, no Debug formatting, no unwind tables, size-tuned std
-      # (see cranpose docs/binary_size.md for the recipe and trade-offs).
       - name: Build (dist-min)
         shell: bash
         env:
@@ -231,44 +159,14 @@ jobs:
           package_dir="release/cranamp-${version}-${{ matrix.platform }}"
           mkdir -p "$package_dir/demo-music" assets
           if [ "${{ matrix.platform }}" = "macos" ]; then
-            # Ship a sealed .app bundle. macOS Finder runs a bare Unix binary
-            # inside a Terminal window, and an unsealed bundle is reported as
-            # "damaged" once downloaded (quarantined). Assemble and ad-hoc sign
-            # so the seal is valid.
             signed_devid=0
             app="$package_dir/Cranamp.app"
             mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
             cp "${{ matrix.binary }}" "$app/Contents/MacOS/Cranamp"
             cp platform/macos/Info.plist "$app/Contents/Info.plist"
             if [ "${{ steps.devid.outputs.signed }}" = "true" ]; then
-              # Unlock HERE, not once at import time. The keychain was unlocked
-              # minutes ago in another step, and everything between then and
-              # now -- a full release build on a laptop that may sleep -- can
-              # relock it. A locked keychain does not report itself as locked:
-              # codesign fails with
-              #
-              #   Warning: unable to build chain to self-signed root for signer ...
-              #   errSecInternalComponent
-              #
-              # which names the certificate chain and cost two wrong fixes.
-              # `security verify-cert -p codeSign` on the very same keychain
-              # answers "certificate verification successful", so the chain is
-              # provably not the fault.
               security unlock-keychain -p "$CRANAMP_SIGN_KEYCHAIN_PASS" \
                 "$CRANAMP_SIGN_KEYCHAIN"
-              # A Developer ID signature with the hardened runtime and a
-              # timestamp is what notarytool accepts.
-              #
-              # A release is worth more than a signature. Two runners answer
-              # this job's labels and only one can codesign -- the other runs
-              # under launchd with no GUI login session, where this fails with
-              # `errSecInternalComponent` on a keychain whose chain
-              # `security verify-cert -p codeSign` calls successful. Rather
-              # than let which machine picked the job decide whether the app
-              # ships, fall back to an ad-hoc signature and say so loudly.
-              # Ad-hoc means Gatekeeper blocks a download until the user
-              # clears the quarantine, which is worse than notarized and much
-              # better than no build at all.
               if codesign --force --deep --options runtime --timestamp \
                    --keychain "$CRANAMP_SIGN_KEYCHAIN" \
                    --sign "$CRANAMP_SIGN_IDENTITY" "$app"; then
@@ -282,16 +180,7 @@ jobs:
               codesign --force --deep --sign - "$app"
             fi
             codesign --verify --strict --verbose=2 "$app"
-            # A shell variable, NOT `$GITHUB_ENV`: that only reaches later
-            # steps and notarization runs in this one, so it would read empty
-            # here and skip notarizing a perfectly good signature.
-            #
-            # And `signed_devid` rather than `steps.devid.outputs.signed`: the
-            # identity being available is not the same as the signature having
-            # been produced, and notarytool rejects an ad-hoc one.
             if [ "${signed_devid:-}" = "1" ] && [ -n "$ASC_P8_BASE64" ]; then
-              # Notarize, then staple the ticket into the bundle so a download
-              # opens with no network check and no warning.
               key="$RUNNER_TEMP/asc.p8"
               trap 'rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/cranamp-notarize.zip"' EXIT
               (umask 177; printf '%s' "$ASC_P8_BASE64" | base64 -d > "$key")
@@ -307,13 +196,11 @@ jobs:
           fi
           cp README.md LICENSE "$package_dir/"
           mkdir -p "$package_dir/skins"
-          # Every Catamp in the repository, so a download has the whole set
-          # whether or not it is compiled in. Sampler shipped without being
-          # added here and was in the source tree and in no release.
           cp "assets/skins/Catamp Silverplay.wsz" "$package_dir/skins/"
           cp "assets/skins/Catamp Feral Night.wsz" "assets/skins/Catamp Cardboard.wsz" \
              "assets/skins/Catamp Sampler.wsz" "assets/skins/Catamp Cat Scan.wsz" \
              "assets/skins/Catamp Seance.wsz" "assets/skins/Catamp Salvage.wsz" \
+             "assets/skins/Catamp Freefall.wsz" \
              "$package_dir/skins/"
           cp assets/demo-music/generated/*.mp3 "$package_dir/demo-music/"
           cp assets/demo-music/generated/cranamp-demo-playlist.m3u "$package_dir/demo-music/"
@@ -327,16 +214,8 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: assets/cranamp-*
-          # Handoff to the publish job below, which is the only consumer.
-          # The pool this lands in is 500 MB shared across every repository
-          # on the account, so it holds these only as long as the run needs.
           retention-days: 1
 
-      # `always()`, because the whole point is that a FAILED signing job must
-      # not leave the runner's user keychain search list pointing at a keychain
-      # that is about to be deleted. Without this the next release inherits the
-      # dead entry and fails in codesign for a reason that names neither this
-      # job nor this file.
       - name: Restore the keychain search list
         if: always() && matrix.platform == 'macos'
         shell: bash
@@ -366,15 +245,10 @@ jobs:
           java-version: "17"
       - uses: android-actions/setup-android@v4
         with:
-          # The action's default is "tools platform-tools", and Google has
-          # withdrawn the legacy "tools" package, so the default now fails
-          # outright. Everything this job actually builds against is installed
-          # by name in the next step.
           packages: platform-tools
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -421,9 +295,6 @@ jobs:
         with:
           name: cranamp-android
           path: assets/cranamp-*
-          # Handoff to the publish job below, which is the only consumer.
-          # The pool this lands in is 500 MB shared across every repository
-          # on the account, so it holds these only as long as the run needs.
           retention-days: 1
 
   web:
@@ -434,7 +305,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -451,9 +321,6 @@ jobs:
         with:
           name: cranamp-web
           path: cranamp-*-web.tar.gz
-          # Handoff to the publish job below, which is the only consumer.
-          # The pool this lands in is 500 MB shared across every repository
-          # on the account, so it holds these only as long as the run needs.
           retention-days: 1
 
   ios:
@@ -464,7 +331,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
-      # Hosted runners only, and never `~/.cargo/bin` -- see release.yml.
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -479,7 +345,6 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           mkdir -p assets
 
-          # Device build → .ipa (Payload/Cranamp.app) for sideloading.
           payload="$RUNNER_TEMP/Payload"
           rm -rf "$payload"
           mkdir -p "$payload"
@@ -487,26 +352,16 @@ jobs:
           (cd "$RUNNER_TEMP" && zip -qry "ipa.zip" Payload)
           mv "$RUNNER_TEMP/ipa.zip" "assets/cranamp-${version}-ios.ipa"
 
-          # Simulator build → zipped .app for `xcrun simctl install`.
           (cd "target/aarch64-apple-ios-sim/release" && zip -qry "$RUNNER_TEMP/sim.zip" Cranamp.app)
           mv "$RUNNER_TEMP/sim.zip" "assets/cranamp-${version}-ios-simulator.app.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: cranamp-ios
           path: assets/cranamp-*
-          # Handoff to the publish job below, which is the only consumer.
-          # The pool this lands in is 500 MB shared across every repository
-          # on the account, so it holds these only as long as the run needs.
           retention-days: 1
 
   publish:
     name: Publish GitHub Release
-    # iOS is deliberately not in `needs`. It runs on a self-hosted Mac, so when
-    # that runner is offline the job sits queued until GitHub cancels it 24
-    # hours later -- and with `needs` waiting on it, the whole release waited
-    # too, holding five finished platforms hostage to a sixth. `publish-ios`
-    # below attaches the iOS assets once they exist, so a late, failed or
-    # never-started iOS build now costs the release only its own two files.
     needs: [desktop, android, web]
     runs-on: ubuntu-latest
     steps:
@@ -531,9 +386,6 @@ jobs:
 
   publish-ios:
     name: Attach iOS Assets
-    # Success on both is what `needs` already demands, so an iOS build that
-    # failed, hung or was cancelled skips this job and leaves the published
-    # release untouched rather than failing the run after the fact.
     needs: [ios, publish]
     runs-on: ubuntu-latest
     steps:

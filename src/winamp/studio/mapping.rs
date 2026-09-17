@@ -1,8 +1,6 @@
-//! Bidirectional mapping between the assembled skin and the classic atlases.
 use super::model::View;
 use crate::winamp::sprites::*;
 use serde::Serialize;
-
 #[derive(Clone, Debug, Serialize)]
 pub struct Layer {
     pub id: String,
@@ -10,11 +8,6 @@ pub struct Layer {
     pub source: [u32; 4],
     pub destination: [u32; 4],
     pub variants: Vec<[u32; 4]>,
-    /// What each variant is, in the same order. Four rectangles for a switch
-    /// say nothing about which is off and which is pressed, and twenty-eight
-    /// say nothing about which end of the travel frame 0 is; both used to be
-    /// answerable only by reading this file. Guessing wrong paints the pressed
-    /// art into the released cell, and nothing reports it.
     pub labels: Vec<String>,
 }
 fn rect(r: SpriteRect) -> [u32; 4] {
@@ -38,19 +31,10 @@ impl Layer {
 pub fn size(panel: &str) -> (u32, u32) {
     if panel == "playlist" {
         (275, 261)
-    } else if panel == "main" {
-        (275, 115)
     } else {
         (275, 116)
     }
 }
-/// What each of a sprite's variants is.
-///
-/// Two rectangles are released and pressed almost everywhere, four are a switch
-/// that is also off or on, and twenty-eight are a slider's travel -- but which
-/// end of the travel frame 0 sits at differs per slider, and three of the
-/// two-variant sprites are not pressed states at all. None of that was visible
-/// from outside this file.
 fn variant_labels(id: &str, sheet: &str, count: usize) -> Vec<String> {
     let ends = |low: &str, high: &str| -> Vec<String> {
         (0..count)
@@ -63,9 +47,6 @@ fn variant_labels(id: &str, sheet: &str, count: usize) -> Vec<String> {
     };
     let named =
         |names: &[&str]| -> Vec<String> { names.iter().map(|s| (*s).to_string()).collect() };
-    // The playlist header is the trap. Classic pledit.bmp keeps two rows of it
-    // and Cranamp draws the lower one always -- there is no unfocused playlist
-    // -- so art put in the upper row is never seen by anybody.
     if sheet == "pledit" && matches!(id, "top.left" | "top.tile" | "top.right" | "title") {
         return named(&[
             "unfocused · classic only; Cranamp never draws this row",
@@ -94,7 +75,7 @@ fn variant_labels(id: &str, sheet: &str, count: usize) -> Vec<String> {
         _ => ends("first", "last"),
     }
 }
-pub fn layers(v: &View, layout: crate::winamp::skin::SkinLayout) -> Vec<Layer> {
+pub fn layers(v: &View) -> Vec<Layer> {
     let mut out = Vec::new();
     let mut add = |id: &str,
                    sheet: &str,
@@ -121,7 +102,7 @@ pub fn layers(v: &View, layout: crate::winamp::skin::SkinLayout) -> Vec<Layer> {
             add(
                 "background",
                 "main",
-                vec![(0., 0., 275., 115.)],
+                vec![(0., 0., 275., 116.)],
                 0,
                 0,
                 0,
@@ -427,21 +408,12 @@ pub fn layers(v: &View, layout: crate::winamp::skin::SkinLayout) -> Vec<Layer> {
                     vec![EQ_SLIDER_THUMB, EQ_SLIDER_THUMB_SELECTED],
                     p,
                     EQ_THUMB_XS[i] as u32,
-                    38 + (layout.eq_travel as f32 * (1. - frame as f32 / 27.)).round() as u32,
+                    38 + (EQ_SLIDER_THUMB_TRAVEL * (1. - frame as f32 / 27.)).round() as u32,
                     None,
                 );
             }
         }
         "playlist" => {
-            add(
-                "list.background",
-                "plbg",
-                vec![(0., 0., 243., 203.)],
-                0,
-                12,
-                20,
-                None,
-            );
             add(
                 "top.left",
                 "pledit",
@@ -528,10 +500,6 @@ pub fn layers(v: &View, layout: crate::winamp::skin::SkinLayout) -> Vec<Layer> {
     }
     out
 }
-
-/// Match the native playlist renderer's repetition and cropping, never stretch
-/// its source pixels. Repeated footprints retain their logical layer ID so a
-/// shared tile can be selected once in the human/MCP layer picker.
 pub fn native_panel_layers(layers: Vec<Layer>, panel: &str, height: u32, scroll: u8) -> Vec<Layer> {
     if panel != "playlist" {
         return layers;

@@ -1,14 +1,4 @@
-//! Framework-level end-to-end tests, driven through cranpose's real
-//! hit-dispatch pipeline (no device/adb): synthesized pointer clicks on the
-//! actual composables, asserting on what a real click dispatch produces
-//! rather than on the underlying state functions directly.
-//!
-//! Uses a `HitGraphRenderer` that builds a real hit graph from the layout tree
-//! (via the published `cranpose-render-common`) so `pointer_pressed`/
-//! `pointer_released` dispatch to live click handlers.
-
 #![cfg(not(target_arch = "wasm32"))]
-
 mod common;
 use common::{pump, visible_texts, HitGraphRenderer};
 use cranpose_app_shell::AppShell;
@@ -16,11 +6,9 @@ use cranpose_core::location_key;
 use cranpose_foundation::Modifiers;
 use std::cell::RefCell;
 use std::rc::Rc;
-
 fn contains(texts: &[String], needle: &str) -> bool {
     texts.iter().any(|text| text.contains(needle))
 }
-
 #[test]
 fn clicking_the_logo_opens_and_closes_the_settings_window() {
     let root_key = location_key(file!(), line!(), column!());
@@ -32,19 +20,11 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
     shell.set_buffer_size(500, 700);
     shell.set_viewport(500.0, 700.0);
     pump(&mut shell);
-
-    // Settings is closed on launch. "SYNC" is a section heading unique to the
-    // open panel, so it is an unambiguous open/closed marker (the player status
-    // line can itself read "Settings"/"Settings Closed").
     let before = visible_texts(&mut shell);
     assert!(
         !contains(&before, "SYNC"),
         "settings panel should be closed on launch; visible={before:?}"
     );
-
-    // The logo (MAIN_SKIN_CHOOSER_HIT_AREA = 249,79,26,33) lives inside the
-    // inline MainWindow, which is offset by its default inline position (26,22).
-    // Click its center.
     let logo_x = 26.0 + 249.0 + 13.0;
     let logo_y = 22.0 + 79.0 + 16.0;
     shell.set_cursor(logo_x, logo_y);
@@ -56,8 +36,6 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         pressed && released,
         "pointer down/up should hit the logo target at ({logo_x},{logo_y})"
     );
-
-    // The modern Settings panel and its sections are now present.
     let after = visible_texts(&mut shell);
     assert!(
         contains(&after, "Settings"),
@@ -88,6 +66,10 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         "the fifth bundled skin should be listed too; visible={after:?}"
     );
     assert!(
+        contains(&after, "Catamp Freefall (Bundled)"),
+        "the sixth bundled skin should be listed too; visible={after:?}"
+    );
+    assert!(
         contains(&after, "SYNC"),
         "sync section should appear; visible={after:?}"
     );
@@ -95,45 +77,25 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         contains(&after, "UPDATES"),
         "updates section should appear; visible={after:?}"
     );
-
     assert!(
         contains(&after, "Open Skin Studio"),
         "desktop settings should expose Skin Studio; visible={after:?}"
     );
-
-    // Tapping outside the centered panel hits the dim backdrop, which dismisses
-    // the modal. (500x700 surface; the 300x500 panel is centered, so the corner
-    // at (20,20) is safely on the backdrop.)
     shell.set_cursor(20.0, 20.0);
     shell.pointer_pressed();
     pump(&mut shell);
     shell.pointer_released();
     pump(&mut shell);
-
     let after_close = visible_texts(&mut shell);
     assert!(
         !contains(&after_close, "SYNC"),
         "settings panel should close after tapping the backdrop; visible={after_close:?}"
     );
 }
-
-/// Regression test for the bug in PLAN.md: playlist shift/ctrl-click
-/// multi-select used to read keyboard modifiers via a raw `x11rb` connection.
-/// `x11rb::connect` fails on every non-X11 desktop, so on macOS and Windows the
-/// click silently saw "no modifiers held" no matter what was actually pressed.
-///
-/// Modifiers now travel on `PointerEvent` itself -- stamped by
-/// `AppShell::set_modifiers`, the same per-shell state every desktop backend's
-/// event loop already feeds from its native `ModifiersChanged`/DOM event (see
-/// cranpose PR #452) -- so this drives a real click through the real
-/// `pointer_pressed`/`pointer_released` dispatch pipeline (no X11, no platform
-/// keyboard query of any kind) and asserts `PlaylistRowClickTarget` reports
-/// exactly what was set.
 #[test]
 fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
     let captured: Rc<RefCell<Vec<Modifiers>>> = Rc::new(RefCell::new(Vec::new()));
     let captured_for_app = Rc::clone(&captured);
-
     let root_key = location_key(file!(), line!(), column!());
     let mut shell = AppShell::new(HitGraphRenderer::default(), root_key, move || {
         let captured = Rc::clone(&captured_for_app);
@@ -144,9 +106,6 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
     shell.set_buffer_size(100, 100);
     shell.set_viewport(100.0, 100.0);
     pump(&mut shell);
-
-    // Before any platform ever calls `set_modifiers`, a click must read as
-    // "nothing held" -- not silently drop the multi-select gesture.
     shell.set_cursor(10.0, 10.0);
     assert!(shell.pointer_pressed(), "press should hit the row target");
     pump(&mut shell);
@@ -155,8 +114,6 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
         "release should complete the click"
     );
     pump(&mut shell);
-
-    // A shift-held click must reach the handler with shift set.
     shell.set_modifiers(Modifiers {
         shift: true,
         ..Modifiers::NONE
@@ -166,9 +123,6 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
     pump(&mut shell);
     assert!(shell.pointer_released());
     pump(&mut shell);
-
-    // A ctrl-held click must reach the handler with ctrl set, and the earlier
-    // shift must not leak into it.
     shell.set_modifiers(Modifiers {
         ctrl: true,
         ..Modifiers::NONE
@@ -178,7 +132,6 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
     pump(&mut shell);
     assert!(shell.pointer_released());
     pump(&mut shell);
-
     let events = captured.borrow();
     assert_eq!(events.len(), 3, "expected exactly three clicks: {events:?}");
     assert_eq!(
@@ -197,15 +150,6 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
         events[2]
     );
 }
-
-/// Audio handed over by another application — a file named on the command line,
-/// a drop on the window or canvas, an Android share — reaches the playlist and
-/// starts playing when the player is idle.
-///
-/// Publishes through `publish_incoming_content`, the same inbox the desktop,
-/// web and Android hosts publish into, so this exercises the real delivery path
-/// rather than calling the playlist helpers directly. Bytes rather than a URI
-/// keep it independent of any platform content resolver.
 #[test]
 fn audio_handed_over_by_another_application_plays() {
     let root_key = location_key(file!(), line!(), column!());
@@ -217,16 +161,12 @@ fn audio_handed_over_by_another_application_plays() {
     shell.set_buffer_size(500, 700);
     shell.set_viewport(500.0, 700.0);
     pump(&mut shell);
-
-    // A name no bundled demo track carries, so finding it proves it came from
-    // the handover and not from the startup playlist.
     let name = "handed-over-by-another-app.mp3";
     let before = visible_texts(&mut shell);
     assert!(
         !contains(&before, "handed-over-by-another-app"),
         "the handed-over track must not already be present; visible={before:?}"
     );
-
     let bytes =
         std::fs::read(demo_track_for_handover()).expect("a bundled demo track to hand over");
     cranpose_services::publish_incoming_content(
@@ -234,24 +174,18 @@ fn audio_handed_over_by_another_application_plays() {
             .with_name(name)
             .with_mime_type("audio/mpeg"),
     );
-    // `pump` stops as soon as nothing wants a redraw, which can be before the
-    // collector's task has even been polled; drive the runtime unconditionally.
     for _ in 0..80 {
         shell.update();
     }
-
     let after = visible_texts(&mut shell);
     assert!(
         contains(&after, "handed-over-by-another-app"),
         "handed-over audio should appear in the player; visible={after:?}"
     );
-    // The startup playlist survives: a handover appends, it does not replace.
     assert!(
         contains(&after, "Cranamp Demo 01 - Retro Tracker"),
         "the existing playlist should be kept; visible={after:?}"
     );
-    // The main display leads the visible text, so the handed-over track showing
-    // there is what "the idle player started playing it" looks like.
     assert!(
         after
             .first()
@@ -259,9 +193,6 @@ fn audio_handed_over_by_another_application_plays() {
         "an idle player should start the handed-over track; visible={after:?}"
     );
 }
-
-/// Any real audio file in the bundled demo set; the handover carries its bytes
-/// under a different name, so which one it is does not matter.
 fn demo_track_for_handover() -> std::path::PathBuf {
     let directory =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/demo-music/generated");

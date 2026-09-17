@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Thin client for the MCP server inside the running Cranamp Skin Studio.
 import fs from 'node:fs';
 const name=process.argv[2]||'studio_status';
 const argument=process.argv[3];

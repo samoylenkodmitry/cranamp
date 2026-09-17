@@ -35,7 +35,6 @@ desktop = [
     "cranpose-services/file-picker-native",
     "cranpose-services/http-native",
 ]
-# Per-display-server variants for size-critical release builds.
 desktop-x11 = [
     "cranpose/desktop-x11",
     "cranpose/media",
@@ -74,19 +73,6 @@ anyhow = "1.0"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# 0.1.124 is the first release that plays a remote `https:` track anywhere but
-# the browser (Cranpose PR #669). Every native backend used to resolve a URI to
-# a filesystem path and refuse what it could not find there, so the hosted
-# playlist played on the web build and nowhere else; iOS now streams through
-# `AVPlayer` and desktop/Android read HTTP byte ranges.
-#
-# 0.1.98 carries Cranpose PR #463, which deletes the `android/` Maven module
-# tree and moves the Gradle plugin inside this crate
-# (`android/cranpose-gradle-plugin/`), resolved by `settings.gradle.kts` via
-# `cargo metadata` + `includeBuild` instead of a Maven coordinate/version. It
-# also carries cranpose_services::content's shared percent_decode/
-# percent_decode_lossy pair, which src/sync/mod.rs below depends on to drop
-# its own hand-rolled percent-decoder.
 cranpose = { version = "0.1.124", default-features = false }
 cranpose-core = "0.1.124"
 cranpose-foundation = "0.1.124"
@@ -109,15 +95,10 @@ wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 wasm-logger = { version = "0.2", optional = true }
 
-# Framework-level e2e tests drive the real cranpose hit-dispatch pipeline
-# headlessly (see tests/settings_e2e.rs). Published crates, pinned to the same
-# cranpose release as the runtime dependencies above.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 cranpose-app-shell = "0.1.124"
 cranpose-render-common = "0.1.124"
 
-# Distribution profile: LTO + strip + abort panics keep the binary small
-# (see cranpose README "Binary Size").
 [profile.release]
 opt-level = 3
 lto = true
@@ -125,16 +106,11 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
-
-# Size-optimized distribution profile (see cranpose docs/binary_size.md).
 [profile.release-small]
 inherits = "release"
 opt-level = "z"
 lto = "fat"
 
-# Nightly size floor: abort panics + size-tuned std (build-std).
-# (`immediate-abort` was removed from nightly cargo ~2026-03; plain abort
-# costs only the panic-formatting shims relative to it.)
 [profile.dist-min]
 inherits = "release-small"
 panic = "abort"
