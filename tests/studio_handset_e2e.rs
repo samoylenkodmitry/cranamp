@@ -102,3 +102,31 @@ fn the_brushes_do_not_fill_the_drawer_before_their_own_settings() {
         );
     }
 }
+
+/// The scope a stroke paints in has to be reachable where there is no sidebar.
+///
+/// It was a switch on the quick-access sidebar, which is the one strip a
+/// handset does not get: the README says the sidebar can go because "everything
+/// on it is also in a panel", and this one was not. On a phone there was no way
+/// at all to say whether a stroke lands in the slider frame in hand or in all
+/// twenty-eight of them.
+#[test]
+fn the_edit_scope_is_reachable_where_there_is_no_sidebar() {
+    let document = cranamp::winamp::studio::open_document(None).expect("a document");
+    open(&document, "tools", "pencil");
+    let mut shell = touch(document);
+    let texts = visible_texts(&mut shell);
+    for control in [
+        "EDIT SCOPE",
+        "This state only",
+        "This state onward",
+        "Up to this state",
+        "All sprite states",
+    ] {
+        assert!(
+            contains(&texts, control),
+            "{control:?} decides which variants a stroke lands in and has to be \
+             pressable here; visible={texts:?}"
+        );
+    }
+}

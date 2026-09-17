@@ -49,7 +49,7 @@ panels with the same controls in them; only the arrangement changes.
 | What | Where there is room | Where there is not |
 | --- | --- | --- |
 | The two toolbar rows | one row each | wrapped at the same left margin |
-| The quick-access sidebar | beside the canvas | gone: everything on it is also in a panel, and its zoom pills and **Fit whole skin** join the toolbar |
+| The quick-access sidebar | beside the canvas | gone: everything on it is also in a panel — the edit scope reads there and is set in **Drawing tools** — and its zoom pills and **Fit whole skin** join the toolbar |
 | The tool column | docked beside the canvas | over the right of it, or over all of it |
 | The whole-skin preview | its own column, right of the canvas | the same column, reduced further to fit |
 | The sprite-state strip | one row and a slider | wrapped |
@@ -230,13 +230,33 @@ both panels, and every drawing operation may override its own.
 | `mirror_x`, `mirror_y` | bool | mirrors |
 | `alpha_lock` | bool | **Lock transparent pixels** |
 | `mask_colors` | list of colours | **Mask picked color** |
-| `all_states` | bool | **Current state only** |
+| `states` | `current`, `onward`, `up-to`, `all` | **EDIT SCOPE** |
 | `clip` | `[x,y,w,h]` or null | selected rectangle / **Clear paint clip** |
 | `grid`, `guides` | bool | pixel grid (4× and up), rectangle outlines |
 
 Brush settings and `measure` are the pencil, not the canvas: setting one does
-not close an open atlas. Asking anything of the canvas, or an empty call,
-returns to it.
+not close an open atlas. Neither does reading the surface back — `crop`, `zoom`,
+`magnify` and `path` alone are a look at the sheet in hand, not a way out of it.
+Asking anything of the canvas, or an empty call, returns to it.
+
+### Edit scope
+
+Which variants of each target a stroke lands in.
+
+| `states` | Writes into |
+| --- | --- |
+| `current` | the variant the canvas is showing |
+| `onward` | that one and every one after it |
+| `up-to` | every one up to and including it |
+| `all` | every variant of every target |
+
+A slider is twenty-eight frames that differ by one object, so the run from the
+frame in hand to an end is the shape its artwork has: the stowage shelf in
+Catamp Freefall is one `all` for the shelf and nine `onward`s, one per object,
+instead of twenty-eight drawings. `all_states: true` is the retired name for
+`all` and still answers, on the way in and in `view`. A draw whose scope is
+wider than one variant answers `states_written` with the scope and how many
+variants each target got.
 
 ### Text
 
@@ -414,9 +434,15 @@ to the brush colour.
 
 ### Readability
 
-`studio_options` answers `readability` — for each of the eight readouts Cranamp
-writes: `reads`, `ink`, `ground`, `contrast`, `readable`. `studio_export`
-repeats anything below 3:1 as `hard_to_read`. 4.5 is comfortable at this size;
+`studio_options` answers `readability` — for each of the nine readouts Cranamp
+writes: `reads`, `ink`, `ground`, `contrast`, `readable`. Eight are words and
+the ninth is a picture: **the equalizer curve is drawn in text.bmp's ink**, the same
+colour as the title, so a skin that wants dark ink on a pale title strip must
+give the graph a pale background too or draw its curve invisibly. The three
+playlist checks use `NormalBG` where the skin has no `plbg.bmp`, which is where
+they are needed most — the classic playlist fill has no bitmap under it at all.
+
+`studio_export` repeats anything below 3:1 as `hard_to_read`. 4.5 is comfortable at this size;
 below 2 is a readout that is not there. `studio_pixel {"ink": "#..."}` points
 the same WCAG arithmetic at any rectangle.
 
@@ -560,11 +586,12 @@ Transaction-level fields on `studio_draw`:
 | --- | --- |
 | `layers` | sprites to route every pixel into; `[]` is Auto |
 | `origin` | put 0,0 on this sprite's destination as it stands, and target it — the only safe way to aim at a sprite that moves with its frame |
-| `all_states` | write the same local pixels into every variant of each target |
+| `states` | the edit scope for this transaction; `all_states: true` is the retired name for `all` |
 | `mask_colors` | a temporary mask, without replacing the persistent one |
 | `label` | names the history entry |
 | `preview` | dry run: applied, answered, and put back; nothing recorded, revision unmoved |
-| `crop`, `zoom`, `magnify`, `path` | read the surface back, as `studio_canvas` does |
+| `states` | the edit scope: `current`, `onward`, `up-to`, `all` |
+| `crop`, `zoom`, `magnify`, `path` | read the surface back, as `studio_canvas` does — on a committed transaction as well as a `preview` |
 
 ### Draw reports
 
@@ -582,6 +609,7 @@ All describe the transaction in hand.
 | `crossed_cells` | ink left its own cell and landed in a **repeated** one, which the player then draws n times. Silent for a cell painted on its own, and for an operation covering the whole sheet |
 | `identical_variants` | variants that came out the same picture — 28 slider frames all on frame 0, or a pressed state identical to its released one. Fully transparent variants are excluded; sprites sharing source cells share one entry, with `also` |
 | `unsupported_characters` | characters the face does not have; the rest of the text still landed |
+| `states_written` | the scope, and how many variants each target got, when it was more than the one in hand |
 | `surface`, `revision`, `note` | which surface, which revision, the sheet's note |
 
 ### Response shapes
@@ -598,7 +626,7 @@ one entry per variant.
 | `studio_rectangles {"gaps":true}` | `{sheet, size, gaps, of, note}`, or `never_drawn: true`; capped at 64 entries |
 | `studio_states` | the contact sheet, plus `sprite`: `id`, `sheet`, `of`, and per variant `index`, `label`, `rect`, `painted_pixels`, `differs_from_previous`, `largest_channel_change`, `same_picture_as`. `image: false` answers the numbers alone |
 | `studio_pixel` | `surface`, `hits` (each sprite under the pixel, where it keeps it, its `rgba`, what shares it), `ground` over the rectangle's opaque pixels, `contrast`/`readable` with `ink`, `nothing_at` when there is no artwork |
-| `studio_options` | every option, `visualizer_slots`, `readability`, and `sheets_changed` when one added or removed a sheet |
+| `studio_options` | every option flat, as this table names them, plus `visualizer_slots`, `readability`, and `sheets_changed` when one added or removed a sheet |
 | `studio_screenshot` | `path`/`size` or the PNG, plus `showing` (`player` or `editor`) and `player` (`x`, `y`, `zoom`) |
 | `studio_export` | `path`, `bytes`, and when there is something to say `undrawn_sprites` and `hard_to_read` |
 | `studio_layers`, `studio_history`, `studio_project` | the planes, the history (seekable with `cursor`), the project file |

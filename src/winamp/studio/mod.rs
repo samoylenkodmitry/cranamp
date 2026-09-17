@@ -2184,23 +2184,22 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     }
                     Label(format!("Brush {}", view.color), 70., 405., 130., 11., FG);
                     Label("EDIT SCOPE".into(), 32., 440., 160., 11., DIM);
-                    {
-                        let d = document.clone();
-                        let all = view.all_states;
-                        Toggle(
-                            if all {
-                                "All sprite states"
-                            } else {
-                                "Current state only"
-                            }
-                            .into(),
-                            30.,
-                            456.,
-                            168.,
-                            all,
-                            move || state(&d, json!({"all_states":!all})),
-                        );
-                    }
+                    // Read-only here, as Sprite targets below it is. It used to
+                    // be the only control for this anywhere, on the one strip
+                    // that is not drawn below 900 points -- so the setting that
+                    // decides whether a stroke lands in one slider frame or all
+                    // twenty-eight could not be reached on a handset at all. It
+                    // lives in Drawing tools now, with every other brush
+                    // setting, which every size has.
+                    Label(
+                        model::scope_label(&view.states).into(),
+                        32.,
+                        456.,
+                        168.,
+                        11.,
+                        FG,
+                    );
+                    Label("Set it in Drawing tools.".into(), 32., 470., 168., 10., DIM);
                     // "Sprite targets" everywhere: these are the sprites a stroke is
                     // routed into. The independent stack of artwork planes over the
                     // atlases is "painting layers", and never shares the word.
@@ -2764,7 +2763,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                                                 )
                                                                                 .unwrap(),
                                                                                 "selection",
-                                                                                v.all_states,
+                                                                                model::Scope::named(&v.states),
                                                                             );
                                                                             }
                                                                             last = Some(point);
@@ -2795,7 +2794,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                                                     )
                                                                                     .unwrap(),
                                                                                     "selection",
-                                                                                    v.all_states,
+                                                                                    model::Scope::named(&v.states),
                                                                                 );
                                                                                 }
                                                                                 last = Some(point);
@@ -3205,7 +3204,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         move || {
             let shared = shared.clone();
             Box(
-                Modifier::empty().size_points(room.0 + 24., 800.),
+                Modifier::empty().size_points(room.0 + 24., 940.),
                 BoxSpec::default(),
                 move || {
                     let v = shared.lock().unwrap().view.clone();
@@ -3460,6 +3459,26 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                             move || state(&d, json!({ "opacity": amount })),
                         );
                     }
+                    // Which variants of each target a stroke lands in. A slider
+                    // is twenty-eight frames that differ by one object, so the
+                    // useful scope is neither this frame nor all of them but
+                    // the run from this frame to one end. It was a switch on
+                    // the quick-access sidebar, which is the one strip a
+                    // handset does not get, so it is here with every other
+                    // brush setting instead.
+                    Label("EDIT SCOPE".into(), 12., 658., 348., 11., DIM);
+                    for (i, scope) in model::SCOPES.iter().enumerate() {
+                        let d = shared.clone();
+                        let scope = *scope;
+                        Choice(
+                            model::scope_label(scope).into(),
+                            12. + (i % 2) as f32 * 178.,
+                            674. + (i / 2) as f32 * 34.,
+                            170.,
+                            v.states == scope,
+                            move || state(&d, json!({ "states": scope })),
+                        );
+                    }
                     for (i, (field, label, on)) in [
                         ("filled", "Fill shapes", v.filled),
                         ("mirror_x", "Mirror left / right", v.mirror_x),
@@ -3475,7 +3494,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                         Toggle(
                             label.into(),
                             12. + (i % 2) as f32 * 178.,
-                            658. + (i / 2) as f32 * 42.,
+                            750. + (i / 2) as f32 * 42.,
                             170.,
                             on,
                             move || state(&d, json!({field:!on})),
@@ -3491,7 +3510,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                             "Mask picked color".into()
                         },
                         12.,
-                        790. - 46.,
+                        880.,
                         348.,
                         mask_on,
                         move || {
@@ -3504,7 +3523,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                     Label(
                         "Lift a region; Stamp places its exact pixels.".into(),
                         12.,
-                        780.,
+                        914.,
                         353.,
                         10.,
                         DIM,
@@ -4161,8 +4180,14 @@ mod integration_tests {
         {
             let mut d = shared.lock().unwrap();
             d.checkpoint();
-            d.paint_line([40, 90], [44, 90], [17, 34, 51, 255], "play", false)
-                .unwrap();
+            d.paint_line(
+                [40, 90],
+                [44, 90],
+                [17, 34, 51, 255],
+                "play",
+                model::Scope::Current,
+            )
+            .unwrap();
         }
         let response = mcp::dispatch(
             json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"studio_draw","arguments":{"layer":"play","all_states":true,"operations":[{"op":"pixel","x":42,"y":91,"color":"#abcdef"}]}}}),

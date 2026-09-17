@@ -15,6 +15,66 @@ use std::{
 /// Shared capacity for human edits, isolated patches, and layered projects.
 const MAX_PAINT_LAYERS: usize = 64;
 
+/// The variant in hand alone.
+pub const SCOPE_CURRENT: &str = "current";
+/// The variant in hand and every one after it.
+pub const SCOPE_ONWARD: &str = "onward";
+/// Every variant up to and including the one in hand.
+pub const SCOPE_UP_TO: &str = "up-to";
+/// Every variant of every target.
+pub const SCOPE_ALL: &str = "all";
+/// The four edit scopes, in the order the pills are drawn in.
+pub const SCOPES: &[&str] = &[SCOPE_CURRENT, SCOPE_ONWARD, SCOPE_UP_TO, SCOPE_ALL];
+/// What each scope is called where a person reads it.
+pub fn scope_label(scope: &str) -> &'static str {
+    match scope {
+        SCOPE_ONWARD => "This state onward",
+        SCOPE_UP_TO => "Up to this state",
+        SCOPE_ALL => "All sprite states",
+        _ => "This state only",
+    }
+}
+
+/// Which variants of one sprite a stroke lands in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Scope {
+    Current,
+    Onward,
+    UpTo,
+    All,
+}
+impl Scope {
+    pub fn named(scope: &str) -> Self {
+        match scope {
+            SCOPE_ONWARD => Scope::Onward,
+            SCOPE_UP_TO => Scope::UpTo,
+            SCOPE_ALL => Scope::All,
+            _ => Scope::Current,
+        }
+    }
+    /// The source cells this scope writes, for one sprite. `onward` and `up-to`
+    /// are measured from the variant the sprite is drawn in now, which is the
+    /// one the canvas is showing, so what a stroke does is what the canvas says
+    /// it will do.
+    pub fn cells(self, layer: &Layer) -> Vec<[u32; 4]> {
+        match self {
+            Scope::Current => vec![layer.source],
+            Scope::All => layer.variants.clone(),
+            Scope::Onward | Scope::UpTo => {
+                let at = layer
+                    .variants
+                    .iter()
+                    .position(|v| *v == layer.source)
+                    .unwrap_or(0);
+                match self {
+                    Scope::Onward => layer.variants[at..].to_vec(),
+                    _ => layer.variants[..=at].to_vec(),
+                }
+            }
+        }
+    }
+}
+
 /// The tool panels, by name, in the one vocabulary both layouts answer to.
 ///
 /// The desktop calls them Drawing tools, Painting layers, Sprite targets,
@@ -193,7 +253,13 @@ pub struct View {
     pub grid: bool,
     pub alpha_lock: bool,
     pub mask_colors: Vec<String>,
-    pub all_states: bool,
+    /// Which variants of each target a stroke lands in: `current`, `onward`,
+    /// `up-to` or `all`. It was a bool, and a bool is the wrong shape for the
+    /// thing it is for -- a twenty-eight frame slider whose frames differ by
+    /// one object is neither one frame nor all of them, and drawing one cost
+    /// twenty-eight transactions. `onward` and `up-to` run from the variant in
+    /// hand to an end, which is the shape every slider's artwork actually has.
+    pub states: String,
     pub pressed: bool,
     pub active: bool,
     pub volume: u8,
@@ -244,7 +310,7 @@ impl Default for View {
             grid: true,
             alpha_lock: false,
             mask_colors: vec![],
-            all_states: false,
+            states: SCOPE_CURRENT.into(),
             pressed: false,
             active: true,
             volume: 20,
@@ -335,6 +401,10 @@ pub struct Document {
     keyed_blend: Vec<[i32; 2]>,
     overwrites: usize,
     overwrite_note: Option<String>,
+    /// Sprites this transaction wrote into, and how many variants of each. Only
+    /// collected when the scope is wider than the variant in hand, because that
+    /// is the only case where the answer is not "one".
+    scope_writes: BTreeMap<String, usize>,
 }
 /// The WCAG relative luminance of a colour.
 fn relative_luminance(c: [u8; 4]) -> f64 {
@@ -417,6 +487,7 @@ impl Document {
             preview: None,
             overwrites: 0,
             overwrite_note: None,
+            scope_writes: BTreeMap::new(),
         }
     }
     pub fn open(bytes: &[u8], path: Option<String>) -> Result<Self> {
@@ -475,6 +546,7 @@ impl Document {
             preview: None,
             overwrites: 0,
             overwrite_note: None,
+            scope_writes: BTreeMap::new(),
             stroke: None,
             images,
             files,
@@ -664,6 +736,18 @@ impl Document {
         let mut value = serde_json::to_value(&self.view)?;
         let object = value.as_object_mut().context("view")?;
         for (k, v) in patch.as_object().context("state must be an object")? {
+            // The bool `states` grew out of. Scripts and the sidebar still set
+            // it, and both ends of it still mean what they meant.
+            if k == "all_states" {
+                let on = v
+                    .as_bool()
+                    .with_context(|| format!("all_states is true or false (got {v})"))?;
+                object.insert(
+                    "states".into(),
+                    json!(if on { SCOPE_ALL } else { SCOPE_CURRENT }),
+                );
+                continue;
+            }
             if !object.contains_key(k) {
                 bail!("Unknown state field: {k}");
             }
@@ -770,6 +854,12 @@ impl Document {
             view.text_spacing
         );
         anyhow::ensure!(
+            SCOPES.contains(&view.states.as_str()),
+            "states is one of {} (got {})",
+            SCOPES.join(", "),
+            view.states
+        );
+        anyhow::ensure!(
             DRAWERS.contains(&view.drawer.as_str()),
             "drawer is one of {} (got {})",
             DRAWERS.join(", "),
@@ -852,7 +942,11 @@ impl Document {
     /// studio_rectangles says where each variant lives -- and the sheet list
     /// changes only when a sheet is added, so studio_status keeps it.
     pub fn brief(&self) -> Value {
-        json!({"path":self.path,"revision":self.revision,"dirty":self.dirty,"view":self.view,"undo":self.undo.len(),"redo":self.redo.len(),"message":self.message,"canvas":self.canvas_size(),"surface":self.surface(),"sprites":self.layers().len(),"paint_layers":self.paint_layer_info()})
+        let mut view = serde_json::to_value(&self.view).unwrap_or_else(|_| json!({}));
+        // Answered as well as `states`, so a script written when this was a
+        // bool still reads a true answer out of it rather than nothing.
+        view["all_states"] = json!(self.view.states == SCOPE_ALL);
+        json!({"path":self.path,"revision":self.revision,"dirty":self.dirty,"view":view,"undo":self.undo.len(),"redo":self.redo.len(),"message":self.message,"canvas":self.canvas_size(),"surface":self.surface(),"sprites":self.layers().len(),"paint_layers":self.paint_layer_info()})
     }
     /// Which surface a stroke's coordinates mean right now. The assembled
     /// canvas and a single sheet share one pencil and one history, so a draw
@@ -1555,7 +1649,7 @@ impl Document {
         im: &RgbaImage,
         at: [i32; 2],
         layer: &str,
-        all: bool,
+        all: Scope,
         layers: &[Layer],
     ) -> Result<usize> {
         let mut n = 0;
@@ -1892,7 +1986,7 @@ impl Document {
         to: [i32; 2],
         color: [u8; 4],
         layer: &str,
-        all: bool,
+        all: Scope,
     ) -> Result<usize> {
         let op = json!({"op":"line","x":from[0],"y":from[1],"x2":to[0],"y2":to[1],"brush_size":self.view.brush_size});
         let count = self.paint_shape(&op, color, layer, all, &self.layers())?;
@@ -1906,7 +2000,7 @@ impl Document {
         op: &Value,
         color: [u8; 4],
         layer: &str,
-        all: bool,
+        all: Scope,
         layers: &[Layer],
     ) -> Result<usize> {
         let (w, h) = self.canvas_size();
@@ -2086,7 +2180,7 @@ impl Document {
                 &cluster,
                 to,
                 "selection",
-                self.view.all_states,
+                Scope::named(&self.view.states),
                 &self.layers(),
             )?;
             if count > 0 {
@@ -2143,7 +2237,7 @@ impl Document {
             &op,
             parse_color(&v.color)?,
             "selection",
-            v.all_states,
+            Scope::named(&v.states),
             &self.layers(),
         )?;
         self.changed();
@@ -2161,7 +2255,7 @@ impl Document {
         to: [i32; 2],
         color: [u8; 4],
         layer: &str,
-        all: bool,
+        all: Scope,
         layers: &[Layer],
     ) -> Result<usize> {
         let (w, h) = self.canvas_size();
@@ -2231,11 +2325,10 @@ impl Document {
             let mut touched = Vec::new();
             for l in hits {
                 let (sx, sy) = l.map(x as u32, y as u32).unwrap();
-                let targets = if all {
-                    l.variants.clone()
-                } else {
-                    vec![l.source]
-                };
+                let targets = all.cells(l);
+                if all != Scope::Current {
+                    self.scope_writes.insert(l.id.clone(), targets.len());
+                }
                 let dimensions = self
                     .images
                     .get(&l.sheet)
@@ -2343,10 +2436,26 @@ impl Document {
                 selected.push(id.clone());
             }
         }
-        let all = args
-            .get("all_states")
-            .and_then(Value::as_bool)
-            .unwrap_or(self.view.all_states);
+        // `states` is the scope this transaction paints in; `all_states` is the
+        // bool it grew out of and still answers to, because scripts were
+        // written against it before there was anything between one and all.
+        let scope = match args.get("states") {
+            Some(Value::String(named)) => {
+                anyhow::ensure!(
+                    SCOPES.contains(&named.as_str()),
+                    "states is one of {} (got {named})",
+                    SCOPES.join(", ")
+                );
+                named.clone()
+            }
+            Some(other) => bail!("states is one of {} (got {other})", SCOPES.join(", ")),
+            None => match args.get("all_states").and_then(Value::as_bool) {
+                Some(true) => SCOPE_ALL.into(),
+                Some(false) => SCOPE_CURRENT.into(),
+                None => self.view.states.clone(),
+            },
+        };
+        let all = Scope::named(&scope);
         let layer = "selection";
         let operations = args
             .get("operations")
@@ -2392,6 +2501,7 @@ impl Document {
         }
         let previous_mask = std::mem::replace(&mut self.view.mask_colors, mask);
         let previous_unmapped = std::mem::take(&mut self.unmapped_pixels);
+        self.scope_writes.clear();
         let previous_selection = std::mem::replace(&mut self.view.layers, selected.clone());
         let paint_layers = self.layers();
         // Every cell of the open sheet, and how many places the player draws
@@ -2685,7 +2795,12 @@ impl Document {
         }
         self.message = format!(
             "Painted {count} atlas pixels{}",
-            if all { " across all variants" } else { "" }
+            match all {
+                Scope::Current => "",
+                Scope::Onward => " into this state and every one after it",
+                Scope::UpTo => " into every state up to this one",
+                Scope::All => " across all variants",
+            }
         );
         if !self.unmapped_pixels.is_empty() {
             self.message.push_str(&format!(
@@ -2747,6 +2862,20 @@ impl Document {
             "unsampled_sample":unsampled.iter().take(8).collect::<Vec<_>>()});
         if never_drawn {
             result["sheet_is_never_drawn"] = json!(true);
+        }
+        // What a scope other than "this frame" actually did. A transaction that
+        // writes one object into twenty-three of a slider's twenty-eight frames
+        // looks exactly like one that wrote it into one, and the difference is
+        // the whole of what the caller asked for.
+        let wrote = std::mem::take(&mut self.scope_writes);
+        if !wrote.is_empty() {
+            result["states_written"] = json!({
+                "scope": scope,
+                "variants": wrote
+                    .into_iter()
+                    .map(|(id, n)| (id, json!(n)))
+                    .collect::<serde_json::Map<String, Value>>(),
+            });
         }
         if !skipped.is_empty() {
             result["unsupported_characters"] =
@@ -3845,7 +3974,27 @@ impl Document {
                             "contrast":r,"readable":r >= 3.0}));
         };
         for (id, rect) in &runtime {
-            let Some(ground) = self.ground_under(*rect) else {
+            // Not `else { continue }`. The classic playlist fill has no bitmap
+            // under it at all, so `ground_under` answers None there -- and that
+            // skipped the whole of TRACK ROWS, including the three checks below
+            // that do not want the artwork's ground but `NormalBG`. Every skin
+            // that does not add `plbg.bmp`, which is every skin by default, was
+            // told nothing at all about whether its playlist reads, by the one
+            // call that exists to say so.
+            let ground = self.ground_under(*rect);
+            let Some(ground) = ground else {
+                if id == "runtime.playlist.TRACK ROWS" {
+                    let bg = colour("NormalBG");
+                    if let (Some(normal), Some(bg)) = (colour("Normal"), bg) {
+                        check("a playlist row", normal, bg);
+                    }
+                    if let (Some(current), Some(bg)) = (colour("Current"), bg) {
+                        check("the playing row", current, bg);
+                    }
+                    if let (Some(normal), Some(on)) = (colour("Normal"), colour("SelectedBG")) {
+                        check("a selected row", normal, on);
+                    }
+                }
                 continue;
             };
             match id.as_str() {
@@ -3853,6 +4002,14 @@ impl Document {
                 "runtime.main.BITRATE" | "runtime.main.SAMPLE RATE" => {
                     check(id.rsplit('.').next().unwrap_or(id), ink, ground)
                 }
+                // The equalizer curve is drawn in the display ink -- text.bmp's
+                // sampled colour, the same one the title is written in -- over
+                // whatever the skin painted in the graph rectangle. A skin with
+                // a dark graph and a dark ink draws its curve and nobody ever
+                // sees it, and until this line the check that exists for
+                // exactly this said nothing about the one readout that is a
+                // picture rather than words.
+                "runtime.equalizer.EQ CURVE" => check("the equalizer curve", ink, ground),
                 // The footer's two readouts are the one place in the playlist
                 // that does *not* use PLEDIT.TXT: Cranamp writes them in the
                 // display ink, the same colour as the main window's title.
@@ -4433,7 +4590,7 @@ mod tests {
                 [w as i32 - 1, y as i32],
                 ink,
                 "selection",
-                false,
+                Scope::Current,
             );
             d.finish_stroke();
         }
@@ -4457,8 +4614,14 @@ mod tests {
         let original = d.snapshot();
         assert!(d.view.layers.is_empty(), "no explicit target means Auto");
         d.checkpoint();
-        d.paint_line([40, 90], [40, 90], [4, 5, 6, 255], "selection", false)
-            .unwrap();
+        d.paint_line(
+            [40, 90],
+            [40, 90],
+            [4, 5, 6, 255],
+            "selection",
+            Scope::Current,
+        )
+        .unwrap();
         // The control the brush is over, and the window background underneath
         // it: one stroke on the joined canvas is one stroke on the artwork, so
         // it cannot stop at whichever sprite happens to be drawn last.
@@ -4493,8 +4656,14 @@ mod tests {
         assert!(!d.dirty);
         d.state(json!({"layers":["play"]})).unwrap();
         d.checkpoint();
-        d.paint_line([40, 90], [40, 90], [4, 5, 6, 255], "selection", false)
-            .unwrap();
+        d.paint_line(
+            [40, 90],
+            [40, 90],
+            [4, 5, 6, 255],
+            "selection",
+            Scope::Current,
+        )
+        .unwrap();
         assert_eq!(d.images["main.bmp"], original.images["main.bmp"]);
         assert_eq!(d.images["cbuttons.bmp"].get_pixel(24, 2).0, [4, 5, 6, 255]);
     }
@@ -4554,17 +4723,29 @@ mod tests {
         d.undo();
         d.state(json!({"layers":["play"]})).unwrap();
         d.checkpoint();
-        d.paint_line([0, 0], [2, 2], [1, 2, 3, 255], "selection", false)
+        d.paint_line([0, 0], [2, 2], [1, 2, 3, 255], "selection", Scope::Current)
             .unwrap();
         d.finish_stroke();
         assert_eq!(d.history()["cursor"], 0);
         assert!(!d.dirty);
         assert!(d.redo());
         d.checkpoint();
-        d.paint_line([40, 90], [41, 90], [1, 2, 3, 255], "selection", false)
-            .unwrap();
-        d.paint_line([41, 90], [43, 90], [1, 2, 3, 255], "selection", false)
-            .unwrap();
+        d.paint_line(
+            [40, 90],
+            [41, 90],
+            [1, 2, 3, 255],
+            "selection",
+            Scope::Current,
+        )
+        .unwrap();
+        d.paint_line(
+            [41, 90],
+            [43, 90],
+            [1, 2, 3, 255],
+            "selection",
+            Scope::Current,
+        )
+        .unwrap();
         d.finish_stroke();
         assert_eq!(d.history()["cursor"], 2);
         assert_eq!(d.history()["entries"][2]["source"], "Human");
@@ -5734,5 +5915,130 @@ mod tests {
         assert_eq!(crop["parts"][0]["source_overlap"], json!([137, 114, 1, 1]));
         d.undo();
         assert_eq!(d.images["main.bmp"].get_pixel(137, 114).0, [0; 4]);
+    }
+
+    /// The scope between one variant and all of them.
+    ///
+    /// A slider is twenty-eight frames that differ by one object, and with a
+    /// bool there was no way to say "from this frame on": every frame was its
+    /// own transaction. The run from the frame in hand to an end is the shape
+    /// the artwork actually has, so it is the shape the setting has.
+    #[test]
+    fn a_stroke_lands_in_a_run_of_variants_and_the_report_says_how_many() {
+        let mut d = Document::blank();
+        d.open_on_whole_skin();
+        d.state(json!({"volume": 20})).unwrap();
+        let report = d
+            .draw(
+                &json!({"layers":["main.volume.track"],"states":"onward","operations":[
+                    {"op":"pixel","x":110,"y":58,"color":"#123456"}
+                ]}),
+            )
+            .unwrap();
+        assert_eq!(report["states_written"]["scope"], json!("onward"));
+        assert_eq!(
+            report["states_written"]["variants"]["main.volume.track"],
+            json!(8),
+            "volume 20 onward is variants 20..27"
+        );
+        let cells = |d: &Document| {
+            (0..28)
+                .map(|v| d.images["volume.bmp"].get_pixel(3, v * 15 + 1).0)
+                .collect::<Vec<_>>()
+        };
+        let after = cells(&d);
+        assert!(
+            after[..20].iter().all(|p| p[3] == 0),
+            "nothing below the frame in hand"
+        );
+        assert!(
+            after[20..].iter().all(|p| *p == [0x12, 0x34, 0x56, 255]),
+            "the frame in hand and every one after it"
+        );
+
+        d.state(json!({"volume": 3})).unwrap();
+        let report = d
+            .draw(
+                &json!({"layers":["main.volume.track"],"states":"up-to","operations":[
+                    {"op":"pixel","x":111,"y":58,"color":"#abcdef"}
+                ]}),
+            )
+            .unwrap();
+        assert_eq!(
+            report["states_written"]["variants"]["main.volume.track"],
+            json!(4),
+            "volume 3 up-to is variants 0..3"
+        );
+
+        // The bool it grew out of still answers, on the way in and on the way
+        // back, because scripts were written against it.
+        d.state(json!({"all_states": true})).unwrap();
+        assert_eq!(d.view.states, SCOPE_ALL);
+        assert_eq!(d.brief()["view"]["all_states"], json!(true));
+        d.state(json!({"states": SCOPE_CURRENT})).unwrap();
+        assert_eq!(d.brief()["view"]["all_states"], json!(false));
+        let refusal = d.state(json!({"states": "sometimes"})).unwrap_err();
+        assert!(
+            refusal.to_string().contains("up-to"),
+            "a refusal names the scopes: {refusal}"
+        );
+
+        // A scope of one is the old default and says nothing extra.
+        let report = d
+            .draw(&json!({"layers":["main.volume.track"],"operations":[
+                {"op":"pixel","x":112,"y":58,"color":"#010203"}
+            ]}))
+            .unwrap();
+        assert!(report["states_written"].is_null());
+    }
+
+    /// Both halves of the readability answer that were never given.
+    ///
+    /// `TRACK ROWS` sits over the classic playlist fill, which has no bitmap
+    /// under it at all, so the ground was None and the whole entry was skipped
+    /// -- taking three of the eight checks with it, for every skin that does
+    /// not add `plbg.bmp`. And the equalizer curve is drawn in the display ink
+    /// over the graph, and was not checked at all: the one readout that is a
+    /// picture rather than words.
+    #[test]
+    fn readability_answers_for_the_playlist_without_plbg_and_for_the_eq_curve() {
+        let mut d = Document::blank();
+        d.open_on_whole_skin();
+        d.state(json!({"panel":"atlas","sheet":"text.bmp","layer":"sheet"}))
+            .unwrap();
+        d.draw(&json!({"operations":[
+            {"op":"rect","x":0,"y":0,"width":155,"height":18,"color":"#101010"}
+        ]}))
+        .unwrap();
+        d.open_on_whole_skin();
+        d.draw(&json!({"layers":["equalizer.background"],"operations":[
+            {"op":"rect","x":86,"y":133,"width":113,"height":19,"color":"#0c0c0c"}
+        ]}))
+        .unwrap();
+        d.draw(&json!({"layers":["main.background"],"operations":[
+            {"op":"rect","x":0,"y":0,"width":275,"height":115,"color":"#f0f0f0"}
+        ]}))
+        .unwrap();
+        d.set_palette(&json!({"Normal":"#0a0a0a","Current":"#ffffff",
+                              "NormalBG":"#080808","SelectedBG":"#111111"}))
+            .unwrap();
+        assert!(!d.images.contains_key("plbg.bmp"), "no playlist background");
+        let says = |d: &mut Document, what: &str| -> Value {
+            d.readability()
+                .into_iter()
+                .find(|r| r["reads"] == json!(what))
+                .unwrap_or_else(|| panic!("readability never mentioned {what}"))
+        };
+        assert_eq!(says(&mut d, "a playlist row")["readable"], json!(false));
+        assert_eq!(says(&mut d, "the playing row")["readable"], json!(true));
+        assert_eq!(says(&mut d, "a selected row")["readable"], json!(false));
+        let title = says(&mut d, "the track title");
+        let curve = says(&mut d, "the equalizer curve");
+        assert_eq!(
+            curve["ink"], title["ink"],
+            "the curve is written in the display ink, like the title"
+        );
+        assert_eq!(curve["ground"], json!("#0c0c0c"));
+        assert_eq!(curve["readable"], json!(false), "dark ink on a dark graph");
     }
 }

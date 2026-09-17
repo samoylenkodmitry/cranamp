@@ -298,7 +298,7 @@ fn operation_schema() -> Value {
 /// editing this editor no longer has.
 fn tools() -> Vec<Value> {
     vec![
- tool("studio_canvas","The whole skin as one canvas -- main, equalizer and playlist joined at their own positions -- and the only drawing surface. Reads it back as a PNG at an integer zoom, optionally cropped to [x,y,width,height]; with path it writes the file and returns where. Also sets what the canvas shows: zoom, brush, colour, width, the state every sprite is drawn in, and whether rectangles are outlined.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8,"description":"The editor's own canvas zoom, and the returned image's enlargement when magnify is not given."},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"measure":{"type":["string","array"],"items":{"type":"string"},"description":"Answer how wide these words come out in the current face and scale instead of reading the canvas back: width and height are the ink, advance is where the pen ends. The engine's own glyph walk, so a recipe stops carrying its own copy of the arithmetic -- the pen advances (cell+spacing)*scale, which is not cell*scale+spacing above scale 1."},"spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for this measure only; text_spacing is the one the brush and the operations use."},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft","text"]},"ramp_to":{"type":["string","null"],"description":"A gradient from the brush colour to this one, along the shape the gesture drew. null turns it off."},"ramp_axis":{"enum":["down","across"]},"bevel":{"type":"integer","minimum":0,"maximum":128,"description":"Glass lens bevel; 0 takes it from the height of the drag, as it always did."},"refraction":{"type":"integer","minimum":0,"maximum":32},"text":{"type":"string","description":"What the text brush writes."},"face":{"enum":["5x7","small"]},"text_scale":{"type":"integer","minimum":1,"maximum":8},"drawer":{"enum":["none","tools","layers","targets","rectangles","atlases","history","study","options","picker","files","states"],"description":"Which tool panel is open. It is on the document rather than in each layout's own state so a panel can be opened by a caller with no pointer -- every capability this editor grows has to appear in both panels, and without this the only way to see that it had was to be sitting in front of one. A name a layout does not have opens nothing there."},"text_spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for the text brush and for every text operation that does not name its own. It is the setting that decides whether a word fits: STEREO in the small face is 29 pixels of ink at spacing 1 and the stereo lamp is 29 pixels wide."},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"grain":{"type":"integer","minimum":0,"maximum":64},"grain_size":{"type":"integer","minimum":1,"maximum":16},"opacity":{"type":"integer","minimum":1,"maximum":255},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"all_states":{"type":"boolean"},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean","description":"Which variant the canvas shows -- and so which variant a stroke lands in. Drawing a four-state switch is the same code run with active and pressed set four ways, clipped and reported by layers; the alternative is computing four rectangles by hand in studio_atlas, where nothing clips and nothing reports."},"active":{"type":"boolean","description":"Focused titles, and on/off for the channel lamps, shuffle, repeat and the equalizer switches. Chooses the variant a stroke lands in, as pressed does."},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}),&[]),
+ tool("studio_canvas","The whole skin as one canvas -- main, equalizer and playlist joined at their own positions -- and the only drawing surface. Reads it back as a PNG at an integer zoom, optionally cropped to [x,y,width,height]; with path it writes the file and returns where. Also sets what the canvas shows: zoom, brush, colour, width, the state every sprite is drawn in, and whether rectangles are outlined.",json!({"zoom":{"type":"integer","minimum":1,"maximum":8,"description":"The editor's own canvas zoom, and the returned image's enlargement when magnify is not given."},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"measure":{"type":["string","array"],"items":{"type":"string"},"description":"Answer how wide these words come out in the current face and scale instead of reading the canvas back: width and height are the ink, advance is where the pen ends. The engine's own glyph walk, so a recipe stops carrying its own copy of the arithmetic -- the pen advances (cell+spacing)*scale, which is not cell*scale+spacing above scale 1."},"spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for this measure only; text_spacing is the one the brush and the operations use."},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft","text"]},"ramp_to":{"type":["string","null"],"description":"A gradient from the brush colour to this one, along the shape the gesture drew. null turns it off."},"ramp_axis":{"enum":["down","across"]},"bevel":{"type":"integer","minimum":0,"maximum":128,"description":"Glass lens bevel; 0 takes it from the height of the drag, as it always did."},"refraction":{"type":"integer","minimum":0,"maximum":32},"text":{"type":"string","description":"What the text brush writes."},"face":{"enum":["5x7","small"]},"text_scale":{"type":"integer","minimum":1,"maximum":8},"drawer":{"enum":["none","tools","layers","targets","rectangles","atlases","history","study","options","picker","files","states"],"description":"Which tool panel is open. It is on the document rather than in each layout's own state so a panel can be opened by a caller with no pointer -- every capability this editor grows has to appear in both panels, and without this the only way to see that it had was to be sitting in front of one. A name a layout does not have opens nothing there."},"text_spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for the text brush and for every text operation that does not name its own. It is the setting that decides whether a word fits: STEREO in the small face is 29 pixels of ink at spacing 1 and the stereo lamp is 29 pixels wide."},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"grain":{"type":"integer","minimum":0,"maximum":64},"grain_size":{"type":"integer","minimum":1,"maximum":16},"opacity":{"type":"integer","minimum":1,"maximum":255},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"states":{"enum":["current","onward","up-to","all"],"description":"Which variants of each target this writes into: the one the canvas is showing, that one and every one after it, every one up to it, or all of them. A slider is twenty-eight frames that differ by one object, so the run from the frame in hand to an end is the shape its artwork actually has; without it each frame is its own transaction. all_states:true is the old name for \"all\"."},"all_states":{"type":"boolean","description":"Retired name for states."},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean","description":"Which variant the canvas shows -- and so which variant a stroke lands in. Drawing a four-state switch is the same code run with active and pressed set four ways, clipped and reported by layers; the alternative is computing four rectangles by hand in studio_atlas, where nothing clips and nothing reports."},"active":{"type":"boolean","description":"Focused titles, and on/off for the channel lamps, shuffle, repeat and the equalizer switches. Chooses the variant a stroke lands in, as pressed does."},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}),&[]),
  tool("studio_atlas","One BMP on its own, at its own native coordinates, sharing the pencil and the history. path/crop/zoom read it back exactly as studio_canvas reads the skin -- the only way to see a sheet the canvas never shows: numbers.bmp, text.bmp, a pressed variant. Omit sheet to go back to the whole skin, where drawing normally happens.",json!({"sheet":{"type":"string"},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4}}),&[]),
  tool("studio_targets","Which sprites a stroke is routed into. It lists the whole skin whatever surface is open, so a recipe drawing one sheet at its own coordinates can ask where that sheet's cells are without leaving it. Omit everything to list them; narrow with sheet or id (case-insensitive substring). Every sprite says whether it has been drawn at all, so a skin started from New blank can be asked what is left. Add variants for every source rectangle a sprite has -- all 28 frames of one slider track -- which also answers labels, saying what each variant is: which of a switch's four is pressed, which end of a slider's twenty-eight is silence, and that the classic playlist header keeps a row Cranamp never draws. Auto, the default, paints every sprite under the brush, as a human stroke does. Solo one, or choose any combination.",json!({"layers":{"type":"array","items":{"type":"string"}},"solo":{"type":"string"},"auto":{"type":"boolean"},"paint_layer":{"type":["string","null"]},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One case-insensitive substring, or several -- six transport keys in one call rather than six."},"variants":{"type":"boolean"}}),&[]),
  tool("studio_rectangles","Where every sprite variant lives in the joined canvas, plus the two kinds of rectangle that have no sprite at all. Narrow with at (everything overlapping a box), sheet, id (one case-insensitive substring or several), runtime -- the live readouts Cranamp draws over the artwork -- or hit: controls Cranamp hit-tests and draws nothing for, which is the classic playlist footer\'s five menus and six transport keys, and the main window\'s skin-chooser corner. Those eleven footer buttons have to be drawn by the artist and used to be findable only in the player\'s source. select clips painting to one rectangle; otherwise read-only. Rectangles are an overlay, never pixels in the artwork.",json!({"select":{"type":"string"},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One case-insensitive substring, or several."},"at":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4,"description":"Everything overlapping this [x,y,width,height] box on the surface in hand -- what a band about to be painted would cross. A list of rectangles says where each one is and nothing about what is next to what."},"runtime":{"type":"boolean"},"gaps":{"type":"boolean","description":"Instead of rectangles: the parts of one sheet no sprite ever samples, as rectangles, so ink that will never be shown can be avoided rather than counted afterwards. pledit.bmp column 125 falls between the two footer flaps. Takes sheet; defaults to the open one."},"hit":{"type":"boolean"}}),&[]),
@@ -307,7 +307,7 @@ fn tools() -> Vec<Value> {
  tool("studio_status","The shared document: path, revision, unsaved edits, history depth, sheets, painting planes and the whole view -- panel, brush, colour, width, sprite state. surface is what a stroke's coordinates mean now (\"canvas\", or \"atlas <sheet>\"). Only this call carries the sheet list; the sprites are studio_targets and studio_rectangles.",json!({}),&[]),
  tool("studio_new","Create a transparent classic skin from scratch. No artwork or metadata is inherited. Unsaved edits require discard=true.",json!({"discard":{"type":"boolean"}}),&[]),
  tool("studio_open","Load a WSZ into the running native Studio. Existing unsaved edits require discard=true.",json!({"path":{"type":"string"},"discard":{"type":"boolean"}}),&["path"]),
- tool("studio_draw","One atomic undoable transaction, up to 10000 operations in order, all or nothing, on the surface the view is on: the assembled canvas, or one sheet at its own coordinates while studio_atlas has it open. Every result names that surface; a refusal names the operation index. Results report bounds (where the ink landed), clipped_pixels (outside the chosen sprites), unsampled_pixels (in a gap between a sheet's cells, where nothing will ever show it), unmapped_pixels (no bitmap source at all -- the classic playlist fill) overwrites: two different canvas pixels writing one shared source cell, which is how a stroke across the four timer digits, or the playlist top tile drawn nine times, lands on top of itself (name one target in layers to cure that), and keyed_blends: an opacity, an image's alpha or glass that read the transparency key as a colour, which turns a glow into mud and glass into magenta and takes the cell's transparency with it.",json!({"operations":operation_schema(),"layers":{"type":"array","items":{"type":"string"},"description":"Sprites to route every pixel into. [] means Auto: every sprite under the brush."},"layer":{"type":"string"},"all_states":{"type":"boolean","description":"Write the same local pixels into every variant of each target."},"origin":{"type":"string","description":"Put 0,0 on this sprite's destination as it stands, and target it -- the only safe way to aim at a sprite that moves with its frame."},"label":{"type":"string"},"mask_colors":{"type":"array","items":{"type":"string"}},"preview":{"type":"boolean","description":"Dry run: apply the operations, answer with the surface as they would leave it, and put the document back. Nothing is recorded and the revision does not move. crop, zoom and path work as they do on studio_canvas."},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"}}),&["operations"]),
+ tool("studio_draw","One atomic undoable transaction, up to 10000 operations in order, all or nothing, on the surface the view is on: the assembled canvas, or one sheet at its own coordinates while studio_atlas has it open. Every result names that surface; a refusal names the operation index. Results report bounds (where the ink landed), clipped_pixels (outside the chosen sprites), unsampled_pixels (in a gap between a sheet's cells, where nothing will ever show it), unmapped_pixels (no bitmap source at all -- the classic playlist fill) overwrites: two different canvas pixels writing one shared source cell, which is how a stroke across the four timer digits, or the playlist top tile drawn nine times, lands on top of itself (name one target in layers to cure that), and keyed_blends: an opacity, an image's alpha or glass that read the transparency key as a colour, which turns a glow into mud and glass into magenta and takes the cell's transparency with it.",json!({"operations":operation_schema(),"layers":{"type":"array","items":{"type":"string"},"description":"Sprites to route every pixel into. [] means Auto: every sprite under the brush."},"layer":{"type":"string"},"states":{"enum":["current","onward","up-to","all"],"description":"Which variants of each target this writes into: the one the canvas is showing, that one and every one after it, every one up to it, or all of them. A slider is twenty-eight frames that differ by one object, so the run from the frame in hand to an end is the shape its artwork actually has; without it each frame is its own transaction. all_states:true is the old name for \"all\"."},"all_states":{"type":"boolean","description":"Retired name for states: true is \"all\", false is \"current\"."},"origin":{"type":"string","description":"Put 0,0 on this sprite's destination as it stands, and target it -- the only safe way to aim at a sprite that moves with its frame."},"label":{"type":"string"},"mask_colors":{"type":"array","items":{"type":"string"}},"preview":{"type":"boolean","description":"Dry run: apply the operations, answer with the surface as they would leave it, and put the document back. Nothing is recorded and the revision does not move. crop, zoom and path work as they do on studio_canvas."},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"path":{"type":"string"}}),&["operations"]),
  tool("studio_project","Save or open a layered .cstudio project. WSZ remains the flattened skin export. Opening unsaved work requires discard=true.",json!({"action":{"enum":["save","open"]},"path":{"type":"string"},"discard":{"type":"boolean"}}),&["action","path"]),
  tool("studio_cluster","Pick up a native pixel region from the selected sprites; Auto captures the visible canvas. Omit rect to read the clipboard back as stamp rows and a palette. flip_x, flip_y and quarter_turns transform it losslessly. Paint it with studio_draw op cluster, or the human Stamp brush. The clipboard never enters a WSZ.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"flip_x":{"type":"boolean"},"flip_y":{"type":"boolean"},"quarter_turns":{"type":"integer","minimum":0,"maximum":3}}),&[]),
  tool("studio_study","Read-only study board: a native crop above an integer enlargement, optionally as grayscale values, with sprite geometry, a pixel grid and a reference image alongside. rect defaults to the last lifted region; reference pixels are never imported. With path, written there instead of returned inline. Changes nothing.",json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the returned image, nearest-neighbour, instead of zoom. Judging a 14x25 handle wants more than 8x; the limit is 2048 pixels a side, so crop first to go closer."},"selected":{"type":"boolean"},"values":{"type":"boolean"},"grid":{"type":"boolean"},"geometry":{"type":"boolean"},"reference":{"type":"string"},"reference_rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"path":{"type":"string"}}),&[]),
@@ -378,10 +378,29 @@ fn only_the_pencil(args: &Value) -> bool {
         // sprites to name in `layers` there -- and reaching it used to mean
         // leaving the sheet, which is the one thing it was wanted for.
         "clip",
+        "states",
         "all_states",
     ];
     match args.as_object() {
         Some(fields) => !fields.is_empty() && fields.keys().all(|k| PENCIL.contains(&k.as_str())),
+        None => false,
+    }
+}
+
+/// A call that only looks. It reads the surface in hand back and says nothing
+/// about which surface that should be.
+///
+/// `studio_atlas {"crop": ...}` is the only way to see what was just drawn on
+/// the sheet that is open, and it used to be read as "take me back to the
+/// whole skin": the sheet closed and the answer was a picture of the *canvas*
+/// at the sheet's coordinates. Two surfaces, the same four numbers, and the
+/// only sign of it was `surface` in a reply nobody reads when they asked for a
+/// picture. posbar.bmp is 307x10 and the canvas is 275x377, so what came back
+/// was a crop of empty wall.
+fn only_a_look(args: &Value) -> bool {
+    const LOOK: &[&str] = &["path", "crop", "zoom", "magnify"];
+    match args.as_object() {
+        Some(fields) => !fields.is_empty() && fields.keys().all(|k| LOOK.contains(&k.as_str())),
         None => false,
     }
 }
@@ -635,6 +654,18 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             let report = doc.draw(&args)?;
             // A preview answers with an image, like every other look does:
             // written to `path` and named, or inline when no path is given.
+            // So does a committed transaction: these four fields are in this
+            // tool's own schema and were honoured only on a dry run, so a real
+            // stroke that asked to be looked at was answered with numbers and
+            // no picture, no `path`, and no refusal. Every stroke then cost a
+            // second round trip to see what it had done, which over a skin is
+            // most of the calls made.
+            let looked = ["path", "crop", "zoom", "magnify"]
+                .iter()
+                .any(|k| args.get(*k).is_some());
+            if doc.preview.is_none() && looked {
+                doc.preview = Some(doc.render());
+            }
             if let Some(image) = doc.preview.take() {
                 let zoom = args["zoom"].as_u64().unwrap_or(1).clamp(1, 8) as u32;
                 let mut image = image;
@@ -732,6 +763,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                         view["sheet"] = json!(sheet);
                         view["layer"] = json!("sheet");
                     }
+                    None if only_a_look(&args) || only_the_pencil(&args) => {}
                     None => {
                         view["panel"] = json!("canvas");
                         view["layer"] = json!("auto");
@@ -953,8 +985,16 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                     appeared.push(format!("{name} is gone and will not be exported"));
                 }
             }
+            let layout = doc.layout();
             let mut value = json!({
-                "layout": doc.layout(),
+                // Flat, with the other three. These arrived nested under
+                // `layout` from the retired `studio_layout` tool, and the one
+                // call that exists to say what a skin's options are could not
+                // be used to confirm an option it had just been given: set
+                // visualizer_glass, read visualizer_glass, find nothing.
+                "footer": layout.footer,
+                "eq_travel": layout.eq_travel,
+                "visualizer_glass": layout.visualizer_glass,
                 "playlist_background": doc.has_playlist_background(),
                 "eq_handles": sheets.iter().any(|(n, _, _)| n == "eqhandles.bmp"),
                 "playlist_selection": sheets.iter().any(|(n, _, _)| n == "plselection.bmp"),
@@ -1239,7 +1279,10 @@ mod tests {
         let before = call("studio_options", json!({}), &shared).unwrap();
         let before: Value =
             serde_json::from_str(before["content"][0]["text"].as_str().unwrap()).unwrap();
-        assert_eq!(before["layout"]["footer"], "classic");
+        // Flat, beside the three that were always flat.
+        assert_eq!(before["footer"], "classic");
+        assert_eq!(before["eq_travel"], 52);
+        assert_eq!(before["visualizer_glass"], false);
         assert_eq!(before["playlist_colors"].as_object().unwrap().len(), 6);
         assert_eq!(before["visualizer_colors"].as_array().unwrap().len(), 24);
 
@@ -1255,8 +1298,8 @@ mod tests {
         .unwrap();
         let after: Value =
             serde_json::from_str(after["content"][0]["text"].as_str().unwrap()).unwrap();
-        assert_eq!(after["layout"]["footer"], "time-total");
-        assert_eq!(after["layout"]["eq_travel"], 40);
+        assert_eq!(after["footer"], "time-total");
+        assert_eq!(after["eq_travel"], 40);
         assert_eq!(after["playlist_colors"]["Normal"], "#010203");
     }
 
@@ -1294,6 +1337,81 @@ mod tests {
             "canvas",
             "an empty call is still show me the canvas"
         );
+    }
+
+    /// Looking at the sheet in hand is not asking to leave it.
+    ///
+    /// `studio_atlas {"crop": ...}` closed the sheet and rendered the *canvas*
+    /// at those coordinates instead: two surfaces, the same four numbers, and a
+    /// picture of somewhere else. posbar.bmp is 307x10 and the canvas is
+    /// 275x377, so what came back was a crop of empty background.
+    #[test]
+    fn reading_an_open_sheet_back_does_not_close_it() {
+        let dir = std::env::temp_dir().join("cranamp-atlas-look-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("look.png");
+        let shared = SharedDocument(Arc::new(Mutex::new(Document::blank())));
+        call("studio_atlas", json!({"sheet": "posbar.bmp"}), &shared).unwrap();
+        let answer = call(
+            "studio_atlas",
+            json!({"crop": [0, 0, 307, 10], "magnify": 2, "path": path.to_str().unwrap()}),
+            &shared,
+        )
+        .unwrap();
+        let answer: Value =
+            serde_json::from_str(answer["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            answer["size"],
+            json!([614, 20]),
+            "the sheet, not the canvas"
+        );
+        assert_eq!(shared.lock().unwrap().view.panel, "atlas");
+        assert_eq!(shared.lock().unwrap().view.sheet, "posbar.bmp");
+        // And an empty call is still the way back.
+        call("studio_atlas", json!({}), &shared).unwrap();
+        assert_eq!(shared.lock().unwrap().view.panel, "canvas");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A committed stroke answers with a picture, the same way a dry run does.
+    ///
+    /// These four fields are in `studio_draw`'s own schema and were honoured
+    /// only when `preview` was set, so a real stroke that asked to be looked at
+    /// got numbers, no file, no `path`, and no refusal -- and every stroke cost
+    /// a second round trip to see what it had done.
+    #[test]
+    fn a_committed_transaction_reads_the_surface_back_like_a_preview() {
+        let dir = std::env::temp_dir().join("cranamp-draw-readback-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stroke.png");
+        let shared = SharedDocument(Arc::new(Mutex::new(Document::blank())));
+        let before = shared.lock().unwrap().revision;
+        let answer = call(
+            "studio_draw",
+            json!({
+                "operations": [{"op":"rect","x":16,"y":88,"width":23,"height":18,"color":"#ff8800"}],
+                "crop": [16, 88, 23, 18],
+                "magnify": 4,
+                "path": path.to_str().unwrap(),
+            }),
+            &shared,
+        )
+        .unwrap();
+        let answer: Value =
+            serde_json::from_str(answer["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(answer["size"], json!([92, 72]));
+        assert!(
+            answer["path"].as_str().unwrap().ends_with("stroke.png"),
+            "the answer names where it wrote: {}",
+            answer["path"]
+        );
+        assert!(answer["pixels_written"].as_u64().unwrap() > 0);
+        assert!(path.exists(), "the file the answer named");
+        assert!(
+            shared.lock().unwrap().revision > before,
+            "a committed stroke, not a dry run"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A refusal that names two ways out and not the one the tool has leaves a

@@ -418,7 +418,7 @@ mod tests {
     fn disjoint_artists_merge_with_unchanged_view_and_one_undo_each() {
         let mut d = Document::blank();
         d.view.mirror_x = true;
-        d.view.all_states = true;
+        d.view.states = super::SCOPE_ALL.into();
         d.view.brush_size = 8;
         d.view.layers = vec!["main.close".into()];
         let view = serde_json::to_value(&d.view).unwrap();
