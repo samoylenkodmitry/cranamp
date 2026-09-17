@@ -88,6 +88,10 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         "the fifth bundled skin should be listed too; visible={after:?}"
     );
     assert!(
+        contains(&after, "Catamp Freefall (Bundled)"),
+        "the sixth bundled skin should be listed too; visible={after:?}"
+    );
+    assert!(
         contains(&after, "SYNC"),
         "sync section should appear; visible={after:?}"
     );

@@ -767,6 +767,11 @@ const BUNDLED_SKINS: &[BundledSkin] = &[
         label: "Catamp Salvage (Bundled)",
         bytes: include_bytes!("../../assets/skins/Catamp Salvage.wsz"),
     },
+    BundledSkin {
+        id: "freefall",
+        label: "Catamp Freefall (Bundled)",
+        bytes: include_bytes!("../../assets/skins/Catamp Freefall.wsz"),
+    },
 ];
 
 /// A saved skin path naming a bundled skin instead of a file on disk.

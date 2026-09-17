@@ -314,6 +314,7 @@ jobs:
           cp "assets/skins/Catamp Feral Night.wsz" "assets/skins/Catamp Cardboard.wsz" \
              "assets/skins/Catamp Sampler.wsz" "assets/skins/Catamp Cat Scan.wsz" \
              "assets/skins/Catamp Seance.wsz" "assets/skins/Catamp Salvage.wsz" \
+             "assets/skins/Catamp Freefall.wsz" \
              "$package_dir/skins/"
           cp assets/demo-music/generated/*.mp3 "$package_dir/demo-music/"
           cp assets/demo-music/generated/cranamp-demo-playlist.m3u "$package_dir/demo-music/"
