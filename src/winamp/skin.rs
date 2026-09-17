@@ -17,46 +17,10 @@ pub struct WinampSkin {
     pub numbers: ImageBitmap,
     pub eqmain: ImageBitmap,
     pub pledit: ImageBitmap,
-    pub playlist_background: Option<ImageBitmap>,
-    pub eq_handles: Option<ImageBitmap>,
-    pub playlist_selection: Option<ImageBitmap>,
     pub text: ImageBitmap,
     pub display_text_color: [u8; 4],
     pub palette: SkinPalette,
     pub viscolor: VisColor,
-    pub layout: SkinLayout,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct SkinLayout {
-    pub footer: FooterLayout,
-    pub eq_travel: u8,
-    pub visualizer_glass: bool,
-}
-impl Default for SkinLayout {
-    fn default() -> Self {
-        Self {
-            footer: FooterLayout::Classic,
-            eq_travel: 52,
-            visualizer_glass: false,
-        }
-    }
-}
-impl SkinLayout {
-    pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(
-            (1..=52).contains(&self.eq_travel),
-            "eq_travel must be 1..52 native pixels"
-        );
-        Ok(())
-    }
-}
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum FooterLayout {
-    #[default]
-    Classic,
-    TimeTotal,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SkinPalette {
@@ -148,50 +112,6 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
     };
     let display_text_color =
         sample_text_bitmap_color(&text).unwrap_or_else(|| default_display_text_color(viscolor));
-    let layout: SkinLayout = files
-        .get("cranamp.json")
-        .map(|data| serde_json::from_slice(data))
-        .transpose()
-        .context("invalid cranamp.json layout")?
-        .unwrap_or_default();
-    layout.validate()?;
-    let playlist_background = files
-        .get("plbg.bmp")
-        .map(|bytes| {
-            let image = decode_bmp(bytes).context("failed to decode plbg.bmp")?;
-            anyhow::ensure!(
-                image.width() == 243 && image.height() == 203,
-                "plbg.bmp must be 243 × 203 native pixels"
-            );
-            Ok::<_, anyhow::Error>(image)
-        })
-        .transpose()?;
-    let eq_handles = files
-        .get("eqhandles.bmp")
-        .map(|bytes| {
-            let image = decode_bmp(bytes).context("failed to decode eqhandles.bmp")?;
-            anyhow::ensure!(
-                image.width() == 154 && image.height() == 50,
-                "eqhandles.bmp must be 154 × 50 native pixels"
-            );
-            anyhow::ensure!(
-                layout.eq_travel <= 38,
-                "independent EQ handles need eq_travel <= 38"
-            );
-            Ok::<_, anyhow::Error>(image)
-        })
-        .transpose()?;
-    let playlist_selection = files
-        .get("plselection.bmp")
-        .map(|bytes| {
-            let image = decode_bmp(bytes).context("failed to decode plselection.bmp")?;
-            anyhow::ensure!(
-                image.width() == 243 && image.height() == 11,
-                "plselection.bmp must be 243 × 11 native pixels"
-            );
-            Ok::<_, anyhow::Error>(image)
-        })
-        .transpose()?;
     Ok(WinampSkin {
         main: decode("main.bmp")?,
         titlebar: decode("titlebar.bmp")?,
@@ -205,14 +125,10 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
         numbers: decode("numbers.bmp")?,
         eqmain: decode("eqmain.bmp")?,
         pledit: decode("pledit.bmp")?,
-        playlist_background,
-        eq_handles,
-        playlist_selection,
         text,
         display_text_color,
         palette,
         viscolor,
-        layout,
     })
 }
 fn default_text_bitmap() -> ImageBitmap {
@@ -369,12 +285,7 @@ fn normalize_name(name: &str) -> String {
 }
 fn decode_bmp(bytes: &[u8]) -> Result<ImageBitmap> {
     let dynamic = image::load_from_memory(bytes).context("image decode")?;
-    let mut rgba = dynamic.to_rgba8();
-    for pixel in rgba.pixels_mut() {
-        if pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 255 {
-            pixel[3] = 0;
-        }
-    }
+    let rgba = dynamic.to_rgba8();
     ImageBitmap::from_rgba8(rgba.width(), rgba.height(), rgba.into_raw())
         .context("failed to create image bitmap")
 }
@@ -392,7 +303,7 @@ mod tests {
         let wsz = include_bytes!("../../assets/winamp.wsz");
         let skin = load_skin(wsz).expect("bundled skin should load");
         assert_eq!(skin.main.width(), 275);
-        assert_eq!(skin.main.height(), 115);
+        assert_eq!(skin.main.height(), 116);
         assert_eq!(skin.titlebar.width(), 344);
         assert_eq!(skin.cbuttons.width(), 136);
         assert_eq!(skin.cbuttons.height(), 36);
@@ -512,4 +423,107 @@ mod tests {
         assert_eq!(palette.0[1], [40, 50, 60, 255]);
         assert_eq!(palette.0[2], [70, 80, 90, 255]);
     }
+}
+pub const CLASSIC_SHEETS: &[(&str, u32, u32)] = &[
+    ("main.bmp", 275, 116),
+    ("titlebar.bmp", 275, 87),
+    ("cbuttons.bmp", 136, 36),
+    ("shufrep.bmp", 92, 85),
+    ("posbar.bmp", 307, 10),
+    ("volume.bmp", 68, 433),
+    ("balance.bmp", 38, 433),
+    ("monoster.bmp", 56, 24),
+    ("playpaus.bmp", 42, 9),
+    ("numbers.bmp", 99, 13),
+    ("text.bmp", 155, 18),
+    ("eqmain.bmp", 275, 315),
+    ("pledit.bmp", 280, 186),
+];
+pub const CLASSIC_EXTRAS: &[&str] = &[
+    "pledit.txt",
+    "viscolor.txt",
+    "region.txt",
+    "nums_ex.bmp",
+    "eq_ex.bmp",
+    "avs.bmp",
+    "mb.bmp",
+    "video.bmp",
+    "gen.bmp",
+    "genex.bmp",
+    "winampmb.bmp",
+];
+pub type SkinEntry = (String, Option<(u32, u32)>);
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Divergence {
+    pub entry: String,
+    pub problem: String,
+    pub fix: String,
+}
+pub fn divergences(entries: &[SkinEntry]) -> Vec<Divergence> {
+    let mut out = Vec::new();
+    let named = |name: &str| entries.iter().any(|(entry, _)| entry == name);
+    for (sheet, width, height) in CLASSIC_SHEETS {
+        let Some((_, size)) = entries.iter().find(|(entry, _)| entry == sheet) else {
+            if *sheet == "numbers.bmp" && named("nums_ex.bmp") {
+                continue;
+            }
+            out.push(Divergence {
+                entry: (*sheet).into(),
+                problem: "every player reads this sheet and the skin does not carry it".into(),
+                fix: format!("add {sheet} at {width}x{height}"),
+            });
+            continue;
+        };
+        if let Some((w, h)) = size {
+            if w < width || h < height {
+                out.push(Divergence {
+                    entry: (*sheet).into(),
+                    problem: format!(
+                        "{w}x{h} is smaller than the sprites the format reads, so \
+                         part of every state falls outside the sheet"
+                    ),
+                    fix: format!("grow it to at least {width}x{height}"),
+                });
+            }
+        }
+    }
+    for (entry, size) in entries {
+        let classic = CLASSIC_SHEETS.iter().any(|(sheet, _, _)| sheet == entry)
+            || CLASSIC_EXTRAS.contains(&entry.as_str());
+        let prose = entry.rsplit_once('.').is_some_and(|(_, extension)| {
+            matches!(extension, "txt" | "md" | "nfo" | "html" | "diz")
+        });
+        if classic || prose {
+            continue;
+        }
+        out.push(Divergence {
+            entry: entry.clone(),
+            problem: if size.is_some() {
+                "no player reads this sheet, so whatever it holds is invisible everywhere".into()
+            } else {
+                "no player reads this entry".into()
+            },
+            fix: "drop it, and say the same thing in a sheet every player reads".into(),
+        });
+    }
+    out.sort_by(|a, b| a.entry.cmp(&b.entry));
+    out
+}
+pub fn entries_of(wsz_bytes: &[u8]) -> Result<Vec<SkinEntry>> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(wsz_bytes)).context("not a .wsz archive")?;
+    let mut out = Vec::new();
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).context("unreadable zip entry")?;
+        if file.is_dir() {
+            continue;
+        }
+        let name = normalize_name(file.name());
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)?;
+        let size = decode_bmp(&data)
+            .ok()
+            .map(|image| (image.width(), image.height()));
+        out.push((name, size));
+    }
+    Ok(out)
 }

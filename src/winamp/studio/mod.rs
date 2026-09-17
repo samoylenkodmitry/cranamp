@@ -3080,19 +3080,10 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                 Modifier::empty().size_points(room.0 + 24., 780.),
                 BoxSpec::default(),
                 move || {
-                    let (layout, playlist_background, eq_handles, selection) = {
-                        let d = shared.lock().unwrap();
-                        let sheets = d.sheets();
-                        (
-                            d.layout(),
-                            d.has_playlist_background(),
-                            sheets.iter().any(|(n, _, _)| n == "eqhandles.bmp"),
-                            sheets.iter().any(|(n, _, _)| n == "plselection.bmp"),
-                        )
-                    };
+                    let divergences = { shared.lock().unwrap().divergences() };
                     Label("SKIN OPTIONS".into(), 12., 17., 270., 14., FG);
                     Label(
-                "What the skin is, rather than how it is painted. Turning\none on adds the sheet it needs; turning it off removes it."
+                "The colours below are the whole skin, apart from the sheets.\nEvery player reads them, so every player shows what you see."
                     .into(),
                 12.,
                 41.,
@@ -3100,142 +3091,31 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                 11.,
                 DIM,
             );
-                    Label("TIME READOUT".into(), 12., 86., 200., 11., DIM);
-                    for (i, (caption, value, current)) in [
-                        (
-                            "Classic",
-                            "classic",
-                            layout.footer == super::skin::FooterLayout::Classic,
-                        ),
-                        (
-                            "Time / total",
-                            "time-total",
-                            layout.footer == super::skin::FooterLayout::TimeTotal,
-                        ),
-                    ]
-                    .into_iter()
-                    .enumerate()
-                    {
-                        let d = shared.clone();
-                        Choice(
-                            caption.into(),
-                            12. + i as f32 * 130.,
+                    Label("PLAYS THE SAME ELSEWHERE".into(), 12., 86., 260., 11., DIM);
+                    if divergences.is_empty() {
+                        Label(
+                            "Yes. Every entry in this skin is one the format \ndefines, and every sheet is big enough for its sprites."
+                                .into(),
+                            12.,
                             104.,
-                            122.,
-                            current,
-                            move || {
-                                let mut doc = d.lock().unwrap();
-                                if let Err(error) =
-                                    doc.set_layout(&json!({ "footer": value }), "Human")
-                                {
-                                    doc.message = error.to_string();
-                                }
-                            },
+                            355.,
+                            11.,
+                            FG,
                         );
-                    }
-                    Label("EQUALIZER SLIDER TRAVEL".into(), 12., 154., 260., 11., DIM);
-                    Label(format!("{} px", layout.eq_travel), 12., 174., 60., 12., FG);
-                    for (i, (label, delta)) in [("− Shorter", -1_i16), ("+ Longer", 1)]
-                        .into_iter()
-                        .enumerate()
-                    {
-                        let d = shared.clone();
-                        let travel = layout.eq_travel;
-                        Action(label.into(), 76. + i as f32 * 96., 168., 90., move || {
-                            let value = (travel as i16 + delta).clamp(1, 52);
-                            let mut doc = d.lock().unwrap();
-                            if let Err(error) =
-                                doc.set_layout(&json!({ "eq_travel": value }), "Human")
-                            {
-                                doc.message = error.to_string();
-                            }
-                        });
-                    }
-                    Label("EXTRA ARTWORK".into(), 12., 222., 200., 11., DIM);
-                    {
-                        let d = shared.clone();
-                        Toggle(
-                            if playlist_background {
-                                "Playlist has its own background"
-                            } else {
-                                "Playlist is one flat PLEDIT.TXT colour"
-                            }
-                            .into(),
-                            12.,
-                            240.,
-                            348.,
-                            playlist_background,
-                            move || {
-                                d.lock()
-                                    .unwrap()
-                                    .set_playlist_background(!playlist_background, "Human");
-                            },
-                        );
-                    }
-                    {
-                        let d = shared.clone();
-                        Toggle(
-                            if eq_handles {
-                                "Equalizer sliders have their own art"
-                            } else {
-                                "Equalizer sliders reuse the main art"
-                            }
-                            .into(),
-                            12.,
-                            278.,
-                            348.,
-                            eq_handles,
-                            move || {
-                                let mut doc = d.lock().unwrap();
-                                if let Err(error) = doc.set_eq_handles(!eq_handles, "Human") {
-                                    doc.message = error.to_string();
-                                }
-                            },
-                        );
-                    }
-                    {
-                        let d = shared.clone();
-                        Toggle(
-                            if selection {
-                                "Playlist selection has its own art"
-                            } else {
-                                "Playlist selection is a flat colour"
-                            }
-                            .into(),
-                            12.,
-                            316.,
-                            348.,
-                            selection,
-                            move || {
-                                d.lock()
-                                    .unwrap()
-                                    .set_playlist_selection(!selection, "Human");
-                            },
-                        );
-                    }
-                    {
-                        let d = shared.clone();
-                        let glass = layout.visualizer_glass;
-                        Toggle(
-                            if glass {
-                                "Visualizer is drawn under glass"
-                            } else {
-                                "Visualizer is drawn flat"
-                            }
-                            .into(),
-                            12.,
-                            354.,
-                            348.,
-                            glass,
-                            move || {
-                                let mut doc = d.lock().unwrap();
-                                if let Err(error) =
-                                    doc.set_layout(&json!({ "visualizer_glass": !glass }), "Human")
-                                {
-                                    doc.message = error.to_string();
-                                }
-                            },
-                        );
+                    } else {
+                        for (i, divergence) in divergences.iter().take(4).enumerate() {
+                            Label(
+                                format!(
+                                    "{} — {}\n{}",
+                                    divergence.entry, divergence.problem, divergence.fix
+                                ),
+                                12.,
+                                104. + i as f32 * 34.,
+                                355.,
+                                11.,
+                                FG,
+                            );
+                        }
                     }
                     let (playlist_colours, visualizer_colours) =
                         { shared.lock().unwrap().text_palettes() };
@@ -3671,7 +3551,7 @@ mod integration_tests {
         );
         d.redo();
         d.state(json!({"panel":"main","layer":"auto"})).unwrap();
-        assert_eq!(d.render().dimensions(), (275, 115));
+        assert_eq!(d.render().dimensions(), (275, 116));
         assert!(d
             .state(json!({"panel":"atlas","sheet":"missing.bmp"}))
             .is_err());

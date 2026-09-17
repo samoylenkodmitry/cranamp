@@ -31,8 +31,6 @@ impl Layer {
 pub fn size(panel: &str) -> (u32, u32) {
     if panel == "playlist" {
         (275, 261)
-    } else if panel == "main" {
-        (275, 115)
     } else {
         (275, 116)
     }
@@ -77,7 +75,7 @@ fn variant_labels(id: &str, sheet: &str, count: usize) -> Vec<String> {
         _ => ends("first", "last"),
     }
 }
-pub fn layers(v: &View, layout: crate::winamp::skin::SkinLayout) -> Vec<Layer> {
+pub fn layers(v: &View) -> Vec<Layer> {
     let mut out = Vec::new();
     let mut add = |id: &str,
                    sheet: &str,
@@ -104,7 +102,7 @@ pub fn layers(v: &View, layout: crate::winamp::skin::SkinLayout) -> Vec<Layer> {
             add(
                 "background",
                 "main",
-                vec![(0., 0., 275., 115.)],
+                vec![(0., 0., 275., 116.)],
                 0,
                 0,
                 0,
@@ -410,21 +408,12 @@ pub fn layers(v: &View, layout: crate::winamp::skin::SkinLayout) -> Vec<Layer> {
                     vec![EQ_SLIDER_THUMB, EQ_SLIDER_THUMB_SELECTED],
                     p,
                     EQ_THUMB_XS[i] as u32,
-                    38 + (layout.eq_travel as f32 * (1. - frame as f32 / 27.)).round() as u32,
+                    38 + (EQ_SLIDER_THUMB_TRAVEL * (1. - frame as f32 / 27.)).round() as u32,
                     None,
                 );
             }
         }
         "playlist" => {
-            add(
-                "list.background",
-                "plbg",
-                vec![(0., 0., 243., 203.)],
-                0,
-                12,
-                20,
-                None,
-            );
             add(
                 "top.left",
                 "pledit",

@@ -4,7 +4,7 @@
 mod browser_skins;
 mod pixel_grid;
 mod pixel_text;
-mod skin;
+pub mod skin;
 mod sprites;
 #[cfg(not(target_os = "ios"))]
 pub mod studio;
@@ -1901,11 +1901,8 @@ fn WinampInlineStage(
             if state.get().playlist_visible {
                 PlaylistWindow(
                     skin.pledit.clone(),
-                    skin.playlist_background.clone(),
-                    skin.playlist_selection.clone(),
                     skin.palette,
                     skin.display_text_color,
-                    skin.layout.footer,
                     state,
                     WinampDragTarget::Inline(windows.playlist),
                     WinampWindowSize::Fixed(Size::new(PLAYLIST_WIDTH, PLAYLIST_HEIGHT)),
@@ -1968,11 +1965,8 @@ fn WinampStackedStage(
                 pixel_grid::provide([0., playlist_y], || {
                     PlaylistWindow(
                         skin.pledit.clone(),
-                        skin.playlist_background.clone(),
-                        skin.playlist_selection.clone(),
                         skin.palette,
                         skin.display_text_color,
-                        skin.layout.footer,
                         state,
                         playlist_drag_target,
                         WinampWindowSize::Fixed(Size::new(
@@ -2213,19 +2207,13 @@ fn WinampNativeWindows(
                 ),
                 {
                     let pledit = skin.pledit.clone();
-                    let playlist_background = skin.playlist_background.clone();
-                    let playlist_selection = skin.playlist_selection.clone();
                     let palette = skin.palette;
                     let display_text_color = skin.display_text_color;
-                    let footer_layout = skin.layout.footer;
                     move || {
                         PlaylistWindow(
                             pledit.clone(),
-                            playlist_background.clone(),
-                            playlist_selection.clone(),
                             palette,
                             display_text_color,
-                            footer_layout,
                             state,
                             WinampDragTarget::NativeGroup,
                             WinampWindowSize::State(peer_windows.playlist),
@@ -2335,19 +2323,13 @@ pub fn WinampStandaloneApp() {
                 .with_min_size(PLAYLIST_WIDTH, playlist_min_height()),
                 {
                     let pledit = skin.pledit.clone();
-                    let playlist_background = skin.playlist_background.clone();
-                    let playlist_selection = skin.playlist_selection.clone();
                     let palette = skin.palette;
                     let display_text_color = skin.display_text_color;
-                    let footer_layout = skin.layout.footer;
                     move || {
                         PlaylistWindow(
                             pledit.clone(),
-                            playlist_background.clone(),
-                            playlist_selection.clone(),
                             palette,
                             display_text_color,
-                            footer_layout,
                             state,
                             WinampDragTarget::NativeGroup,
                             WinampWindowSize::State(peer_windows.playlist),
@@ -2400,7 +2382,6 @@ fn MainWindow(
         BoxSpec::default(),
         move || {
             Sprite(skin.main.clone(), MAIN_WINDOW, 0.0, 0.0, scale);
-            Sprite(skin.main.clone(), MAIN_DOCK_EDGE, 0.0, 115.0, scale);
             Sprite(
                 skin.titlebar.clone(),
                 MAIN_TITLE_BAR_SELECTED,
@@ -2488,13 +2469,7 @@ fn MainWindow(
             );
             Visualizer(
                 snapshot.playback == PlaybackState::Playing,
-                if skin.layout.visualizer_glass {
-                    let mut palette = skin.viscolor;
-                    palette.0[0][3] = 0;
-                    palette
-                } else {
-                    skin.viscolor
-                },
+                skin.viscolor,
                 scale,
             );
             let digits = time_digits(snapshot.elapsed_seconds);
@@ -3041,7 +3016,7 @@ fn EqualizerWindow(
                 let value = eq_drag.get().unwrap_or(snapshot.eq_values[index]);
                 let artwork_value = slider_frame(value, EQ_SLIDER_BG_FRAMES) as f32
                     / (EQ_SLIDER_BG_FRAMES - 1) as f32;
-                let thumb_extent = EQ_SLIDER_TRACK_HEIGHT - skin.layout.eq_travel as f32;
+                let thumb_extent = EQ_SLIDER_TRACK_HEIGHT - EQ_SLIDER_THUMB_TRAVEL;
                 let thumb_y = EQ_SLIDER_BG_Y
                     + vertical_slider_thumb_y(artwork_value, EQ_SLIDER_TRACK_HEIGHT, thumb_extent);
                 let eq_thumb_sprite = if eq_pressed.get() {
@@ -3056,28 +3031,13 @@ fn EqualizerWindow(
                     EQ_SLIDER_BG_Y,
                     scale,
                 );
-                if let Some(handles) = skin.eq_handles.clone() {
-                    Sprite(
-                        handles,
-                        (
-                            index as f32 * 14.,
-                            if eq_pressed.get() { 25. } else { 0. },
-                            14.,
-                            25.,
-                        ),
-                        slider_x,
-                        thumb_y,
-                        scale,
-                    );
-                } else {
-                    Sprite(
-                        skin.eqmain.clone(),
-                        eq_thumb_sprite,
-                        thumb_x,
-                        thumb_y + EQ_SLIDER_THUMB_Y_OFFSET,
-                        scale,
-                    );
-                }
+                Sprite(
+                    skin.eqmain.clone(),
+                    eq_thumb_sprite,
+                    thumb_x,
+                    thumb_y + EQ_SLIDER_THUMB_Y_OFFSET,
+                    scale,
+                );
                 let eq_drag_change = eq_drag;
                 let eq_drag_commit = eq_drag;
                 let state_drag = state;
@@ -3767,9 +3727,6 @@ fn SettingsModal(
         },
     );
 }
-fn playlist_background_tiles(width: f32, height: f32) -> Vec<(SpriteRect, f32, f32)> {
-    native_sprite_tiles((0., 0., 243., 203.), width, height)
-}
 fn native_sprite_tiles(source: SpriteRect, width: f32, height: f32) -> Vec<(SpriteRect, f32, f32)> {
     let mut tiles = Vec::new();
     if source.2 <= 0. || source.3 <= 0. {
@@ -3799,11 +3756,8 @@ fn native_sprite_tiles(source: SpriteRect, width: f32, height: f32) -> Vec<(Spri
 #[composable]
 fn PlaylistWindow(
     pledit: ImageBitmap,
-    playlist_background: Option<ImageBitmap>,
-    playlist_selection: Option<ImageBitmap>,
     palette: SkinPalette,
     display_text_color: [u8; 4],
-    footer_layout: skin::FooterLayout,
     state: MutableState<WinampState>,
     drag_target: WinampDragTarget,
     window_size: WinampWindowSize,
@@ -3866,11 +3820,6 @@ fn PlaylistWindow(
                 BoxSpec::default(),
                 || {},
             );
-            if let Some(background) = playlist_background.clone() {
-                for (source, x, y) in playlist_background_tiles(list_width, list_height) {
-                    Sprite(background.clone(), source, 12. + x, 20. + y, scale);
-                }
-            }
             Sprite(pledit.clone(), PLAYLIST_TOP_LEFT_CORNER, 0.0, 0.0, scale);
             TiledSprite(
                 pledit.clone(),
@@ -3936,7 +3885,7 @@ fn PlaylistWindow(
                 scale,
             );
             PlaylistEntries(
-                (palette, playlist_selection.clone()),
+                palette,
                 state,
                 snapshot.clone(),
                 playlist_entries_scroll_state,
@@ -3944,14 +3893,8 @@ fn PlaylistWindow(
                 list_height,
                 scale,
             );
-            PlaylistFooterReadouts(
-                snapshot.clone(),
-                bottom_y,
-                scale,
-                display_text_color,
-                footer_layout,
-            );
-            PlaylistFooterControls(state, footer_menu, bottom_y, scale, footer_layout);
+            PlaylistFooterReadouts(snapshot.clone(), bottom_y, scale, display_text_color);
+            PlaylistFooterControls(state, footer_menu, bottom_y, scale);
             if snapshot.playlist_search_visible {
                 PlaylistSearchOverlay(
                     palette,
@@ -4120,7 +4063,7 @@ fn PlaylistScrollbarInput(
 }
 #[composable]
 fn PlaylistEntries(
-    appearance: (SkinPalette, Option<ImageBitmap>),
+    palette: SkinPalette,
     state: MutableState<WinampState>,
     snapshot: WinampState,
     playlist_scroll: MutableState<f32>,
@@ -4128,7 +4071,6 @@ fn PlaylistEntries(
     list_height: f32,
     scale: f32,
 ) {
-    let (palette, selection_art) = appearance;
     let playlist_scroll = playlist_scroll.get();
     Box(
         Modifier::empty()
@@ -4142,7 +4084,7 @@ fn PlaylistEntries(
         move || {
             let row_height = WINAMP_PLAYLIST_LINE_HEIGHT;
             let max_rows = playlist_visible_row_capacity(list_height);
-            let x = WINAMP_PLAYLIST_TEXT_X + if selection_art.is_some() { 8. } else { 0. };
+            let x = WINAMP_PLAYLIST_TEXT_X;
             let y = WINAMP_PLAYLIST_TEXT_Y;
             cranpose_core::SideEffect(move || {
                 if state.get_non_reactive().playlist_visible_rows != max_rows {
@@ -4182,15 +4124,6 @@ fn PlaylistEntries(
                         scale,
                         skin_color(palette.selected_bg),
                     );
-                    if let Some(art) = selection_art.clone() {
-                        Sprite(
-                            art,
-                            (0., 0., list_width.min(243.), 11.),
-                            0.,
-                            selection_y,
-                            scale,
-                        );
-                    }
                 }
             }
             for (row, track) in snapshot
@@ -4273,27 +4206,7 @@ fn PlaylistFooterReadouts(
     bottom_y: f32,
     scale: f32,
     display_text_color: [u8; 4],
-    layout: skin::FooterLayout,
 ) {
-    if layout == skin::FooterLayout::TimeTotal {
-        let elapsed = format_duration_compact(snapshot.elapsed_seconds);
-        let total = playlist_total_duration_seconds(snapshot.playlist.as_slice())
-            .map(format_duration_compact)
-            .unwrap_or_else(|| "0:00".into());
-        for (text, center) in [(elapsed, 152.0_f32), (total, 202.0_f32)] {
-            let width = (system_text_width(&text) - 1.0).clamp(1.0, 44.0);
-            SystemWinampText(
-                text,
-                (center - width / 2.0).round(),
-                bottom_y + 17.0,
-                width,
-                WINAMP_SYSTEM_LINE_HEIGHT,
-                scale,
-                display_text_color,
-            );
-        }
-        return;
-    }
     let summary = playlist_footer_summary(&snapshot);
     SystemWinampText(
         summary,
@@ -4508,22 +4421,7 @@ fn PlaylistFooterControls(
     footer_menu: MutableState<Option<PlaylistFooterMenu>>,
     bottom_y: f32,
     scale: f32,
-    layout: skin::FooterLayout,
 ) {
-    if layout == skin::FooterLayout::TimeTotal {
-        for (area, menu) in [
-            ((12., 7., 24., 23.), PlaylistFooterMenu::Add),
-            ((41., 7., 24., 23.), PlaylistFooterMenu::Remove),
-            ((70., 7., 24., 23.), PlaylistFooterMenu::Select),
-            ((99., 7., 24., 23.), PlaylistFooterMenu::Misc),
-            ((230., 7., 31., 23.), PlaylistFooterMenu::List),
-        ] {
-            PlaylistFooterClickTarget(area, bottom_y, scale, move || {
-                toggle_playlist_footer_menu(footer_menu, menu)
-            });
-        }
-        return;
-    }
     {
         let menu_state = footer_menu;
         PlaylistFooterClickTarget(PLAYLIST_ADD_BUTTON_HIT_AREA, bottom_y, scale, move || {
@@ -8232,22 +8130,6 @@ fn time_digits(elapsed_seconds: f32) -> [u8; 4] {
 }
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn playlist_glass_crops_and_tiles_at_native_size() {
-        assert_eq!(
-            super::playlist_background_tiles(243., 87.),
-            vec![((0., 0., 243., 87.), 0., 0.)]
-        );
-        assert_eq!(
-            super::playlist_background_tiles(250., 210.),
-            vec![
-                ((0., 0., 243., 203.), 0., 0.),
-                ((0., 0., 7., 203.), 243., 0.),
-                ((0., 0., 243., 7.), 0., 203.),
-                ((0., 0., 7., 7.), 243., 203.),
-            ]
-        );
-    }
     #[test]
     fn playlist_border_tiles_preserve_source_texels_and_crop_partial_edges() {
         let source = (31., 42., 20., 29.);

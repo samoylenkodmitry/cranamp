@@ -65,9 +65,12 @@ fn every_mcp_instrument_survives_panel_tile_and_footer_joins() {
                     if i == 1 {
                         d.view.active = false;
                         assert_footprint(&d, &r, &before, &label);
+                        d.make_portable("test").unwrap();
+                        let flattened = d.render();
                         let mut reopened = Document::open(&d.archive().unwrap(), None).unwrap();
                         reopened.view = d.view.clone();
-                        assert_eq!(reopened.render(), d.render(), "{label}: WSZ reload");
+                        assert_eq!(reopened.render(), flattened, "{label}: WSZ reload");
+                        d.undo();
                     }
                 }
             }

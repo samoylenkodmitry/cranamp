@@ -107,3 +107,14 @@ fn stamp_repeat_and_sweep_are_reachable_where_there_is_no_sidebar() {
         );
     }
 }
+#[test]
+fn whether_the_skin_plays_the_same_elsewhere_is_reachable_where_there_is_no_sidebar() {
+    let document = cranamp::winamp::studio::open_document(None).expect("a document");
+    open(&document, "options", "pencil");
+    let mut shell = touch(document);
+    let texts = visible_texts(&mut shell);
+    assert!(
+        contains(&texts, "PLAYS THE SAME ELSEWHERE"),
+        "a hand needs the portability readout too; visible={texts:?}"
+    );
+}

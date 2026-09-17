@@ -393,7 +393,6 @@ pub struct Document {
     clipped_pixels: usize,
     atlas_writes: BTreeMap<AtlasPixel, AtlasInk>,
     operation_box: Option<(usize, [u32; 4])>,
-    keyed_blend: Vec<[i32; 2]>,
     overwrites: usize,
     overwrite_note: Option<String>,
     scope_writes: BTreeMap<String, usize>,
@@ -420,7 +419,7 @@ impl Document {
         let mut images = BTreeMap::new();
         let mut files = BTreeMap::new();
         for (name, w, h) in [
-            ("main.bmp", 275, 115),
+            ("main.bmp", 275, 116),
             ("titlebar.bmp", 344, 87),
             ("cbuttons.bmp", 136, 36),
             ("posbar.bmp", 307, 10),
@@ -467,7 +466,6 @@ impl Document {
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
             operation_box: None,
-            keyed_blend: Vec::new(),
             preview: None,
             overwrites: 0,
             overwrite_note: None,
@@ -496,12 +494,7 @@ impl Document {
             let mut data = Vec::new();
             entry.read_to_end(&mut data)?;
             if name.ends_with(".bmp") {
-                let mut image = image::load_from_memory(&data)?.to_rgba8();
-                for p in image.pixels_mut() {
-                    if p.0[..3] == [255, 0, 255] {
-                        p.0[3] = 0;
-                    }
-                }
+                let image = image::load_from_memory(&data)?.to_rgba8();
                 images.insert(name.clone(), image);
             }
             files.insert(name, data);
@@ -527,7 +520,6 @@ impl Document {
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
             operation_box: None,
-            keyed_blend: Vec::new(),
             preview: None,
             overwrites: 0,
             overwrite_note: None,
@@ -926,43 +918,12 @@ impl Document {
                  when more than two thirds of the sheet is opaque. Paint it in \
                  the colour the readouts should be.",
             ),
-            "plbg.bmp" => Some(
-                "The player draws one track row every 11 pixels from the top of \
-                 this sheet, and the selection strip is one row of the same \
-                 height. 243x203 covers a tall playlist exactly; a taller one \
-                 tiles this sheet from the top without stretching it, so a \
-                 pattern whose period does not divide 203 steps at the seam.",
-            ),
-            "plselection.bmp" => Some(
-                "One track row, 243x11, drawn under the selected row's text. It \
-                 has to stay clear of the playlist ink: Cranamp writes the row's \
-                 own colours over it, from PLEDIT.TXT.",
-            ),
             "titlebar.bmp" => Some(
                 "Most of this sheet is classic shade-mode artwork Cranamp does \
                  not draw. Only the two 275x14 title rows and the four 9x9 \
                  window buttons are sampled; the rest is reported as unsampled.",
             ),
             _ => None,
-        }
-    }
-    pub fn new_sheet_note(sheet: &str) -> &'static str {
-        match sheet {
-            "eqhandles.bmp" => {
-                "eleven 14x25 handles, one per band, normal above pressed. \
-                 Equalizer travel is limited to 38 pixels while these exist, \
-                 because the handle itself takes 25 of the 63-pixel groove. \
-                 The eleven band *tracks* are untouched and still share one set \
-                 of 28 cells, so nothing that is true of only one band can be \
-                 said in its groove -- this sheet is the only place eleven \
-                 bands can differ from each other."
-            }
-            "plbg.bmp" => {
-                "the ground under the track list, one row every 11 pixels, tiled \
-                 from the top without stretching when the list is taller."
-            }
-            "plselection.bmp" => "one 243x11 track row, drawn under the selected row's text.",
-            _ => "a new drawing surface",
         }
     }
     pub fn sheet_gaps(&self, sheet: &str) -> Result<Value> {
@@ -1098,39 +1059,9 @@ impl Document {
                     all.push(layer);
                 }
             }
-            all.push(Layer {
-                id: "main.docking.edge".into(),
-                sheet: "main.bmp".into(),
-                source: [0, 114, 275, 1],
-                destination: [0, 115, 275, 1],
-                variants: vec![[0, 114, 275, 1]],
-                labels: vec!["always · the same row as main's last".into()],
-            });
             return all;
         }
-        let mut layers = mapping::layers(view, self.layout());
-        if view.panel == "playlist" && self.images.contains_key("plselection.bmp") {
-            layers.push(Layer {
-                id: "list.selection".into(),
-                sheet: "plselection.bmp".into(),
-                source: [0, 0, 243, 11],
-                destination: [12, 21, 243, 11],
-                variants: vec![[0, 0, 243, 11]],
-                labels: vec!["always · one track row".into()],
-            });
-        }
-        if view.panel == "equalizer" && self.images.contains_key("eqhandles.bmp") {
-            for i in 0..11 {
-                if let Some(layer) = layers.iter_mut().find(|l| l.id == format!("band{i}.thumb")) {
-                    layer.sheet = "eqhandles.bmp".into();
-                    layer.variants = vec![[i * 14, 0, 14, 25], [i * 14, 25, 14, 25]];
-                    layer.source = layer.variants[usize::from(view.pressed)];
-                    layer.destination[0] -= 1;
-                    layer.destination[2] = 14;
-                    layer.destination[3] = 25;
-                }
-            }
-        }
+        let layers = mapping::layers(view);
         layers
             .into_iter()
             .filter(|layer| self.images.contains_key(&layer.sheet))
@@ -1359,9 +1290,7 @@ impl Document {
                         continue;
                     };
                     if let Some(pixel) = stack.at(layer.source[0] + sx, layer.source[1] + sy) {
-                        if pixel.0[3] > 0
-                            && (view.panel == "atlas" || pixel.0[..3] != [255, 0, 255])
-                        {
+                        if pixel.0[3] > 0 {
                             image.put_pixel(x - x0, y - y0, pixel);
                         }
                     }
@@ -1407,8 +1336,7 @@ impl Document {
                     if let Some((sx, sy)) = l.map(x, y) {
                         if let Some(p) = sheet.get_pixel_checked(l.source[0] + sx, l.source[1] + sy)
                         {
-                            if p[3] > 0 && (self.view.panel == "atlas" || p.0[..3] != [255, 0, 255])
-                            {
+                            if p[3] > 0 {
                                 im.put_pixel(x, y, *p);
                             }
                         }
@@ -1732,7 +1660,7 @@ impl Document {
             for y in 0..r[3] {
                 for x in 0..r[2] {
                     let pixel = source.get_pixel(r[0] + x, r[1] + y);
-                    if pixel.0[3] > 0 && pixel.0[..3] != [255, 0, 255] {
+                    if pixel.0[3] > 0 {
                         image.put_pixel(ox + 5 + x, oy + BAND + 3 + y, *pixel);
                     }
                 }
@@ -1840,16 +1768,6 @@ impl Document {
         );
         let shaded = if material == Some("glass") {
             let beneath = self.selected_image();
-            for [x, y] in points.iter().copied() {
-                if let Some(p) = beneath
-                    .get_pixel_checked(x.max(0) as u32, y.max(0) as u32)
-                    .filter(|_| x >= 0 && y >= 0)
-                {
-                    if p.0[3] == 0 || p.0[..3] == [255, 0, 255] {
-                        self.keyed_blend.push([x, y]);
-                    }
-                }
-            }
             Some(super::material::glass(&points, &beneath, color, op)?)
         } else {
             None
@@ -1877,9 +1795,6 @@ impl Document {
             if let Some(base) = under.as_ref() {
                 let a = opacity as f64 / 255.0;
                 let beneath = base.at(x, y).unwrap_or([0, 0, 0, 255]);
-                if beneath[3] == 0 || beneath[..3] == [255, 0, 255] {
-                    self.keyed_blend.push([x, y]);
-                }
                 for c in 0..3 {
                     color[c] = (color[c] as f64 * a + beneath[c] as f64 * (1.0 - a))
                         .round()
@@ -2374,7 +2289,6 @@ impl Document {
             }
         }
         let mut crossed: Vec<Value> = Vec::new();
-        let mut keyed: Vec<Value> = Vec::new();
         let mut count = 0;
         let mut at: Option<(usize, String)> = None;
         let mut skipped: Vec<char> = Vec::new();
@@ -2388,7 +2302,6 @@ impl Document {
                     let kind = op.get("op").and_then(Value::as_str).unwrap_or("pixel");
                     at = Some((index, kind.to_owned()));
                     self.operation_box = None;
-                    self.keyed_blend.clear();
                     let color = parse_color(
                         op.get("color")
                             .and_then(Value::as_str)
@@ -2474,9 +2387,6 @@ impl Document {
                                     }
                                     let (bx, by) = (x + ix as i32, y + iy as i32);
                                     let under = base.at(bx, by).unwrap_or([0, 0, 0, 255]);
-                                    if under[3] == 0 || under[..3] == [255, 0, 255] {
-                                        self.keyed_blend.push([bx, by]);
-                                    }
                                     let a = p[3] as f32 / 255.0;
                                     let mut out = [0u8; 4];
                                     for c in 0..3 {
@@ -2571,11 +2481,6 @@ impl Document {
                             }
                         }
                     }
-                    if !self.keyed_blend.is_empty() && keyed.len() < 8 {
-                        keyed.push(json!({"operation":index,"op":kind,
-                        "pixels":self.keyed_blend.len(),
-                        "at":self.keyed_blend.iter().take(4).collect::<Vec<_>>()}));
-                    }
                 }
             }
             Ok(())
@@ -2667,9 +2572,7 @@ impl Document {
                     never_drawn = !mask.iter().any(|sampled| *sampled);
                     if !never_drawn {
                         for ((sheet, x, y), (colour, _)) in self.atlas_writes.iter() {
-                            if *sheet == index
-                                && colour[..3] != [255, 0, 255]
-                                && !mask[(y * width + x) as usize]
+                            if *sheet == index && !mask[(y * width + x) as usize] && colour[3] != 0
                             {
                                 unsampled.push([*x, *y]);
                             }
@@ -2726,13 +2629,6 @@ impl Document {
             self.message
                 .push_str(&format!("; {} crossed into a repeated cell", crossed.len()));
             result["crossed_cells"] = json!(crossed);
-        }
-        if !keyed.is_empty() {
-            let total: u64 = keyed.iter().filter_map(|k| k["pixels"].as_u64()).sum();
-            self.message.push_str(&format!(
-                "; {total} blended with the transparency key and were written opaque"
-            ));
-            result["keyed_blends"] = json!(keyed);
         }
         let same = self.identical_variants();
         if !same.is_empty() {
@@ -2794,7 +2690,7 @@ impl Document {
                     l.variants.iter().all(|cell| {
                         image
                             .get_pixel_checked(cell[0] + sx, cell[1] + sy)
-                            .is_some_and(|p| p[3] > 0 && p.0[..3] != [255, 0, 255])
+                            .is_some_and(|p| p[3] > 0)
                     })
                 });
                 let tally = seen.entry((id.clone(), at)).or_insert((0, 0));
@@ -2873,7 +2769,7 @@ impl Document {
         let mut counts: BTreeMap<[u8; 4], usize> = BTreeMap::new();
         for image in self.composite_images().values() {
             for p in image.pixels() {
-                if p.0[3] == 0 || p.0[..3] == [255, 0, 255] {
+                if p.0[3] == 0 {
                     continue;
                 }
                 *counts.entry(p.0).or_insert(0) += 1;
@@ -2899,115 +2795,160 @@ impl Document {
         }
         json!({"colors":colors})
     }
-    pub fn layout(&self) -> crate::winamp::skin::SkinLayout {
-        self.files
-            .get("cranamp.json")
-            .and_then(|data| serde_json::from_slice(data).ok())
-            .unwrap_or_default()
+    pub fn divergences(&self) -> Vec<crate::winamp::skin::Divergence> {
+        let mut entries: Vec<crate::winamp::skin::SkinEntry> = self
+            .files
+            .keys()
+            .map(|name| {
+                let size = self
+                    .images
+                    .get(name)
+                    .map(|image| (image.width(), image.height()));
+                (name.clone(), size)
+            })
+            .collect();
+        entries.sort();
+        let mut found = crate::winamp::skin::divergences(&entries);
+        for (sheet, image) in &self.images {
+            let Some((mask, width)) = self.sampled_mask(sheet) else {
+                continue;
+            };
+            let clear = mask
+                .iter()
+                .enumerate()
+                .filter(|(i, sampled)| {
+                    **sampled && image.get_pixel(*i as u32 % width, *i as u32 / width).0[3] < 128
+                })
+                .count();
+            if clear > 0 {
+                found.push(crate::winamp::skin::Divergence {
+                    entry: sheet.clone(),
+                    problem: format!(
+                        "{clear} pixels a sprite reads are clear, and a .wsz sheet \
+                         cannot hold clear pixels; another player draws them as \
+                         flat magenta"
+                    ),
+                    fix: "paint them, or move the sprite off them".into(),
+                });
+            }
+        }
+        found.sort_by(|a, b| a.entry.cmp(&b.entry));
+        found
     }
-    pub fn set_playlist_selection(&mut self, enabled: bool, source: &str) -> Value {
-        self.finish_stroke();
-        if enabled != self.images.contains_key("plselection.bmp") {
-            self.record(self.snapshot(), "Playlist selection artwork".into(), source);
-            if enabled {
-                self.images
-                    .insert("plselection.bmp".into(), RgbaImage::new(243, 11));
-                self.files.insert("plselection.bmp".into(), Vec::new());
-            } else {
-                self.images.remove("plselection.bmp");
-                self.files.remove("plselection.bmp");
-                if self.view.sheet == "plselection.bmp" {
-                    self.view.sheet = "pledit.bmp".into();
-                }
-                self.view.layers.retain(|id| id != "list.selection");
-                if self.view.layer == "list.selection" {
-                    self.view.layer = "auto".into();
+    fn flatten_clear_sprite_pixels(&mut self) -> Vec<String> {
+        let mut view = self.view.clone();
+        view.panel = "canvas".into();
+        view.preview_playlist_height = 522;
+        let (w, h) = self.canvas_size_for(&view);
+        let canvas = self
+            .render_patch_for(&view, [0, 0, w as i32, h as i32])
+            .image;
+        let layers = self.layers_for(&view);
+        let mut filled: std::collections::BTreeMap<String, u32> = Default::default();
+        for layer in &layers {
+            let Some(image) = self.images.get(&layer.sheet) else {
+                continue;
+            };
+            let (w, h) = image.dimensions();
+            let [dx, dy, dw, dh] = layer.destination;
+            let mut paint: Vec<(u32, u32, Rgba<u8>)> = Vec::new();
+            for variant in &layer.variants {
+                for y in 0..dh {
+                    for x in 0..dw {
+                        let sx = variant[0] + x * variant[2] / dw.max(1);
+                        let sy = variant[1] + y * variant[3] / dh.max(1);
+                        if sx >= w || sy >= h || image.get_pixel(sx, sy).0[3] >= 128 {
+                            continue;
+                        }
+                        let under = canvas
+                            .get_pixel_checked(dx + x, dy + y)
+                            .copied()
+                            .filter(|p| p.0[3] >= 128)
+                            .unwrap_or(Rgba([0, 0, 0, 255]));
+                        paint.push((sx, sy, Rgba([under.0[0], under.0[1], under.0[2], 255])));
+                    }
                 }
             }
-            self.changed();
-        }
-        json!({"enabled":enabled,"revision":self.revision})
-    }
-    pub fn set_eq_handles(&mut self, enabled: bool, source: &str) -> Result<Value> {
-        self.finish_stroke();
-        if enabled != self.images.contains_key("eqhandles.bmp") {
-            self.record(self.snapshot(), "Independent EQ handles".into(), source);
-            if enabled {
-                self.images
-                    .insert("eqhandles.bmp".into(), RgbaImage::new(154, 50));
-                self.files.insert("eqhandles.bmp".into(), Vec::new());
-                let mut layout = self.layout();
-                layout.eq_travel = layout.eq_travel.min(38);
-                self.files
-                    .insert("cranamp.json".into(), serde_json::to_vec(&layout)?);
-            } else {
-                self.images.remove("eqhandles.bmp");
-                self.files.remove("eqhandles.bmp");
-                if self.view.sheet == "eqhandles.bmp" {
-                    self.view.sheet = "eqmain.bmp".into();
+            if paint.is_empty() {
+                continue;
+            }
+            let sheet = layer.sheet.clone();
+            let image = self.images.get_mut(&sheet).expect("the sheet is there");
+            let mut count = 0;
+            for (x, y, colour) in paint {
+                if image.get_pixel(x, y).0[3] < 128 {
+                    image.put_pixel(x, y, colour);
+                    count += 1;
                 }
             }
-            self.changed();
+            *filled.entry(sheet).or_default() += count;
         }
-        Ok(json!({"enabled":enabled,"revision":self.revision}))
+        filled
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
+            .map(|(sheet, count)| {
+                format!("painted {count} clear pixels in {sheet} the colour the player already showed there")
+            })
+            .collect()
     }
-    pub fn has_playlist_background(&self) -> bool {
-        self.images.contains_key("plbg.bmp")
-    }
-    pub fn set_playlist_background(&mut self, enabled: bool, source: &str) -> Value {
+    pub fn make_portable(&mut self, source: &str) -> Result<Value> {
         self.finish_stroke();
-        if enabled != self.has_playlist_background() {
-            self.record(self.snapshot(), "Playlist canvas".into(), source);
-            if enabled {
-                let color = self
-                    .files
-                    .get("pledit.txt")
-                    .map(|bytes| crate::winamp::skin::parse_pledit_txt(bytes).normal_bg)
-                    .unwrap_or([0, 0, 0, 255]);
-                self.images.insert(
-                    "plbg.bmp".into(),
-                    RgbaImage::from_pixel(243, 203, Rgba(color)),
-                );
-                self.files.insert("plbg.bmp".into(), Vec::new());
-            } else {
-                self.images.remove("plbg.bmp");
-                self.files.remove("plbg.bmp");
-                self.view.layers.retain(|id| id != "list.background");
-                if self.view.layer == "list.background" {
-                    self.view.layer = self
-                        .view
-                        .layers
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "auto".into());
+        let found = self.divergences();
+        if found.is_empty() {
+            return Ok(json!({"plays_the_same_elsewhere":true,"changed":[]}));
+        }
+        self.record(self.snapshot(), "Make the skin portable".into(), source);
+        let mut changed: Vec<String> = Vec::new();
+        let clear: Vec<String> = found
+            .iter()
+            .filter(|d| d.problem.contains("clear"))
+            .map(|d| d.entry.clone())
+            .collect();
+        for divergence in found.iter().filter(|d| !clear.contains(&d.entry)) {
+            let entry = divergence.entry.clone();
+            let classic = crate::winamp::skin::CLASSIC_SHEETS
+                .iter()
+                .find(|(sheet, _, _)| *sheet == entry);
+            let Some((_, width, height)) = classic else {
+                self.images.remove(&entry);
+                self.files.remove(&entry);
+                if self.view.sheet == entry {
+                    self.view.sheet = "main.bmp".into();
                 }
-            }
-            self.changed();
+                changed.push(format!("dropped {entry}, which no player reads"));
+                continue;
+            };
+            let grown = match self.images.get(&entry) {
+                Some(old) => {
+                    let (was, tall) = old.dimensions();
+                    let mut image = RgbaImage::new((*width).max(was), (*height).max(tall));
+                    for y in 0..image.height() {
+                        for x in 0..image.width() {
+                            let pixel = *old.get_pixel(x.min(was - 1), y.min(tall - 1));
+                            image.put_pixel(x, y, pixel);
+                        }
+                    }
+                    changed.push(format!(
+                        "grew {entry} from {was}x{tall} to {}x{}, repeating its edge",
+                        image.width(),
+                        image.height()
+                    ));
+                    image
+                }
+                None => {
+                    changed.push(format!("added {entry} at {width}x{height}, empty"));
+                    RgbaImage::new(*width, *height)
+                }
+            };
+            self.images.insert(entry.clone(), grown);
+            self.files.insert(entry, Vec::new());
         }
-        json!({"enabled":enabled,"revision":self.revision})
-    }
-    pub fn set_layout(&mut self, args: &Value, source: &str) -> Result<Value> {
-        self.finish_stroke();
-        let mut fields = serde_json::to_value(self.layout())?;
-        for (key, value) in args.as_object().context("layout object required")? {
-            fields
-                .as_object_mut()
-                .unwrap()
-                .insert(key.clone(), value.clone());
-        }
-        let layout: crate::winamp::skin::SkinLayout = serde_json::from_value(fields)?;
-        layout.validate()?;
-        anyhow::ensure!(
-            !self.images.contains_key("eqhandles.bmp") || layout.eq_travel <= 38,
-            "independent EQ handles need eq_travel <= 38"
-        );
-        if layout != self.layout() {
-            let bytes = serde_json::to_vec(&layout)?;
-            self.record(self.snapshot(), "Skin layout".into(), source);
-            self.files.insert("cranamp.json".into(), bytes);
-            self.changed();
-        }
-        Ok(json!({"layout":layout,"revision":self.revision}))
+        changed.extend(self.flatten_clear_sprite_pixels());
+        self.changed();
+        Ok(json!({
+            "plays_the_same_elsewhere": self.divergences().is_empty(),
+            "changed": changed,
+        }))
     }
     pub(super) fn text_palettes(&self) -> (Vec<(&'static str, String)>, Vec<String>) {
         let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
@@ -3198,13 +3139,8 @@ impl Document {
                     } else {
                         261
                     };
-                    let gutter = if self.images.contains_key("plselection.bmp") {
-                        8
-                    } else {
-                        0
-                    };
                     vec![
-                        ("TRACK ROWS", [16 + gutter, 20, 227 - gutter, h - 58]),
+                        ("TRACK ROWS", [16, 20, 227, h - 58]),
                         ("TIME / TOTAL", [132, h - 28, 72, 8]),
                         ("ELAPSED", [192, h - 14, 30, 8]),
                     ]
@@ -3271,19 +3207,6 @@ impl Document {
                     hit: true,
                 });
             }
-        }
-        if self.view.panel == "canvas" {
-            out.push(Guide {
-                id: "main.docking.edge".into(),
-                label: "Dock edge · shares main bottom row".into(),
-                sheet: "main.bmp".into(),
-                rect: [0, 115, 275, 1],
-                source: [0, 114, 275, 1],
-                variant: 0,
-                active: true,
-                runtime: false,
-                hit: false,
-            });
         }
         out
     }
@@ -3694,7 +3617,7 @@ impl Document {
                     let mut im = image.clone();
                     for p in im.pixels_mut() {
                         if p.0[3] < 128 {
-                            p.0 = [255, 0, 255, 255];
+                            p.0 = [0, 0, 0, 255];
                         }
                     }
                     let mut bytes = Cursor::new(Vec::new());
@@ -3759,7 +3682,7 @@ impl Document {
                         continue;
                     }
                     let pixel = image.get_pixel(px, py).0;
-                    if pixel[3] == 0 || pixel[..3] == [255, 0, 255] {
+                    if pixel[3] == 0 {
                         continue;
                     }
                     for c in 0..3 {
@@ -3831,23 +3754,14 @@ impl Document {
                     check(id.rsplit('.').next().unwrap_or(id), ink, ground)
                 }
                 "runtime.playlist.TRACK ROWS" => {
-                    let ground = if self.images.contains_key("plbg.bmp") {
-                        ground
-                    } else {
-                        colour("NormalBG").unwrap_or(ground)
-                    };
+                    let ground = colour("NormalBG").unwrap_or(ground);
                     if let Some(normal) = colour("Normal") {
                         check("a playlist row", normal, ground);
                     }
                     if let Some(current) = colour("Current") {
                         check("the playing row", current, ground);
                     }
-                    let selected = self
-                        .images
-                        .get("plselection.bmp")
-                        .and_then(|_| self.ground_under([12, rect[1], 243, 11]))
-                        .or_else(|| colour("SelectedBG"));
-                    if let (Some(normal), Some(on)) = (colour("Normal"), selected) {
+                    if let (Some(normal), Some(on)) = (colour("Normal"), colour("SelectedBG")) {
                         check("a selected row", normal, on);
                     }
                 }
@@ -3999,7 +3913,7 @@ mod tests {
         Document::open(include_bytes!("../../../assets/winamp.wsz"), None).unwrap()
     }
     #[test]
-    fn painted_transparency_key_matches_player_in_canvas_but_remains_editable_in_atlas() {
+    fn magenta_is_a_colour_here_because_it_is_a_colour_in_every_other_player() {
         let mut d = Document::blank();
         for p in d.images.get_mut("main.bmp").unwrap().pixels_mut() {
             *p = Rgba([20, 30, 40, 255]);
@@ -4008,9 +3922,11 @@ mod tests {
             *p = Rgba([255, 0, 255, 255]);
         }
         d.state(json!({"panel":"canvas"})).unwrap();
-        assert_eq!(d.render().get_pixel(40, 90), &Rgba([20, 30, 40, 255]));
-        d.state(json!({"layers":["main.play"]})).unwrap();
-        assert_eq!(d.selected_image().get_pixel(40, 90)[3], 0);
+        assert_eq!(
+            d.render().get_pixel(40, 90),
+            &Rgba([255, 0, 255, 255]),
+            "the play button is magenta, and that is what every player draws"
+        );
         d.state(json!({"panel":"atlas","sheet":"cbuttons.bmp","layers":[]}))
             .unwrap();
         assert_eq!(d.render().get_pixel(23, 0), &Rgba([255, 0, 255, 255]));
@@ -4511,96 +4427,9 @@ mod tests {
         assert_eq!(d.archive().unwrap(), original);
     }
     #[test]
-    fn footer_layout_round_trips_without_changing_classic_defaults() {
-        use crate::winamp::skin::FooterLayout;
-        let mut d = document();
-        assert_eq!(d.layout().footer, FooterLayout::Classic);
-        let original = d.archive().unwrap();
-        assert!(d.set_layout(&json!({"footer":"unknown"}), "MCP").is_err());
-        assert_eq!(original, d.archive().unwrap());
-        d.set_layout(&json!({"footer":"time-total"}), "Human")
-            .unwrap();
-        let skin = crate::winamp::skin::load_skin(&d.archive().unwrap()).unwrap();
-        assert_eq!(skin.layout.footer, FooterLayout::TimeTotal);
-        assert_eq!(d.history()["entries"][1]["source"], "Human");
-        d.undo();
-        assert_eq!(d.layout().footer, FooterLayout::Classic);
-        assert_eq!(original, d.archive().unwrap());
-    }
-    #[test]
     fn color_parser_rejects_non_ascii_without_panicking() {
         assert!(parse_color("#ééé").is_err());
         assert_eq!(parse_color("transparent").unwrap(), [255, 0, 255, 0]);
-    }
-    #[test]
-    fn playlist_canvas_draws_and_round_trips_with_shared_history() {
-        let mut d = document();
-        let original = d.archive().unwrap();
-        d.state(json!({"panel":"playlist"})).unwrap();
-        assert!(!d.layers().iter().any(|l| l.id == "list.background"));
-        d.set_playlist_background(true, "Human");
-        d.state(json!({"layer":"list.background"})).unwrap();
-        d.draw(&json!({"operations":[{"op":"pixel","x":12,"y":20,"color":"#123456"}]}))
-            .unwrap();
-        assert_eq!(d.render().get_pixel(12, 20).0, [18, 52, 86, 255]);
-        let skin = crate::winamp::skin::load_skin(&d.archive().unwrap()).unwrap();
-        let bitmap = skin.playlist_background.unwrap();
-        assert_eq!(&bitmap.pixels()[..4], &[18, 52, 86, 255]);
-        assert_eq!(d.history()["entries"][1]["source"], "Human");
-        assert_eq!(d.history()["entries"][2]["source"], "MCP");
-        d.undo();
-        d.undo();
-        assert!(!d.has_playlist_background());
-        assert_eq!(original, d.archive().unwrap());
-        let _ = d.state_sheet(None);
-        d.state(json!({"pressed":true})).unwrap();
-        d.redo();
-        d.redo();
-        d.set_playlist_background(false, "MCP");
-        assert_eq!(d.view.layer, "auto");
-        d.undo();
-        assert_eq!(d.images["plbg.bmp"].get_pixel(0, 0).0, [18, 52, 86, 255]);
-    }
-    #[test]
-    fn playlist_canvas_rejects_non_native_dimensions() {
-        let mut d = document();
-        d.set_playlist_background(true, "MCP");
-        d.images.insert("plbg.bmp".into(), RgbaImage::new(486, 406));
-        assert!(crate::winamp::skin::load_skin(&d.archive().unwrap()).is_err());
-    }
-    #[test]
-    fn eq_travel_round_trips_and_keeps_pencil_mapping_on_native_pixels() {
-        let mut d = document();
-        d.set_layout(&json!({"eq_travel":40}), "Human").unwrap();
-        d.set_layout(&json!({"footer":"time-total"}), "MCP")
-            .unwrap();
-        assert_eq!(d.layout().eq_travel, 40);
-        for invalid in [0, 53] {
-            assert!(d.set_layout(&json!({"eq_travel":invalid}), "MCP").is_err());
-        }
-        for frame in 0..28 {
-            d.state(json!({"panel":"equalizer","layer":"band1.thumb","eq":vec![frame;11]}))
-                .unwrap();
-            let thumb = d
-                .layers()
-                .into_iter()
-                .find(|l| l.id == "band1.thumb")
-                .unwrap();
-            let y = 38 + (40.0 * (1.0 - frame as f32 / 27.0)).round() as u32;
-            assert_eq!(thumb.destination, [79, y, 11, 11]);
-            assert!(!thumb.stretched());
-            assert_eq!(thumb.map(79, y), Some((0, 0)));
-        }
-        let skin = crate::winamp::skin::load_skin(&d.archive().unwrap()).unwrap();
-        assert_eq!(skin.layout.eq_travel, 40);
-        assert_eq!(
-            skin.layout.footer,
-            crate::winamp::skin::FooterLayout::TimeTotal
-        );
-        d.undo();
-        assert_eq!(d.layout().eq_travel, 40);
-        d.undo();
-        assert_eq!(d.layout().eq_travel, 52);
     }
     #[test]
     fn pressed_player_preview_uses_pressed_art_without_mutating_the_document() {
@@ -4625,72 +4454,6 @@ mod tests {
             d.images["cbuttons.bmp"].get_pixel(24, 2)
         );
         assert_eq!(d.archive().unwrap(), original);
-    }
-    #[test]
-    fn independent_eq_handles_paint_per_band_and_preview_pressed_without_mutation() {
-        let mut d = Document::blank();
-        d.set_eq_handles(true, "MCP").unwrap();
-        assert_eq!(d.layout().eq_travel, 38);
-        assert!(d.set_layout(&json!({"eq_travel":39}), "MCP").is_err());
-        d.state(json!({"panel":"equalizer","layer":"band1.thumb","eq":vec![27;11],"pressed":true}))
-            .unwrap();
-        let layer = d
-            .layers()
-            .into_iter()
-            .find(|l| l.id == "band1.thumb")
-            .unwrap();
-        assert_eq!(layer.destination, [78, 38, 14, 25]);
-        d.draw(&json!({"operations":[{"op":"pixel","x":82,"y":54,"color":"#123456"}]}))
-            .unwrap();
-        assert_eq!(
-            d.images["eqhandles.bmp"].get_pixel(18, 41).0,
-            [18, 52, 86, 255]
-        );
-        assert_eq!(d.images["eqhandles.bmp"].get_pixel(32, 41).0, [0; 4]);
-        let archive = d.archive().unwrap();
-        let preview = Document::open(&d.preview_archive().unwrap(), None).unwrap();
-        assert_eq!(
-            preview.images["eqhandles.bmp"].get_pixel(18, 16).0,
-            [18, 52, 86, 255]
-        );
-        assert_eq!(d.archive().unwrap(), archive);
-        let loaded = crate::winamp::skin::load_skin(&archive).unwrap();
-        assert!(loaded.eq_handles.is_some());
-        d.undo();
-        assert_eq!(d.images["eqhandles.bmp"].get_pixel(18, 41).0, [0; 4]);
-        d.redo();
-        assert_eq!(
-            d.images["eqhandles.bmp"].get_pixel(18, 41).0,
-            [18, 52, 86, 255]
-        );
-    }
-    #[test]
-    fn native_selection_art_and_glass_visualizer_export_and_undo() {
-        let mut d = Document::blank();
-        d.set_playlist_selection(true, "Human");
-        d.set_layout(&json!({"visualizer_glass":true}), "Human")
-            .unwrap();
-        d.state(json!({"panel":"playlist","layer":"list.selection"}))
-            .unwrap();
-        d.draw(&json!({"operations":[{"op":"pixel","x":14,"y":24,"color":"#765432"}]}))
-            .unwrap();
-        assert_eq!(
-            d.images["plselection.bmp"].get_pixel(2, 3).0,
-            [118, 84, 50, 255]
-        );
-        let skin = crate::winamp::skin::load_skin(&d.archive().unwrap()).unwrap();
-        assert!(skin.layout.visualizer_glass);
-        assert_eq!(skin.playlist_selection.unwrap().width(), 243);
-        d.undo();
-        assert_eq!(d.images["plselection.bmp"].get_pixel(2, 3).0, [0; 4]);
-        d.redo();
-        d.set_playlist_selection(false, "MCP");
-        assert_eq!(d.view.layer, "auto");
-        d.undo();
-        assert_eq!(
-            d.images["plselection.bmp"].get_pixel(2, 3).0,
-            [118, 84, 50, 255]
-        );
     }
     #[test]
     fn whole_skin_canvas_keeps_definitions_and_maps_cross_panel_history() {
@@ -4780,9 +4543,9 @@ mod tests {
             reopened.planes[32].images["main.bmp"].get_pixel(20, 30).0,
             [18, 52, 86, 255]
         );
-        assert_eq!(
-            reopened.images["main.bmp"].get_pixel(20, 30)[3],
-            0,
+        assert_ne!(
+            reopened.images["main.bmp"].get_pixel(20, 30).0,
+            [18, 52, 86, 255],
             "Project must not flatten paint into original atlas"
         );
         let mut patch = reopened
@@ -5281,7 +5044,7 @@ mod tests {
             .unwrap();
         let out = d
             .draw(&json!({"operations":[
-                {"op":"rect","x":0,"y":0,"width":99,"height":13,"color":"#ff00ff"}]}))
+                {"op":"rect","x":0,"y":0,"width":99,"height":13,"color":"transparent"}]}))
             .unwrap();
         assert_eq!(out["unsampled_pixels"], 0, "{out}");
         let out = d
@@ -5360,33 +5123,6 @@ mod tests {
         let also = same[0]["also"].as_array().expect("the other ten");
         assert_eq!(also.len(), 10, "{same:?}");
         assert!(also.contains(&json!("equalizer.band10.track")));
-    }
-    #[test]
-    fn a_blend_against_the_transparency_key_is_reported() {
-        let mut d = Document::blank();
-        d.state(json!({"panel":"atlas","sheet":"cbuttons.bmp","layer":"sheet"}))
-            .unwrap();
-        d.draw(&json!({"operations":[
-            {"op":"rect","x":0,"y":0,"width":23,"height":18,"color":"#ff00ff"}]}))
-            .unwrap();
-        let out = d
-            .draw(&json!({"operations":[
-                {"op":"ellipse","x":4,"y":4,"width":10,"height":10,"color":"#ffcc66",
-                 "fill":true,"opacity":120}]}))
-            .unwrap();
-        let keyed = out["keyed_blends"].as_array().expect("a report");
-        assert_eq!(keyed[0]["operation"], 0);
-        assert_eq!(keyed[0]["op"], "ellipse");
-        assert!(keyed[0]["pixels"].as_u64().unwrap() > 40, "{out}");
-        d.draw(&json!({"operations":[
-            {"op":"rect","x":0,"y":0,"width":23,"height":18,"color":"#203040"}]}))
-            .unwrap();
-        let out = d
-            .draw(&json!({"operations":[
-                {"op":"ellipse","x":4,"y":4,"width":10,"height":10,"color":"#ffcc66",
-                 "fill":true,"opacity":120}]}))
-            .unwrap();
-        assert!(out["keyed_blends"].is_null(), "{out}");
     }
     #[test]
     fn frames_that_came_out_the_same_picture_are_reported() {
@@ -5562,23 +5298,22 @@ mod tests {
             .any(|p| p["sheet"] == "pledit.bmp" && p["source_overlap"] == json!([128, 23, 4, 3])));
     }
     #[test]
-    fn dock_row_copies_native_edge_and_inverse_maps_without_resizing() {
+    fn the_main_sheet_is_the_full_classic_height_with_no_aliased_row() {
         let mut d = Document::blank();
-        d.state(json!({"panel":"canvas","layers":["main.docking.edge"]}))
-            .unwrap();
-        assert!(d.layers().iter().all(|l| !l.stretched()));
+        d.open_on_whole_skin();
+        assert_eq!(d.images["main.bmp"].dimensions(), (275, 116));
+        assert!(
+            !d.layers().iter().any(|l| l.id.contains("docking")),
+            "row 115 is real art now, not a copy of row 114"
+        );
+        d.state(json!({"panel":"canvas"})).unwrap();
         d.draw(&json!({"operations":[{"op":"pixel","x":137,"y":115,"color":"#72aabb"}]}))
             .unwrap();
-        assert_eq!(d.images["main.bmp"].dimensions(), (275, 115));
         assert_eq!(
-            d.images["main.bmp"].get_pixel(137, 114).0,
-            [114, 170, 187, 255]
+            d.images["main.bmp"].get_pixel(137, 115).0,
+            [114, 170, 187, 255],
+            "the bottom row takes its own ink"
         );
-        let rendered = d.render();
-        assert_eq!(rendered.get_pixel(137, 114), rendered.get_pixel(137, 115));
-        let crop = d.inspect_region([137, 115, 1, 1]).unwrap();
-        assert_eq!(crop["parts"][0]["source_overlap"], json!([137, 114, 1, 1]));
-        d.undo();
         assert_eq!(d.images["main.bmp"].get_pixel(137, 114).0, [0; 4]);
     }
     #[test]
@@ -5852,24 +5587,43 @@ mod tests {
     }
 
     #[test]
-    fn the_track_row_rectangle_follows_the_selection_marker_gutter() {
+    fn the_validator_names_a_stray_sheet_a_missing_one_and_unpainted_sprites() {
         let mut d = Document::blank();
         d.open_on_whole_skin();
-        let rows = |d: &mut Document| {
-            d.guides()
+        let entries = |d: &Document| -> Vec<String> {
+            d.divergences()
                 .into_iter()
-                .find(|g| g.id == "runtime.playlist.TRACK ROWS")
-                .expect("a track rows rectangle")
-                .rect
+                .filter(|x| !x.problem.contains("clear"))
+                .map(|x| x.entry)
+                .collect()
         };
-        assert!(!d.images.contains_key("plselection.bmp"));
-        assert_eq!(rows(&mut d)[0], 16, "list at 12, text inset 4");
-        d.set_playlist_selection(true, "test");
-        assert!(d.images.contains_key("plselection.bmp"));
-        let with = rows(&mut d);
-        assert_eq!(with[0], 24, "the marker gutter moves every row eight right");
-        assert_eq!(with[2], 219, "and takes eight from the width");
-        d.set_playlist_selection(false, "test");
-        assert_eq!(rows(&mut d)[0], 16, "and gives them back");
+        assert_eq!(entries(&d), Vec::<String>::new(), "only classic sheets");
+        assert!(
+            d.divergences().iter().any(|x| x.problem.contains("clear")),
+            "a blank skin is unpainted, and a .wsz cannot hold a clear pixel"
+        );
+        d.images
+            .insert("plbg.bmp".into(), image::RgbaImage::new(243, 203));
+        d.files.insert("plbg.bmp".into(), Vec::new());
+        assert_eq!(entries(&d), vec!["plbg.bmp".to_string()]);
+        d.images.remove("plbg.bmp");
+        d.files.remove("plbg.bmp");
+        d.files.remove("main.bmp");
+        d.images.remove("main.bmp");
+        assert_eq!(entries(&d), vec!["main.bmp".to_string()]);
+    }
+
+    #[test]
+    fn the_track_row_rectangle_has_no_gutter_because_no_marker_sheet_exists() {
+        let mut d = Document::blank();
+        d.open_on_whole_skin();
+        let rows = d
+            .guides()
+            .into_iter()
+            .find(|g| g.id == "runtime.playlist.TRACK ROWS")
+            .expect("a track rows rectangle")
+            .rect;
+        assert_eq!(rows[0], 16, "list at 12, text inset 4");
+        assert_eq!(rows[2], 227);
     }
 }

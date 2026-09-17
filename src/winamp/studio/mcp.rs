@@ -246,7 +246,8 @@ fn tools() -> Vec<Value> {
  tool("studio_targets","The sprites a stroke goes into. It lists the whole skin whatever surface is open. Leave out everything for the full list. Narrow it with sheet or id, which take one substring or a list. Each sprite says its sheet, its cell, how many states it has, and whether anything is drawn in it yet.",json!({"layers":{"type":"array","items":{"type":"string"}},"solo":{"type":"string"},"auto":{"type":"boolean"},"paint_layer":{"type":["string","null"]},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One substring, or several. Case does not matter. Six transport keys take one call."},"variants":{"type":"boolean"}}),&[]),
  tool("studio_rectangles","Where each sprite state sits on the canvas, plus the two kinds of rectangle that have no sprite. Narrow it with at, sheet, id, runtime for the readouts the player writes, or hit for controls the player hit-tests but never draws. gaps lists the parts of a sheet no cell uses.",json!({"select":{"type":"string"},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One substring, or several. Case does not matter."},"at":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4,"description":"Everything that overlaps this [x,y,width,height] box on the surface in hand: what a new band would cross. A plain list says where each one is, not what sits next to what."},"runtime":{"type":"boolean"},"gaps":{"type":"boolean","description":"The parts of one sheet no sprite reads, as rectangles, so you can keep ink out of them. pledit.bmp column 125 falls between the two footer flaps. Takes sheet, or uses the open one."},"hit":{"type":"boolean"}}),&[]),
  tool("studio_layers","Paint planes above the original sheets. list, add, select, set, move, merge_down and delete. A plane has a name, an opacity, and switches for shown, locked and clipped to the plane below.",json!({"action":{"enum":["list","add","select","set","move","merge_down","delete"]},"id":{"type":"string"},"name":{"type":"string"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"clip_below":{"type":"boolean"},"opacity":{"type":"integer","minimum":0,"maximum":255},"index":{"type":"integer","minimum":0}}),&[]),
- tool("studio_options","Everything about the skin that is not painted into a sheet. Three of them add or remove a sheet: playlist_background, playlist_selection and eq_handles. The answer names any sheet that appears or goes. It also holds the time readout, the equalizer travel, the six PLEDIT.TXT colours and the 24 VISCOLOR.TXT colours. It answers readability: the contrast of every colour the player writes against the art behind it. Leave everything out to read them all.",json!({"footer":{"enum":["classic","time-total"]},"eq_travel":{"type":"integer","minimum":1,"maximum":52},"visualizer_glass":{"type":"boolean","description":"Unlit visualizer pixels stay clear. Off, the player fills the whole spectrum rectangle with the first VISCOLOR colour. No sheet holds that box and no canvas render shows it, so only the live player reveals it."},"playlist_background":{"type":"boolean"},"eq_handles":{"type":"boolean"},"playlist_selection":{"type":"boolean"},"playlist_colors":{"type":"object","additionalProperties":{"type":"string"}},"visualizer_colors":{"type":"array","items":{"type":"string"},"minItems":24,"maxItems":24}}),&[]),
+ tool("studio_options","The skin apart from its sheets: the six PLEDIT.TXT colours and the 24 VISCOLOR.TXT colours. It answers readability: the contrast of every colour the player writes against the art behind it. Leave everything out to read them all.",json!({"playlist_colors":{"type":"object","additionalProperties":{"type":"string"}},"visualizer_colors":{"type":"array","items":{"type":"string"},"minItems":24,"maxItems":24}}),&[]),
+ tool("studio_validate","Whether this skin looks the same in every player that reads .wsz. It names each entry no player reads, each sheet the format needs and the skin lacks, and each sheet too small for its own sprites. An empty list means the skin is portable. fix repairs what it can: it drops the entries no player reads and grows the sheets that are too small.",json!({"fix":{"type":"boolean","description":"Repair instead of report. A grown sheet repeats its own edge into the new rows, so it looks the way it looked before."}}),&[]),
  tool("studio_status","The shared document: path, revision, unsaved edits, history depth, sheets, paint planes and the whole view. surface says which surface a stroke lands on.",json!({}),&[]),
  tool("studio_new","Make an empty classic skin. Nothing is kept from the old one. Set discard to true if there are unsaved edits.",json!({"discard":{"type":"boolean"}}),&[]),
  tool("studio_open","Load a WSZ into the open Studio. Set discard to true if there are unsaved edits.",json!({"path":{"type":"string"},"discard":{"type":"boolean"}}),&["path"]),
@@ -595,33 +596,6 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             doc.inspect(rect, ink)
         }
         "studio_visualizer_palette" => doc.visualizer_palette(&args)?,
-        "studio_playlist_selection" => {
-            if let Some(enabled) = args.get("enabled") {
-                doc.set_playlist_selection(
-                    enabled.as_bool().context("enabled must be boolean")?,
-                    "MCP",
-                )
-            } else {
-                json!({"enabled":doc.sheets().iter().any(|(n,_,_)| n == "plselection.bmp")})
-            }
-        }
-        "studio_eq_handles" => {
-            if let Some(enabled) = args.get("enabled") {
-                doc.set_eq_handles(enabled.as_bool().context("enabled must be boolean")?, "MCP")?
-            } else {
-                json!({"enabled":doc.sheets().iter().any(|(n,_,_)| n == "eqhandles.bmp")})
-            }
-        }
-        "studio_playlist_background" => {
-            if let Some(enabled) = args.get("enabled") {
-                doc.set_playlist_background(
-                    enabled.as_bool().context("enabled must be boolean")?,
-                    "MCP",
-                )
-            } else {
-                json!({"enabled":doc.has_playlist_background()})
-            }
-        }
         "studio_canvas" | "studio_atlas" => {
             let mut view = args.clone();
             if name == "studio_atlas" {
@@ -772,36 +746,6 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             }
         }
         "studio_options" => {
-            let mut appeared: Vec<String> = Vec::new();
-            let before: Vec<String> = doc.sheets().into_iter().map(|(n, _, _)| n).collect();
-            for (key, call) in [
-                ("playlist_background", 0u8),
-                ("eq_handles", 1),
-                ("playlist_selection", 2),
-            ] {
-                let Some(on) = args.get(key).and_then(Value::as_bool) else {
-                    continue;
-                };
-                match call {
-                    0 => {
-                        doc.set_playlist_background(on, "MCP");
-                    }
-                    1 => {
-                        doc.set_eq_handles(on, "MCP")?;
-                    }
-                    _ => {
-                        doc.set_playlist_selection(on, "MCP");
-                    }
-                }
-            }
-            let layout: Value = ["footer", "eq_travel", "visualizer_glass"]
-                .into_iter()
-                .filter_map(|k| args.get(k).map(|v| (k.to_string(), v.clone())))
-                .collect::<serde_json::Map<String, Value>>()
-                .into();
-            if !layout.as_object().unwrap().is_empty() {
-                doc.set_layout(&layout, "MCP")?;
-            }
             if let Some(colors) = args.get("playlist_colors") {
                 doc.set_palette(colors)?;
             }
@@ -810,28 +754,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             }
             let readability = doc.readability();
             let (playlist, visualizer) = doc.text_palettes();
-            let sheets = doc.sheets();
-            for (name, w, h) in &sheets {
-                if !before.contains(name) {
-                    appeared.push(format!(
-                        "{name} is now a sheet, {w}x{h}: {}",
-                        super::model::Document::new_sheet_note(name)
-                    ));
-                }
-            }
-            for name in &before {
-                if !sheets.iter().any(|(n, _, _)| n == name) {
-                    appeared.push(format!("{name} is gone and will not be exported"));
-                }
-            }
-            let layout = doc.layout();
-            let mut value = json!({
-                "footer": layout.footer,
-                "eq_travel": layout.eq_travel,
-                "visualizer_glass": layout.visualizer_glass,
-                "playlist_background": doc.has_playlist_background(),
-                "eq_handles": sheets.iter().any(|(n, _, _)| n == "eqhandles.bmp"),
-                "playlist_selection": sheets.iter().any(|(n, _, _)| n == "plselection.bmp"),
+            json!({
                 "playlist_colors": playlist
                     .into_iter()
                     .map(|(k, v)| (k.to_string(), json!(v)))
@@ -839,21 +762,17 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 "visualizer_colors": visualizer,
                 "visualizer_slots": VISUALIZER_SLOTS,
                 "readability": readability,
-            });
-            if !appeared.is_empty() {
-                doc.message = appeared.join("; ");
-                value["sheets_changed"] = json!(appeared);
-            }
-            value
+            })
         }
-        "studio_layout" => {
-            if args.get("footer").is_some()
-                || args.get("eq_travel").is_some()
-                || args.get("visualizer_glass").is_some()
-            {
-                doc.set_layout(&args, "MCP")?
+        "studio_validate" => {
+            if args.get("fix").and_then(Value::as_bool) == Some(true) {
+                doc.make_portable("MCP")?
             } else {
-                json!({"layout":doc.layout()})
+                let divergences = doc.divergences();
+                json!({
+                    "plays_the_same_elsewhere": divergences.is_empty(),
+                    "divergences": divergences,
+                })
             }
         }
         "studio_palette" => doc.palette(),
@@ -1054,7 +973,6 @@ mod tests {
             "studio_patch",
             "studio_inspect_region",
             "studio_render",
-            "studio_layout",
             "studio_set_palette",
             "studio_visualizer_palette",
         ] {
@@ -1067,7 +985,7 @@ mod tests {
     #[test]
     fn the_retired_tools_still_answer() {
         let shared = document();
-        for retired in ["studio_state", "studio_layout", "studio_palette"] {
+        for retired in ["studio_state", "studio_palette"] {
             call(retired, json!({}), &shared)
                 .unwrap_or_else(|e| panic!("{retired} should still answer: {e:#}"));
         }
@@ -1078,25 +996,16 @@ mod tests {
         let before = call("studio_options", json!({}), &shared).unwrap();
         let before: Value =
             serde_json::from_str(before["content"][0]["text"].as_str().unwrap()).unwrap();
-        assert_eq!(before["footer"], "classic");
-        assert_eq!(before["eq_travel"], 52);
-        assert_eq!(before["visualizer_glass"], false);
         assert_eq!(before["playlist_colors"].as_object().unwrap().len(), 6);
         assert_eq!(before["visualizer_colors"].as_array().unwrap().len(), 24);
         let after = call(
             "studio_options",
-            json!({
-                "footer": "time-total",
-                "eq_travel": 40,
-                "playlist_colors": {"Normal": "#010203"},
-            }),
+            json!({ "playlist_colors": {"Normal": "#010203"} }),
             &shared,
         )
         .unwrap();
         let after: Value =
             serde_json::from_str(after["content"][0]["text"].as_str().unwrap()).unwrap();
-        assert_eq!(after["footer"], "time-total");
-        assert_eq!(after["eq_travel"], 40);
         assert_eq!(after["playlist_colors"]["Normal"], "#010203");
     }
     #[test]
@@ -1516,7 +1425,7 @@ mod drawing_tests {
             &json!({"crop":[0,0,8,8],"panel":"main"}),
         )
         .unwrap();
-        reject_unknown_arguments("studio_layout", &json!({"anything": 1})).unwrap();
+        reject_unknown_arguments("studio_patch", &json!({"anything": 1})).unwrap();
     }
     #[test]
     fn the_canvas_can_be_read_back_cropped() {
@@ -1542,7 +1451,7 @@ mod drawing_tests {
         let out = result(&shared, "studio_new", json!({ "discard": true }));
         assert_eq!(out["surface"], "canvas");
         assert_eq!(out["canvas"], json!([275, 377]));
-        assert_eq!(out["sprites"], json!(81));
+        assert_eq!(out["sprites"], json!(80));
     }
     #[test]
     fn a_curve_may_start_and_end_between_pixels() {
@@ -1630,28 +1539,20 @@ mod drawing_tests {
         }
     }
     #[test]
-    fn the_playlist_background_is_sampled_to_its_last_row() {
+    fn studio_validate_tells_a_blank_skin_its_sprites_are_unpainted() {
         let shared = blank();
-        result(
-            &shared,
-            "studio_options",
-            json!({"playlist_background":true}),
+        let out = result(&shared, "studio_validate", json!({}));
+        assert_eq!(out["plays_the_same_elsewhere"], json!(false), "{out}");
+        assert!(
+            out["divergences"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|d| d["problem"].as_str().unwrap().contains("clear")),
+            "a blank skin has nothing wrong but unpainted sprites: {out}"
         );
-        call(
-            "studio_canvas",
-            json!({ "preview_playlist_height": 145 }),
-            &shared,
-        )
-        .unwrap();
-        call("studio_atlas", json!({"sheet":"plbg.bmp"}), &shared).unwrap();
-        let out = result(
-            &shared,
-            "studio_draw",
-            json!({"operations":[{"op":"rect","x":0,"y":0,"width":243,"height":203,
-                                 "color":"#101418"}]}),
-        );
-        assert_eq!(out["unsampled_pixels"], json!(0));
     }
+
     #[test]
     fn a_state_sheet_answers_for_a_named_sprite_whatever_surface_is_open() {
         let shared = blank();

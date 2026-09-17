@@ -245,7 +245,12 @@ fn every_window_s_options_are_reachable_without_scrolling_the_canvas() {
     let mut shell = studio(document);
     click(&mut shell, PANEL_ROW[7]);
     let texts = visible_texts(&mut shell);
-    for option in ["SKIN OPTIONS", "Playlist", "Equalizer", "Visualizer"] {
+    for option in [
+        "SKIN OPTIONS",
+        "PLAYS THE SAME ELSEWHERE",
+        "PLEDIT.TXT",
+        "VISCOLOR.TXT",
+    ] {
         assert!(
             contains(&texts, option),
             "{option:?} belongs to a different window but must still be here; visible={texts:?}"

@@ -11,8 +11,7 @@ pub fn to_rect(rect: SpriteRect) -> Rect {
 }
 pub const MAIN_WIDTH: f32 = 275.0;
 pub const MAIN_HEIGHT: f32 = 116.0;
-pub const MAIN_WINDOW: SpriteRect = (0.0, 0.0, MAIN_WIDTH, 115.0);
-pub const MAIN_DOCK_EDGE: SpriteRect = (0.0, 114.0, MAIN_WIDTH, 1.0);
+pub const MAIN_WINDOW: SpriteRect = (0.0, 0.0, MAIN_WIDTH, 116.0);
 pub const TITLE_DRAG_AREA: SpriteRect = (0.0, 0.0, 275.0, 14.0);
 pub const MAIN_TITLE_BAR: SpriteRect = (27.0, 15.0, 275.0, 14.0);
 pub const MAIN_TITLE_BAR_SELECTED: SpriteRect = (27.0, 0.0, 275.0, 14.0);
@@ -142,6 +141,7 @@ pub const POS_EQ_GRAPH_BG: (f32, f32) = (86.0, 17.0);
 pub const POS_EQ_PREAMP_LINE: (f32, f32) = (86.0, 26.0);
 pub const EQ_SLIDER_BG_Y: f32 = 38.0;
 pub const EQ_SLIDER_TRACK_HEIGHT: f32 = 63.0;
+pub const EQ_SLIDER_THUMB_TRAVEL: f32 = 51.0;
 pub const EQ_SLIDER_THUMB_Y_OFFSET: f32 = 0.0;
 pub const EQ_SLIDER_XS: [f32; 11] = [
     21.0, 78.0, 96.0, 114.0, 132.0, 150.0, 168.0, 186.0, 204.0, 222.0, 240.0,
