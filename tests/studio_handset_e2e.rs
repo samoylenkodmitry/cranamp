@@ -130,3 +130,27 @@ fn the_edit_scope_is_reachable_where_there_is_no_sidebar() {
         );
     }
 }
+
+/// The pointer's half of `at` and of a swept `[from, to]`.
+///
+/// A capability that only MCP can reach exists for whoever is holding a socket
+/// and for nobody drawing by hand, on a phone, or in a browser — which are the
+/// surfaces with no socket to reach it with instead.
+#[test]
+fn stamp_repeat_and_sweep_are_reachable_where_there_is_no_sidebar() {
+    let document = cranamp::winamp::studio::open_document(None).expect("a document");
+    open(&document, "tools", "stamp");
+    let mut shell = touch(document);
+    let texts = visible_texts(&mut shell);
+    for control in [
+        "STAMP COPIES ALONG A DRAG",
+        "5×",
+        "11×",
+        "Every copy in the edit scope",
+    ] {
+        assert!(
+            contains(&texts, control),
+            "{control:?} is how a hand does what studio_draw's at does; visible={texts:?}"
+        );
+    }
+}

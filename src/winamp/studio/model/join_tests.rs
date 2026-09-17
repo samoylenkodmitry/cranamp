@@ -106,7 +106,7 @@ fn gui_brush_preview_lift_stamp_and_cancel_cross_joins() {
                 }
                 doc.checkpoint();
                 if brush == "pencil" {
-                    doc.paint_line(from, to, [237, 71, 145, 255], "auto", Scope::All)
+                    doc.paint_line(from, to, [237, 71, 145, 255], "auto", Scope::All.into())
                         .unwrap();
                 } else if brush == "stamp" {
                     doc.shape_stroke(from, from).unwrap();
@@ -181,13 +181,25 @@ fn classic_list_holes_are_reported_in_mcp_and_gui_instead_of_silent_success() {
     }
     d.undo();
     d.checkpoint();
-    d.paint_line([6, 270], [16, 270], [237, 71, 145, 255], "auto", Scope::All)
-        .unwrap();
+    d.paint_line(
+        [6, 270],
+        [16, 270],
+        [237, 71, 145, 255],
+        "auto",
+        Scope::All.into(),
+    )
+    .unwrap();
     d.finish_stroke();
     assert!(d.message.contains("5 pixels have no bitmap source"));
     d.checkpoint();
-    d.paint_line([6, 270], [6, 275], [237, 71, 145, 255], "auto", Scope::All)
-        .unwrap();
+    d.paint_line(
+        [6, 270],
+        [6, 275],
+        [237, 71, 145, 255],
+        "auto",
+        Scope::All.into(),
+    )
+    .unwrap();
     d.finish_stroke();
     assert!(!d.message.contains("no bitmap source"));
     let clean = d

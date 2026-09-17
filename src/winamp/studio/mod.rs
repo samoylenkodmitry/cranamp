@@ -2763,7 +2763,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                                                 )
                                                                                 .unwrap(),
                                                                                 "selection",
-                                                                                model::Scope::named(&v.states),
+                                                                                model::Scope::named(&v.states).into(),
                                                                             );
                                                                             }
                                                                             last = Some(point);
@@ -2794,7 +2794,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                                                     )
                                                                                     .unwrap(),
                                                                                     "selection",
-                                                                                    model::Scope::named(&v.states),
+                                                                                    model::Scope::named(&v.states).into(),
                                                                                 );
                                                                                 }
                                                                                 last = Some(point);
@@ -3204,7 +3204,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         move || {
             let shared = shared.clone();
             Box(
-                Modifier::empty().size_points(room.0 + 24., 940.),
+                Modifier::empty().size_points(room.0 + 24., 1040.),
                 BoxSpec::default(),
                 move || {
                     let v = shared.lock().unwrap().view.clone();
@@ -3459,6 +3459,45 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                             move || state(&d, json!({ "opacity": amount })),
                         );
                     }
+                    // The pointer's half of `at` and of a swept `[from, to]`:
+                    // one lift, one drag, N copies -- five transport berths,
+                    // nine playlist header tiles, eleven equalizer bands.
+                    Label(
+                        "STAMP COPIES ALONG A DRAG".into(),
+                        12.,
+                        658.,
+                        348.,
+                        11.,
+                        DIM,
+                    );
+                    for (i, n) in [1u32, 2, 3, 5, 9, 11].into_iter().enumerate() {
+                        let d = shared.clone();
+                        Choice(
+                            format!("{n}×"),
+                            12. + (i % 6) as f32 * 59.,
+                            674.,
+                            53.,
+                            v.stamp_repeat == n,
+                            move || state(&d, json!({ "stamp_repeat": n })),
+                        );
+                    }
+                    {
+                        let d = shared.clone();
+                        let on = v.stamp_sweep;
+                        Toggle(
+                            if on {
+                                "One copy per sprite state"
+                            } else {
+                                "Every copy in the edit scope"
+                            }
+                            .into(),
+                            12.,
+                            708.,
+                            348.,
+                            on,
+                            move || state(&d, json!({ "stamp_sweep": !on })),
+                        );
+                    }
                     // Which variants of each target a stroke lands in. A slider
                     // is twenty-eight frames that differ by one object, so the
                     // useful scope is neither this frame nor all of them but
@@ -3466,14 +3505,14 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                     // the quick-access sidebar, which is the one strip a
                     // handset does not get, so it is here with every other
                     // brush setting instead.
-                    Label("EDIT SCOPE".into(), 12., 658., 348., 11., DIM);
+                    Label("EDIT SCOPE".into(), 12., 750., 348., 11., DIM);
                     for (i, scope) in model::SCOPES.iter().enumerate() {
                         let d = shared.clone();
                         let scope = *scope;
                         Choice(
                             model::scope_label(scope).into(),
                             12. + (i % 2) as f32 * 178.,
-                            674. + (i / 2) as f32 * 34.,
+                            766. + (i / 2) as f32 * 34.,
                             170.,
                             v.states == scope,
                             move || state(&d, json!({ "states": scope })),
@@ -3494,7 +3533,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                         Toggle(
                             label.into(),
                             12. + (i % 2) as f32 * 178.,
-                            750. + (i / 2) as f32 * 42.,
+                            842. + (i / 2) as f32 * 42.,
                             170.,
                             on,
                             move || state(&d, json!({field:!on})),
@@ -3510,7 +3549,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                             "Mask picked color".into()
                         },
                         12.,
-                        880.,
+                        972.,
                         348.,
                         mask_on,
                         move || {
@@ -3523,7 +3562,7 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                     Label(
                         "Lift a region; Stamp places its exact pixels.".into(),
                         12.,
-                        914.,
+                        1006.,
                         353.,
                         10.,
                         DIM,
@@ -4185,7 +4224,7 @@ mod integration_tests {
                 [44, 90],
                 [17, 34, 51, 255],
                 "play",
-                model::Scope::Current,
+                model::Scope::Current.into(),
             )
             .unwrap();
         }

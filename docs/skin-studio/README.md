@@ -231,6 +231,8 @@ both panels, and every drawing operation may override its own.
 | `alpha_lock` | bool | **Lock transparent pixels** |
 | `mask_colors` | list of colours | **Mask picked color** |
 | `states` | `current`, `onward`, `up-to`, `all` | **EDIT SCOPE** |
+| `stamp_repeat` | 1..64 | **STAMP COPIES ALONG A DRAG** |
+| `stamp_sweep` | bool | **One copy per sprite state** |
 | `clip` | `[x,y,w,h]` or null | selected rectangle / **Clear paint clip** |
 | `grid`, `guides` | bool | pixel grid (4× and up), rectangle outlines |
 
@@ -257,6 +259,40 @@ instead of twenty-eight drawings. `all_states: true` is the retired name for
 `all` and still answers, on the way in and in `view`. A draw whose scope is
 wider than one variant answers `states_written` with the scope and how many
 variants each target got.
+
+### Repeating and sweeping
+
+A sheet is a grid of cells that mostly hold the same drawing, and a slider is one
+shape whose numbers walk across its frames. Both used to be loops outside the
+editor emitting the same operations N times.
+
+| Want | Write |
+| --- | --- |
+| the same drawing in five berths | `at: "targets"` with the five sprites in `layers` |
+| the same drawing at chosen places | `at: [[0,0],[23,0],[46,0],…]` |
+| a slider's 28 frames | `states: "all"` and `[from, to]` on the numbers that move |
+
+A numeric operation field written as `[from, to]` is a **sweep**: the operation
+is drawn once per variant the transaction writes, with that number walking from
+the first variant to the last and landing on whole pixels. Sweepable: `x`, `y`,
+`x2`, `y2`, `width`, `height`, `brush_size`, `curve_bend`, `bevel`,
+`refraction`, `opacity`, `grain`, `grain_size`, `grain_seed`, `spacing`,
+`scale` — and `control`, written as two points rather than two numbers. A sweep
+needs a named target to count variants on, and more than one variant to walk
+across; it says so when it has neither.
+
+```json
+{"layers":["main.balance.track"],"states":"all","operations":[
+  {"op":"curve","x":195,"y":65,"x2":[180,210],"y2":58,"curve_bend":[55,-55],"color":"#5d5d6e"}]}
+```
+
+That is one call for all twenty-eight frames of a balance tail.
+
+The pointer does the same two things with one lift and one drag: **STAMP COPIES
+ALONG A DRAG** places N copies of the clipboard evenly between where the drag
+started and where it ended, and **One copy per sprite state** puts one in each
+variant of the edit scope instead — lift a tail, set the scope to All, and drag
+from where frame 0 wants it to where frame 27 does.
 
 ### Text
 
@@ -573,6 +609,7 @@ palette pair. They are not offered in the tool list.
 | `color`, `ramp`, `ramp_axis` | `#rrggbb`; exact palette colours along an axis |
 | `rows`, `palette` | one character per pixel; a character absent from the palette is skipped, which is how transparency is spelled |
 | `text`, `face`, `scale`, `spacing` | see **Text** |
+| `align`, `width` | place the word in a box `width` wide starting at `x` — `left`, `center` or `right` — instead of starting it at `x` |
 | `data` | base64 PNG for `image` |
 | `material`, `bevel`, `refraction` | glass |
 | `grain`, `grain_size`, `grain_seed`, `opacity` | materials |
@@ -591,6 +628,7 @@ Transaction-level fields on `studio_draw`:
 | `label` | names the history entry |
 | `preview` | dry run: applied, answered, and put back; nothing recorded, revision unmoved |
 | `states` | the edit scope: `current`, `onward`, `up-to`, `all` |
+| `at` | run the whole operation list once at each `[x, y]` offset, or at each chosen target's own destination with `"targets"`; at most 256 places |
 | `crop`, `zoom`, `magnify`, `path` | read the surface back, as `studio_canvas` does — on a committed transaction as well as a `preview` |
 
 ### Draw reports
@@ -609,6 +647,8 @@ All describe the transaction in hand.
 | `crossed_cells` | ink left its own cell and landed in a **repeated** one, which the player then draws n times. Silent for a cell painted on its own, and for an operation covering the whole sheet |
 | `identical_variants` | variants that came out the same picture — 28 slider frames all on frame 0, or a pressed state identical to its released one. Fully transparent variants are excluded; sprites sharing source cells share one entry, with `also` |
 | `unsupported_characters` | characters the face does not have; the rest of the text still landed |
+| `repeated` | how many places `at` ran the operations at |
+| `swept` | which fields walked, and over how many steps |
 | `states_written` | the scope, and how many variants each target got, when it was more than the one in hand |
 | `surface`, `revision`, `note` | which surface, which revision, the sheet's note |
 

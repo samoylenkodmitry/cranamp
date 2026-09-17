@@ -35,6 +35,143 @@ pub fn scope_label(scope: &str) -> &'static str {
     }
 }
 
+/// One pass of a transaction: the scope, and which single step of it this pass
+/// is painting.
+///
+/// A sweep draws the same operation once per variant with its numbers moved a
+/// little each time -- a slider's twenty-eight frames are one shape whose
+/// endpoint walks across the cell -- so each pass has to land in exactly one
+/// variant of the scope rather than in all of them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Variants {
+    pub scope: Scope,
+    /// Which cell of `scope`, when a sweep is painting them one at a time.
+    pub pick: Option<usize>,
+}
+impl From<Scope> for Variants {
+    fn from(scope: Scope) -> Self {
+        Variants { scope, pick: None }
+    }
+}
+impl Variants {
+    pub fn cells(self, layer: &Layer) -> Vec<[u32; 4]> {
+        let cells = self.scope.cells(layer);
+        match self.pick {
+            Some(k) => cells.get(k).copied().into_iter().collect(),
+            None => cells,
+        }
+    }
+}
+
+/// The operation fields a sweep may walk. Every one of them is a number the
+/// rasteriser reads; `control` is the one that is a pair, and it sweeps as two
+/// pairs rather than as two numbers.
+const SWEEPABLE: &[&str] = &[
+    "x",
+    "y",
+    "x2",
+    "y2",
+    "width",
+    "height",
+    "brush_size",
+    "curve_bend",
+    "bevel",
+    "refraction",
+    "opacity",
+    "grain",
+    "grain_size",
+    "grain_seed",
+    "spacing",
+    "scale",
+    "text_scale",
+];
+
+/// Which fields of these operations are written as `[from, to]`.
+fn sweep_fields(operations: &[Value]) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for op in operations {
+        let Some(fields) = op.as_object() else {
+            continue;
+        };
+        for (key, value) in fields {
+            let is_pair = match (key.as_str(), value) {
+                ("control", Value::Array(a)) => a.len() == 2 && a.iter().all(Value::is_array),
+                (k, Value::Array(a)) => {
+                    SWEEPABLE.contains(&k) && a.len() == 2 && a.iter().all(Value::is_number)
+                }
+                _ => false,
+            };
+            if is_pair && !found.contains(key) {
+                found.push(key.clone());
+            }
+        }
+    }
+    found
+}
+
+/// One operation, moved to a place and stepped to a point in its sweep.
+///
+/// `t` runs 0..1 across the variants the transaction writes. Swept numbers land
+/// on whole pixels: a curve may be fractional, but a slider frame that is half
+/// a pixel along is the same picture as the one before it, and
+/// `identical_variants` would rightly complain about it.
+fn place_operation(op: &Value, shift: [i32; 2], t: f64) -> Value {
+    let mut op = op.clone();
+    let lerp = |a: f64, b: f64| (a + (b - a) * t).round();
+    if let Some(fields) = op.as_object_mut() {
+        for (key, value) in fields.iter_mut() {
+            match (key.as_str(), &value) {
+                ("control", Value::Array(a)) if a.len() == 2 && a.iter().all(Value::is_array) => {
+                    let point =
+                        |i: usize, j: usize| a[i].get(j).and_then(Value::as_f64).unwrap_or(0.0);
+                    *value = json!([
+                        lerp(point(0, 0), point(1, 0)),
+                        lerp(point(0, 1), point(1, 1))
+                    ]);
+                }
+                (k, Value::Array(a))
+                    if SWEEPABLE.contains(&k) && a.len() == 2 && a.iter().all(Value::is_number) =>
+                {
+                    let from = a[0].as_f64().unwrap_or(0.0);
+                    let to = a[1].as_f64().unwrap_or(0.0);
+                    *value = json!(lerp(from, to) as i64);
+                }
+                _ => {}
+            }
+        }
+    }
+    if shift != [0, 0] {
+        for (key, d) in [("x", shift[0]), ("y", shift[1])] {
+            let at = op.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+            op[key] = json!(at + d as f64);
+        }
+        for (key, d) in [("x2", shift[0]), ("y2", shift[1])] {
+            if let Some(at) = op.get(key).and_then(Value::as_f64) {
+                op[key] = json!(at + d as f64);
+            }
+        }
+        if let Some(c) = op.get_mut("control").and_then(Value::as_array_mut) {
+            for (i, d) in [shift[0], shift[1]].into_iter().enumerate() {
+                if let Some(v) = c.get(i).and_then(Value::as_f64) {
+                    c[i] = json!(v + d as f64);
+                }
+            }
+        }
+        if let Some(points) = op.get_mut("points").and_then(Value::as_array_mut) {
+            let _ = points;
+        }
+    }
+    // Whole-pixel operations want whole numbers back after a float shift.
+    for key in ["x", "y", "x2", "y2"] {
+        if let Some(v) = op.get(key).and_then(Value::as_f64) {
+            if v.fract() == 0.0 {
+                op[key] = json!(v as i64);
+            }
+        }
+    }
+    op
+}
+
 /// Which variants of one sprite a stroke lands in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Scope {
@@ -260,6 +397,16 @@ pub struct View {
     /// twenty-eight transactions. `onward` and `up-to` run from the variant in
     /// hand to an end, which is the shape every slider's artwork actually has.
     pub states: String,
+    /// How many copies a Stamp drag places, evenly along the drag. The pointer's
+    /// half of `at`: a sheet is a grid of cells that mostly hold the same
+    /// drawing, and lifting it once and dragging across them is how a hand does
+    /// what `at` does from a socket.
+    pub stamp_repeat: u32,
+    /// A Stamp drag places one copy per variant of the edit scope, stepping
+    /// along the drag. The pointer's half of a swept `[from, to]`: lift a tail,
+    /// set the scope to All, and drag from where frame 0 wants it to where
+    /// frame 27 does.
+    pub stamp_sweep: bool,
     pub pressed: bool,
     pub active: bool,
     pub volume: u8,
@@ -311,6 +458,8 @@ impl Default for View {
             alpha_lock: false,
             mask_colors: vec![],
             states: SCOPE_CURRENT.into(),
+            stamp_repeat: 1,
+            stamp_sweep: false,
             pressed: false,
             active: true,
             volume: 20,
@@ -852,6 +1001,11 @@ impl Document {
             (-2..=8).contains(&view.text_spacing),
             "text_spacing is -2..8 (got {})",
             view.text_spacing
+        );
+        anyhow::ensure!(
+            (1..=64).contains(&view.stamp_repeat),
+            "stamp_repeat is 1..64 (got {})",
+            view.stamp_repeat
         );
         anyhow::ensure!(
             SCOPES.contains(&view.states.as_str()),
@@ -1649,7 +1803,7 @@ impl Document {
         im: &RgbaImage,
         at: [i32; 2],
         layer: &str,
-        all: Scope,
+        all: Variants,
         layers: &[Layer],
     ) -> Result<usize> {
         let mut n = 0;
@@ -1986,7 +2140,7 @@ impl Document {
         to: [i32; 2],
         color: [u8; 4],
         layer: &str,
-        all: Scope,
+        all: Variants,
     ) -> Result<usize> {
         let op = json!({"op":"line","x":from[0],"y":from[1],"x2":to[0],"y2":to[1],"brush_size":self.view.brush_size});
         let count = self.paint_shape(&op, color, layer, all, &self.layers())?;
@@ -2000,7 +2154,7 @@ impl Document {
         op: &Value,
         color: [u8; 4],
         layer: &str,
-        all: Scope,
+        all: Variants,
         layers: &[Layer],
     ) -> Result<usize> {
         let (w, h) = self.canvas_size();
@@ -2176,13 +2330,47 @@ impl Document {
                 self.planes = before.planes.clone();
             }
             let cluster = self.cluster.clone().context("Lift a pixel cluster first")?;
-            let count = self.paint_cluster(
-                &cluster,
-                to,
-                "selection",
-                Scope::named(&self.view.states),
-                &self.layers(),
-            )?;
+            let layers = self.layers();
+            let scope = Scope::named(&self.view.states);
+            // One copy per variant when sweeping, otherwise as many as asked
+            // for. Both walk the drag: the first copy lands where the drag
+            // started and the last where it ended, so a slider's whole travel
+            // is one gesture.
+            let variants = self
+                .view
+                .layers
+                .iter()
+                .filter_map(|id| layers.iter().find(|l| &l.id == id))
+                .map(|l| scope.cells(l).len())
+                .max()
+                .unwrap_or(1);
+            let copies = if self.view.stamp_sweep {
+                variants.max(1)
+            } else {
+                self.view.stamp_repeat as usize
+            };
+            let mut count = 0;
+            for k in 0..copies.max(1) {
+                let t = if copies > 1 {
+                    k as f64 / (copies - 1) as f64
+                } else {
+                    1.0
+                };
+                let at = [
+                    (from[0] as f64 + (to[0] - from[0]) as f64 * t).round() as i32,
+                    (from[1] as f64 + (to[1] - from[1]) as f64 * t).round() as i32,
+                ];
+                count += self.paint_cluster(
+                    &cluster,
+                    at,
+                    "selection",
+                    Variants {
+                        scope,
+                        pick: (self.view.stamp_sweep && variants > 1).then_some(k),
+                    },
+                    &layers,
+                )?;
+            }
             if count > 0 {
                 self.changed();
             }
@@ -2237,7 +2425,7 @@ impl Document {
             &op,
             parse_color(&v.color)?,
             "selection",
-            Scope::named(&v.states),
+            Scope::named(&v.states).into(),
             &self.layers(),
         )?;
         self.changed();
@@ -2255,7 +2443,7 @@ impl Document {
         to: [i32; 2],
         color: [u8; 4],
         layer: &str,
-        all: Scope,
+        all: Variants,
         layers: &[Layer],
     ) -> Result<usize> {
         let (w, h) = self.canvas_size();
@@ -2326,8 +2514,11 @@ impl Document {
             for l in hits {
                 let (sx, sy) = l.map(x as u32, y as u32).unwrap();
                 let targets = all.cells(l);
-                if all != Scope::Current {
-                    self.scope_writes.insert(l.id.clone(), targets.len());
+                if all.scope != Scope::Current {
+                    // The scope's own count, not this pass's. A sweep paints one
+                    // variant per pass and still wrote the whole run.
+                    self.scope_writes
+                        .insert(l.id.clone(), all.scope.cells(l).len());
                 }
                 let dimensions = self
                     .images
@@ -2455,41 +2646,123 @@ impl Document {
                 None => self.view.states.clone(),
             },
         };
-        let all = Scope::named(&scope);
+        let base_scope = Scope::named(&scope);
         let layer = "selection";
         let operations = args
             .get("operations")
             .and_then(Value::as_array)
             .context("operations array required")?;
-        let shifted = (offset != [0, 0]).then(|| {
-            operations
-                .iter()
-                .map(|op| {
-                    let mut op = op.clone();
-                    for (key, d) in [("x", offset[0]), ("y", offset[1])] {
-                        let at = op.get(key).and_then(Value::as_i64).unwrap_or(0) as i32;
-                        op[key] = json!(at + d);
-                    }
-                    for (key, d) in [("x2", offset[0]), ("y2", offset[1])] {
-                        if let Some(at) = op.get(key).and_then(Value::as_i64) {
-                            op[key] = json!(at as i32 + d);
-                        }
-                    }
-                    if let Some(c) = op.get_mut("control").and_then(Value::as_array_mut) {
-                        for (i, d) in [offset[0], offset[1]].into_iter().enumerate() {
-                            if let Some(v) = c.get(i).and_then(Value::as_f64) {
-                                c[i] = json!(v + d as f64);
-                            }
-                        }
-                    }
-                    op
+        // Where to run the whole operation list. One place is an ordinary
+        // transaction; `at` repeats it, which is the difference between drawing
+        // ten identical berths and writing a loop outside the editor to emit
+        // ten copies of the same nine operations.
+        let places: Vec<[i32; 2]> = match args.get("at") {
+            None => vec![[0, 0]],
+            Some(Value::String(word)) => {
+                anyhow::ensure!(
+                    word == "targets",
+                    "at is a list of [x, y] offsets or \"targets\" (got {word})"
+                );
+                anyhow::ensure!(
+                    !selected.is_empty(),
+                    "at \"targets\" runs the operations once at each chosen \
+                     sprite's own destination, so it needs targets: name them in \
+                     layers, or give explicit [x, y] offsets"
+                );
+                let known = self.layers();
+                selected
+                    .iter()
+                    .map(|id| {
+                        known
+                            .iter()
+                            .find(|l| &l.id == id)
+                            .map(|l| [l.destination[0] as i32, l.destination[1] as i32])
+                            .with_context(|| format!("Unknown layer {id}"))
+                    })
+                    .collect::<Result<_>>()?
+            }
+            Some(Value::Array(list)) => {
+                anyhow::ensure!(!list.is_empty(), "at is at least one [x, y] offset");
+                anyhow::ensure!(list.len() <= 256, "at is at most 256 places");
+                list.iter()
+                    .enumerate()
+                    .map(|(i, place)| {
+                        let pair: [i32; 2] = serde_json::from_value(place.clone())
+                            .with_context(|| format!("at[{i}] is [x, y] (got {place})"))?;
+                        Ok(pair)
+                    })
+                    .collect::<Result<_>>()?
+            }
+            Some(other) => bail!("at is a list of [x, y] offsets or \"targets\" (got {other})"),
+        };
+        // Numbers that walk across the variants this transaction writes. A
+        // slider's twenty-eight frames are one shape whose endpoint moves, and
+        // spelling that as `[from, to]` is the difference between one call and
+        // twenty-eight.
+        let swept = sweep_fields(operations);
+        let steps = if swept.is_empty() {
+            1
+        } else {
+            anyhow::ensure!(
+                !selected.is_empty(),
+                "a sweep writes one variant per step, so it needs a named target: \
+                 {} is swept and the targets are Auto",
+                swept.join(", ")
+            );
+            let known = self.layers();
+            let mut counts: Vec<(String, usize)> = Vec::new();
+            for id in &selected {
+                let layer = known
+                    .iter()
+                    .find(|l| &l.id == id)
+                    .with_context(|| format!("Unknown layer {id}"))?;
+                counts.push((id.clone(), Scope::named(&scope).cells(layer).len()));
+            }
+            let n = counts[0].1;
+            anyhow::ensure!(
+                counts.iter().all(|(_, c)| *c == n),
+                "a sweep steps through one run of variants, and these do not \
+                 agree: {}",
+                counts
+                    .iter()
+                    .map(|(id, c)| format!("{id} has {c}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            anyhow::ensure!(
+                n > 1,
+                "a sweep needs more than one variant to walk across; \
+                 {} writes {n} in scope {scope}",
+                counts[0].0
+            );
+            n
+        };
+        let passes = places.len().saturating_mul(steps);
+        anyhow::ensure!(
+            operations.len().saturating_mul(passes) <= 10000,
+            "At most 10000 operations per transaction ({} operations at {} places \
+             over {steps} sweep steps is {})",
+            operations.len(),
+            places.len(),
+            operations.len().saturating_mul(passes)
+        );
+        let prepared: Vec<Vec<Value>> = places
+            .iter()
+            .flat_map(|place| {
+                let shift = [place[0] + offset[0], place[1] + offset[1]];
+                (0..steps).map(move |step| {
+                    let t = if steps > 1 {
+                        step as f64 / (steps - 1) as f64
+                    } else {
+                        0.0
+                    };
+                    operations
+                        .iter()
+                        .map(|op| place_operation(op, shift, t))
+                        .collect::<Vec<_>>()
                 })
-                .collect::<Vec<_>>()
-        });
-        let operations = shifted.as_ref().unwrap_or(operations);
-        if operations.len() > 10000 {
-            bail!("At most 10000 operations per transaction");
-        }
+            })
+            .collect();
         let mask: Vec<String> = args
             .get("mask_colors")
             .map(|v| serde_json::from_value(v.clone()))
@@ -2540,199 +2813,241 @@ impl Document {
         let mut at: Option<(usize, String)> = None;
         let mut skipped: Vec<char> = Vec::new();
         let result = (|| -> Result<()> {
-            for (index, op) in operations.iter().enumerate() {
-                let kind = op.get("op").and_then(Value::as_str).unwrap_or("pixel");
-                at = Some((index, kind.to_owned()));
-                self.operation_box = None;
-                self.keyed_blend.clear();
-                let color = parse_color(
-                    op.get("color")
-                        .and_then(Value::as_str)
-                        .unwrap_or(&self.view.color),
-                )?;
-                // A stamp, a cluster, an image and a set word all land on a
-                // whole pixel. A shape does not: its geometry stays fractional
-                // until the rasteriser walks it, so reading its origin as an
-                // integer here refused a curve the engine was about to turn
-                // into f64 on its next line.
-                let placed = |key: &str| integer(op, key, 0);
-                match kind {
-                    "pixel" | "line" | "rect" | "ellipse" | "path" | "curve" | "tuft" => {
-                        let mut shape = op.clone();
-                        shape["op"] = json!(kind);
-                        if shape.get("brush_size").is_none() {
-                            shape["brush_size"] = json!(self.view.brush_size);
+            for (pass, operations) in prepared.iter().enumerate() {
+                // Which variant this pass paints. Without a sweep there is one
+                // pass and it paints whatever the scope says; with one, each
+                // pass paints exactly one step of it.
+                let all = Variants {
+                    scope: base_scope,
+                    pick: (steps > 1).then_some(pass % steps),
+                };
+                for (index, op) in operations.iter().enumerate() {
+                    let kind = op.get("op").and_then(Value::as_str).unwrap_or("pixel");
+                    at = Some((index, kind.to_owned()));
+                    self.operation_box = None;
+                    self.keyed_blend.clear();
+                    let color = parse_color(
+                        op.get("color")
+                            .and_then(Value::as_str)
+                            .unwrap_or(&self.view.color),
+                    )?;
+                    // A stamp, a cluster, an image and a set word all land on a
+                    // whole pixel. A shape does not: its geometry stays fractional
+                    // until the rasteriser walks it, so reading its origin as an
+                    // integer here refused a curve the engine was about to turn
+                    // into f64 on its next line.
+                    let placed = |key: &str| integer(op, key, 0);
+                    match kind {
+                        "pixel" | "line" | "rect" | "ellipse" | "path" | "curve" | "tuft" => {
+                            let mut shape = op.clone();
+                            shape["op"] = json!(kind);
+                            if shape.get("brush_size").is_none() {
+                                shape["brush_size"] = json!(self.view.brush_size);
+                            }
+                            if kind == "rect" && shape.get("fill").is_none() {
+                                shape["fill"] = json!(true);
+                            }
+                            count += self.paint_shape(&shape, color, layer, all, &paint_layers)?;
                         }
-                        if kind == "rect" && shape.get("fill").is_none() {
-                            shape["fill"] = json!(true);
+                        "cluster" => {
+                            let (x, y) = (placed("x")?, placed("y")?);
+                            let im = self.cluster.clone().context("Lift a pixel cluster first")?;
+                            count += self.paint_cluster(&im, [x, y], layer, all, &paint_layers)?;
                         }
-                        count += self.paint_shape(&shape, color, layer, all, &paint_layers)?;
-                    }
-                    "cluster" => {
-                        let (x, y) = (placed("x")?, placed("y")?);
-                        let im = self.cluster.clone().context("Lift a pixel cluster first")?;
-                        count += self.paint_cluster(&im, [x, y], layer, all, &paint_layers)?;
-                    }
-                    "stamp" => {
-                        let (x, y) = (placed("x")?, placed("y")?);
-                        let rows = op
-                            .get("rows")
-                            .and_then(Value::as_array)
-                            .context("stamp rows required")?;
-                        let palette = op
-                            .get("palette")
-                            .and_then(Value::as_object)
-                            .context("stamp palette required")?;
-                        for (j, row) in rows.iter().enumerate() {
-                            for (i, ch) in row
-                                .as_str()
-                                .context("stamp row string")?
-                                .chars()
-                                .enumerate()
-                            {
-                                if let Some(c) =
-                                    palette.get(&ch.to_string()).and_then(Value::as_str)
+                        "stamp" => {
+                            let (x, y) = (placed("x")?, placed("y")?);
+                            let rows = op
+                                .get("rows")
+                                .and_then(Value::as_array)
+                                .context("stamp rows required")?;
+                            let palette = op
+                                .get("palette")
+                                .and_then(Value::as_object)
+                                .context("stamp palette required")?;
+                            for (j, row) in rows.iter().enumerate() {
+                                for (i, ch) in row
+                                    .as_str()
+                                    .context("stamp row string")?
+                                    .chars()
+                                    .enumerate()
                                 {
-                                    count += self.paint_line_untracked(
-                                        [x + i as i32, y + j as i32],
-                                        [x + i as i32, y + j as i32],
-                                        parse_color(c)?,
-                                        layer,
-                                        all,
-                                        &paint_layers,
-                                    )?;
+                                    if let Some(c) =
+                                        palette.get(&ch.to_string()).and_then(Value::as_str)
+                                    {
+                                        count += self.paint_line_untracked(
+                                            [x + i as i32, y + j as i32],
+                                            [x + i as i32, y + j as i32],
+                                            parse_color(c)?,
+                                            layer,
+                                            all,
+                                            &paint_layers,
+                                        )?;
+                                    }
                                 }
                             }
                         }
-                    }
-                    "image" => {
-                        let (x, y) = (placed("x")?, placed("y")?);
-                        use base64::Engine as _;
-                        let data = op
-                            .get("data")
-                            .and_then(Value::as_str)
-                            .context("image op needs base64 PNG data")?;
-                        let bytes = base64::engine::general_purpose::STANDARD
-                            .decode(data.trim())
-                            .context("image data is not valid base64")?;
-                        let mut im = image::load_from_memory(&bytes)
-                            .context("image data is not a readable PNG")?
-                            .to_rgba8();
-                        anyhow::ensure!(
-                            im.width() <= 2048 && im.height() <= 2048,
-                            "Image is at most 2048x2048"
-                        );
-                        // A sheet has no alpha channel to keep, so a half
-                        // transparent pixel has to become an opaque blend with
-                        // what it lands on or it arrives as full-strength
-                        // colour: soft glows used to stamp as hard speckle.
-                        if im.pixels().any(|p| p[3] > 0 && p[3] < 255) {
-                            // The artwork a half-transparent image blends
-                            // into, composed now rather than reused: a glow
-                            // placed after the picture beneath it used to
-                            // blend into the picture that was there *before*
-                            // and write that back, which silently undid the
-                            // work underneath it. Only the image's own
-                            // footprint is composed, because that is all it
-                            // reads.
-                            let base =
-                                self.render_patch([x, y, im.width() as i32, im.height() as i32]);
-                            for (ix, iy, p) in im.enumerate_pixels_mut() {
-                                if p[3] == 0 || p[3] == 255 {
-                                    continue;
+                        "image" => {
+                            let (x, y) = (placed("x")?, placed("y")?);
+                            use base64::Engine as _;
+                            let data = op
+                                .get("data")
+                                .and_then(Value::as_str)
+                                .context("image op needs base64 PNG data")?;
+                            let bytes = base64::engine::general_purpose::STANDARD
+                                .decode(data.trim())
+                                .context("image data is not valid base64")?;
+                            let mut im = image::load_from_memory(&bytes)
+                                .context("image data is not a readable PNG")?
+                                .to_rgba8();
+                            anyhow::ensure!(
+                                im.width() <= 2048 && im.height() <= 2048,
+                                "Image is at most 2048x2048"
+                            );
+                            // A sheet has no alpha channel to keep, so a half
+                            // transparent pixel has to become an opaque blend with
+                            // what it lands on or it arrives as full-strength
+                            // colour: soft glows used to stamp as hard speckle.
+                            if im.pixels().any(|p| p[3] > 0 && p[3] < 255) {
+                                // The artwork a half-transparent image blends
+                                // into, composed now rather than reused: a glow
+                                // placed after the picture beneath it used to
+                                // blend into the picture that was there *before*
+                                // and write that back, which silently undid the
+                                // work underneath it. Only the image's own
+                                // footprint is composed, because that is all it
+                                // reads.
+                                let base = self.render_patch([
+                                    x,
+                                    y,
+                                    im.width() as i32,
+                                    im.height() as i32,
+                                ]);
+                                for (ix, iy, p) in im.enumerate_pixels_mut() {
+                                    if p[3] == 0 || p[3] == 255 {
+                                        continue;
+                                    }
+                                    let (bx, by) = (x + ix as i32, y + iy as i32);
+                                    let under = base.at(bx, by).unwrap_or([0, 0, 0, 255]);
+                                    if under[3] == 0 || under[..3] == [255, 0, 255] {
+                                        self.keyed_blend.push([bx, by]);
+                                    }
+                                    let a = p[3] as f32 / 255.0;
+                                    let mut out = [0u8; 4];
+                                    for c in 0..3 {
+                                        out[c] = (p[c] as f32 * a + under[c] as f32 * (1.0 - a))
+                                            .round()
+                                            .clamp(0.0, 255.0)
+                                            as u8;
+                                    }
+                                    out[3] = 255;
+                                    *p = Rgba(out);
                                 }
-                                let (bx, by) = (x + ix as i32, y + iy as i32);
-                                let under = base.at(bx, by).unwrap_or([0, 0, 0, 255]);
-                                if under[3] == 0 || under[..3] == [255, 0, 255] {
-                                    self.keyed_blend.push([bx, by]);
+                            }
+                            count += self.paint_cluster(&im, [x, y], layer, all, &paint_layers)?;
+                        }
+                        "text" => {
+                            let (x, y) = (placed("x")?, placed("y")?);
+                            let body = op
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .context("text op needs text")?;
+                            let scale = op
+                                .get("scale")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(1)
+                                .clamp(1, 8) as i32;
+                            let spacing = op
+                                .get("spacing")
+                                .and_then(Value::as_i64)
+                                .unwrap_or(self.view.text_spacing as i64)
+                                as i32;
+                            // Two faces, because a classic skin has cells a word
+                            // has to fit in and the 5x7 one does not: 14 pixels for
+                            // an equalizer caption, 27 for the mono lamp.
+                            let small = op.get("face").and_then(Value::as_str) == Some("small");
+                            // Where the word starts, when the caller knows the box
+                            // it has to sit in rather than the pixel it starts at.
+                            // Centring a caption is (cell - ink) / 2 and the ink is
+                            // (4*n + n-1) for the small face -- arithmetic every
+                            // caller was carrying its own copy of, next to the
+                            // `measure` call that exists to answer it.
+                            let x = match op.get("align").and_then(Value::as_str) {
+                                None => x,
+                                Some(side) => {
+                                    let width = op.get("width").and_then(Value::as_i64).context(
+                                        "align needs width: the box the word is \
+                                         placed in, starting at x",
+                                    )? as i32;
+                                    let ink = crate::winamp::pixel_text::measure(
+                                        body, small, scale, spacing,
+                                    )
+                                    .width;
+                                    match side {
+                                        "left" => x,
+                                        "center" | "centre" => x + (width - ink) / 2,
+                                        "right" => x + width - ink,
+                                        other => {
+                                            bail!("align is left, center or right (got {other})")
+                                        }
+                                    }
                                 }
-                                let a = p[3] as f32 / 255.0;
-                                let mut out = [0u8; 4];
-                                for c in 0..3 {
-                                    out[c] = (p[c] as f32 * a + under[c] as f32 * (1.0 - a))
-                                        .round()
-                                        .clamp(0.0, 255.0)
-                                        as u8;
+                            };
+                            let mut points: Vec<[i32; 2]> = Vec::new();
+                            let missing = crate::winamp::pixel_text::layout(
+                                body,
+                                small,
+                                scale,
+                                spacing,
+                                |dx, dy| points.push([x + dx, y + dy]),
+                            );
+                            for ch in missing {
+                                if !skipped.contains(&ch) {
+                                    skipped.push(ch);
                                 }
-                                out[3] = 255;
-                                *p = Rgba(out);
+                            }
+                            for at in points {
+                                count += self.paint_line_untracked(
+                                    at,
+                                    at,
+                                    color,
+                                    layer,
+                                    all,
+                                    &paint_layers,
+                                )?;
                             }
                         }
-                        count += self.paint_cluster(&im, [x, y], layer, all, &paint_layers)?;
+                        _ => bail!("Unknown drawing operation {kind}"),
                     }
-                    "text" => {
-                        let (x, y) = (placed("x")?, placed("y")?);
-                        let body = op
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .context("text op needs text")?;
-                        let scale = op
-                            .get("scale")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(1)
-                            .clamp(1, 8) as i32;
-                        let spacing = op
-                            .get("spacing")
-                            .and_then(Value::as_i64)
-                            .unwrap_or(self.view.text_spacing as i64)
-                            as i32;
-                        // Two faces, because a classic skin has cells a word
-                        // has to fit in and the 5x7 one does not: 14 pixels for
-                        // an equalizer caption, 27 for the mono lamp.
-                        let small = op.get("face").and_then(Value::as_str) == Some("small");
-                        let mut points: Vec<[i32; 2]> = Vec::new();
-                        let missing = crate::winamp::pixel_text::layout(
-                            body,
-                            small,
-                            scale,
-                            spacing,
-                            |dx, dy| points.push([x + dx, y + dy]),
-                        );
-                        for ch in missing {
-                            if !skipped.contains(&ch) {
-                                skipped.push(ch);
+                    if let Some((_, box_)) = self.operation_box {
+                        // An operation that covers the whole sheet has no cell of
+                        // its own to have crossed out of. Clearing one to the
+                        // transparency key is how a recipe starts a sheet, and a
+                        // wash over the whole of one is how it starts a
+                        // background; both touch every cell, so both answered
+                        // "crossed into a cell the player draws nine times" --
+                        // true, not a spill, and printed above the one spill that
+                        // was real. It is the same distinction `unsampled_pixels`
+                        // draws when it counts ink rather than clearing.
+                        let whole_sheet = box_[0] == 0
+                            && box_[1] == 0
+                            && box_[2] >= sheet_size.0
+                            && box_[3] >= sheet_size.1;
+                        if let Some(note) = (!whole_sheet)
+                            .then(|| crossed_into_repeat(&cells, box_, index, kind))
+                            .flatten()
+                        {
+                            if crossed.len() < 8
+                                && !crossed.iter().any(|c| c["cell"] == note["cell"])
+                            {
+                                crossed.push(note);
                             }
                         }
-                        for at in points {
-                            count += self.paint_line_untracked(
-                                at,
-                                at,
-                                color,
-                                layer,
-                                all,
-                                &paint_layers,
-                            )?;
-                        }
                     }
-                    _ => bail!("Unknown drawing operation {kind}"),
-                }
-                if let Some((_, box_)) = self.operation_box {
-                    // An operation that covers the whole sheet has no cell of
-                    // its own to have crossed out of. Clearing one to the
-                    // transparency key is how a recipe starts a sheet, and a
-                    // wash over the whole of one is how it starts a
-                    // background; both touch every cell, so both answered
-                    // "crossed into a cell the player draws nine times" --
-                    // true, not a spill, and printed above the one spill that
-                    // was real. It is the same distinction `unsampled_pixels`
-                    // draws when it counts ink rather than clearing.
-                    let whole_sheet = box_[0] == 0
-                        && box_[1] == 0
-                        && box_[2] >= sheet_size.0
-                        && box_[3] >= sheet_size.1;
-                    if let Some(note) = (!whole_sheet)
-                        .then(|| crossed_into_repeat(&cells, box_, index, kind))
-                        .flatten()
-                    {
-                        if crossed.len() < 8 && !crossed.iter().any(|c| c["cell"] == note["cell"]) {
-                            crossed.push(note);
-                        }
-                    }
-                }
-                if !self.keyed_blend.is_empty() && keyed.len() < 8 {
-                    keyed.push(json!({"operation":index,"op":kind,
+                    if !self.keyed_blend.is_empty() && keyed.len() < 8 {
+                        keyed.push(json!({"operation":index,"op":kind,
                         "pixels":self.keyed_blend.len(),
                         "at":self.keyed_blend.iter().take(4).collect::<Vec<_>>()}));
+                    }
                 }
             }
             Ok(())
@@ -2762,6 +3077,15 @@ impl Document {
                 "overwrites":self.overwrites,
                 "overwrite_sample":self.overwrite_note,
                 "unmapped_pixels":self.unmapped_pixels.len()});
+            // A dry run says what it did as fully as a real one. Without these
+            // the one call that exists to check a transaction before making it
+            // could not confirm that `at` had repeated anything.
+            if places.len() > 1 {
+                report["repeated"] = json!({"places": places.len()});
+            }
+            if !swept.is_empty() {
+                report["swept"] = json!({"fields": swept.clone(), "steps": steps});
+            }
             self.preview = Some(self.render());
             self.restore(before);
             self.revision = before_revision;
@@ -2795,7 +3119,7 @@ impl Document {
         }
         self.message = format!(
             "Painted {count} atlas pixels{}",
-            match all {
+            match base_scope {
                 Scope::Current => "",
                 Scope::Onward => " into this state and every one after it",
                 Scope::UpTo => " into every state up to this one",
@@ -2867,6 +3191,12 @@ impl Document {
         // writes one object into twenty-three of a slider's twenty-eight frames
         // looks exactly like one that wrote it into one, and the difference is
         // the whole of what the caller asked for.
+        if places.len() > 1 {
+            result["repeated"] = json!({"places": places.len()});
+        }
+        if !swept.is_empty() {
+            result["swept"] = json!({"fields": swept, "steps": steps});
+        }
         let wrote = std::mem::take(&mut self.scope_writes);
         if !wrote.is_empty() {
             result["states_written"] = json!({
@@ -4590,7 +4920,7 @@ mod tests {
                 [w as i32 - 1, y as i32],
                 ink,
                 "selection",
-                Scope::Current,
+                Scope::Current.into(),
             );
             d.finish_stroke();
         }
@@ -4619,7 +4949,7 @@ mod tests {
             [40, 90],
             [4, 5, 6, 255],
             "selection",
-            Scope::Current,
+            Scope::Current.into(),
         )
         .unwrap();
         // The control the brush is over, and the window background underneath
@@ -4661,7 +4991,7 @@ mod tests {
             [40, 90],
             [4, 5, 6, 255],
             "selection",
-            Scope::Current,
+            Scope::Current.into(),
         )
         .unwrap();
         assert_eq!(d.images["main.bmp"], original.images["main.bmp"]);
@@ -4723,8 +5053,14 @@ mod tests {
         d.undo();
         d.state(json!({"layers":["play"]})).unwrap();
         d.checkpoint();
-        d.paint_line([0, 0], [2, 2], [1, 2, 3, 255], "selection", Scope::Current)
-            .unwrap();
+        d.paint_line(
+            [0, 0],
+            [2, 2],
+            [1, 2, 3, 255],
+            "selection",
+            Scope::Current.into(),
+        )
+        .unwrap();
         d.finish_stroke();
         assert_eq!(d.history()["cursor"], 0);
         assert!(!d.dirty);
@@ -4735,7 +5071,7 @@ mod tests {
             [41, 90],
             [1, 2, 3, 255],
             "selection",
-            Scope::Current,
+            Scope::Current.into(),
         )
         .unwrap();
         d.paint_line(
@@ -4743,7 +5079,7 @@ mod tests {
             [43, 90],
             [1, 2, 3, 255],
             "selection",
-            Scope::Current,
+            Scope::Current.into(),
         )
         .unwrap();
         d.finish_stroke();
@@ -6040,5 +6376,137 @@ mod tests {
         );
         assert_eq!(curve["ground"], json!("#0c0c0c"));
         assert_eq!(curve["readable"], json!(false), "dark ink on a dark graph");
+    }
+
+    /// The two shapes a sheet actually has, and the loops they replace.
+    ///
+    /// A sheet is a grid of cells that mostly hold the same drawing, and a
+    /// slider is one shape whose numbers walk across twenty-eight frames.
+    /// Without `at` and a swept `[from, to]` the only way to draw either was to
+    /// emit the operations N times from outside the editor -- which is a
+    /// drawing program living in whatever wrote the loop.
+    #[test]
+    fn at_repeats_a_transaction_and_a_swept_field_walks_the_variants() {
+        let mut d = Document::blank();
+        d.open_on_whole_skin();
+
+        // Five transport berths, one operation, no coordinates typed out.
+        let report = d
+            .draw(&json!({
+                "layers":["main.previous","main.play","main.pause","main.stop","main.next"],
+                "at":"targets",
+                "operations":[{"op":"rect","x":2,"y":2,"width":3,"height":3,"color":"#ff0000"}]
+            }))
+            .unwrap();
+        assert_eq!(report["repeated"]["places"], json!(5));
+        assert_eq!(
+            report["pixels_written"],
+            json!(45),
+            "nine pixels, five berths"
+        );
+        for (x, _) in [(16, 0), (39, 1), (62, 2), (85, 3), (108, 4)] {
+            assert_eq!(
+                d.render().get_pixel(x + 3, 88 + 3).0,
+                [255, 0, 0, 255],
+                "berth at {x} should have its own copy"
+            );
+        }
+
+        // Explicit offsets, and the count is places x operations.
+        let report = d
+            .draw(&json!({
+                "layers":["main.background"],
+                "at":[[0,0],[0,2],[0,4]],
+                "operations":[{"op":"pixel","x":200,"y":100,"color":"#00ff00"}]
+            }))
+            .unwrap();
+        assert_eq!(report["repeated"]["places"], json!(3));
+        for dy in 0..3 {
+            assert_eq!(d.render().get_pixel(200, 100 + dy * 2).0, [0, 255, 0, 255]);
+        }
+
+        // One call, twenty-eight frames, an endpoint that moves.
+        let mut d = Document::blank();
+        d.open_on_whole_skin();
+        let report = d
+            .draw(&json!({
+                "layers":["main.balance.track"],"states":"all",
+                "operations":[{"op":"pixel","x":[178,213],"y":60,"color":"#0000ff"}]
+            }))
+            .unwrap();
+        assert_eq!(report["swept"]["steps"], json!(28));
+        assert_eq!(report["swept"]["fields"], json!(["x"]));
+        assert_eq!(
+            report["states_written"]["variants"]["main.balance.track"],
+            json!(28),
+            "the scope's own count, not one per pass"
+        );
+        let blue = |d: &mut Document, frame: u8| {
+            d.state(json!({ "balance": frame })).unwrap();
+            let im = d.render();
+            (177..215)
+                .find(|x| im.get_pixel(*x, 60).0 == [0, 0, 255, 255])
+                .unwrap_or_else(|| panic!("frame {frame} has no swept pixel"))
+        };
+        assert_eq!(blue(&mut d, 0), 178, "the first frame is where it starts");
+        assert_eq!(blue(&mut d, 27), 213, "the last frame is where it ends");
+        let middle = blue(&mut d, 13);
+        assert!(
+            (194..=197).contains(&middle),
+            "frame 13 is about halfway, not {middle}"
+        );
+
+        // A sweep needs a target to count variants on, and more than one.
+        let refusal = d
+            .draw(&json!({"operations":[{"op":"pixel","x":[1,9],"y":1,"color":"#ffffff"}]}))
+            .unwrap_err();
+        let refusal = format!("{refusal:#}");
+        assert!(refusal.contains("named target"), "{refusal}");
+        let refusal = d
+            .draw(&json!({"layers":["main.background"],"states":"all",
+                          "operations":[{"op":"pixel","x":[1,9],"y":1,"color":"#ffffff"}]}))
+            .unwrap_err();
+        let refusal = format!("{refusal:#}");
+        assert!(refusal.contains("more than one variant"), "{refusal}");
+    }
+
+    /// Where a caption starts, from the walk that draws it.
+    ///
+    /// Centring a word in a cell is (cell - ink) / 2, and the ink of the small
+    /// face is 4n + (n-1) -- arithmetic every caller was keeping its own copy
+    /// of, beside the `measure` call that exists to answer it.
+    #[test]
+    fn a_word_can_be_placed_in_a_box_instead_of_at_a_pixel() {
+        let mut d = Document::blank();
+        d.open_on_whole_skin();
+        let ink = crate::winamp::pixel_text::measure("EQ", true, 1, 1).width;
+        assert_eq!(ink, 9, "two small cells and one space");
+        for (align, expected) in [
+            ("left", 20),
+            ("center", 20 + (30 - ink) / 2),
+            ("right", 20 + 30 - ink),
+        ] {
+            let mut d = Document::blank();
+            d.open_on_whole_skin();
+            d.draw(&json!({"layers":["main.background"],"operations":[
+                {"op":"text","x":20,"y":60,"width":30,"align":align,
+                 "text":"EQ","face":"small","color":"#ffffff"}
+            ]}))
+            .unwrap();
+            let im = d.render();
+            let first = (0..275)
+                .find(|x| (60..67).any(|y| im.get_pixel(*x, y).0 == [255, 255, 255, 255]))
+                .expect("some ink");
+            assert_eq!(first as i32, expected, "align {align}");
+        }
+        let refusal = d
+            .draw(&json!({"layers":["main.background"],"operations":[
+                {"op":"text","x":20,"y":60,"align":"center","text":"EQ","face":"small"}
+            ]}))
+            .unwrap_err();
+        // The whole chain: the operation index is the outer context and the
+        // reason is under it.
+        let refusal = format!("{refusal:#}");
+        assert!(refusal.contains("width"), "{refusal}");
     }
 }
