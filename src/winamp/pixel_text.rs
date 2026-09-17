@@ -1,6 +1,4 @@
-//! Native-grid text for the classic player. Unsupported text keeps the Unicode renderer.
 use cranpose_ui::ImageBitmap;
-
 pub fn render(text: &str, width: u32, height: u32, color: [u8; 4]) -> Option<ImageBitmap> {
     if !text.is_ascii() || width == 0 || height == 0 {
         return None;
@@ -116,15 +114,6 @@ pub(crate) fn glyph(ch: char) -> Option<[u8; 7]> {
         _ => return None,
     })
 }
-/// Walk a word's pixels, in either face, at an integer scale.
-///
-/// One implementation, because there are two callers -- an MCP `text`
-/// operation and the editor's own text brush -- and two copies of a glyph walk
-/// drift in exactly the way that puts a word a pixel out of step with itself.
-/// Emits offsets from the word's origin and answers with the characters the
-/// face does not have, which are skipped rather than fatal.
-/// Only the Skin Studio writes text into a sheet, and iOS has no editor to
-/// build, so this and the small face it walks have no caller in that build.
 #[cfg(not(target_os = "ios"))]
 pub(crate) fn layout(
     text: &str,
@@ -169,19 +158,6 @@ pub(crate) fn layout(
     }
     skipped
 }
-/// How wide a word comes out, from the same walk that draws it.
-///
-/// Every skin recipe so far has carried its own copy of this arithmetic --
-/// Cardboard's, Sampler's and Cat Scan's -- because the engine knew the answer
-/// and had no way to say it. All three copies had the same bug: the pen
-/// advances `(cell + spacing) * scale` and they compute `cell * scale +
-/// spacing`, which agree at scale 1 and at no other scale. A caption measured
-/// one way and set the other runs past the end of the cell it was aimed at,
-/// and on a sheet with a repeating tile in it that error is drawn nine times.
-///
-/// `width` and `height` are the ink, which is what centring a word in a cell
-/// wants; `advance` is where the pen ends, which is what setting a second run
-/// after the first one wants.
 #[cfg(not(target_os = "ios"))]
 pub(crate) fn measure(text: &str, small: bool, scale: i32, spacing: i32) -> TextExtent {
     let cell = if small { 4 } else { 5 };
@@ -204,18 +180,6 @@ pub(crate) struct TextExtent {
     pub advance: i32,
     pub missing: Vec<char>,
 }
-/// A four-by-five small-caps face, for the cells a classic skin gives a word
-/// and no room for one.
-///
-/// The mono and stereo lamps are 27 and 29 pixels wide, an equalizer band
-/// caption is 14, and a playlist footer button is 28: the 5x7 face runs
-/// straight off the end of all of them. Every skin that has wanted a word in
-/// one of those cells has carried its own glyph table in its build script --
-/// which meant the capability existed only for a recipe with a script, and not
-/// for anyone drawing by hand, on Android, or in a browser.
-///
-/// Five pixels tall has no room for a descender, so there is no lower case: it
-/// is a small-caps face and `a` is drawn as `A` rather than skipped.
 #[cfg(not(target_os = "ios"))]
 pub(crate) fn small_glyph(ch: char) -> Option<[u8; 5]> {
     Some(match ch.to_ascii_uppercase() {
@@ -231,11 +195,6 @@ pub(crate) fn small_glyph(ch: char) -> Option<[u8; 5]> {
         'J' => [3, 1, 1, 9, 6],
         'K' => [9, 10, 12, 10, 9],
         'L' => [8, 8, 8, 8, 15],
-        // M, H and W are the same four columns with the bar in a different
-        // place, so one bar is not enough to tell them apart at this size: M
-        // fills the two rows under the apex, W the two above the point, and H
-        // keeps the single crossbar in the middle. With one bar each, MISC
-        // came out of the playlist footer reading HISC.
         'M' => [9, 15, 15, 9, 9],
         'N' => [9, 13, 11, 9, 9],
         'O' => [6, 9, 9, 9, 6],

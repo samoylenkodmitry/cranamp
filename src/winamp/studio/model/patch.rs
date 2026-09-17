@@ -1,6 +1,4 @@
-//! Isolated native drawing handoffs for artists working on disjoint atlas cells.
 use super::*;
-
 fn rect(part: &Value, images: &BTreeMap<String, RgbaImage>) -> Result<(String, [u32; 4])> {
     let sheet = part["sheet"]
         .as_str()
@@ -18,7 +16,6 @@ fn rect(part: &Value, images: &BTreeMap<String, RgbaImage>) -> Result<(String, [
     );
     Ok((sheet, r))
 }
-// A stable optimistic-concurrency token, not a cryptographic authenticity check.
 fn fingerprint(im: &RgbaImage, r: [u32; 4]) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for y in r[1]..r[1] + r[3] {
@@ -100,8 +97,6 @@ fn validate_bounds(op: &Value, r: [u32; 4], clip_to_rect: bool) -> Result<()> {
     Ok(())
 }
 impl Document {
-    /// Inspect without changing selection; validate/draw on a private document,
-    /// then transfer one new plane in a single shared history transaction.
     pub fn patch(&mut self, args: &Value) -> Result<Value> {
         let action = args["action"].as_str().unwrap_or("inspect");
         anyhow::ensure!(
@@ -165,7 +160,6 @@ impl Document {
                 !self.planes.get(i + 1).is_some_and(|p| p.clip_below),
                 "Replace a clipped follower before its mask source"
             );
-            // Replacing a whole plane must not discard art outside ownership.
             for (sheet, im) in &plane.images {
                 for (x, y, _) in im.enumerate_pixels().filter(|(_, _, p)| p[3] > 0) {
                     anyhow::ensure!(regions.iter().any(|v| {
@@ -241,16 +235,11 @@ impl Document {
             for op in ops {
                 validate_bounds(op, r, clipped)?;
             }
-            // Rasterize the complete original geometry, then use the same native
-            // per-pixel clip as human painting. Cutting curve geometry first
-            // would alter sampling, corner cleanup and the palette ramp.
             stage.view.clip = clipped.then_some(r);
             stage.view.sheet = region["sheet"].as_str().unwrap().into();
             let result = stage.draw(&json!({"operations":ops,"label":part["label"]}))?;
             pixels += result["pixels_written"].as_u64().unwrap_or(0);
         }
-        // Defense in depth: even an explicitly clipped part never owns pixels
-        // outside its declared rectangles or any unrelated painting plane.
         for (sheet, im) in &stage.planes[plane_index].images {
             for (x, y, _) in im.enumerate_pixels().filter(|(_, _, p)| p[3] > 0) {
                 anyhow::ensure!(
@@ -289,7 +278,6 @@ impl Document {
         )
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,7 +460,6 @@ mod tests {
             [10, 10, 5, 5],
             json!([{"op":"pixel","x":10,"y":10},{"op":"line","x":14,"y":14,"x2":16,"y2":14}]),
         );
-        // The first part stages successfully; failure in a later sheet rolls back all.
         let second = bad["parts"][0].clone();
         bad["parts"] = json!([a["parts"][0].clone(), second]);
         bad["parts"][0]["expected"] = d

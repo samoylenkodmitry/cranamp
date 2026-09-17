@@ -1,10 +1,7 @@
-//! Read-only native material studies. Enlargement is integer nearest-neighbour;
-//! grids, reference images and layer bounds never enter an exported skin.
 use super::model::Document;
 use anyhow::Result;
 use image::{Rgba, RgbaImage};
 use serde_json::Value;
-
 pub fn crop(im: &RgbaImage, rect: [u32; 4]) -> Result<RgbaImage> {
     let [x, y, w, h] = rect;
     anyhow::ensure!(
@@ -34,7 +31,6 @@ pub fn enlarged(im: &RgbaImage, zoom: u32, grid: bool) -> RgbaImage {
     }
     out
 }
-/// Inspection-only value preview. Keep dimensions and alpha exactly unchanged.
 pub fn value_view(im: &RgbaImage) -> RgbaImage {
     let mut out = im.clone();
     for p in out.pixels_mut() {

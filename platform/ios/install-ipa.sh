@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Sign the release .ipa with the local development identity and install it on
-# the attached iPhone.
-#
-# The release .ipa is built unsigned -- CI has no development identity and the
-# device set is not CI's business -- so sideloading is a local step: take the
-# .app out of the Payload, embed the development profile, re-sign, install.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,9 +10,6 @@ bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$here/Info.plist")"
 identity="$(security find-identity -v -p codesigning | awk '/Apple Development/{print $2; exit}')"
 [ -n "$identity" ] || { echo "No 'Apple Development' identity in the keychain. Add your Apple ID in Xcode > Settings > Accounts." >&2; exit 1; }
 
-# A profile written for this bundle identifier is the better match, but the
-# team wildcard Xcode mints by default covers it too -- take whichever is
-# there, exact first.
 profiles="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 profile=""
 wildcard=""

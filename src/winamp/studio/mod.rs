@@ -1,4 +1,3 @@
-//! Built-in Cranpose pixel editor and MCP endpoint for classic Winamp skins.
 #![allow(unused_braces)]
 mod brush;
 mod draft;
@@ -29,20 +28,11 @@ use std::{
     },
     time::Duration,
 };
-
-/// How the editor hands work back to a player it is living inside.
-///
-/// `None` on the desktop, where the editor is its own window and the player is
-/// another process entirely. `Some` on Android and the web, where the editor
-/// borrows the player's single surface and has to be able to give it back.
 #[derive(Clone)]
 pub struct StudioHost {
     pub close: Rc<dyn Fn()>,
     pub apply: Rc<dyn Fn(Vec<u8>, String)>,
 }
-
-/// Two hosts are the same host when they carry the same callbacks, which is
-/// what the composer needs in order to decide the editor has not changed.
 impl PartialEq for StudioHost {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.close, &other.close) && Rc::ptr_eq(&self.apply, &other.apply)
@@ -56,8 +46,6 @@ impl PartialEq for SharedDocument {
     }
 }
 impl SharedDocument {
-    /// The colour a viewer actually sees at a canvas pixel, so the framework
-    /// tests can assert on the picture rather than on the atlases behind it.
     pub fn rendered_pixel(&self, x: u32, y: u32) -> Option<[u8; 4]> {
         let doc = self.0.lock().ok()?;
         doc.render().get_pixel_checked(x, y).map(|p| p.0)
@@ -71,85 +59,34 @@ impl std::ops::Deref for SharedDocument {
 }
 const BG: Color = Color(0.065, 0.077, 0.10, 1.);
 const CARD: Color = Color(0.105, 0.125, 0.16, 1.);
-/// The sidebar and the tool column. A shade under `CARD` so that a button
-/// resting on one is visibly a button: both were `CARD`, which left every
-/// unlit control on them reading as a line of text.
 const PANEL_BACK: Color = Color(0.079, 0.094, 0.122, 1.);
 const FG: Color = Color(0.89, 0.93, 0.98, 1.);
 const DIM: Color = Color(0.55, 0.63, 0.73, 1.);
 const ACCENT: Color = Color(0.13, 0.40, 0.53, 1.);
-/// Reserved for the two buttons that can discard unexported work.
 const DANGER: Color = Color(0.38, 0.14, 0.16, 1.);
-/// A switch that is on: lit enough to read across the window, but never
-/// mistakable for the solid `ACCENT` of an open drawer.
 const CARD_ON: Color = Color(0.10, 0.19, 0.24, 1.);
 const ACCENT_LIT: Color = Color(0.36, 0.72, 0.88, 1.);
 const PIP_OFF: Color = Color(0.22, 0.26, 0.32, 1.);
-/// The status line when it is carrying a refusal or a failure.
 const ALERT: Color = Color(0.98, 0.62, 0.55, 1.);
-
-// The desktop editor is an absolutely positioned scene: a fixed sidebar and
-// toolbars, and a canvas that takes everything left over. `Scene` is the one
-// place that knows the window size, so the drawing hit test and the drawer can
-// agree on exactly which strip of canvas is covered at any window size.
-/// The canvas starts under two toolbar rows and the canvas' own header line.
-/// The skin is a 275x377 portrait document, so every point of chrome above it
-/// is a point of zoom it cannot reach: at 2x it needs 754, which only fits in
-/// a window this shallow above and below the canvas.
 const CANVAS_ORIGIN: (f32, f32) = (230., 128.);
-/// The size the scene was drawn for. A smaller window keeps this layout and
-/// clips, rather than collapsing every absolute coordinate on top of itself.
 const SCENE_MIN: (f32, f32) = (1160., 850.);
-/// The smallest surface this layout lays out for at all. Below the reference
-/// size the chrome wraps and the sidebar goes away; below this it clips, which
-/// is the same bargain the reference size used to make at every size.
 const SCENE_FLOOR: (f32, f32) = (320., 480.);
-/// The width at which the canvas can spare the quick-access sidebar beside it.
 const SIDEBAR_MIN: f32 = 900.;
-/// The docked tool column. Wider than the drawer was when it covered the
-/// canvas, because it no longer has to be grudging about the room it takes.
 const DRAWER_WIDTH: f32 = 380.;
 const DRAWER_MAX: f32 = 480.;
-/// Below this the canvas is not worth splitting, and the drawer goes back to
-/// covering it.
 const CANVAS_MIN: f32 = 320.;
-/// Room under the canvas for the sprite-state row, the frame slider and the
-/// status line.
 const CANVAS_BOTTOM_RESERVE: f32 = 102.;
-/// Width of the scrollbars along the canvas' right and bottom edges.
 const SCROLLBAR: f32 = 14.;
-/// The column the whole-skin preview is given, to the right of the canvas.
-/// It is taken off the area before the canvas and the tool column divide what
-/// is left, so the preview is never over the artwork: a picture of the skin
-/// that hides part of the skin is worse than no picture at all.
 const PREVIEW_COLUMN: f32 = PREVIEW_BOX.0 + 12.;
-/// The two toolbar rows: what the document does, then what the drawers show.
-/// Each is one row where the window is wide enough and wraps where it is not,
-/// so a phone gets the same buttons in the same order rather than a different
-/// editor: `Rows` is what decides, and the canvas starts under whatever they
-/// came to.
 const ACTION_ROW: f32 = 40.;
-/// Top to top of one chrome row, button and gap.
 const ROW_PITCH: f32 = 38.;
-/// The line above the canvas that names what it is showing.
 const CANVAS_HEADER: f32 = 12.;
-
-/// A row of chrome buttons, laid left to right and wrapped at the same left
-/// margin when the width runs out.
-///
-/// Every button in this editor is absolutely positioned, which is what lets a
-/// 275x377 document and its tools share a window without fighting over layout
-/// -- and what made a narrow surface a second editor rather than the same one
-/// smaller. A packer is the whole difference: at any width that fits the row
-/// it gives back exactly the coordinates that were written by hand, and below
-/// that it wraps instead of clipping.
 struct Rows {
     left: f32,
     right: f32,
     x: f32,
     y: f32,
 }
-
 impl Rows {
     fn new(left: f32, top: f32, right: f32) -> Self {
         Self {
@@ -159,12 +96,9 @@ impl Rows {
             y: top,
         }
     }
-    /// Where the next button of this width goes.
     fn take(&mut self, width: f32) -> (f32, f32) {
         self.take_gap(width, 8.)
     }
-    /// The same, with the gap this row happens to use after it: the sprite
-    /// state strip is packed tighter than the toolbars above it.
     fn take_gap(&mut self, width: f32, gap: f32) -> (f32, f32) {
         if self.x > self.left && self.x + width > self.right {
             self.wrap();
@@ -177,23 +111,17 @@ impl Rows {
         self.x = self.left;
         self.y += ROW_PITCH;
     }
-    /// The top of whatever comes under this row.
     fn bottom(&self) -> f32 {
         self.y + ROW_PITCH
     }
 }
-
 #[derive(Clone, Copy, PartialEq)]
 struct Scene {
     width: f32,
     height: f32,
-    /// Where the canvas starts, which is under however many rows the chrome
-    /// wrapped to. One row each on a window wide enough, more on a phone.
     top: f32,
-    /// What the sprite-state strip under it came to, the same way.
     footer: f32,
 }
-
 impl Scene {
     fn new(width: f32, height: f32) -> Self {
         Self {
@@ -206,23 +134,15 @@ impl Scene {
     fn under_chrome(self, top: f32) -> Self {
         Self { top, ..self }
     }
-    /// How much room the sprite-state strip came to, which is the room the
-    /// canvas does not get. One row and a slider on a window wide enough for
-    /// them, more where the strip wrapped.
     fn over_footer(self, footer: f32) -> Self {
         Self { footer, ..self }
     }
-    /// The top of the sprite-state strip.
     fn footer_top(&self) -> f32 {
         self.height - self.footer + 6.
     }
-    /// Whether the quick-access sidebar has room beside the canvas. Everything
-    /// in it is also in a panel, so a narrow surface drops the strip rather
-    /// than becoming a different editor: the same buttons, one press further.
     fn sidebar(&self) -> bool {
         self.width >= SIDEBAR_MIN
     }
-    /// The canvas' left edge: past the sidebar where there is one.
     fn left(&self) -> f32 {
         if self.sidebar() {
             CANVAS_ORIGIN.0
@@ -230,7 +150,6 @@ impl Scene {
             20.
         }
     }
-    /// Distance in from the right edge, for controls that track the window.
     fn right(&self, inset_at_min_width: f32) -> f32 {
         self.width - (SCENE_MIN.0 - inset_at_min_width)
     }
@@ -243,9 +162,6 @@ impl Scene {
             self.height - self.top - self.footer,
         )
     }
-    /// The tool column where it is not docked beside the canvas: over the right
-    /// of it, clear of the preview column while there is room for both, and
-    /// over everything when there is not.
     fn drawer(&self) -> (f32, f32, f32, f32) {
         let (x, y, w, h) = self.painting();
         if w >= DRAWER_WIDTH {
@@ -254,15 +170,10 @@ impl Scene {
             self.canvas()
         }
     }
-    /// What the canvas itself gets: the area less the preview column.
     fn painting(&self) -> (f32, f32, f32, f32) {
         let (x, y, w, h) = self.canvas();
         (x, y, w - PREVIEW_COLUMN, h)
     }
-    /// How the canvas panel and the docked tool column divide the room left
-    /// over beside the sidebar. A 275-wide document in a 1200-wide panel is
-    /// mostly empty panel; the room is worth more as tools that are always on
-    /// screen than as margin.
     fn split(&self) -> (f32, f32) {
         let area = self.painting().2;
         if area - DRAWER_WIDTH - 12. < CANVAS_MIN {
@@ -275,9 +186,6 @@ impl Scene {
         self.height - 22.
     }
 }
-
-/// The largest whole-pixel zoom at which the whole skin fits the canvas. Never
-/// fractional: a classic skin is native pixels, and half a pixel is a lie.
 fn fit_zoom(canvas: (f32, f32), document: (u32, u32)) -> u8 {
     (1..=8u8)
         .rev()
@@ -286,15 +194,9 @@ fn fit_zoom(canvas: (f32, f32), document: (u32, u32)) -> u8 {
         })
         .unwrap_or(1)
 }
-
 #[cfg(test)]
 mod fit_tests {
     use super::{fit_zoom, Scene, CANVAS_MIN, DRAWER_WIDTH};
-
-    /// The window the editor opens at has to reach 2x on the joined skin, or
-    /// the default zoom is a compromise nobody asked for. It is the preview
-    /// column wider than it was: the whole-skin preview is not allowed over the
-    /// artwork, so the room it needs is room the window asks for.
     #[test]
     fn the_default_window_fits_the_whole_skin_at_two_times() {
         let scene = Scene::new(1388., 1000.);
@@ -303,10 +205,6 @@ mod fit_tests {
         assert!(drawer_w >= DRAWER_WIDTH, "the tool column stays docked");
         assert_eq!(fit_zoom((canvas_w, canvas_h), (275, 377)), 2);
     }
-
-    /// A window too small to hold both goes back to one canvas with the tool
-    /// column over it, rather than a canvas too narrow to draw in. The same
-    /// editor lays out at every size, so this has to hold at every size.
     #[test]
     fn a_narrow_window_gives_the_canvas_back_the_room_the_column_took() {
         for (w, h) in [
@@ -337,20 +235,15 @@ mod fit_tests {
         }
     }
 }
-
 fn presentation_origin(scene: [f32; 2], player: [f32; 2]) -> [f32; 2] {
-    // Keep native pixels on the logical pixel grid, including scale-1 GPU
-    // captures. An odd spare pixel belongs to the right or bottom margin.
     [
         ((scene[0] - player[0]) / 2.).floor(),
         ((scene[1] - player[1]) / 2.).floor(),
     ]
 }
-
 #[cfg(test)]
 mod presentation_tests {
     use super::presentation_origin;
-
     #[test]
     fn presentation_centers_on_native_pixels_in_odd_and_even_scenes() {
         assert_eq!(
@@ -375,7 +268,6 @@ mod presentation_tests {
             }
         }
     }
-
     #[test]
     fn presentation_keeps_centered_overflow_when_scene_is_smaller() {
         assert_eq!(
@@ -388,31 +280,19 @@ mod presentation_tests {
         );
     }
 }
-
 #[cfg(all(
     feature = "renderer-wgpu",
     not(target_os = "android"),
     not(target_arch = "wasm32")
 ))]
 static CAPTURE: std::sync::OnceLock<Mutex<cranpose::Robot>> = std::sync::OnceLock::new();
-
 static COMPOSED_REVISION: AtomicU64 = AtomicU64::new(0);
-/// Where the live player last landed inside the captured scene, and at what
-/// integer zoom.
-///
-/// A screenshot crop is in scene pixels. Without this the only way to cut one
-/// window out of a capture is to measure it by eye against a full-scene PNG --
-/// and to measure it again after any resize, because the window is centred in
-/// whatever room it has. The player's own layout is the canvas layout, main at
-/// y=0, equalizer at y=116, playlist at y=232, so one origin and one zoom turn
-/// any canvas rectangle into a scene one.
 static PLAYER_SCENE: Mutex<Option<[f32; 3]>> = Mutex::new(None);
 fn note_player_scene(origin: [f32; 2], zoom: f32) {
     if let Ok(mut at) = PLAYER_SCENE.lock() {
         *at = Some([origin[0], origin[1], zoom]);
     }
 }
-/// The scene rectangle a canvas rectangle occupies, if the player is on screen.
 pub fn player_scene_rect(canvas: [u32; 4]) -> Option<[u32; 4]> {
     let [x, y, zoom] = (*PLAYER_SCENE.lock().ok()?)?;
     Some([
@@ -425,11 +305,7 @@ pub fn player_scene_rect(canvas: [u32; 4]) -> Option<[u32; 4]> {
 pub fn player_scene() -> Option<[f32; 3]> {
     *PLAYER_SCENE.lock().ok()?
 }
-/// The document revision whose status line is a failure rather than a report.
-/// Errors and stroke reports share one line, so the line has to be able to
-/// look different when it is carrying bad news.
 static ALERT_REVISION: AtomicU64 = AtomicU64::new(u64::MAX);
-
 pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
     #[cfg(all(
         feature = "renderer-wgpu",
@@ -442,11 +318,6 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
             .ok_or_else(|| anyhow::anyhow!("Studio capture is not ready"))?
             .lock()
             .map_err(|_| anyhow::anyhow!("Studio capture lock"))?;
-        // MCP runs on its own thread. Wait for the requested document revision,
-        // including LivePlayer's atlas/state reload, without locking the document.
-        // An occluded window may not receive ordinary redraws. An offscreen
-        // snapshot pumps composition without waiting for a visible presentation.
-        // PumpFrames requires that presentation and stalls for hidden windows.
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while COMPOSED_REVISION.load(Ordering::Acquire) < revision {
             anyhow::ensure!(
@@ -474,8 +345,6 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
         anyhow::bail!("Scene capture requires the WGPU renderer on a native window")
     }
 }
-
-/// Open the editor in its own native window without interrupting playback.
 #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 pub fn launch(path: Option<&str>) -> std::io::Result<()> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
@@ -484,31 +353,20 @@ pub fn launch(path: Option<&str>) -> std::io::Result<()> {
         command.arg(path);
     }
     let mut child = command.spawn()?;
-    // Reap the editor process when its window closes.
     std::thread::spawn(move || {
         let _ = child.wait();
     });
     Ok(())
 }
-
-/// The editor always works on the whole skin: main, equalizer and playlist
-/// joined into one surface, so a stroke can cross a window boundary and each
-/// pixel is routed to whichever sheet is under it. The individual panels remain
-/// as MCP addressing, not as editing modes.
 fn open_on_whole_skin(doc: &mut Document) {
     doc.open_on_whole_skin();
 }
-
 fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
     let Some(path) = path else {
-        // The bundled skin as it ships, which is the skin: a layered project of
-        // it was a second copy of the same artwork that could drift from the
-        // one the player loads.
         let mut doc = Document::open(
             include_bytes!("../../../assets/skins/Catamp Silverplay.wsz"),
             None,
         )?;
-        // The bundled artwork is an unsaved editable copy, never a developer path.
         doc.path = None;
         doc.view = model::View::default();
         doc.message = "Catamp Silverplay · editable copy".into();
@@ -540,38 +398,15 @@ fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
         Ok(doc)
     }
 }
-
-/// The desktop layout is an absolutely positioned scene built for the editor
-/// window. Below this it does not fit, and the touch layout is the honest
-/// answer; at or above it the full editor is simply better, so a browser on a
-/// laptop gets the same tools a desktop window does.
 pub const DESKTOP_LAYOUT_MIN: (f32, f32) = (1140., 820.);
-
-/// The editor sized to the surface it was given.
-///
-/// One editor at every size. A desktop window, a browser and a handset used to
-/// get two different editors -- different buttons, different names, a subset of
-/// the panels -- so a capability that reached the desktop panel had not reached
-/// Android or the web, which are the two platforms with no MCP to ask for it
-/// with instead. It is the same composable now: the chrome wraps, the
-/// quick-access sidebar goes away because everything on it is also in a panel,
-/// and the canvas takes what is left.
 #[composable]
 pub fn AdaptiveSkinStudio(shared: SharedDocument, host: StudioHost) {
     SkinStudio(shared, Some(host));
 }
-
-/// A shared editor document for `path`, or the bundled editable copy. Lets the
-/// framework-level tests mount the real `SkinStudio` against a real document.
 pub fn open_document(path: Option<&str>) -> anyhow::Result<SharedDocument> {
     let document = initial_document(path)?;
     Ok(SharedDocument(Arc::new(Mutex::new(document))))
 }
-
-/// Where an untitled export lands. The browser has no filesystem, and
-/// `std::env::temp_dir()` panics there rather than failing, so a web build that
-/// opened the Studio without a file already in hand took the whole player down
-/// with it. On the web the name stands alone and the browser places it.
 fn default_export_path() -> std::path::PathBuf {
     let documents = cranpose::application_directories()
         .ok()
@@ -582,17 +417,10 @@ fn default_export_path() -> std::path::PathBuf {
     let base = documents.unwrap_or_else(std::env::temp_dir);
     base.join("Skin edited.wsz")
 }
-
 #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 pub fn run(path: Option<&str>) {
     let doc = initial_document(path).unwrap_or_else(|e| panic!("Open skin: {e:#}"));
     let shared = SharedDocument(Arc::new(Mutex::new(doc)));
-    // Say so, on stdout, before the window opens. Every recipe in this tree
-    // runs against a Studio that has to already be up, and this process wrote
-    // nothing at all: a log that is empty because the editor never started and
-    // a log that is empty because it started perfectly looked exactly alike,
-    // and the first one is a build that is about to fail in forty lines of
-    // somebody else's stack trace.
     match mcp::start(shared.clone()) {
         Ok(()) => println!(
             "Cranamp Skin Studio: MCP on http://{}, editing {}",
@@ -606,9 +434,6 @@ pub fn run(path: Option<&str>) {
     }
     let launcher = crate::create_surface_app()
         .with_title("Cranamp · Skin Studio")
-        // The joined skin is a 275x377 portrait document, so the window is
-        // shaped for height rather than width: this is the smallest window in
-        // which the whole skin fits at 2x, with the tool column beside it.
         .with_size(1388, 1000);
     #[cfg(all(feature = "renderer-wgpu", not(target_os = "android")))]
     let launcher = launcher
@@ -618,7 +443,6 @@ pub fn run(path: Option<&str>) {
         });
     launcher.run(move || SkinStudio(shared.clone(), None));
 }
-/// A handset-sized native preview for testing fractional scaling and touch UI.
 #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 pub fn run_touch_preview(editor: bool) {
     let document = new_mobile_document(None).expect("Bundled Studio document");
@@ -640,7 +464,6 @@ pub fn run_touch_preview(editor: bool) {
         }
     });
 }
-
 pub fn stdio_bridge() {
     mcp::bridge();
 }
@@ -659,22 +482,10 @@ fn Label(text: String, x: f32, y: f32, w: f32, size: f32, color: Color) {
         text_style(size, color),
     );
 }
-/// The editor's button vocabulary.
-///
-/// Every control belongs to exactly one of five classes, and each class has a
-/// shape of its own, so a button says what kind of thing it does before it is
-/// pressed: a plain slab runs once, a red slab runs once and can lose work, a
-/// slab with a left tab opens the drawer named on it, a pill is one value out
-/// of a set, and a slab with a pip on the right is an on/off switch.
-///
-/// Only a drawer button and a chosen value are ever filled with `ACCENT`, and
-/// those two can never be confused because one is a slab and one is a pill.
-/// A momentary action: it happens once, and the button looks the same after.
 #[composable]
 fn Action(label: String, x: f32, y: f32, w: f32, click: impl Fn() + 'static) {
     Slab(label, x, y, w, CARD, click);
 }
-/// The same, drawn as unavailable and inert when there is nothing for it to do.
 #[composable]
 fn MaybeAction(label: String, x: f32, y: f32, w: f32, enabled: bool, click: impl Fn() + 'static) {
     if enabled {
@@ -697,7 +508,6 @@ fn MaybeAction(label: String, x: f32, y: f32, w: f32, enabled: bool, click: impl
         },
     );
 }
-/// A momentary action that can destroy unexported work.
 #[composable]
 fn Danger(label: String, x: f32, y: f32, w: f32, click: impl Fn() + 'static) {
     Slab(label, x, y, w, DANGER, click);
@@ -721,9 +531,6 @@ fn Slab(label: String, x: f32, y: f32, w: f32, fill: Color, click: impl Fn() + '
         },
     );
 }
-/// Opens the drawer named on it, and stays lit for as long as that drawer is
-/// open. The tab on the left edge is what tells a closed drawer button apart
-/// from an action that would run immediately.
 #[composable]
 fn Panel(label: String, x: f32, y: f32, w: f32, open: bool, click: impl Fn() + 'static) {
     Button(
@@ -742,9 +549,6 @@ fn Panel(label: String, x: f32, y: f32, w: f32, open: bool, click: impl Fn() + '
             );
         },
     );
-    // The rule is drawn over the button rather than inside it: a `Box` in a
-    // button's content is laid out in the content flow, not positioned, and a
-    // label with room made for it beside it no longer fits a 30pt button.
     Box(
         Modifier::empty()
             .absolute_offset(x + 7., y + 24.)
@@ -755,12 +559,6 @@ fn Panel(label: String, x: f32, y: f32, w: f32, open: bool, click: impl Fn() + '
         || {},
     );
 }
-/// One value out of a set -- a zoom step, which slider the frame scrubber
-/// drives. Lit when it is the value in force. A pill, never a slab, so a lit
-/// value cannot be mistaken for an open drawer.
-/// A switch that is a row in a list. Same rules as `Toggle`, but the label sits
-/// against the left edge: a long list is read down one column, and a centred
-/// label turns that into a ragged search.
 #[composable]
 fn ListToggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() + 'static) {
     Button(
@@ -789,7 +587,6 @@ fn ListToggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() 
         || {},
     );
 }
-/// The same, for a row that selects rather than switches.
 #[composable]
 fn ListChoice(label: String, x: f32, y: f32, w: f32, current: bool, click: impl Fn() + 'static) {
     Button(
@@ -828,10 +625,6 @@ fn Choice(label: String, x: f32, y: f32, w: f32, current: bool, click: impl Fn()
         },
     );
 }
-/// An on/off switch. The label always names the state the editor is in right
-/// now, never the state pressing it would move to, and the pip repeats that,
-/// so a switch can be read without pressing it to find out which way round it
-/// is. Every switch in the editor follows this rule.
 #[composable]
 fn Toggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() + 'static) {
     Button(
@@ -850,7 +643,6 @@ fn Toggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() + 's
             );
         },
     );
-    // Over the button, for the same reason as the drawer tab above.
     Box(
         Modifier::empty()
             .absolute_offset(x + w - 17., y + 11.)
@@ -861,9 +653,6 @@ fn Toggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() + 's
         || {},
     );
 }
-/// A scrollbar for the canvas: a track the whole length of an edge, and a thumb
-/// sized to the fraction of the skin on screen. Dragging anywhere on the track
-/// moves the thumb there, so it doubles as jump-to-position.
 #[composable]
 fn CanvasScrollbar(
     vertical: bool,
@@ -891,8 +680,6 @@ fn CanvasScrollbar(
             .size_points(w, h)
             .background(CARD)
             .rounded_corners(SCROLLBAR / 2.)
-            // Same reason as the canvas: the track geometry is baked into the
-            // handler, so it has to be rebuilt when the track moves or resizes.
             .pointer_input(
                 (max, vertical, thumb.to_bits(), travel.to_bits()),
                 move |scope: PointerInputScope| {
@@ -942,22 +729,12 @@ fn CanvasScrollbar(
         },
     );
 }
-
-/// Put a sentence in the editor's status line. Everything the editor has to
-/// say goes through here, so there is one place to change when it should be
-/// said somewhere louder.
 fn note(shared: &SharedDocument, message: String) {
     let mut d = shared.lock().unwrap();
     d.message = message;
     d.revision += 1;
     ALERT_REVISION.store(d.revision, Ordering::Release);
 }
-/// The pixel under the pointer, in the skin's own coordinates.
-///
-/// Its own composable, reading the hover state itself, so that moving the mouse
-/// invalidates this one line and nothing else. `SkinStudio` rebuilds the whole
-/// canvas bitmap from the document every time it recomposes, which at pointer
-/// rate would cost far more than the readout is worth.
 #[composable]
 fn CursorReadout(hover: cranpose_core::MutableState<Option<[i32; 2]>>, x: f32, y: f32) {
     Label(
@@ -972,11 +749,6 @@ fn CursorReadout(hover: cranpose_core::MutableState<Option<[i32; 2]>>, x: f32, y
         DIM,
     );
 }
-/// The sprite rectangle under the pointer, outlined over the canvas and named.
-///
-/// Only the one being pointed at. Outlining all hundred of them at once -- and
-/// in the artwork's own pixels, so the hairlines grew with the zoom -- buried
-/// the artwork under the hints that were meant to point at it.
 #[composable]
 fn GuideHint(
     hover: cranpose_core::MutableState<Option<[i32; 2]>>,
@@ -992,8 +764,6 @@ fn GuideHint(
     }
     let (at, id) = {
         let (x, y) = (point[0] as u32, point[1] as u32);
-        // The smallest rectangle containing the pointer: sprites nest, and the
-        // innermost one is the one being pointed at.
         let mut best: Option<(&str, [u32; 4])> = None;
         for (id, r) in rects.iter() {
             if x >= r[0] && y >= r[1] && x < r[0] + r[2] && y < r[1] + r[3] {
@@ -1035,9 +805,6 @@ fn GuideHint(
         Color(0.22, 0.89, 0.87, 1.),
     );
 }
-/// An outline around the pixel the brush would hit, scaled to the stroke width.
-/// Same reasoning as `CursorReadout`: it reads the hover state itself so the
-/// canvas underneath is not re-rendered to move a four-line box.
 #[composable]
 fn BrushCursor(
     hover: cranpose_core::MutableState<Option<[i32; 2]>>,
@@ -1067,23 +834,6 @@ fn BrushCursor(
         );
     }
 }
-/// Panels that only mean anything while the canvas is being painted. Leaving
-/// the canvas closes one rather than leaving a live, inert set of brushes in
-/// the tool column.
-/// The tool panels, as this layout's own ids. The name is what the document
-/// holds, so a caller with no pointer can open one; see `View::drawer`.
-/// The whole skin, always, in the top-right corner.
-///
-/// Everything else in this window is a view of part of the document: one
-/// sheet, one sprite's variants, a crop at 8x, a window scrolled to the
-/// playlist. None of them answers "what does the skin look like now", and that
-/// is the question an artist asks after every stroke -- which used to mean
-/// leaving whatever you were doing, fitting the whole skin, looking, and
-/// finding your way back.
-///
-/// It is a picture and never a surface: nothing here takes a pointer, and the
-/// reduction is a whole-number divisor so a preview of pixel art is made of
-/// whole pixels.
 #[composable]
 fn SkinPreview(bitmap: ImageBitmap, size: (u32, u32), x: f32, y: f32, room: (f32, f32)) {
     let (w, h) = size;
@@ -1121,20 +871,12 @@ fn SkinPreview(bitmap: ImageBitmap, size: (u32, u32), x: f32, y: f32, room: (f32
         None,
     );
 }
-
-/// The whole-number reduction that keeps the preview inside its corner. A
-/// fractional one would resample pixel art, which is the one thing a preview of
-/// pixel art must not do.
 fn preview_divisor(size: (u32, u32), room: (f32, f32)) -> u32 {
     (2..=8)
         .find(|d| size.0 / d <= room.0 as u32 && size.1 / d <= room.1 as u32)
         .unwrap_or(8)
 }
-
-/// The room the always-on preview is allowed: enough for the whole skin at a
-/// third, which is the reduction a 275x377 document lands on.
 const PREVIEW_BOX: (f32, f32) = (96., 132.);
-
 fn drawer_id(name: &str) -> u8 {
     match name {
         "targets" => 1,
@@ -1149,7 +891,6 @@ fn drawer_id(name: &str) -> u8 {
         _ => 0,
     }
 }
-
 fn drawer_name(id: u8) -> &'static str {
     match id {
         1 => "targets",
@@ -1164,20 +905,11 @@ fn drawer_name(id: u8) -> &'static str {
         _ => "none",
     }
 }
-
-/// The composition-side handle to this window's document revision. Setting it
-/// recomposes at once, which a press has to do: the document is otherwise
-/// polled, and a panel that opens on the next poll is a panel that did not open.
 type Tick = cranpose_core::MutableState<u64>;
-
 fn set_drawer(shared: &SharedDocument, tick: Tick, id: u8) {
     state(shared, json!({ "drawer": drawer_name(id) }));
-    // The document is polled at frame rate, and a button that answers on the
-    // next poll rather than on the press is a button that looks broken under a
-    // test and sluggish under a finger. The press knows what it changed.
     tick.set(shared.lock().unwrap().revision);
 }
-
 fn close_painting_drawer(shared: &SharedDocument, tick: Tick, open: u8) {
     if matches!(open, 4..=8) {
         set_drawer(shared, tick, 0);
@@ -1193,9 +925,6 @@ fn state(shared: &SharedDocument, patch: serde_json::Value) {
 }
 #[composable]
 pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
-    // A hosted editor is the Android and browser one, and the Android one
-    // serves MCP the same way the desktop window does. The browser cannot open
-    // a listening socket, so there it does nothing.
     if host.is_some() || std::env::args().any(|arg| arg == "--touch-preview") {
         let active = shared.clone();
         cranpose_core::LaunchedEffect(shared.clone(), move |_| {
@@ -1210,29 +939,16 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let live = cranpose_core::rememberMutableStateOf(|| false);
     let review = cranpose_core::rememberMutableStateOf(|| false);
     let picker = cranpose_core::rememberMutableStateOf(|| false);
-    // Armed by the first press of a button that would discard unexported work.
     let confirm = cranpose_core::rememberMutableStateOf(|| false);
-    // A finger has no middle button, so the surfaces with no room for the
-    // sidebar get a switch that turns a drag into a pan instead.
     let pan_mode = cranpose_core::rememberMutableStateOf(|| false);
-    // The skin pixel under the pointer. Only the readout and the brush outline
-    // read it, so a mouse move never rebuilds the canvas.
     let hover = cranpose_core::rememberMutableStateOf(|| None::<[i32; 2]>);
-    // Where the pointer last was, kept after it leaves the canvas: the study
-    // panel is read by moving the pointer onto it, which would otherwise clear
-    // the very thing it is showing.
     let studied = cranpose_core::rememberMutableStateOf(|| None::<[i32; 2]>);
     let pan = cranpose_core::rememberMutableStateOf(|| [0i32; 2]);
     let frame_kind = cranpose_core::rememberMutableStateOf(|| "volume".to_string());
-    // The window is not a composition input, so it is polled alongside the
-    // document: the canvas is sized from it, and a resize has to recompose.
     let scene_state = cranpose_core::rememberMutableStateOf(|| Scene::new(0., 0.));
     let poll = shared.clone();
     cranpose_core::LaunchedEffectAsync(0u8, move |_| {
         Box::pin(async move {
-            // Only a lock and a compare: this recomposes when the document has
-            // actually changed, so polling it at frame rate costs nothing and
-            // makes every control answer immediately.
             cranpose_core::interval(Duration::from_millis(16), move || {
                 let revision = poll.lock().unwrap().revision;
                 if tick.get_non_reactive() != revision {
@@ -1244,13 +960,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     });
     let _ = tick.get();
     let scene = scene_state.get();
-    // The canvas is a drawing surface only in its own mode; preview and the
-    // state sheet are pictures of the skin, not places to paint.
     let drawing = !live.get() && !review.get();
-    // The chrome is laid out before the canvas, because the canvas starts
-    // under it: one row each where the window is wide enough, wrapped where it
-    // is not. Nothing here is a different control at a different size -- the
-    // same buttons in the same order, on however many rows they need.
     let hosted = host.is_some();
     let armed = confirm.get();
     let mut action = Rows::new(20., ACTION_ROW, scene.width - 20.);
@@ -1258,8 +968,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let redo_at = action.take(76.);
     let live_at = action.take(140.);
     let sheet_at = action.take(150.);
-    // Pan is the middle mouse button on a pointer surface and nothing at all
-    // on a finger, so the surfaces without a sidebar get a switch for it.
     let pan_at = (!scene.sidebar()).then(|| action.take(96.));
     let (player_at, apply_at) = if hosted {
         if scene.right(640.) < action.x + 8. {
@@ -1273,11 +981,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     } else {
         ((0., 0.), (0., 0.))
     };
-    // A hosted editor is the one that can be left mid-stroke -- Android Back,
-    // or the Player button -- so it is the one that keeps a recoverable draft.
     let draft_at = hosted.then(|| (action.take(104.), action.take(146.)));
-    // The file group tracks the right edge while the row is wide enough to
-    // hold it there, and joins the flow when it is not.
     let inline_files = scene.right(872.) < action.x + 8.;
     let (wsz_at, open_at, export_at, blank_at, keep_at) = if inline_files {
         let wsz = if hosted { (0., 0.) } else { action.take(222.) };
@@ -1297,9 +1001,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
             (scene.right(940.), ACTION_ROW),
         )
     };
-    // The zoom pills and Fit live in the sidebar where there is one, and in the
-    // chrome where there is not. Same pills, same labels, same order -- a
-    // surface without room for the strip is not a surface without zoom.
     let zoom_at: Vec<(f32, f32)> = if scene.sidebar() {
         Vec::new()
     } else {
@@ -1308,8 +1009,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
         at
     };
     let mut panels = Rows::new(20., action.bottom(), scene.width - 20.);
-    // Every drawer the editor has, each button named exactly as the panel it
-    // opens. Positions first, so the canvas knows where it starts.
     let panel_buttons: Vec<(f32, f32, u8, &'static str, f32)> = {
         let list: &[(u8, &str, f32)] = if !drawing {
             &[
@@ -1337,11 +1036,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
             })
             .collect()
     };
-    // The two preview controls sit on the same row as the panels they replace.
     let live_extra = live.get().then(|| (panels.take(130.), panels.take(160.)));
-    // The sprite-state strip, packed the same way and for the same reason: it
-    // is one row and a slider where there is room for that, and the canvas
-    // gets whatever it did not need.
     let mut footer = Rows::new(24., 0., scene.width - 12.);
     let state_at = footer.take_gap(198., 8.);
     let pressed_at = footer.take_gap(136., 8.);
@@ -1366,10 +1061,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
         .under_chrome(panels.bottom() + CANVAS_HEADER)
         .over_footer(footer.bottom() + 26.);
     let (canvas_x, canvas_y, canvas_full_w, canvas_h) = scene.painting();
-    // The tool column is docked beside the canvas rather than laid over it, and
-    // the canvas gives up the width it was only using as margin. Covering the
-    // drawing surface with the panel that holds the brush was a concession to a
-    // narrow window; a window wide enough gets both at once.
     let (split_w, split_drawer) = scene.split();
     let docked = split_drawer > 0.;
     let canvas_w = if docked { split_w } else { canvas_full_w };
@@ -1383,7 +1074,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     } else {
         scene.drawer()
     };
-    // Nothing to exclude from the brush once the drawer is out of the way.
     let drawer_canvas_x = if docked {
         f32::INFINITY
     } else {
@@ -1404,12 +1094,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
         redoable,
     ) = {
         let d = shared.lock().unwrap();
-        // The corner preview is the whole skin whatever this window is showing,
-        // so it is its own render rather than the canvas image scaled down: with
-        // a sheet open the canvas is that sheet.
         let skin = d.skin_render();
-        // A state sheet is one sprite's variants, so it can refuse: the editor
-        // shows the refusal in place of the canvas rather than a wrong sprite.
         let sheet = review.get().then(|| d.state_sheet(None));
         let (undone, redoable) = d.history_depth();
         let target = d.state_sheet_layer();
@@ -1438,8 +1123,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
             redoable,
         )
     };
-    // Which panel is open is the document's, not this layout's, so that a
-    // caller with no pointer can open one and look at it.
     let open_drawer = drawer_id(&view.drawer);
     let export_path = path
         .as_deref()
@@ -1546,13 +1229,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let skin_bitmap =
         ImageBitmap::from_rgba8(skin.width(), skin.height(), skin.into_raw()).expect("skin bitmap");
     let panel = view.panel.clone();
-    // Which window the canvas is scrolled over. It only decides which window's
-    // own controls to offer -- there is no per-window view to switch into, and
-    // the drawing surface is always the whole skin. The atlas panel keeps its
-    // own identity so its per-sheet controls still apply.
     let section = if panel == "canvas" {
-        // Taken from the middle of the view rather than its top edge: at 6x the
-        // top row is nowhere near where the eye is.
         let rows = ((canvas_h - SCROLLBAR) / view.zoom.max(1) as f32) as i32;
         match pan.get()[1] + rows / 2 {
             y if y >= 232 => "playlist".to_string(),
@@ -1567,12 +1244,10 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     } else {
         view.zoom as f32
     };
-
     let preview_playlist_height = view.preview_playlist_height;
     let preview_size = (275, 232 + preview_playlist_height);
     let (viewport_w, viewport_h) = if live.get() { preview_size } else { (w, h) };
     let pan_value = pan.get();
-    // How far the canvas can scroll, in source pixels, for this window.
     let pan_max = [
         (viewport_w as f32 - (canvas_w - SCROLLBAR) / zoom)
             .ceil()
@@ -1583,9 +1258,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     ];
     let px = pan_value[0].clamp(0, pan_max[0]) as f32 * zoom;
     let py = pan_value[1].clamp(0, pan_max[1]) as f32 * zoom;
-    // Centre the skin in whatever room the canvas has. A tall skin in a wide
-    // window otherwise sits jammed against the left edge with the workspace
-    // empty beside it.
     let ox = ((canvas_w - SCROLLBAR - viewport_w as f32 * zoom) / 2.).max(0.) - px;
     let oy = ((canvas_h - SCROLLBAR - viewport_h as f32 * zoom) / 2.).max(0.) - py;
     let guide_rects = Rc::new(if view.guides && drawing {
@@ -1614,8 +1286,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
         })
         .unwrap_or_else(|| "Control art and background\nalike, in one stroke.".into());
     if !view.presentation && !live.get() {
-        // The window is showing the editor's own canvas, not the player, so
-        // there is no player rectangle to crop against any more.
         if let Ok(mut at) = PLAYER_SCENE.lock() {
             *at = None;
         }
@@ -1628,9 +1298,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
         Modifier::empty().fill_max_size().background(BG),
         BoxSpec::default(),
         move || {
-            // Measures the window for `Scene`. The editor is an absolutely
-            // positioned scene, so nothing else here would ever ask how much
-            // room it actually has.
             BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
                 let measured = Scene::new(
                     scope.constraints().max_width,
@@ -1677,9 +1344,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 return;
             }
             Label("CRANAMP  /  SKIN STUDIO".into(), 22., 12., 300., 18., FG);
-            // Beside the title where there is room for it. Where there is not,
-            // the path is in the WSZ field and the status line already, and a
-            // two-character stub of it is worse than none.
             if scene.width - 380. >= 120. {
                 Label(
                     format!(
@@ -1694,10 +1358,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     if dirty { ACCENT_LIT } else { DIM },
                 );
             }
-            // Row one is what happens to the document; row two is what the tool
-            // column shows. Both are anchored from the left so the row stays one
-            // row at any window width, with only the file group tracking the
-            // right edge.
             {
                 let d = document.clone();
                 MaybeAction(
@@ -1770,9 +1430,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 move || {
                     let on = !review.get_non_reactive();
                     if on && !has_subject {
-                        // A state sheet is one sprite's variants, so entering
-                        // the mode with nothing chosen used to show an
-                        // arbitrary sprite. Ask for one instead.
                         note(
                             &sheet_doc,
                             "Choose one sprite in Sprite targets: a state sheet shows one \
@@ -1789,8 +1446,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     }
                 },
             );
-            // The same six pills and the same Fit the sidebar carries, for the
-            // surfaces that have no sidebar to carry them.
             if let [zooms @ .., fit] = zoom_at.as_slice() {
                 for (i, z) in [1, 2, 3, 4, 6, 8].into_iter().enumerate() {
                     let d = document.clone();
@@ -1830,9 +1485,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
             if let Some(host) = host.clone() {
                 let leaving = document.clone();
                 let back = host.close.clone();
-                // Leaving is not discarding: Android Back and the Player button
-                // both keep a recoverable draft, so the work is still here when
-                // the player hands the window back and on disk if it does not.
                 cranpose::BackHandler(true, move || {
                     if open_drawer != 0 {
                         set_drawer(&leaving, tick, 0);
@@ -1870,9 +1522,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                 restored.path = None;
                                 restored.view.panel = "canvas".into();
                                 let mut doc = d.lock().unwrap();
-                                // Capture the outgoing work before replacing
-                                // it; the restored bytes are already owned, so
-                                // this cannot erase them.
                                 let outgoing = doc.project_bytes()?;
                                 store_draft(&outgoing, true)?;
                                 restored.revision = doc.revision + 1;
@@ -1899,8 +1548,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         Err(e) => note(&d, format!("Apply: {e:#}")),
                     },
                 );
-                // A hosted editor has no filesystem path to type into, so both
-                // file actions go through the platform's own picker.
                 let open = open_launcher.clone();
                 Action("Open…".into(), open_at.0, open_at.1, 70., move || {
                     open.launch(cranpose::FilePickerOptions::default().with_filter(
@@ -1943,8 +1590,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     if let Err(e) = result {
                         doc.message = format!("Open: {e:#}");
                     } else {
-                        // A replaced document arrives on the library's own
-                        // per-window default; the editor has no such view.
                         open_on_whole_skin(&mut doc);
                     }
                     doc.revision += 1;
@@ -1960,9 +1605,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 });
             }
             {
-                // The one button that can throw away unexported work. It refuses
-                // while there is any, and says so where the eye already is --
-                // next to the button, not in the status line at the far bottom.
                 let d = document.clone();
                 let armed = confirm.get();
                 let label = if armed {
@@ -1987,9 +1629,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     if let Err(e) = call {
                         note(&d, format!("New: {e:#}"));
                     } else {
-                        // A replaced document arrives on the library's own
-                        // per-window default. The editor has no per-window
-                        // view, so put it back on the whole skin.
                         {
                             let mut doc = d.lock().unwrap();
                             open_on_whole_skin(&mut doc);
@@ -2010,7 +1649,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     );
                 }
             }
-            // Row two: every drawer the editor has, laid out above.
             {
                 for (x, y, id, label, width) in panel_buttons.iter().copied() {
                     let d = document.clone();
@@ -2021,8 +1659,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         width,
                         open_drawer == id,
                         move || {
-                            // Part rectangles are only worth a panel when they are
-                            // drawn, so opening that one turns them on.
                             if id == 6 {
                                 state(&d, json!({"guides":true}));
                             }
@@ -2061,10 +1697,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     );
                 }
             }
-            // The quick-access strip, where the canvas has room for it beside
-            // it. Every control on it is also in a panel, so a narrow surface
-            // drops the strip and keeps the editor: the same buttons, one
-            // press further in.
             if scene.sidebar() {
                 Box(
                     Modifier::empty()
@@ -2075,10 +1707,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     BoxSpec::default(),
                     || {},
                 );
-                // Painting controls only while the canvas is the drawing surface.
-                // Preview and the state sheet used to leave a full sidebar of live,
-                // completely inert brushes, colours and targets on screen with one
-                // 11pt line of grey text as the only sign they did nothing.
                 if drawing {
                     Label("DRAW".into(), 32., 142., 160., 11., DIM);
                     {
@@ -2117,8 +1745,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         11.,
                         DIM,
                     );
-                    // Stroke width is the parameter a painter reaches for most, so it
-                    // lives in the sidebar rather than behind a panel across the window.
                     Label("STROKE WIDTH".into(), 32., 226., 110., 11., DIM);
                     Label(format!("{} px", view.brush_size), 150., 225., 50., 12., FG);
                     for (i, (label, delta)) in [("− Thinner", -1i32), ("+ Thicker", 1)]
@@ -2167,9 +1793,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                             move || set_drawer(&d, tick, if open_drawer == 8 { 0 } else { 8 })
                         },
                     );
-                    // The colour in force, as a swatch rather than only as hex.
-                    // Typing an exact value now lives in the picker, beside the
-                    // field and the palette it belongs with.
                     {
                         let rgba = parse_color(&view.color).unwrap_or([255, 255, 255, 255]);
                         Box(
@@ -2184,13 +1807,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     }
                     Label(format!("Brush {}", view.color), 70., 405., 130., 11., FG);
                     Label("EDIT SCOPE".into(), 32., 440., 160., 11., DIM);
-                    // Read-only here, as Sprite targets below it is. It used to
-                    // be the only control for this anywhere, on the one strip
-                    // that is not drawn below 900 points -- so the setting that
-                    // decides whether a stroke lands in one slider frame or all
-                    // twenty-eight could not be reached on a handset at all. It
-                    // lives in Drawing tools now, with every other brush
-                    // setting, which every size has.
                     Label(
                         model::scope_label(&view.states).into(),
                         32.,
@@ -2200,11 +1816,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         FG,
                     );
                     Label("Set it in Drawing tools.".into(), 32., 470., 168., 10., DIM);
-                    // "Sprite targets" everywhere: these are the sprites a stroke is
-                    // routed into. The independent stack of artwork planes over the
-                    // atlases is "painting layers", and never shares the word.
-                    // Read-only: the panel that changes this is one row up in the
-                    // toolbar, and a second button here was only a duplicate.
                     Label("SPRITE TARGETS".into(), 32., 494., 165., 11., DIM);
                     Label(
                         if view.layers.is_empty() {
@@ -2320,10 +1931,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 11.,
                 DIM,
             );
-            // Where the brush is, in the skin's own pixels. Its own composable,
-            // so a mouse move repaints this line and the brush outline and
-            // nothing else -- the canvas bitmap is rebuilt only when the
-            // picture changes.
             CursorReadout(hover, canvas_x + canvas_w - 200., canvas_y - CANVAS_HEADER);
             if let Some(refusal) = sheet_refusal.clone() {
                 Label(
@@ -2355,15 +1962,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     .size_points(canvas_w, canvas_h)
                     .clip_to_bounds()
                     .background(Color(0.04, 0.05, 0.07, 1.))
-                    // Navigation sits on the canvas panel, under the drawing
-                    // surface, so it works over the artwork and over the margin
-                    // around it alike: the brush consumes presses and drags, and
-                    // everything it does not consume arrives here.
-                    //
-                    // cranpose delivers key events only to a focused text field,
-                    // so there is no Cmd+Z, no bracket keys and no space-to-pan
-                    // to be had; every gesture the editor offers has to be one
-                    // the pointer alone can make.
                     .pointer_input(
                         (
                             view.zoom,
@@ -2378,40 +1976,16 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                 scope
                                     .await_pointer_event_scope(|events| async move {
                                         let mut grab: Option<([f32; 2], [i32; 2])> = None;
-                                        // Panning is in source pixels, and the
-                                        // skin is never larger than its own
-                                        // canvas, so these are the only bounds
-                                        // either axis can need.
                                         let limit = [viewport_w as i32, viewport_h as i32];
                                         loop {
                                             let event = events.await_pointer_event().await;
                                             match event.kind {
                                                 PointerEventKind::Zoom => {
-                                                    // ctrl+wheel reaches a
-                                                    // handler as a zoom gesture,
-                                                    // not as a scroll with a
-                                                    // modifier: the shell's
-                                                    // wheel policy converts it
-                                                    // before dispatch.
                                                     let step: i32 =
                                                         if event.zoom_delta > 1. { 1 } else { -1 };
                                                     let next = (view.zoom as i32 + step).clamp(1, 8)
                                                         as f32;
                                                     if next != zoom {
-                                                        // Zoom about the pointer:
-                                                        // the pixel under it stays
-                                                        // under it, so magnifying
-                                                        // does not also lose the
-                                                        // reader's place.
-                                                        // Panning is in whole
-                                                        // source pixels, so the
-                                                        // anchor is the pixel the
-                                                        // pointer names rather than
-                                                        // the exact point under it:
-                                                        // the smallest pan that
-                                                        // keeps that same pixel
-                                                        // under the pointer is the
-                                                        // ceiling, not the nearest.
                                                         let anchor = |along: f32,
                                                                       origin: f32,
                                                                       room: f32,
@@ -2448,10 +2022,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                     event.consume();
                                                 }
                                                 PointerEventKind::Scroll => {
-                                                    // The shell has already applied
-                                                    // its wheel policy, alt-held
-                                                    // axis swap included, so both
-                                                    // axes are used as they arrive.
                                                     pan.update(|p| {
                                                         for axis in 0..2 {
                                                             let delta = if axis == 0 {
@@ -2467,9 +2037,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                     event.consume();
                                                 }
                                                 PointerEventKind::Down => {
-                                                    // The middle button pans. It is
-                                                    // the one grab gesture available
-                                                    // without a spacebar.
                                                     if event.buttons.contains(PointerButton::Middle)
                                                         || (pan_mode.get_non_reactive()
                                                             && event
@@ -2618,13 +2185,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                     .absolute_offset(ox, oy)
                                     .required_size(cranpose_ui::Size::new(w as f32 * zoom, h as f32 * zoom))
                                     .pointer_input(
-                                        // The mapping from a pointer to a skin
-                                        // pixel is built from the canvas
-                                        // geometry, so the handler has to be
-                                        // rebuilt whenever that geometry moves:
-                                        // a drawer opening or a window resize
-                                        // shifts the image, and a stale handler
-                                        // then paints somewhere else entirely.
                                         (
                                             canvas_panel.clone(),
                                             view.zoom,
@@ -2656,9 +2216,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                                     && ox + event.position.x
                                                                         >= drawer_canvas_x
                                                                 {
-                                                                    // Under the open panel: end
-                                                                    // any stroke rather than
-                                                                    // painting out of sight.
                                                                     if origin.take().is_some() {
                                                                         d.lock()
                                                                             .unwrap()
@@ -2681,25 +2238,11 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                                 }
                                                                 match event.kind {
                                                                     PointerEventKind::Down => {
-                                                                        // Only the two buttons
-                                                                        // that mean something
-                                                                        // here. A middle press
-                                                                        // belongs to the panel
-                                                                        // underneath, which pans
-                                                                        // with it; consuming it
-                                                                        // as a stroke meant
-                                                                        // middle-drag painted
-                                                                        // over the artwork and
-                                                                        // panned only over the
-                                                                        // margin around it.
                                                                         let sampling = picker
                                                                             .get_non_reactive()
                                                                             || event.buttons.contains(
                                                                                 PointerButton::Secondary,
                                                                             );
-                                                                        // A drag is a pan, not a
-                                                                        // stroke, while the switch
-                                                                        // is on.
                                                                         if pan_mode
                                                                             .get_non_reactive()
                                                                             && !sampling
@@ -2715,9 +2258,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                                                         }
                                                                         let mut doc =
                                                                             d.lock().unwrap();
-                                                                        // The right button
-                                                                        // samples with no mode
-                                                                        // to enter and leave.
                                                                         if sampling {
                                                                             let info = doc.inspect(
                                                                                 [
@@ -2829,10 +2369,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                 || {},
                             );
                         }
-                        // Where the next stroke would land, sized to the
-                        // stroke width. Drawn over the artwork rather than
-                        // into it, so following the pointer costs one outline
-                        // and not a re-render of the whole skin.
                         if !review.get() {
                             GuideHint(
                                 hover,
@@ -2848,8 +2384,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 },
             );
             if panel != "canvas" && drawing {
-                // One atlas at a time is a detour, and the way back has to be
-                // on the canvas rather than only inside a panel.
                 let d = document.clone();
                 Action(
                     "← The whole skin".into(),
@@ -2866,8 +2400,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 );
             }
             let footer_top = scene.footer_top();
-            // The most consequential strip in the editor had no name at all: it
-            // decides which variant of every sprite the canvas is drawing.
             Label(
                 "SPRITE STATE".into(),
                 state_at.0,
@@ -2918,10 +2450,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     move || state(&d, json!({"active":!active})),
                 );
             }
-            // Every slider the skin has, always. Which of them this row offered
-            // used to depend on where the canvas happened to be scrolled, so
-            // the playlist scrollbar's frames could only be reached by already
-            // knowing to scroll to the playlist.
             let kind = frame_kind.get();
             for (i, k) in ["volume", "balance", "position", "eq", "scroll"]
                 .iter()
@@ -3029,8 +2557,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 11.,
                 DIM,
             );
-            // Scrollbars sit over the canvas' own edges, after it, so they take
-            // the pointer there instead of the brush.
             if !review.get() && !live.get() && pan_max[1] > 0 {
                 CanvasScrollbar(
                     true,
@@ -3075,17 +2601,11 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     DIM
                 },
             );
-            // The whole skin, in the corner, always. Drawn after the canvas so
-            // it is never under it, and before the tool column so the column is
-            // never under this.
             SkinPreview(
                 skin_bitmap.clone(),
                 skin_size,
                 canvas_x + canvas_w + 6.,
                 canvas_y + 22.,
-                // Never past the bottom of the canvas: a preview that runs into
-                // the sprite-state strip is over the editor instead of over its
-                // own column, which is the thing this column exists to stop.
                 (PREVIEW_BOX.0, PREVIEW_BOX.1.min((canvas_h - 34.).max(40.))),
             );
             if open_drawer != 0 {
@@ -3187,9 +2707,6 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
 }
 #[composable]
 fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
-    // Taller than the column on a short window now that the glass lens, the
-    // gradient and the text brush have their own numbers, so the whole block
-    // scrolls rather than losing them off the bottom edge.
     let scroll = cranpose_ui::rememberScrollState!(0.0);
     let word = cranpose_core::remember(|| TextFieldState::new("CATAMP")).with(|f| *f);
     let to_color = cranpose_core::remember(|| TextFieldState::new("#000000")).with(|f| *f);
@@ -3254,8 +2771,6 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                             move || state(&d, json!({"brush_size":size})),
                         );
                     }
-                    // The controls a brush needs and no other brush does, in
-                    // the two rows under the widths.
                     if ["curve", "tuft"].contains(&v.brush.as_str()) {
                         for (x, delta, label) in [(12., -10, "− Bend"), (248., 10, "+ Bend")] {
                             let d = shared.clone();
@@ -3266,9 +2781,6 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                         }
                         Label(format!("{}%", v.curve_bend), 170., 322., 60., 12., FG);
                     } else if v.brush == "glass" {
-                        // Both of the lens' numbers. They have been 1..128 and
-                        // 0..32 over MCP from the day the brush landed and were
-                        // fixed for a hand stroke, so a person got one glass.
                         Label("BEVEL".into(), 12., 316., 172., 11., DIM);
                         for (i, (amount, label)) in [
                             (0u32, "Drag"),
@@ -3342,13 +2854,6 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                                 move || state(&d, json!({ "text_scale": scale })),
                             );
                         }
-                        // Spacing is the one of the four that decides whether
-                        // a word *fits*. The operation has taken it from the
-                        // day it landed and no hand could ask for it, so it
-                        // was fixed at one everywhere: STEREO in the small
-                        // face is 29 pixels of ink and the stereo lamp is 29
-                        // pixels wide, and the only way to label that cell
-                        // was to carry a glyph table in a build script.
                         Label("LETTER SPACING".into(), 12., 410., 172., 11., DIM);
                         for (i, spacing) in [-1i32, 0, 1, 2].into_iter().enumerate() {
                             let d = shared.clone();
@@ -3370,10 +2875,6 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                             DIM,
                         );
                     }
-                    // A gradient. The engine has taken exact palette ramps from
-                    // the start and neither panel could ask for one, so every
-                    // gradient in every skin so far came out of a recipe -- and
-                    // a flat rectangle was the only thing a hand could draw.
                     Label("GRADIENT".into(), 12., 455., 172., 12., DIM);
                     let ramping = v.ramp_to.is_some();
                     for (i, (axis, label, on)) in [
@@ -3459,9 +2960,6 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                             move || state(&d, json!({ "opacity": amount })),
                         );
                     }
-                    // The pointer's half of `at` and of a swept `[from, to]`:
-                    // one lift, one drag, N copies -- five transport berths,
-                    // nine playlist header tiles, eleven equalizer bands.
                     Label(
                         "STAMP COPIES ALONG A DRAG".into(),
                         12.,
@@ -3498,13 +2996,6 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                             move || state(&d, json!({ "stamp_sweep": !on })),
                         );
                     }
-                    // Which variants of each target a stroke lands in. A slider
-                    // is twenty-eight frames that differ by one object, so the
-                    // useful scope is neither this frame nor all of them but
-                    // the run from this frame to one end. It was a switch on
-                    // the quick-access sidebar, which is the one strip a
-                    // handset does not get, so it is here with every other
-                    // brush setting instead.
                     Label("EDIT SCOPE".into(), 12., 750., 348., 11., DIM);
                     for (i, scope) in model::SCOPES.iter().enumerate() {
                         let d = shared.clone();
@@ -3572,16 +3063,8 @@ fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         },
     );
 }
-/// Everything about the skin itself rather than about painting it.
-///
-/// These used to be buttons in the toolbar that appeared and disappeared as the
-/// canvas scrolled past the window they belonged to: a control nobody could
-/// find, because finding it meant already knowing to scroll to the playlist.
-/// They are all here, all of the time.
 #[composable]
 fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
-    // Taller than the column on a small window, so the whole block scrolls
-    // rather than losing the visualizer palette off the bottom edge.
     let scroll = cranpose_ui::rememberScrollState!(0.0);
     let shared = shared.clone();
     cranpose_ui::Column(
@@ -3754,9 +3237,6 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                             },
                         );
                     }
-                    // The two palettes a classic skin carries outside its bitmaps. They were
-                    // reachable only over MCP, which made them invisible to anyone painting by
-                    // hand -- and the playlist's own colours are not a detail.
                     let (playlist_colours, visualizer_colours) =
                         { shared.lock().unwrap().text_palettes() };
                     let brush = { shared.lock().unwrap().view.color.clone() };
@@ -3873,7 +3353,6 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
         },
     );
 }
-
 #[composable]
 fn LayerChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
     let (width, height) = room;
@@ -3932,8 +3411,6 @@ fn LayerChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
             },
         );
     }
-    // A classic skin has around sixty named sprites. Scrolling to one by eye is
-    // the slowest way to reach it.
     cranpose_ui::BasicTextField(
         filter,
         Modifier::empty()
@@ -3986,8 +3463,6 @@ fn LayerChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                     move || {
                         let d = d.clone();
                         let id = id.clone();
-                        // The pip carries the state; the "[ ]" the caption used
-                        // to carry said the same thing a second time.
                         ListToggle(caption.clone(), 2., 0., width - 74., checked, move || {
                             let mut ids = d.lock().unwrap().view.layers.clone();
                             if ids.contains(&id) {
@@ -4139,15 +3614,9 @@ fn LivePlayer(shared: SharedDocument, revision: u64, scale: f32, playlist_height
         );
     }
 }
-
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    /// The editor opens on the skin the player wears, and on that skin itself
-    /// rather than on a layered copy of it. A project file of the bundled
-    /// artwork was a second copy of the same pixels that could drift from the
-    /// one the player loads, and this test is what proved they had not: now
-    /// there is only the one, so the bytes are the same bytes.
     #[test]
     fn the_editor_opens_on_the_skin_the_player_wears() {
         use std::io::{Cursor, Read};
@@ -4173,12 +3642,10 @@ mod integration_tests {
         assert_eq!(exported, entries(super::super::BUNDLED_SKINS[0].bytes));
         super::super::bundled_skin().expect("Catamp must load in the player");
     }
-
     #[test]
     fn explicit_studio_input_does_not_fall_back_to_bundled_art() {
         assert!(initial_document(Some("missing-skin-for-startup-test.wsz")).is_err());
     }
-
     #[test]
     fn blank_atlases_have_no_inherited_art_and_share_native_canvas_history() {
         let mut d = Document::blank();
@@ -4215,7 +3682,6 @@ mod integration_tests {
             Document::open(include_bytes!("../../../assets/winamp.wsz"), None).unwrap(),
         )));
         let original = shared.lock().unwrap().archive().unwrap();
-        // The mouse path calls exactly these operations once per gesture.
         {
             let mut d = shared.lock().unwrap();
             d.checkpoint();
@@ -4243,9 +3709,6 @@ mod integration_tests {
         mcp::call("studio_undo", json!({}), &shared).unwrap();
         assert_eq!(shared.lock().unwrap().archive().unwrap(), original);
     }
-    /// A state sheet is one sprite's variants, and the editor has to be told
-    /// which sprite. Falling back to an arbitrary one meant the first press of
-    /// the button always showed something nobody had asked for.
     #[test]
     fn a_state_sheet_needs_a_sprite_and_shows_every_variant_of_it() {
         let mut d = Document::open(include_bytes!("../../../assets/winamp.wsz"), None).unwrap();
@@ -4254,12 +3717,9 @@ mod integration_tests {
             d.state_sheet(None).is_err(),
             "with no sprite chosen there is nothing to lay out"
         );
-
         d.state(json!({"layer":"volume.track"})).unwrap();
         let sheet = d.state_sheet(None).expect("a chosen sprite has a sheet");
         assert_eq!(sheet.dimensions(), (546, 124));
-        // The classic transparency key is not a colour. Copying it verbatim
-        // turned sprites like the volume track into flat magenta tiles.
         assert!(
             sheet.pixels().all(|p| p.0[..3] != [255, 0, 255]),
             "the transparency key must not be painted as a colour"
@@ -4273,8 +3733,6 @@ mod integration_tests {
         );
     }
 }
-
-/// Hue 0..1, saturation 0..1, value 0..1 to 8-bit RGB.
 fn hsv_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
     let h = (h.rem_euclid(1.)) * 6.;
     let c = v * s;
@@ -4294,7 +3752,6 @@ fn hsv_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
         ((b + m) * 255.).round().clamp(0., 255.) as u8,
     ]
 }
-
 fn rgb_hsv(c: [u8; 3]) -> (f32, f32, f32) {
     let (r, g, b) = (c[0] as f32 / 255., c[1] as f32 / 255., c[2] as f32 / 255.);
     let max = r.max(g).max(b);
@@ -4311,19 +3768,12 @@ fn rgb_hsv(c: [u8; 3]) -> (f32, f32, f32) {
     } / 6.;
     (h, if max > 0. { d / max } else { 0. }, max)
 }
-
-/// A real colour picker: a saturation/value field for the chosen hue, a hue
-/// strip under it, and the palette already in the skin. Eight preset swatches
-/// and a hex box are fine for touching up someone else's artwork and hopeless
-/// for choosing a colour.
 #[composable]
 fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
     Label("COLOUR PICKER".into(), 12., 17., 270., 14., FG);
     let current = { shared.lock().unwrap().view.color.clone() };
     let rgb = parse_color(&current).unwrap_or([255, 255, 255, 255]);
     let (h0, s0, v0) = rgb_hsv([rgb[0], rgb[1], rgb[2]]);
-    // Hue is kept aside: at zero saturation or zero value every hue is the same
-    // colour, and reading it back from RGB would snap the strip to red.
     let hue = cranpose_core::rememberMutableStateOf(|| h0);
     if s0 > 0.02 && v0 > 0.02 {
         let h = h0;
@@ -4332,9 +3782,6 @@ fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         }
     }
     let h = hue.get();
-    // The colour in force, the size of a real swatch, next to the box that
-    // types one exactly. Both used to be elsewhere: the only sign of the
-    // current colour inside the picker was 11pt of grey hex at the top.
     Box(
         Modifier::empty()
             .absolute_offset(12., 40.)
@@ -4371,7 +3818,6 @@ fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         10.,
         DIM,
     );
-
     let field_size: (f32, f32) = (room.0, 196.);
     const STRIP_H: f32 = 22.;
     let field = {
@@ -4398,7 +3844,6 @@ fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         }
         ImageBitmap::from_rgba8(sw, 1, im.into_raw()).expect("hue strip")
     };
-
     let d = shared.clone();
     Box(
         Modifier::empty()
@@ -4453,7 +3898,6 @@ fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
             );
         },
     );
-
     let d = shared.clone();
     Box(
         Modifier::empty()
@@ -4511,7 +3955,6 @@ fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
             );
         },
     );
-
     Label(
         "IN THIS SKIN".into(),
         12.,
@@ -4520,8 +3963,6 @@ fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         11.,
         DIM,
     );
-    // Scanned once when the picker opens: every pixel of every sheet is too much
-    // work to repeat on each recomposition.
     let sampled = shared.clone();
     let palette = cranpose_core::remember(move || sampled.lock().unwrap().palette_sample(24))
         .with(|p| p.clone());
@@ -4556,7 +3997,6 @@ fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         move || state(&d, json!({"color":"#ff00ff"})),
     );
 }
-
 #[composable]
 fn StudyChooser(
     shared: SharedDocument,
@@ -4566,10 +4006,6 @@ fn StudyChooser(
 ) {
     Label("PIXEL STUDY".into(), 12., 17., 270., 14., FG);
     let values = cranpose_core::rememberMutableStateOf(|| false);
-    // A magnifier that has to be aimed by picking a brush and dragging a box is
-    // a magnifier nobody reaches for. With nothing lifted it simply follows the
-    // pointer, quantised so it re-crops every sixteen pixels rather than every
-    // one.
     let at = hover.get().map(|p| {
         [
             (p[0].max(0) / 16 * 16) as u32,
@@ -4632,8 +4068,6 @@ fn StudyChooser(
             im
         };
         let (w, h) = im.dimensions();
-        // The magnified view fits the column rather than a fixed 348 points,
-        // which used to run the picture off the right-hand edge of the panel.
         let detail_h = (room.1 - 350.).max(140.);
         let z = ((room.0 as u32 - 8) / w)
             .min(detail_h as u32 / h)
@@ -4673,8 +4107,6 @@ fn StudyChooser(
             );
         }
     }
-    // The study itself is read-only; these three change the lifted clipboard,
-    // so they are named and separated as what they are.
     let transforms = room.1 - 96.;
     Label(
         "CLIPBOARD  ·  NOT THE STUDY".into(),
@@ -4717,13 +4149,11 @@ fn StudyChooser(
         DIM,
     );
 }
-
 #[composable]
 fn GuideChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
     let filter = cranpose_core::rememberMutableStateOf(|| false);
     let doc = shared.lock().unwrap();
     let selected = doc.selection;
-    // Preserve the canvas guide numbers when narrowing the list.
     let mut guides: Vec<_> = doc.guides().into_iter().enumerate().collect();
     if filter.get() {
         if let Some(r) = selected {
@@ -4835,8 +4265,6 @@ fn PaintChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
     let info = shared.lock().unwrap().paint_layer_info();
     let planes = info["layers"].as_array().unwrap().clone();
     let active = info["active"].as_str().map(str::to_owned);
-    // Armed by the first press of Delete, like New blank: a plane is artwork,
-    // and it used to go on one click while starting a blank skin asked twice.
     let armed = cranpose_core::rememberMutableStateOf(|| false);
     Label("PAINTING LAYERS".into(), 12., 17., 270., 14., FG);
     let third = (width - 16.) / 3.;
@@ -4905,10 +4333,6 @@ fn PaintChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
             plane_action(&d, json!({"action":"set","name":field.text()}))
         });
     }
-    // The controls for the chosen plane sit at the foot of the column and the
-    // list fills everything between. Pinning them at a fixed offset cut the
-    // list to four rows in a seven-plane document, with nothing to say the
-    // other three were there.
     let controls = height - 168.;
     let layer_doc = shared.clone();
     let scroll = cranpose_ui::rememberScrollState!(0.0);
@@ -4927,8 +4351,6 @@ fn PaintChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                 let visible = p["visible"] == true;
                 let locked = p["locked"] == true;
                 let name = p["name"].as_str().unwrap().to_owned();
-                // One line per row: a name long enough to wrap made its row
-                // taller than its neighbours and the list lost its pitch.
                 let name = if name.chars().count() > 22 {
                     format!("{}…", name.chars().take(21).collect::<String>())
                 } else {
@@ -4938,8 +4360,6 @@ fn PaintChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                     Modifier::empty().size_points(width, 38.),
                     BoxSpec::default(),
                     move || {
-                        // One row per plane. A full-width switch pair under
-                        // every name meant four planes filled the panel.
                         {
                             let d = d.clone();
                             let id = id.clone();
@@ -5022,8 +4442,6 @@ fn PaintChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                 },
             )
         };
-        // Delete throws a whole plane of artwork away, so it asks once first;
-        // the other three are reversible rearrangements.
         if i == 3 {
             let armed_now = armed.get();
             Danger(

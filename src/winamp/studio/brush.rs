@@ -1,9 +1,6 @@
-//! Native pixel geometry shared by human gestures and MCP paths. There is no
-//! antialiasing, image resampling, or fractional-opacity edge in this pipeline.
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::collections::BTreeSet;
-
 type Point = [i32; 2];
 fn integer(v: &Value, key: &str, default: i32) -> Result<i32> {
     let n = v
@@ -20,15 +17,6 @@ fn integer(v: &Value, key: &str, default: i32) -> Result<i32> {
     );
     Ok(n as i32)
 }
-/// A coordinate that may be fractional.
-///
-/// A curve's control point has always been allowed to be fractional and a
-/// path's points too, because construction geometry is fractional: a rib
-/// swept round an ellipse, a whisker leaving a muzzle, a tail at two sizes
-/// from one set of numbers. Its own two endpoints were not, and a curve is
-/// exactly where that geometry meets the rest of a drawing -- so every helper
-/// that built one had to round at the join, or emit a `path` by hand to avoid
-/// it. The rasteriser turns all four into f64 on the next line either way.
 fn number(v: &Value, key: &str, default: f64) -> Result<f64> {
     let n = v
         .get(key)
@@ -72,8 +60,6 @@ fn walk_segment(a: Point, b: Point, mut visit: impl FnMut(Point)) {
         }
     }
 }
-/// Remove redundant right-angle elbows from an ordered one-pixel stroke.
-/// Adjacent surviving pixels remain 8-connected and both endpoints are kept.
 fn clean_corners(points: &[Point]) -> Vec<Point> {
     let mut out: Vec<Point> = Vec::new();
     for &p in points {
@@ -121,17 +107,11 @@ fn polygon(points: &[Point], out: &mut BTreeSet<Point>) {
         }
     }
 }
-/// Paths start with [x,y]. Further commands: line [x,y], quadratic
-/// [cx,cy,x,y], cubic [c1x,c1y,c2x,c2y,x,y]. Coordinates are relative to x,y.
 pub fn rasterize(op: &Value) -> Result<Vec<Point>> {
     let kind = op["op"].as_str().context("op required")?;
     let width = integer(op, "brush_size", 1)?;
     anyhow::ensure!((1..=32).contains(&width), "brush_size must be 1..32");
     if kind == "curve" || kind == "tuft" {
-        // A curve keeps its construction geometry fractional at all four
-        // corners, not only at the control point: it is rewritten into an
-        // absolute path below and never sees an integer until the path is
-        // rasterized.
         let (x, y) = (number(op, "x", 0.)?, number(op, "y", 0.)?);
         let end = [number(op, "x2", x)?, number(op, "y2", y)?];
         let bend = integer(op, "curve_bend", 35)?;
@@ -213,7 +193,6 @@ pub fn rasterize(op: &Value) -> Result<Vec<Point>> {
                 (1..=1024).contains(&w) && (1..=1024).contains(&h),
                 "ellipse dimensions must be 1..1024"
             );
-            // Pixel-centre test gives symmetric odd and even-sized ellipses.
             for yy in 0..h {
                 for xx in 0..w {
                     let nx = (2 * xx + 1 - w) as f64 / w as f64;
@@ -250,9 +229,6 @@ pub fn rasterize(op: &Value) -> Result<Vec<Point>> {
                 [x, y],
             ]);
         }
-        // A word is a set of pixels like any other shape, so the text brush
-        // takes the same colour, mirrors, masks, grain and opacity a rectangle
-        // does rather than needing a path of its own.
         "text" => {
             let body = op.get("text").and_then(Value::as_str).unwrap_or_default();
             let small = op.get("face").and_then(Value::as_str) == Some("small");
@@ -317,14 +293,10 @@ pub fn rasterize(op: &Value) -> Result<Vec<Point>> {
     }
     Ok(out.into_iter().collect())
 }
-
-/// Preserve subpixel construction geometry for surface normals. The actual
-/// painting mask still rounds these points to native solid pixels exactly once.
 pub fn path_contour(op: &Value) -> Result<Vec<[f64; 2]>> {
     let x = integer(op, "x", 0)?;
     let y = integer(op, "y", 0)?;
     let mut contour = Vec::new();
-
     let commands = op["points"].as_array().context("path points required")?;
     anyhow::ensure!(
         !commands.is_empty() && commands.len() <= 256,
@@ -396,7 +368,6 @@ pub fn path_contour(op: &Value) -> Result<Vec<[f64; 2]>> {
     }
     Ok(contour)
 }
-
 #[cfg(test)]
 mod curve_tests {
     use super::*;

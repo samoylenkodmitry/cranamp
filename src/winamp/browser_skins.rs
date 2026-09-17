@@ -1,10 +1,6 @@
-//! Browser archives use one atomic localStorage entry each, scoped to Cranamp.
-//! Keep bytes compact; a rejected write must not replace an existing archive.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use cranpose_services::preferences::PreferencesStore;
-
 const PREFIX: &str = "cranamp.skin.v1/";
-
 pub(super) fn list(store: &dyn PreferencesStore) -> Vec<(String, String)> {
     store
         .keys()
@@ -15,7 +11,6 @@ pub(super) fn list(store: &dyn PreferencesStore) -> Vec<(String, String)> {
         })
         .collect()
 }
-
 pub(super) fn save(
     store: &dyn PreferencesStore,
     name: &str,
@@ -27,7 +22,6 @@ pub(super) fn save(
         .map_err(|e| e.to_string())?;
     Ok(key)
 }
-
 pub(super) fn load(store: &dyn PreferencesStore, key: &str) -> Result<Vec<u8>, String> {
     if !key.starts_with(PREFIX) {
         return Err("This skin is not in the browser library. Add it again.".into());
@@ -37,19 +31,16 @@ pub(super) fn load(store: &dyn PreferencesStore, key: &str) -> Result<Vec<u8>, S
         .decode(encoded)
         .map_err(|_| "Saved skin data is damaged".into())
 }
-
 pub(super) fn remove(store: &dyn PreferencesStore, key: &str) -> Result<(), String> {
     if !key.starts_with(PREFIX) {
         return Err("This is not a browser-library skin".into());
     }
     store.remove(key).map_err(|e| e.to_string())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use cranpose_services::preferences::{MemoryPreferences, PreferencesError};
-
     #[test]
     fn archives_round_trip_and_removal_preserves_player_preferences() {
         let store = MemoryPreferences::default();
@@ -66,7 +57,6 @@ mod tests {
         assert_eq!(store.get("cranamp.player").as_deref(), Some("saved player"));
         assert!(load(&store, &key).is_err());
     }
-
     #[test]
     fn corrupt_and_legacy_paths_do_not_decode_as_skins() {
         let store = MemoryPreferences::default();
@@ -74,7 +64,6 @@ mod tests {
         assert!(load(&store, "cranamp.skin.v1/broken.wsz").is_err());
         assert!(load(&store, "blob:old-session").is_err());
     }
-
     struct FullStore(MemoryPreferences);
     impl PreferencesStore for FullStore {
         fn get(&self, key: &str) -> Option<String> {
@@ -93,7 +82,6 @@ mod tests {
             self.0.clear()
         }
     }
-
     #[test]
     fn failed_overwrite_retains_the_saved_archive() {
         let memory = MemoryPreferences::default();

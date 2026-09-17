@@ -1,89 +1,34 @@
-//! Cross-device sync for Cranamp.
-//!
-//! Each device writes exactly one small document into a shared, writable "sync
-//! folder" (a folder the user picks once per device, e.g. a `cranamp-sync/`
-//! directory on the same Tailnet/WebDAV that already holds their music). The
-//! file is named `<device-id>.cransync` and is overwritten in place, so the
-//! folder never accumulates per-session junk — it holds at most one file per
-//! device. Reading merges every peer document.
-//!
-//! The music library itself is never touched: on Android it is a read-only SAF
-//! tree, on iOS a read-only security-scoped URL. Sync state lives only in the
-//! dedicated writable folder, and every write degrades gracefully — a failed or
-//! read-only folder simply drops sync to receive-only and the player keeps
-//! running. Storage is cranpose's cross-platform `WritableFolderStore`.
-//!
-//! ## Cross-device identity
-//!
-//! The same file is a filesystem path on desktop but a `content://` URI on
-//! Android, so raw paths never match across devices. Instead every track is
-//! fingerprinted by `(basename, duration)` — the decoded file name plus rounded
-//! duration in seconds — which is stable for the same file across platforms.
-//! Resume points and play counts key off this fingerprint and therefore merge
-//! cleanly even between an Android phone and a Linux desktop.
-
 #![allow(dead_code)]
-
-// Storage is provided by cranpose's cross-platform `WritableFolderStore`
-// (desktop std::fs / Android SAF). The runtime consumes it directly.
 #[cfg(not(target_arch = "wasm32"))]
 mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod runtime;
-
 #[cfg(not(target_arch = "wasm32"))]
 pub use runtime::SyncStatus;
-
 use std::collections::HashMap;
-
-/// Seconds since the Unix epoch. 0 means "unknown / never".
 pub type UnixSeconds = u64;
-
-/// File extension for a per-device sync document. Distinct from any media
-/// extension so a sync folder shared with other files stays unambiguous.
 pub const SYNC_FILE_EXT: &str = "cransync";
-
-/// Cross-platform identity for a single track.
-///
-/// Built from the file basename and rounded duration, both normalized, so the
-/// same physical file fingerprints identically whether it was reached as a
-/// local path or an Android `content://` URI. The display title is carried
-/// alongside (see [`ResumePoint`]/[`PlayCount`]) but is intentionally *not* part
-/// of the key, since one device may read an ID3 title while another falls back
-/// to the file name.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TrackFingerprint {
-    /// Lower-cased, percent-decoded file name with no directory component.
     pub basename: String,
-    /// Duration rounded to whole seconds; 0 when unknown.
     pub duration_s: u32,
 }
-
 impl TrackFingerprint {
-    /// Builds a fingerprint from a raw path/URI and an optional duration.
     pub fn from_path(path: &str, duration_s: Option<f32>) -> Self {
         Self {
             basename: extract_basename(path),
             duration_s: round_duration(duration_s),
         }
     }
-
-    /// Builds a fingerprint from an already-extracted basename.
     pub fn new(basename: &str, duration_s: u32) -> Self {
         Self {
             basename: normalize(basename),
             duration_s,
         }
     }
-
-    /// A fingerprint carries no useful identity if it has no basename.
     pub fn is_empty(&self) -> bool {
         self.basename.is_empty()
     }
-
-    /// Whether two fingerprints refer to the same track, tolerating an unknown
-    /// (0) duration on either side. Used to match a synced resume point against
-    /// a locally loaded playlist where durations may not be known yet.
     pub fn matches(&self, other: &TrackFingerprint) -> bool {
         if self.basename != other.basename || self.basename.is_empty() {
             return false;
@@ -91,21 +36,13 @@ impl TrackFingerprint {
         self.duration_s == 0 || other.duration_s == 0 || self.duration_s == other.duration_s
     }
 }
-
-/// "Where I left off" on one device.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResumePoint {
     pub fingerprint: TrackFingerprint,
-    /// Display title (original case), for surfacing in the UI.
     pub title: String,
-    /// Elapsed playback position in seconds.
     pub position_s: f32,
-    /// When this resume point was recorded.
     pub updated_at: UnixSeconds,
 }
-
-/// Aggregate play count for one track on one device. Merged counts sum these
-/// across devices, so the per-device value is only ever this device's own plays.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayCount {
     pub fingerprint: TrackFingerprint,
@@ -113,38 +50,28 @@ pub struct PlayCount {
     pub count: u32,
     pub last_played: UnixSeconds,
 }
-
-/// One playlist entry, as written by a device. `path` is that device's own
-/// path/URI and may not resolve elsewhere; the receiving device falls back to
-/// fingerprint matching (see [`SyncTrack::fingerprint`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SyncTrack {
     pub title: String,
     pub path: String,
     pub duration_s: Option<f32>,
 }
-
 impl SyncTrack {
     pub fn fingerprint(&self) -> TrackFingerprint {
         TrackFingerprint::from_path(&self.path, self.duration_s)
     }
 }
-
-/// The complete document a single device publishes into the sync folder.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SyncDocument {
     pub device_id: String,
     pub device_label: String,
     pub platform: String,
-    /// When the document as a whole was last written.
     pub updated_at: UnixSeconds,
     pub resume: Option<ResumePoint>,
     pub playlist: Vec<SyncTrack>,
-    /// When the playlist last changed (drives last-writer-wins playlist merge).
     pub playlist_updated_at: UnixSeconds,
     pub counts: Vec<PlayCount>,
 }
-
 impl SyncDocument {
     pub fn new(device_id: String, device_label: String, platform: String) -> Self {
         Self {
@@ -158,14 +85,10 @@ impl SyncDocument {
             counts: Vec::new(),
         }
     }
-
-    /// File name this document is stored under (`<device-id>.cransync`).
     pub fn file_name(&self) -> String {
         format!("{}.{SYNC_FILE_EXT}", sanitize_id(&self.device_id))
     }
 }
-
-/// A peer device as surfaced in the Settings "Sync" device list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceSummary {
     pub device_id: String,
@@ -173,46 +96,27 @@ pub struct DeviceSummary {
     pub platform: String,
     pub last_seen: UnixSeconds,
 }
-
-/// The merged view across every device document in the folder.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MergedSync {
-    /// Newest resume point across all devices.
     pub resume: Option<ResumePoint>,
-    /// The most recently updated non-empty playlist, with its source device id.
     pub playlist: Option<MergedPlaylist>,
-    /// Summed play counts keyed by fingerprint.
     pub counts: HashMap<TrackFingerprint, MergedCount>,
-    /// One entry per device document seen.
     pub devices: Vec<DeviceSummary>,
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct MergedPlaylist {
     pub source_device_id: String,
     pub tracks: Vec<SyncTrack>,
     pub updated_at: UnixSeconds,
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct MergedCount {
     pub title: String,
     pub count: u32,
     pub last_played: UnixSeconds,
 }
-
-/// Conflict-free merge of every device document.
-///
-/// * resume — the single newest point wins (last write across devices).
-/// * playlist — last-writer-wins: the most recently changed non-empty playlist.
-/// * counts — summed per fingerprint (each device counts only its own plays),
-///   keeping the latest `last_played` and a representative title.
-///
-/// All three rules are commutative and need no coordination, so two devices can
-/// write independently and any reader converges on the same view.
 pub fn merge(docs: &[SyncDocument]) -> MergedSync {
     let mut merged = MergedSync::default();
-
     for doc in docs {
         merged.devices.push(DeviceSummary {
             device_id: doc.device_id.clone(),
@@ -220,7 +124,6 @@ pub fn merge(docs: &[SyncDocument]) -> MergedSync {
             platform: doc.platform.clone(),
             last_seen: doc.updated_at,
         });
-
         if let Some(resume) = &doc.resume {
             let newer = merged
                 .resume
@@ -231,7 +134,6 @@ pub fn merge(docs: &[SyncDocument]) -> MergedSync {
                 merged.resume = Some(resume.clone());
             }
         }
-
         if !doc.playlist.is_empty() {
             let newer = merged
                 .playlist
@@ -246,7 +148,6 @@ pub fn merge(docs: &[SyncDocument]) -> MergedSync {
                 });
             }
         }
-
         for play in &doc.counts {
             let entry = merged
                 .counts
@@ -265,29 +166,18 @@ pub fn merge(docs: &[SyncDocument]) -> MergedSync {
             }
         }
     }
-
     merged
         .devices
         .sort_by_key(|device| std::cmp::Reverse(device.last_seen));
     merged
 }
-
-/// Parses every `(file_name, contents)` pair into documents, skipping any that
-/// fail to parse.
 pub fn parse_documents(raw: &[(String, String)]) -> Vec<SyncDocument> {
     raw.iter()
         .filter_map(|(_, contents)| parse_document(contents))
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// Serialization (line-based key=value, hex-encoded strings — no serde, matching
-// the existing player.conf format so it works identically on every target).
-// ---------------------------------------------------------------------------
-
 const DOC_MAGIC: &str = "cranamp-sync";
 const DOC_VERSION: u32 = 1;
-
 pub fn serialize_document(doc: &SyncDocument) -> String {
     let mut lines = vec![
         format!("{DOC_MAGIC}={DOC_VERSION}"),
@@ -297,7 +187,6 @@ pub fn serialize_document(doc: &SyncDocument) -> String {
         format!("updated_at={}", doc.updated_at),
         format!("playlist_updated_at={}", doc.playlist_updated_at),
     ];
-
     if let Some(resume) = &doc.resume {
         lines.push(format!(
             "resume={}\t{}\t{}\t{:.3}\t{}",
@@ -308,7 +197,6 @@ pub fn serialize_document(doc: &SyncDocument) -> String {
             resume.updated_at,
         ));
     }
-
     for track in &doc.playlist {
         let duration = track
             .duration_s
@@ -322,7 +210,6 @@ pub fn serialize_document(doc: &SyncDocument) -> String {
             duration,
         ));
     }
-
     for play in &doc.counts {
         lines.push(format!(
             "count={}\t{}\t{}\t{}\t{}",
@@ -333,14 +220,11 @@ pub fn serialize_document(doc: &SyncDocument) -> String {
             play.last_played,
         ));
     }
-
     lines.join("\n") + "\n"
 }
-
 pub fn parse_document(input: &str) -> Option<SyncDocument> {
     let mut magic_ok = false;
     let mut doc = SyncDocument::new(String::new(), String::new(), String::new());
-
     for line in input.lines() {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -368,13 +252,11 @@ pub fn parse_document(input: &str) -> Option<SyncDocument> {
             _ => {}
         }
     }
-
     if !magic_ok || doc.device_id.is_empty() {
         return None;
     }
     Some(doc)
 }
-
 fn parse_resume(value: &str) -> Option<ResumePoint> {
     let mut parts = value.split('\t');
     let basename = hex_decode(parts.next()?)?;
@@ -389,7 +271,6 @@ fn parse_resume(value: &str) -> Option<ResumePoint> {
         updated_at,
     })
 }
-
 fn parse_track(value: &str) -> Option<SyncTrack> {
     let (title, rest) = value.split_once('\t')?;
     let (path, duration) = rest.split_once('\t').unwrap_or((rest, ""));
@@ -399,7 +280,6 @@ fn parse_track(value: &str) -> Option<SyncTrack> {
         duration_s: duration.parse::<f32>().ok().filter(|d| *d > 0.0),
     })
 }
-
 fn parse_count(value: &str) -> Option<PlayCount> {
     let mut parts = value.split('\t');
     let basename = hex_decode(parts.next()?)?;
@@ -414,34 +294,15 @@ fn parse_count(value: &str) -> Option<PlayCount> {
         last_played,
     })
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn round_duration(duration_s: Option<f32>) -> u32 {
     duration_s
         .filter(|d| d.is_finite() && *d > 0.0)
         .map(|d| d.round() as u32)
         .unwrap_or(0)
 }
-
 fn normalize(value: &str) -> String {
     value.trim().to_lowercase()
 }
-
-/// Extracts a normalized file basename from a filesystem path or a `content://`
-/// URI. URIs encode `/` as `%2F` and may carry a query string, so we
-/// percent-decode, strip any query, then take the trailing path segment.
-///
-/// The basename becomes part of [`TrackFingerprint`], which is an identity
-/// used to match the same file across devices (`Eq`/`Hash`), so this uses the
-/// strict decoder: a URI that cannot be decoded exactly falls back to the raw,
-/// still-encoded segment rather than to a lossy substitution. A lossy decode
-/// would let two different malformed URIs collapse onto the same replacement
-/// character and silently fingerprint as the same track; the raw segment
-/// stays distinct even though it then fails to match its decoded counterpart
-/// on another device.
 fn extract_basename(path: &str) -> String {
     let decoded =
         cranpose_services::content::percent_decode(path).unwrap_or_else(|| path.to_string());
@@ -450,8 +311,6 @@ fn extract_basename(path: &str) -> String {
     let last = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed);
     normalize(last)
 }
-
-/// Keeps a device id safe as a file-name stem: alphanumerics, dash, underscore.
 fn sanitize_id(id: &str) -> String {
     let cleaned: String = id
         .chars()
@@ -469,7 +328,6 @@ fn sanitize_id(id: &str) -> String {
         cleaned
     }
 }
-
 fn hex_encode(input: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(input.len() * 2);
@@ -479,7 +337,6 @@ fn hex_encode(input: &str) -> String {
     }
     output
 }
-
 fn hex_decode(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     if !bytes.len().is_multiple_of(2) {
@@ -491,15 +348,12 @@ fn hex_decode(input: &str) -> Option<String> {
     }
     String::from_utf8(output).ok()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn fp(basename: &str, duration: u32) -> TrackFingerprint {
         TrackFingerprint::new(basename, duration)
     }
-
     #[test]
     fn fingerprint_matches_path_and_content_uri_for_same_file() {
         let desktop =
@@ -511,24 +365,16 @@ mod tests {
         assert_eq!(desktop.basename, "cool song.mp3");
         assert_eq!(android.basename, "cool song.mp3");
         assert!(desktop.matches(&android));
-        // Exact equality also holds once durations round to the same integer.
         assert_eq!(desktop, android);
     }
-
     #[test]
     fn fingerprint_keeps_a_malformed_uri_undecoded_instead_of_substituting() {
-        // basename is an identity key (Eq/Hash), so a URI this decoder cannot
-        // decode exactly must fall back to its raw, still-encoded form rather
-        // than to a lossy substitution -- otherwise two different malformed
-        // URIs could collapse onto the same replacement character and
-        // fingerprint as the same track.
         let a = TrackFingerprint::from_path("content://x/doc/track%FFone.mp3", None);
         let b = TrackFingerprint::from_path("content://x/doc/track%FFtwo.mp3", None);
         assert_eq!(a.basename, "track%ffone.mp3");
         assert_eq!(b.basename, "track%fftwo.mp3");
         assert_ne!(a.basename, b.basename);
     }
-
     #[test]
     fn fingerprint_tolerates_unknown_duration() {
         let known = fp("song.mp3", 200);
@@ -537,7 +383,6 @@ mod tests {
         assert!(unknown.matches(&known));
         assert!(!known.matches(&fp("other.mp3", 0)));
     }
-
     #[test]
     fn document_round_trips_through_serialization() {
         let mut doc = SyncDocument::new(
@@ -571,18 +416,15 @@ mod tests {
             count: 12,
             last_played: 1_719_400_000,
         }];
-
         let text = serialize_document(&doc);
         let parsed = parse_document(&text).expect("parse");
         assert_eq!(parsed, doc);
     }
-
     #[test]
     fn parse_rejects_foreign_or_empty_documents() {
         assert!(parse_document("just some text\n").is_none());
-        assert!(parse_document("cranamp-sync=1\n").is_none()); // no device id
+        assert!(parse_document("cranamp-sync=1\n").is_none());
     }
-
     #[test]
     fn merge_picks_newest_resume() {
         let mut a = SyncDocument::new("a".into(), "A".into(), "desktop".into());
@@ -601,15 +443,12 @@ mod tests {
             position_s: 20.0,
             updated_at: 200,
         });
-
         let merged = merge(&[a, b]);
         let resume = merged.resume.expect("resume");
         assert_eq!(resume.fingerprint.basename, "b.mp3");
         assert_eq!(merged.devices.len(), 2);
-        // Devices sorted newest-seen first.
         assert_eq!(merged.devices[0].device_id, "b");
     }
-
     #[test]
     fn merge_sums_play_counts_across_devices() {
         let mut a = SyncDocument::new("a".into(), "A".into(), "desktop".into());
@@ -626,13 +465,11 @@ mod tests {
             count: 4,
             last_played: 80,
         }];
-
         let merged = merge(&[a, b]);
         let entry = merged.counts.get(&fp("song.mp3", 100)).expect("count");
         assert_eq!(entry.count, 7);
         assert_eq!(entry.last_played, 80);
     }
-
     #[test]
     fn merge_playlist_is_last_writer_wins() {
         let mut a = SyncDocument::new("a".into(), "A".into(), "desktop".into());
@@ -649,13 +486,11 @@ mod tests {
             duration_s: Some(20.0),
         }];
         b.playlist_updated_at = 300;
-
         let merged = merge(&[a, b]);
         let playlist = merged.playlist.expect("playlist");
         assert_eq!(playlist.source_device_id, "b");
         assert_eq!(playlist.tracks[0].title, "New");
     }
-
     #[test]
     fn file_name_is_one_per_device_and_sanitized() {
         let doc = SyncDocument::new("dev/../x 1".into(), "L".into(), "desktop".into());

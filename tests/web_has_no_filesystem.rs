@@ -1,23 +1,6 @@
-//! The browser has no filesystem, and `std::env::temp_dir()` panics there
-//! rather than failing.
-//!
-//! `cranpose::application_directories()` is unavailable on the web, so reaching
-//! for `temp_dir()` when it returns an error puts a panic on exactly the
-//! platform that takes the fallback. Two places did it. Opening the Skin Studio
-//! in a browser took the whole player down with "no filesystem on this
-//! platform" before a single pixel of the editor appeared, and adding a track
-//! was one file picker away from the same end.
-//!
-//! Reading the source is the point. The crash is a runtime panic on a target
-//! this suite cannot execute, and it compiles cleanly on that target, so what
-//! can be checked is where the call is allowed to sit: behind a cfg that the
-//! web build does not take.
-
 use std::path::{Path, PathBuf};
-
 const HAZARD: &str = "std::env::temp_dir";
 const GUARD: &str = "#[cfg(not(target_arch = \"wasm32\"))]";
-
 fn rust_sources(dir: &Path, found: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir)
         .expect("readable source tree")
@@ -31,8 +14,6 @@ fn rust_sources(dir: &Path, found: &mut Vec<PathBuf>) {
         }
     }
 }
-
-/// Lines inside a `#[cfg(test)]` module. Test code never builds for the web.
 fn inside_test_module(lines: &[&str]) -> Vec<bool> {
     let mut flag = vec![false; lines.len()];
     let mut i = 0;
@@ -62,7 +43,6 @@ fn inside_test_module(lines: &[&str]) -> Vec<bool> {
     }
     flag
 }
-
 #[test]
 fn every_temp_dir_call_sits_behind_a_cfg_the_web_build_does_not_take() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -73,14 +53,12 @@ fn every_temp_dir_call_sits_behind_a_cfg_the_web_build_does_not_take() {
         "expected to walk the crate sources, found {}",
         sources.len()
     );
-
     let mut checked = 0;
     for file in &sources {
         let text = std::fs::read_to_string(file).expect("readable source file");
         let lines: Vec<&str> = text.lines().collect();
         let in_test = inside_test_module(&lines);
         for (n, line) in lines.iter().enumerate() {
-            // Prose naming the hazard is how the next person learns about it.
             if in_test[n] || line.trim_start().starts_with("//") || !line.contains(HAZARD) {
                 continue;
             }

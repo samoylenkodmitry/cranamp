@@ -11,11 +11,9 @@ use std::rc::Rc;
 pub struct HitGraphRenderer {
     scene: Scene,
 }
-
 struct SceneHitSink<'a> {
     scene: &'a mut Scene,
 }
-
 impl HitGraphSink for SceneHitSink<'_> {
     fn push_hit(
         &mut self,
@@ -36,19 +34,15 @@ impl HitGraphSink for SceneHitSink<'_> {
         );
     }
 }
-
 impl Renderer for HitGraphRenderer {
     type Scene = Scene;
     type Error = ();
-
     fn scene(&self) -> &Self::Scene {
         &self.scene
     }
-
     fn scene_mut(&mut self) -> &mut Self::Scene {
         &mut self.scene
     }
-
     fn rebuild_scene(
         &mut self,
         layout_tree: &LayoutTree,
@@ -71,7 +65,6 @@ impl Renderer for HitGraphRenderer {
         self.scene.replace_graph(graph);
         Ok(())
     }
-
     fn rebuild_scene_from_applier(
         &mut self,
         applier: &mut cranpose_core::MemoryApplier,
@@ -96,7 +89,6 @@ impl Renderer for HitGraphRenderer {
         Ok(())
     }
 }
-
 pub fn pump(shell: &mut AppShell<HitGraphRenderer>) {
     for _ in 0..80 {
         if !(shell.needs_redraw() || shell.has_active_animations()) {
@@ -105,9 +97,6 @@ pub fn pump(shell: &mut AppShell<HitGraphRenderer>) {
         shell.update();
     }
 }
-
-// Native pixel labels are images with text descriptions. Read the semantic
-// tree so the same checks cover those labels and Unicode/system text.
 pub fn visible_texts(shell: &mut AppShell<HitGraphRenderer>) -> Vec<String> {
     fn collect(node: &cranpose_ui::SemanticsNode, out: &mut Vec<String>) {
         if let cranpose_ui::SemanticsRole::Text { value } = &node.role {
