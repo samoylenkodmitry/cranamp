@@ -8346,6 +8346,53 @@ mod tests {
         }
     }
 
+    /// A pointer the skin swallows is worse than no pointer at all, so every
+    /// cursor has to carry ink that reads against what the skin covers itself
+    /// in.
+    #[test]
+    fn every_bundled_cursor_is_visible_on_the_skin_it_belongs_to() {
+        use crate::winamp::studio::cursor_art::contrast;
+        for skin in BUNDLED_SKINS {
+            let loaded = crate::winamp::skin::load_skin(skin.bytes).expect("loads");
+            let mut counts: std::collections::BTreeMap<[u8; 4], u32> =
+                std::collections::BTreeMap::new();
+            for pixel in loaded.main.pixels().as_chunks::<4>().0 {
+                if pixel[3] >= 128 {
+                    *counts.entry(*pixel).or_default() += 1;
+                }
+            }
+            let ground = counts
+                .iter()
+                .max_by_key(|(_, count)| **count)
+                .map(|(colour, _)| *colour)
+                .expect("a bundled skin has paint on its main sheet");
+
+            for (role, name) in crate::winamp::cursors::SkinCursor::files() {
+                let icon = loaded
+                    .cursors
+                    .get(role)
+                    .unwrap_or_else(|| panic!("{} has no {name}", skin.id));
+                let PointerIcon::Custom(drawn) = icon else {
+                    panic!("{}'s {name} is a system shape, not the skin's art", skin.id);
+                };
+                let best = drawn
+                    .image()
+                    .pixels()
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .filter(|pixel| pixel[3] >= 128)
+                    .map(|pixel| contrast(ground, *pixel))
+                    .fold(0.0f64, f64::max);
+                assert!(
+                    best >= 3.0,
+                    "{}'s {name} is invisible on its own artwork: best contrast {best:.1} against {ground:?}",
+                    skin.id
+                );
+            }
+        }
+    }
+
     /// Two skins that share a cursor set would look like one skin the moment
     /// the pointer moved, so the derived art has to follow the artwork.
     #[test]

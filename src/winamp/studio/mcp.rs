@@ -248,7 +248,7 @@ fn tools() -> Vec<Value> {
  tool("studio_layers","Paint planes above the original sheets. list, add, select, set, move, merge_down and delete. A plane has a name, an opacity, and switches for shown, locked and clipped to the plane below.",json!({"action":{"enum":["list","add","select","set","move","merge_down","delete"]},"id":{"type":"string"},"name":{"type":"string"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"clip_below":{"type":"boolean"},"opacity":{"type":"integer","minimum":0,"maximum":255},"index":{"type":"integer","minimum":0}}),&[]),
  tool("studio_options","The skin apart from its sheets: the six PLEDIT.TXT colours and the 24 VISCOLOR.TXT colours. It answers readability: the contrast of every colour the player writes against the art behind it. Leave everything out to read them all.",json!({"playlist_colors":{"type":"object","additionalProperties":{"type":"string"}},"visualizer_colors":{"type":"array","items":{"type":"string"},"minItems":24,"maxItems":24}}),&[]),
  tool("studio_validate","Whether this skin looks the same in every player that reads .wsz. It names each entry no player reads, each sheet the format needs and the skin lacks, and each sheet too small for its own sprites. An empty list means the skin is portable. fix repairs what it can: it drops the entries no player reads and grows the sheets that are too small.",json!({"fix":{"type":"boolean","description":"Repair instead of report. A grown sheet repeats its own edge into the new rows, so it looks the way it looked before."}}),&[]),
- tool("studio_cursors","The pointers a skin shows over its own regions: the 18 .cur files a classic player reads, from the main window's plain arrow to the playlist's resize corner. Leave everything out to list which regions are drawn. draw makes the missing ones in the skin's own colours and opens them on the canvas, where every brush works on them as on any sheet. regions narrows any action to the ones you name. overwrite redraws regions that already have a cursor. remove drops them. hotspot moves the point a region's pointer actually points at.",json!({"action":{"enum":["list","draw","remove","hotspot"]},"regions":{"type":"array","items":{"type":"string"},"description":"Region names such as normal, titlebar, posbar, volbar, eqslid, psize, with or without .cur. Leave it out for every region."},"overwrite":{"type":"boolean","description":"Redraw a region that already has a cursor instead of leaving the artwork alone."},"hotspot":{"type":"array","items":{"type":"integer","minimum":0},"minItems":2,"maxItems":2,"description":"Where in the 32x32 image the pointer actually points. An arrow points at its own tip, a slider at its middle."}}),&[]),
+ tool("studio_cursors","The pointers a skin shows over its own regions: the 18 .cur files a classic player reads, from the main window's plain arrow to the playlist's resize corner. Leave everything out to list which regions are drawn. draw makes the missing ones in the skin's own colours and opens them on the canvas, where every brush works on them as on any sheet. regions narrows any action to the ones you name. overwrite redraws regions that already have a cursor. remove drops them. hotspot moves the point a region's pointer actually points at.",json!({"action":{"enum":["list","draw","remove","hotspot"]},"regions":{"type":"array","items":{"type":"string"},"description":"Region names such as normal, titlebar, posbar, volbar, eqslid, psize, with or without .cur. Leave it out for every region."},"overwrite":{"type":"boolean","description":"Redraw a region that already has a cursor instead of leaving the artwork alone."},"style":{"enum":["sharp","chisel","needle","block","sharp-bold","chisel-bold","needle-bold","block-bold"],"description":"The silhouette the whole set is cut to. Left out, it comes from the skin's own colours, so two skins get pointers cut differently without anyone choosing."},"hotspot":{"type":"array","items":{"type":"integer","minimum":0},"minItems":2,"maxItems":2,"description":"Where in the 32x32 image the pointer actually points. An arrow points at its own tip, a slider at its middle."}}),&[]),
  tool("studio_status","The shared document: path, revision, unsaved edits, history depth, sheets, paint planes and the whole view. surface says which surface a stroke lands on.",json!({}),&[]),
  tool("studio_new","Make an empty classic skin. Nothing is kept from the old one. Set discard to true if there are unsaved edits.",json!({"discard":{"type":"boolean"}}),&[]),
  tool("studio_open","Load a WSZ into the open Studio. Set discard to true if there are unsaved edits.",json!({"path":{"type":"string"},"discard":{"type":"boolean"}}),&["path"]),
@@ -262,7 +262,7 @@ fn tools() -> Vec<Value> {
  tool("studio_undo","Undo one step of the shared history.",json!({}),&[]),
  tool("studio_redo","Redo one step of the shared history.",json!({}),&[]),
  tool("studio_screenshot","The player's own scene, as the GPU draws it, once the revision you ask for is on screen. panel crops to one window in that window's coordinates. crop takes scene pixels, or that panel's own skin pixels when panel is given too. presentation puts the window into the live stack first.",json!({"path":{"type":"string"},"panel":{"enum":["main","equalizer","playlist","all"]},"presentation":{"type":"boolean"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"Enlarge the capture, nearest neighbour, up to 2048 pixels a side. One transport key is 23x18 of a 1280x1000 scene."}}),&[]),
- tool("studio_export","Write a WSZ. It runs through the player's own skin loader first and writes the file in one step. It reports undrawn_sprites for sprites still empty and hard_to_read for a readout under 3:1. It never refuses for either.",json!({"path":{"type":"string"}}),&["path"]),
+ tool("studio_export","Write a WSZ. It runs through the player's own skin loader first and writes the file in one step. It reports undrawn_sprites for sprites still empty and hard_to_read for a readout under 3:1. It never refuses for either. Left without a path it writes back over the file the skin was opened from, so a run of open, edit, export cannot put one skin's artwork under another skin's name.",json!({"path":{"type":"string","description":"Where to write. Left out, the skin is written back where it came from."}}),&["path"]),
 ]
 }
 fn text(value: Value) -> Value {
@@ -775,6 +775,7 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 "draw" => {
                     let drawn = doc.draw_cursors(
                         &regions,
+                        args["style"].as_str(),
                         args["overwrite"].as_bool() == Some(true),
                         "MCP",
                     )?;
@@ -822,7 +823,13 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
         "studio_undo" => json!({"changed":doc.undo(),"revision":doc.revision}),
         "studio_redo" => json!({"changed":doc.redo(),"revision":doc.revision}),
         "studio_export" => {
-            doc.export(Path::new(args["path"].as_str().context("path required")?))?
+            let path = match args["path"].as_str() {
+                Some(path) => path.to_string(),
+                None => doc.path.clone().context(
+                    "This skin has never been written, so studio_export needs a path to write it to",
+                )?,
+            };
+            doc.export(Path::new(&path))?
         }
         "studio_render" | "studio_states" | "studio_study" => {
             let zoom = if name == "studio_study" {
@@ -1567,6 +1574,46 @@ mod drawing_tests {
             );
         }
     }
+    /// A run of open, edit, export is the shape of every batch job over a
+    /// folder of skins. If the open fails and the export still needs a path of
+    /// its own, the edit lands in the skin that was already open and the export
+    /// writes it under the name that failed to open.
+    #[test]
+    fn export_without_a_path_writes_the_skin_back_where_it_came_from() {
+        let shared = blank();
+        let first = std::env::temp_dir().join("cranamp-export-in-place.wsz");
+        result(
+            &shared,
+            "studio_export",
+            json!({ "path": first.to_str().unwrap() }),
+        );
+        result(&shared, "studio_cursors", json!({"action":"draw"}));
+
+        let out = result(&shared, "studio_export", json!({}));
+        assert_eq!(
+            out["path"].as_str(),
+            first.to_str(),
+            "an export with no path writes the file the skin came from: {out}"
+        );
+        let written = std::fs::read(&first).expect("the skin was written");
+        let skin = crate::winamp::skin::load_skin(&written).expect("it loads");
+        assert_eq!(
+            skin.cursors.len(),
+            crate::winamp::cursors::SkinCursor::COUNT
+        );
+        std::fs::remove_file(first).ok();
+    }
+
+    #[test]
+    fn a_skin_that_was_never_written_still_asks_where_to_go() {
+        let shared = blank();
+        let out = call("studio_export", json!({}), &shared);
+        assert!(
+            format!("{out:?}").contains("needs a path"),
+            "a blank skin has nowhere to be written back to: {out:?}"
+        );
+    }
+
     #[test]
     fn studio_cursors_lists_every_region_a_classic_player_reads() {
         let shared = blank();

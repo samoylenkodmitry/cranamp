@@ -1,6 +1,6 @@
 #![allow(unused_braces)]
 mod brush;
-mod cursor_art;
+pub(crate) mod cursor_art;
 mod draft;
 mod guides;
 mod mapping;
@@ -2712,7 +2712,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                     false,
                                     move || {
                                         let mut doc = target.lock().unwrap();
-                                        let _ = doc.draw_cursors(&[], false, "editor");
+                                        let _ = doc.draw_cursors(&[], None, false, "editor");
                                         let _ =
                                             doc.state(json!({"panel":"cursors","layer":"auto"}));
                                         drop(doc);

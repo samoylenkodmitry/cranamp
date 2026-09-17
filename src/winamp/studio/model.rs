@@ -3017,6 +3017,7 @@ impl Document {
     pub fn draw_cursors(
         &mut self,
         roles: &[String],
+        style: Option<&str>,
         overwrite: bool,
         source: &str,
     ) -> Result<Value> {
@@ -3030,10 +3031,23 @@ impl Document {
             return Ok(json!({"drawn": [], "note": "every region asked for already has a cursor"}));
         }
         let palette = super::cursor_art::palette(&self.images);
+        let style = match style {
+            Some(name) => super::cursor_art::Style::named(name).with_context(|| {
+                let known: Vec<&str> = super::cursor_art::Style::ALL
+                    .iter()
+                    .map(|style| style.name())
+                    .collect();
+                format!(
+                    "Unknown cursor style {name}; the styles are {}",
+                    known.join(", ")
+                )
+            })?,
+            None => super::cursor_art::Style::for_palette(&palette),
+        };
         self.record(self.snapshot(), "Draw cursors".into(), source);
         let mut drawn = Vec::new();
         for (role, name) in todo {
-            let (image, hotspot) = super::cursor_art::draw(role, &palette);
+            let (image, hotspot) = super::cursor_art::draw(role, &palette, style);
             let bytes = crate::winamp::cursors::encode_cur(
                 image.width(),
                 image.height(),
@@ -3049,6 +3063,7 @@ impl Document {
         let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
         Ok(json!({
             "drawn": drawn,
+            "style": style.name(),
             "palette": {
                 "ink": hex(palette.ink),
                 "body": hex(palette.body),

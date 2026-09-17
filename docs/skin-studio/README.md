@@ -140,15 +140,26 @@ The drawer's four **Aim** buttons move it a pixel at a time.
 | `studio_cursors {}` | Lists the eighteen regions: which are drawn, their size and hotspot. |
 | `studio_cursors {action: "draw"}` | Draws every missing cursor in the skin's own colours and opens them on the canvas. |
 | `studio_cursors {action: "draw", regions: ["posbar"], overwrite: true}` | Redraws named regions over artwork already there. |
+| `studio_cursors {action: "draw", style: "needle-bold"}` | Cuts the set to a named silhouette instead of the one the colours pick. |
 | `studio_cursors {action: "hotspot", regions: ["normal"], hotspot: [0, 0]}` | Moves where a region's pointer points. |
 | `studio_cursors {action: "remove", regions: ["psize"]}` | Drops cursors from the skin. |
 
 `draw` reads its colours off the sheets the player always shows: the darkest
 colour the skin uses often becomes the outline, the lightest the body of the
 pointer, and the most saturated marks the regions that do something when
-dragged. Two skins therefore differ wherever their palettes do, and drawing the
-same skin twice changes nothing. It is a starting point, not a substitute for
-drawing: the result is ordinary artwork, and every brush is still pointed at it.
+dragged. A pointer that would vanish is not drawn — the body and the outline are
+checked against what each sheet covers itself in, and fall back to plain white
+on black rather than leave a cursor the skin swallows.
+
+The silhouette is the skin's own. `style` cuts the whole set to one of eight —
+`sharp`, `chisel`, `needle` and `block`, each on its own or `-bold` for a
+two-pixel outline. Left out, the style comes from the skin's colours, so two
+skins get pointers cut differently without anyone choosing, and one skin picks
+the same style every time it is drawn.
+
+Two skins therefore differ in both colour and cut, and drawing the same skin
+twice changes nothing. It is a starting point, not a substitute for drawing: the
+result is ordinary artwork, and every brush is still pointed at it.
 
 Nothing here leaves the classic format. `studio_validate` counts a `.cur` as an
 entry a player reads rather than offering to drop it, and the export writes it
