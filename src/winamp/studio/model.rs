@@ -554,6 +554,14 @@ pub struct Document {
     /// collected when the scope is wider than the variant in hand, because that
     /// is the only case where the answer is not "one".
     scope_writes: BTreeMap<String, usize>,
+    /// Ink that landed in a control's own part, with the variant it landed in,
+    /// so the transaction can say afterwards whether the control's other part
+    /// is drawn on top of it in that same state.
+    covered_probe: Vec<(String, usize, [i32; 2])>,
+    /// Sprite ids that share a control with another sprite -- a slider's track
+    /// and its thumb. Recomputed per transaction, because it is the only way
+    /// the per-pixel check can be a set lookup.
+    control_parts: BTreeSet<String>,
 }
 /// The WCAG relative luminance of a colour.
 fn relative_luminance(c: [u8; 4]) -> f64 {
@@ -637,6 +645,8 @@ impl Document {
             overwrites: 0,
             overwrite_note: None,
             scope_writes: BTreeMap::new(),
+            covered_probe: Vec::new(),
+            control_parts: BTreeSet::new(),
         }
     }
     pub fn open(bytes: &[u8], path: Option<String>) -> Result<Self> {
@@ -696,6 +706,8 @@ impl Document {
             overwrites: 0,
             overwrite_note: None,
             scope_writes: BTreeMap::new(),
+            covered_probe: Vec::new(),
+            control_parts: BTreeSet::new(),
             stroke: None,
             images,
             files,
@@ -2514,6 +2526,16 @@ impl Document {
             for l in hits {
                 let (sx, sy) = l.map(x as u32, y as u32).unwrap();
                 let targets = all.cells(l);
+                // A slider's track and its thumb move together: both are read
+                // from the same value, so ink put at the thumb's position in
+                // frame k is under the thumb in frame k, in every frame. That
+                // is invisible artwork and nothing said so.
+                if self.control_parts.contains(&l.id) && self.covered_probe.len() < 20000 {
+                    for (index, cell) in targets.iter().enumerate() {
+                        let variant = l.variants.iter().position(|v| v == cell).unwrap_or(index);
+                        self.covered_probe.push((l.id.clone(), variant, [x, y]));
+                    }
+                }
                 if all.scope != Scope::Current {
                     // The scope's own count, not this pass's. A sweep paints one
                     // variant per pass and still wrote the whole run.
@@ -2775,6 +2797,29 @@ impl Document {
         let previous_mask = std::mem::replace(&mut self.view.mask_colors, mask);
         let previous_unmapped = std::mem::take(&mut self.unmapped_pixels);
         self.scope_writes.clear();
+        self.covered_probe.clear();
+        // Sprites with three or more segments in their id share a control with
+        // whatever else has their first two: `main.balance.track` and
+        // `main.balance.thumb`. Two segments is a window's own furniture, and a
+        // background being under a button is not news.
+        self.control_parts = {
+            let known = self.layers();
+            let mut by_control: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for l in &known {
+                let mut parts = l.id.split('.');
+                if let (Some(a), Some(b), Some(_)) = (parts.next(), parts.next(), parts.next()) {
+                    by_control
+                        .entry(format!("{a}.{b}"))
+                        .or_default()
+                        .push(l.id.clone());
+                }
+            }
+            by_control
+                .into_values()
+                .filter(|ids| ids.len() > 1)
+                .flatten()
+                .collect()
+        };
         let previous_selection = std::mem::replace(&mut self.view.layers, selected.clone());
         let paint_layers = self.layers();
         // Every cell of the open sheet, and how many places the player draws
@@ -3086,6 +3131,11 @@ impl Document {
             if !swept.is_empty() {
                 report["swept"] = json!({"fields": swept.clone(), "steps": steps});
             }
+            // Checking a transaction before making it is the one place this
+            // matters most: invisible ink is cheapest to find before it is ink.
+            if let Some(covered) = self.covered_by_a_sibling_part() {
+                report["covered_pixels"] = covered;
+            }
             self.preview = Some(self.render());
             self.restore(before);
             self.revision = before_revision;
@@ -3197,6 +3247,13 @@ impl Document {
         if !swept.is_empty() {
             result["swept"] = json!({"fields": swept, "steps": steps});
         }
+        if let Some(covered) = self.covered_by_a_sibling_part() {
+            let total = covered["pixels"].as_u64().unwrap_or(0);
+            self.message.push_str(&format!(
+                "; {total} pixels are under the control's own thumb"
+            ));
+            result["covered_pixels"] = covered;
+        }
         let wrote = std::mem::take(&mut self.scope_writes);
         if !wrote.is_empty() {
             result["states_written"] = json!({
@@ -3242,6 +3299,95 @@ impl Document {
         }
         result["ms"] = json!(started.elapsed().as_millis() as u64);
         Ok(result)
+    }
+
+    /// Ink a control draws its own other half on top of, in the same state.
+    ///
+    /// A slider's track and its thumb are read from one value, so a mark put at
+    /// the thumb's position in frame k is behind the thumb in frame k -- and in
+    /// every frame, because both moved together. The balance tail in Catamp
+    /// Freefall was drawn that way: twenty-eight frames of a tail whose tip was
+    /// never once visible, and the only way to find out was to look at the live
+    /// player and notice the tip was missing.
+    ///
+    /// Only parts of the same control count. A window background being under a
+    /// button is how a skin is built and is not news.
+    fn covered_by_a_sibling_part(&mut self) -> Option<Value> {
+        let probes = std::mem::take(&mut self.covered_probe);
+        if probes.is_empty() {
+            return None;
+        }
+        let control_of =
+            |id: &str| -> String { id.split('.').take(2).collect::<Vec<_>>().join(".") };
+        let mut by_variant: BTreeMap<usize, Vec<(String, [i32; 2])>> = BTreeMap::new();
+        for (id, variant, at) in probes {
+            by_variant.entry(variant).or_default().push((id, at));
+        }
+        // Hidden in *every* state it was drawn into, not in some. A thumb
+        // always hides part of its own track in any one frame -- that is what a
+        // slider is -- so per-frame coverage is not news. Ink that no frame
+        // shows is.
+        let mut seen: BTreeMap<(String, [i32; 2]), (u32, u32)> = BTreeMap::new();
+        let mut sample: Vec<Value> = Vec::new();
+        for (variant, hits) in by_variant {
+            let value = variant.min(27) as u8;
+            let mut view = self.view.clone();
+            view.panel = "canvas".into();
+            view.volume = value;
+            view.balance = value;
+            view.position = value;
+            view.scroll = value;
+            view.eq = [value; 11];
+            let layers = self.layers_for(&view);
+            for (id, at) in hits {
+                let Some(mine) = layers.iter().position(|l| l.id == id) else {
+                    continue;
+                };
+                // Later in the list is nearer the front: this is the order the
+                // player draws them in, which `ground_under` reads the same way.
+                let over = layers.iter().skip(mine + 1).find(|l| {
+                    if control_of(&l.id) != control_of(&id) || l.id == id {
+                        return false;
+                    }
+                    let Some((sx, sy)) = l.map(at[0].max(0) as u32, at[1].max(0) as u32) else {
+                        return false;
+                    };
+                    // The rectangle is not the artwork. A slider's thumb is a
+                    // 14x11 cell with a three-row grip in it and nothing above:
+                    // counting its whole rectangle called the visible part of
+                    // the tail hidden. Opaque in *every* variant of the part on
+                    // top, because ink a pressed thumb covers and a released
+                    // one does not is ink somebody sees.
+                    let Some(image) = self.images.get(&l.sheet) else {
+                        return false;
+                    };
+                    l.variants.iter().all(|cell| {
+                        image
+                            .get_pixel_checked(cell[0] + sx, cell[1] + sy)
+                            .is_some_and(|p| p[3] > 0 && p.0[..3] != [255, 0, 255])
+                    })
+                });
+                let tally = seen.entry((id.clone(), at)).or_insert((0, 0));
+                tally.0 += 1;
+                if let Some(over) = over {
+                    tally.1 += 1;
+                    if sample.len() < 8
+                        && !sample.iter().any(|s| s["behind"] == json!(over.id.clone()))
+                    {
+                        sample.push(json!({
+                            "at": at,
+                            "in": id.clone(),
+                            "behind": over.id.clone(),
+                        }));
+                    }
+                }
+            }
+        }
+        let pixels = seen
+            .values()
+            .filter(|(drawn, hidden)| drawn == hidden)
+            .count() as u64;
+        (pixels > 0).then(|| json!({"pixels": pixels, "sample": sample}))
     }
     pub fn recolor(&mut self, args: &Value) -> Result<Value> {
         self.finish_stroke();
@@ -6508,5 +6654,85 @@ mod tests {
         // reason is under it.
         let refusal = format!("{refusal:#}");
         assert!(refusal.contains("width"), "{refusal}");
+    }
+
+    /// Ink a control draws its own thumb on top of, in the same state.
+    ///
+    /// The balance slider in Catamp Freefall was first drawn with a thumb that
+    /// filled its cell and a tail whose tip ran to the same value the thumb
+    /// does. Both are read from one number, so the tip was behind the thumb in
+    /// frame 0, and in frame 27, and in all twenty-six between: twenty-eight
+    /// frames of a tail nobody could ever see the end of. Nothing said so --
+    /// it was found by looking at the live player and noticing the tip missing.
+    #[test]
+    fn ink_a_control_hides_under_its_own_thumb_is_reported() {
+        let mut d = Document::blank();
+        d.open_on_whole_skin();
+        // A thumb that fills its cell, as the first one did.
+        d.draw(
+            &json!({"layers":["main.balance.thumb"],"states":"all","operations":[
+                {"op":"rect","x":189,"y":58,"width":14,"height":11,"color":"#c9c2ac"}
+            ]}),
+        )
+        .unwrap();
+        // A mark in the track that runs to the same value the thumb does.
+        let report = d
+            .draw(
+                &json!({"layers":["main.balance.track"],"states":"all","operations":[
+                    {"op":"pixel","x":[183,207],"y":62,"color":"#5d5d6e"}
+                ]}),
+            )
+            .unwrap();
+        let covered = &report["covered_pixels"];
+        // Distinct pixels, not frames: the sweep walks 183..207, so twenty-eight
+        // steps land on twenty-five places, and every one of them is hidden in
+        // every frame it was drawn into.
+        assert_eq!(covered["pixels"], json!(25), "{report}");
+        assert_eq!(covered["sample"][0]["behind"], json!("main.balance.thumb"));
+        assert_eq!(covered["sample"][0]["in"], json!("main.balance.track"));
+
+        // The same mark under a thumb that is transparent there is visible ink
+        // and says nothing: the rectangle is not the artwork.
+        let mut d = Document::blank();
+        d.open_on_whole_skin();
+        d.draw(
+            &json!({"layers":["main.balance.thumb"],"states":"all","operations":[
+                {"op":"rect","x":189,"y":66,"width":14,"height":3,"color":"#c9c2ac"}
+            ]}),
+        )
+        .unwrap();
+        let report = d
+            .draw(
+                &json!({"layers":["main.balance.track"],"states":"all","operations":[
+                    {"op":"pixel","x":[183,207],"y":62,"color":"#5d5d6e"}
+                ]}),
+            )
+            .unwrap();
+        assert!(
+            report["covered_pixels"].is_null(),
+            "a three-row grip hides three rows: {report}"
+        );
+
+        // A thumb hiding part of its own track in *one* frame is what a slider
+        // is. Ink that some frame shows is not invisible artwork.
+        let report = d
+            .draw(
+                &json!({"layers":["main.balance.track"],"states":"all","operations":[
+                    {"op":"rect","x":177,"y":66,"width":38,"height":3,"color":"#5d5d6e"}
+                ]}),
+            )
+            .unwrap();
+        assert!(
+            report["covered_pixels"].is_null(),
+            "a bar across the whole track is visible at both ends: {report}"
+        );
+
+        // And a window background under a button is how a skin is built.
+        let report = d
+            .draw(&json!({"layers":["main.background"],"operations":[
+                {"op":"rect","x":39,"y":88,"width":23,"height":18,"color":"#101010"}
+            ]}))
+            .unwrap();
+        assert!(report["covered_pixels"].is_null(), "not news: {report}");
     }
 }

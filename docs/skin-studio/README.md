@@ -647,6 +647,7 @@ All describe the transaction in hand.
 | `crossed_cells` | ink left its own cell and landed in a **repeated** one, which the player then draws n times. Silent for a cell painted on its own, and for an operation covering the whole sheet |
 | `identical_variants` | variants that came out the same picture — 28 slider frames all on frame 0, or a pressed state identical to its released one. Fully transparent variants are excluded; sprites sharing source cells share one entry, with `also` |
 | `unsupported_characters` | characters the face does not have; the rest of the text still landed |
+| `covered_pixels` | ink hidden, in **every** state it was drawn into, behind another part of the same control — a slider's track and its thumb are read from one value, so a mark that runs to the thumb's position is behind the thumb in every frame. Per-frame coverage is what a slider is and is not reported; a background under a button is not either |
 | `repeated` | how many places `at` ran the operations at |
 | `swept` | which fields walked, and over how many steps |
 | `states_written` | the scope, and how many variants each target got, when it was more than the one in hand |
