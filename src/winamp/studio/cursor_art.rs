@@ -183,15 +183,13 @@ pub fn palette(images: &BTreeMap<String, RgbaImage>) -> Palette {
 pub enum Shape {
     /// A plain pointer, for a window with nothing more specific under it.
     Arrow,
-    /// A pointer carrying a small mark, for a control that reacts to a click.
-    Button,
     /// A left-right bar, for something dragged sideways.
     SlideX,
+    /// A four-way arrow, for a bar that drags its whole window about.
+    Move,
     /// An up-down bar, for something dragged up and down.
     SlideY,
-    /// A crosshair, for a bar you aim at rather than nudge.
-    Aim,
-    /// A diagonal bar, for a corner that resizes.
+    /// A corner-to-corner bar, for a corner that resizes.
     Resize,
 }
 
@@ -199,22 +197,22 @@ impl Shape {
     /// The shape that suits `role`.
     pub fn of(role: SkinCursor) -> Self {
         match role {
-            SkinCursor::MainWindow | SkinCursor::EqualizerWindow | SkinCursor::PlaylistWindow => {
-                Self::Arrow
-            }
-            SkinCursor::MainMenu
+            SkinCursor::MainWindow
+            | SkinCursor::EqualizerWindow
+            | SkinCursor::PlaylistWindow
+            | SkinCursor::MainMenu
             | SkinCursor::MainMinimize
             | SkinCursor::MainWindowshade
             | SkinCursor::MainClose
-            | SkinCursor::EqualizerClose => Self::Button,
+            | SkinCursor::EqualizerClose => Self::Arrow,
             SkinCursor::MainTitleBar
             | SkinCursor::EqualizerTitleBar
-            | SkinCursor::PlaylistTitleBar
-            | SkinCursor::SongName
+            | SkinCursor::PlaylistTitleBar => Self::Move,
+            SkinCursor::SongName
             | SkinCursor::VolumeBar
-            | SkinCursor::BalanceBar => Self::SlideX,
+            | SkinCursor::BalanceBar
+            | SkinCursor::PositionBar => Self::SlideX,
             SkinCursor::EqualizerSlider | SkinCursor::PlaylistScrollBar => Self::SlideY,
-            SkinCursor::PositionBar => Self::Aim,
             SkinCursor::PlaylistResize => Self::Resize,
         }
     }
@@ -222,7 +220,7 @@ impl Shape {
     /// Where the pointer actually points.
     pub fn hotspot(self) -> [u32; 2] {
         match self {
-            Self::Arrow | Self::Button => [0, 0],
+            Self::Arrow => [0, 0],
             _ => [CURSOR_SIDE / 2, CURSOR_SIDE / 2],
         }
     }
@@ -437,7 +435,7 @@ fn arrow_cut(silhouette: Silhouette) -> ArrowCut {
     }
 }
 
-fn arrow_points(silhouette: Silhouette, marked: bool) -> Vec<(i32, i32)> {
+fn arrow_points(silhouette: Silhouette) -> Vec<(i32, i32)> {
     let cut = arrow_cut(silhouette);
     let mut points = Vec::new();
     for y in 0..=cut.head {
@@ -448,15 +446,6 @@ fn arrow_points(silhouette: Silhouette, marked: bool) -> Vec<(i32, i32)> {
     for y in (cut.head - 5).max(0)..=cut.tail_end {
         for x in cut.tail.0..=cut.tail.1 {
             points.push((x, y));
-        }
-    }
-    if marked {
-        for y in 14..=19 {
-            for x in 15..=20 {
-                if y == 14 || y == 19 || x == 15 || x == 20 {
-                    points.push((x, y));
-                }
-            }
         }
     }
     points
@@ -489,25 +478,24 @@ fn slide_points(vertical: bool, weight: i32) -> Vec<(i32, i32)> {
     points
 }
 
-fn aim_points(weight: i32) -> Vec<(i32, i32)> {
-    let middle = (CURSOR_SIDE / 2) as i32;
-    let mut points = Vec::new();
-    for i in 4..28 {
-        for offset in -weight..=weight {
-            points.push((i, middle + offset));
-            points.push((middle + offset, i));
-        }
-    }
+fn move_points(weight: i32) -> Vec<(i32, i32)> {
+    let mut points = slide_points(false, weight);
+    points.extend(slide_points(true, weight));
     points
 }
 
 fn resize_points(weight: i32) -> Vec<(i32, i32)> {
     let mut points = Vec::new();
-    for i in 7..25 {
+    for i in 7..=24 {
         for offset in -weight..=weight {
             points.push((i + offset, i));
-            points.push((i + offset, 31 - i));
         }
+    }
+    for step in 0..6 {
+        points.push((7 + step, 7));
+        points.push((7, 7 + step));
+        points.push((24 - step, 24));
+        points.push((24, 24 - step));
     }
     points
 }
@@ -522,11 +510,10 @@ pub fn draw(role: SkinCursor, palette: &Palette, style: Style) -> (RgbaImage, [u
     let shape = Shape::of(role);
     let mut canvas = Canvas::new();
     let (points, colour) = match shape {
-        Shape::Arrow => (arrow_points(style.silhouette, false), palette.body),
-        Shape::Button => (arrow_points(style.silhouette, true), palette.accent),
+        Shape::Arrow => (arrow_points(style.silhouette), palette.body),
         Shape::SlideX => (slide_points(false, style.weight()), palette.accent),
+        Shape::Move => (move_points(style.weight()), palette.accent),
         Shape::SlideY => (slide_points(true, style.weight()), palette.accent),
-        Shape::Aim => (aim_points(style.weight()), palette.accent),
         Shape::Resize => (resize_points(style.weight()), palette.body),
     };
     canvas.body(&points, colour, palette.ink, style.ring());
@@ -672,17 +659,42 @@ mod tests {
         assert_eq!(first.1, second.1);
     }
 
+    /// A title bar drags its window in both directions at once. A one-axis
+    /// slider says it only moves sideways, which is the wrong promise.
+    #[test]
+    fn a_title_bar_is_not_drawn_as_a_sideways_slider() {
+        for title in [
+            SkinCursor::MainTitleBar,
+            SkinCursor::EqualizerTitleBar,
+            SkinCursor::PlaylistTitleBar,
+        ] {
+            assert_eq!(Shape::of(title), Shape::Move, "{title:?}");
+        }
+        assert_eq!(Shape::of(SkinCursor::VolumeBar), Shape::SlideX);
+        assert_eq!(Shape::of(SkinCursor::BalanceBar), Shape::SlideX);
+    }
+
     #[test]
     fn regions_that_do_different_things_do_not_share_a_shape() {
         assert_ne!(
             Shape::of(SkinCursor::MainWindow),
             Shape::of(SkinCursor::PositionBar)
         );
+        assert_eq!(
+            Shape::of(SkinCursor::PositionBar),
+            Shape::SlideX,
+            "seeking drags the thumb sideways"
+        );
         assert_ne!(
             Shape::of(SkinCursor::EqualizerSlider),
             Shape::of(SkinCursor::VolumeBar)
         );
         assert_eq!(Shape::of(SkinCursor::PlaylistResize), Shape::Resize);
+        assert_eq!(
+            Shape::of(SkinCursor::MainClose),
+            Shape::of(SkinCursor::MainWindow),
+            "a button is clicked, not dragged; classic skins leave it the plain pointer"
+        );
     }
 
     #[test]

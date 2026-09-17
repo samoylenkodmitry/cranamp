@@ -119,7 +119,8 @@ line the moment the sheet is opened and repeated in draw results:
 ## Cursors
 
 A classic skin names a pointer for each region of the player: the plain arrow
-over a window, the bar over a title bar you drag, the crosshair over the seek
+over a window, the four-way arrow over a title bar that moves it, the sideways
+bar over the seek
 bar. There are eighteen regions, each one a `.cur` file, and a skin that ships
 none falls back to the desktop arrow — the one part of the window that would not
 belong to the skin.
@@ -143,6 +144,13 @@ The drawer's four **Aim** buttons move it a pixel at a time.
 | `studio_cursors {action: "draw", style: "needle-bold"}` | Cuts the set to a named silhouette instead of the one the colours pick. |
 | `studio_cursors {action: "hotspot", regions: ["normal"], hotspot: [0, 0]}` | Moves where a region's pointer points. |
 | `studio_cursors {action: "remove", regions: ["psize"]}` | Drops cursors from the skin. |
+
+The shape follows what the region does, not what it is called: a window and a
+button both take the plain pointer, because a button is clicked rather than
+dragged; a title bar takes the four-way arrow, because it moves its window in
+both directions; the seek bar, volume and balance take the sideways bar; the
+equalizer bands and the playlist scroll take the upright one; and only the
+playlist's corner takes the diagonal.
 
 `draw` reads its colours off the sheets the player always shows: the darkest
 colour the skin uses often becomes the outline, the lightest the body of the
