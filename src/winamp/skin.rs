@@ -456,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bundled_skin_ships_no_cursors_and_keeps_the_platform_arrow() {
+    fn the_classic_reference_skin_ships_no_cursors_and_keeps_the_platform_arrow() {
         let skin =
             load_skin(include_bytes!("../../assets/winamp.wsz")).expect("bundled skin should load");
 

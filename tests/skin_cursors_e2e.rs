@@ -37,29 +37,36 @@ fn hover(shell: &mut AppShell<HitGraphRenderer>, (x, y): (f32, f32)) {
 }
 
 #[test]
-fn the_bundled_skin_asks_for_no_pointer_icon_anywhere_on_the_player() {
+fn the_bundled_skin_asks_for_its_own_pointer_over_its_own_regions() {
     let mut shell = surface_app();
-    // The icon the shell starts with; anything the player asks for shows up as
-    // a change against it.
     let _ = shell.take_pointer_icon_change();
 
-    let probes = [
-        ("the title bar", (137.0, 7.0)),
-        ("the close button", (268.0, 7.0)),
-        ("the track title", (150.0, 30.0)),
-        ("the seek bar", (120.0, 76.0)),
-        ("the volume slider", (130.0, 62.0)),
-        ("the balance slider", (190.0, 62.0)),
-        ("the window body", (137.0, 100.0)),
-    ];
-    for (what, point) in probes {
-        hover(&mut shell, point);
-        assert_eq!(
-            shell.take_pointer_icon_change(),
-            None,
-            "hovering {what} changed the pointer icon, but the bundled skin ships no cursors"
-        );
-    }
+    hover(&mut shell, (137.0, 100.0));
+    let body = shell
+        .take_pointer_icon_change()
+        .expect("the window body asks for the skin's own arrow");
+    assert!(
+        matches!(body, PointerIcon::Custom(_)),
+        "the bundled skin draws its own pointer rather than naming a system one: {body:?}"
+    );
+
+    hover(&mut shell, (120.0, 76.0));
+    let seek = shell
+        .take_pointer_icon_change()
+        .expect("the seek bar asks for a pointer of its own");
+    assert_ne!(
+        seek, body,
+        "the seek bar and the window body must not share a pointer"
+    );
+
+    hover(&mut shell, (137.0, 7.0));
+    let title = shell
+        .take_pointer_icon_change()
+        .expect("the title bar asks for a pointer of its own");
+    assert_ne!(
+        title, seek,
+        "the title bar and the seek bar must not share a pointer"
+    );
 }
 
 /// A 2x2 cursor of one flat colour with its hotspot at (1, 0): an icon

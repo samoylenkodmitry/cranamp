@@ -89,6 +89,13 @@ impl SkinCursor {
     /// How many regions a skin can name a cursor for.
     pub const COUNT: usize = Self::FILES.len();
 
+    /// Every region paired with its archive entry, in the order an editor
+    /// should lay them out: the main window, then the equalizer, then the
+    /// playlist, each from its most general region to its most specific.
+    pub const fn files() -> [(Self, &'static str); Self::COUNT] {
+        Self::FILES
+    }
+
     /// The archive entry this region reads, lower-cased.
     pub fn file_name(self) -> &'static str {
         Self::FILES
@@ -206,6 +213,75 @@ pub fn decode_cur(bytes: &[u8]) -> Result<CustomPointerIcon> {
     };
     CustomPointerIcon::new(bitmap, entry.hotspot_x.into(), entry.hotspot_y.into())
         .context("cursor hotspot or size is out of range")
+}
+
+/// Encodes an RGBA image as a Windows `.cur` file with its hotspot.
+///
+/// The output is the shape every modern cursor takes: one directory entry
+/// followed by a bottom-up 32-bit DIB whose alpha channel carries the
+/// transparency. The 1-bit mask the format still demands is written to agree
+/// with that alpha, so a reader that ignores the channel cuts the same shape,
+/// and a cursor whose every pixel is transparent survives the round trip
+/// instead of coming back as an opaque rectangle.
+pub fn encode_cur(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    hotspot_x: u32,
+    hotspot_y: u32,
+) -> Result<Vec<u8>> {
+    ensure!(
+        (1..=MAX_CURSOR_SIZE).contains(&width) && (1..=MAX_CURSOR_SIZE).contains(&height),
+        "a cursor is between 1 and {MAX_CURSOR_SIZE} pixels on a side, not {width}x{height}"
+    );
+    let expected = width as usize * height as usize * 4;
+    ensure!(
+        rgba.len() == expected,
+        "image is {} bytes, not the {expected} a {width}x{height} RGBA image needs",
+        rgba.len()
+    );
+    ensure!(
+        hotspot_x < width && hotspot_y < height,
+        "hotspot ({hotspot_x}, {hotspot_y}) sits outside a {width}x{height} cursor"
+    );
+
+    let mask_stride = row_stride(width, 1);
+    let mut colors = Vec::with_capacity(expected);
+    let mut mask = vec![0u8; mask_stride * height as usize];
+    for (target_row, row) in (0..height).rev().enumerate() {
+        for column in 0..width {
+            let at = ((row * width + column) * 4) as usize;
+            let pixel = &rgba[at..at + 4];
+            colors.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+            if pixel[3] < 128 {
+                mask[target_row * mask_stride + (column / 8) as usize] |= 1 << (7 - (column % 8));
+            }
+        }
+    }
+
+    let mut image = Vec::with_capacity(40 + colors.len() + mask.len());
+    image.extend_from_slice(&40u32.to_le_bytes());
+    image.extend_from_slice(&(width as i32).to_le_bytes());
+    image.extend_from_slice(&(height as i32 * 2).to_le_bytes());
+    image.extend_from_slice(&1u16.to_le_bytes());
+    image.extend_from_slice(&32u16.to_le_bytes());
+    image.extend_from_slice(&[0; 24]);
+    image.extend_from_slice(&colors);
+    image.extend_from_slice(&mask);
+
+    let mut out = Vec::with_capacity(6 + DIRECTORY_ENTRY_LEN + image.len());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&CURSOR_RESOURCE_TYPE.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.push(u8::try_from(width).unwrap_or_default());
+    out.push(u8::try_from(height).unwrap_or_default());
+    out.extend_from_slice(&[0, 0]);
+    out.extend_from_slice(&(hotspot_x as u16).to_le_bytes());
+    out.extend_from_slice(&(hotspot_y as u16).to_le_bytes());
+    out.extend_from_slice(&(image.len() as u32).to_le_bytes());
+    out.extend_from_slice(&((6 + DIRECTORY_ENTRY_LEN) as u32).to_le_bytes());
+    out.extend_from_slice(&image);
+    Ok(out)
 }
 
 /// One entry of the icon directory: where an image lives and where its hotspot
@@ -805,5 +881,67 @@ pub(super) mod tests {
                 .all(|(_, name)| *name == name.to_ascii_lowercase()),
             "archive lookup is by lower-cased name"
         );
+    }
+
+    fn gradient(width: u32, height: u32) -> Vec<u8> {
+        (0..width * height)
+            .flat_map(|i| {
+                let x = (i % width) as u8;
+                let y = (i / width) as u8;
+                [
+                    x.wrapping_mul(7),
+                    y.wrapping_mul(11),
+                    40,
+                    if x == y { 0 } else { 255 },
+                ]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_encoded_cursor_reads_back_pixel_for_pixel() {
+        let rgba = gradient(16, 24);
+        let bytes = encode_cur(16, 24, &rgba, 3, 5).expect("encodes");
+        let icon = decode_cur(&bytes).expect("decodes");
+        assert_eq!(icon.hotspot_x(), 3);
+        assert_eq!(icon.hotspot_y(), 5);
+        assert_eq!(icon.image().width(), 16);
+        assert_eq!(icon.image().height(), 24);
+        assert_eq!(icon.image().pixels(), rgba.as_slice());
+    }
+
+    #[test]
+    fn an_encoded_cursor_keeps_its_transparent_pixels_transparent() {
+        let rgba = vec![0; 32 * 32 * 4];
+        let bytes = encode_cur(32, 32, &rgba, 0, 0).expect("encodes");
+        let icon = decode_cur(&bytes).expect("decodes");
+        assert!(
+            icon.image()
+                .pixels()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[3] == 0),
+            "an all-transparent cursor must not come back opaque"
+        );
+    }
+
+    #[test]
+    fn an_image_of_the_wrong_length_is_refused() {
+        assert!(encode_cur(8, 8, &[0; 10], 0, 0).is_err());
+    }
+
+    #[test]
+    fn a_hotspot_outside_the_image_is_refused() {
+        let rgba = vec![0; 8 * 8 * 4];
+        assert!(encode_cur(8, 8, &rgba, 8, 0).is_err());
+        assert!(encode_cur(8, 8, &rgba, 0, 8).is_err());
+    }
+
+    #[test]
+    fn a_cursor_larger_than_the_format_allows_is_refused() {
+        let side = MAX_CURSOR_SIZE + 1;
+        let rgba = vec![0; (side * side * 4) as usize];
+        assert!(encode_cur(side, side, &rgba, 0, 0).is_err());
     }
 }

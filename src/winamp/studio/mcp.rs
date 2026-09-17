@@ -248,6 +248,7 @@ fn tools() -> Vec<Value> {
  tool("studio_layers","Paint planes above the original sheets. list, add, select, set, move, merge_down and delete. A plane has a name, an opacity, and switches for shown, locked and clipped to the plane below.",json!({"action":{"enum":["list","add","select","set","move","merge_down","delete"]},"id":{"type":"string"},"name":{"type":"string"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"clip_below":{"type":"boolean"},"opacity":{"type":"integer","minimum":0,"maximum":255},"index":{"type":"integer","minimum":0}}),&[]),
  tool("studio_options","The skin apart from its sheets: the six PLEDIT.TXT colours and the 24 VISCOLOR.TXT colours. It answers readability: the contrast of every colour the player writes against the art behind it. Leave everything out to read them all.",json!({"playlist_colors":{"type":"object","additionalProperties":{"type":"string"}},"visualizer_colors":{"type":"array","items":{"type":"string"},"minItems":24,"maxItems":24}}),&[]),
  tool("studio_validate","Whether this skin looks the same in every player that reads .wsz. It names each entry no player reads, each sheet the format needs and the skin lacks, and each sheet too small for its own sprites. An empty list means the skin is portable. fix repairs what it can: it drops the entries no player reads and grows the sheets that are too small.",json!({"fix":{"type":"boolean","description":"Repair instead of report. A grown sheet repeats its own edge into the new rows, so it looks the way it looked before."}}),&[]),
+ tool("studio_cursors","The pointers a skin shows over its own regions: the 18 .cur files a classic player reads, from the main window's plain arrow to the playlist's resize corner. Leave everything out to list which regions are drawn. draw makes the missing ones in the skin's own colours and opens them on the canvas, where every brush works on them as on any sheet. regions narrows any action to the ones you name. overwrite redraws regions that already have a cursor. remove drops them. hotspot moves the point a region's pointer actually points at.",json!({"action":{"enum":["list","draw","remove","hotspot"]},"regions":{"type":"array","items":{"type":"string"},"description":"Region names such as normal, titlebar, posbar, volbar, eqslid, psize, with or without .cur. Leave it out for every region."},"overwrite":{"type":"boolean","description":"Redraw a region that already has a cursor instead of leaving the artwork alone."},"hotspot":{"type":"array","items":{"type":"integer","minimum":0},"minItems":2,"maxItems":2,"description":"Where in the 32x32 image the pointer actually points. An arrow points at its own tip, a slider at its middle."}}),&[]),
  tool("studio_status","The shared document: path, revision, unsaved edits, history depth, sheets, paint planes and the whole view. surface says which surface a stroke lands on.",json!({}),&[]),
  tool("studio_new","Make an empty classic skin. Nothing is kept from the old one. Set discard to true if there are unsaved edits.",json!({"discard":{"type":"boolean"}}),&[]),
  tool("studio_open","Load a WSZ into the open Studio. Set discard to true if there are unsaved edits.",json!({"path":{"type":"string"},"discard":{"type":"boolean"}}),&["path"]),
@@ -763,6 +764,34 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 "visualizer_slots": VISUALIZER_SLOTS,
                 "readability": readability,
             })
+        }
+        "studio_cursors" => {
+            let regions: Vec<String> = match args.get("regions") {
+                Some(value) => serde_json::from_value(value.clone())
+                    .context("regions must be an array of region names")?,
+                None => Vec::new(),
+            };
+            match args["action"].as_str().unwrap_or("list") {
+                "draw" => {
+                    let drawn = doc.draw_cursors(
+                        &regions,
+                        args["overwrite"].as_bool() == Some(true),
+                        "MCP",
+                    )?;
+                    doc.state(json!({"panel": "cursors", "layer": "auto"}))?;
+                    drawn
+                }
+                "remove" => doc.remove_cursors(&regions, "MCP")?,
+                "hotspot" => {
+                    let region = regions
+                        .first()
+                        .context("hotspot needs one region, as regions: [\"posbar\"]")?;
+                    let at: [u32; 2] = serde_json::from_value(args["hotspot"].clone())
+                        .context("hotspot must be [x, y]")?;
+                    doc.set_cursor_hotspot(region, at[0], at[1], "MCP")?
+                }
+                _ => doc.cursors_report(),
+            }
         }
         "studio_validate" => {
             if args.get("fix").and_then(Value::as_bool) == Some(true) {
@@ -1538,6 +1567,105 @@ mod drawing_tests {
             );
         }
     }
+    #[test]
+    fn studio_cursors_lists_every_region_a_classic_player_reads() {
+        let shared = blank();
+        let out = result(&shared, "studio_cursors", json!({}));
+        assert_eq!(out["of"], json!(crate::winamp::cursors::SkinCursor::COUNT));
+        assert_eq!(out["drawn"], json!(0), "a blank skin ships no cursors");
+        assert_eq!(
+            out["regions"].as_array().unwrap().len(),
+            crate::winamp::cursors::SkinCursor::COUNT
+        );
+    }
+
+    #[test]
+    fn studio_cursors_draws_a_set_and_opens_it_on_the_canvas() {
+        let shared = blank();
+        let out = result(&shared, "studio_cursors", json!({"action":"draw"}));
+        assert_eq!(
+            out["drawn"].as_array().unwrap().len(),
+            crate::winamp::cursors::SkinCursor::COUNT,
+            "{out}"
+        );
+        let status = result(&shared, "studio_status", json!({}));
+        assert_eq!(status["view"]["panel"], json!("cursors"), "{status}");
+        let listed = result(&shared, "studio_cursors", json!({}));
+        assert_eq!(
+            listed["drawn"],
+            json!(crate::winamp::cursors::SkinCursor::COUNT)
+        );
+    }
+
+    #[test]
+    fn a_drawn_cursor_leaves_the_skin_as_a_cursor_a_player_can_read() {
+        let shared = blank();
+        result(&shared, "studio_cursors", json!({"action":"draw"}));
+        let bytes = shared.lock().unwrap().archive().unwrap();
+        let skin = crate::winamp::skin::load_skin(&bytes).expect("the skin still loads");
+        assert_eq!(
+            skin.cursors.len(),
+            crate::winamp::cursors::SkinCursor::COUNT,
+            "every region the editor drew is readable by the player"
+        );
+    }
+
+    #[test]
+    fn drawing_again_leaves_hand_drawn_artwork_alone_unless_asked() {
+        let shared = blank();
+        result(&shared, "studio_cursors", json!({"action":"draw"}));
+        let out = result(&shared, "studio_cursors", json!({"action":"draw"}));
+        assert!(out["drawn"].as_array().unwrap().is_empty(), "{out}");
+        let forced = result(
+            &shared,
+            "studio_cursors",
+            json!({"action":"draw","regions":["posbar"],"overwrite":true}),
+        );
+        assert_eq!(forced["drawn"], json!(["posbar.cur"]), "{forced}");
+    }
+
+    #[test]
+    fn a_region_can_be_re_aimed_and_dropped() {
+        let shared = blank();
+        result(&shared, "studio_cursors", json!({"action":"draw"}));
+        let aimed = result(
+            &shared,
+            "studio_cursors",
+            json!({"action":"hotspot","regions":["normal"],"hotspot":[4,9]}),
+        );
+        assert_eq!(aimed["hotspot"], json!([4, 9]), "{aimed}");
+        let listed = result(&shared, "studio_cursors", json!({}));
+        let normal = listed["regions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["region"] == json!("normal"))
+            .unwrap()
+            .clone();
+        assert_eq!(normal["hotspot"], json!([4, 9]));
+
+        let dropped = result(
+            &shared,
+            "studio_cursors",
+            json!({"action":"remove","regions":["normal"]}),
+        );
+        assert_eq!(dropped["removed"], json!(["normal.cur"]), "{dropped}");
+    }
+
+    #[test]
+    fn an_unknown_region_is_named_rather_than_ignored() {
+        let shared = blank();
+        let out = call(
+            "studio_cursors",
+            json!({"action":"draw","regions":["nosuch"]}),
+            &shared,
+        );
+        assert!(
+            format!("{out:?}").contains("nosuch"),
+            "the error should name the region: {out:?}"
+        );
+    }
+
     #[test]
     fn studio_validate_tells_a_blank_skin_its_sprites_are_unpainted() {
         let shared = blank();

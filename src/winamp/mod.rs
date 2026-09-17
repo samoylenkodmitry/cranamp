@@ -8329,6 +8329,46 @@ fn time_digits(elapsed_seconds: f32) -> [u8; 4] {
 }
 #[cfg(test)]
 mod tests {
+    /// Every skin Cranamp ships draws its own pointers. A bundled skin with no
+    /// cursors falls back to the desktop arrow, which is the one part of the
+    /// window that would not belong to the skin.
+    #[test]
+    fn every_bundled_skin_carries_a_full_cursor_set() {
+        for skin in BUNDLED_SKINS {
+            let loaded = crate::winamp::skin::load_skin(skin.bytes)
+                .unwrap_or_else(|error| panic!("{} does not load: {error:#}", skin.id));
+            assert_eq!(
+                loaded.cursors.len(),
+                crate::winamp::cursors::SkinCursor::COUNT,
+                "{} is missing cursors",
+                skin.id
+            );
+        }
+    }
+
+    /// Two skins that share a cursor set would look like one skin the moment
+    /// the pointer moved, so the derived art has to follow the artwork.
+    #[test]
+    fn two_bundled_skins_do_not_share_the_same_pointer() {
+        let pointer = |bytes: &'static [u8]| {
+            crate::winamp::skin::load_skin(bytes)
+                .expect("loads")
+                .cursors
+                .get(crate::winamp::cursors::SkinCursor::MainWindow)
+                .expect("every bundled skin draws its window pointer")
+                .clone()
+        };
+        let first = pointer(BUNDLED_SKINS[0].bytes);
+        let second = pointer(BUNDLED_SKINS[1].bytes);
+        assert_ne!(
+            format!("{first:?}"),
+            format!("{second:?}"),
+            "{} and {} drew the same pointer",
+            BUNDLED_SKINS[0].id,
+            BUNDLED_SKINS[1].id
+        );
+    }
+
     #[test]
     fn playlist_border_tiles_preserve_source_texels_and_crop_partial_edges() {
         let source = (31., 42., 20., 29.);

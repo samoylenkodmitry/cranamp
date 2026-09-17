@@ -399,6 +399,66 @@ pub struct Document {
     covered_probe: Vec<(String, usize, [i32; 2])>,
     control_parts: BTreeSet<String>,
 }
+fn cursor_role(role: &str) -> Result<(crate::winamp::cursors::SkinCursor, &'static str)> {
+    let lower = role.to_ascii_lowercase();
+    let stem = lower.strip_suffix(".cur").unwrap_or(lower.as_str());
+    crate::winamp::cursors::SkinCursor::files()
+        .into_iter()
+        .find(|(_, name)| name.trim_end_matches(".cur") == stem)
+        .with_context(|| format!("Unknown cursor region {role}"))
+}
+
+fn cursor_roles(
+    roles: &[String],
+) -> Result<Vec<(crate::winamp::cursors::SkinCursor, &'static str)>> {
+    if roles.is_empty() {
+        return Ok(crate::winamp::cursors::SkinCursor::files().to_vec());
+    }
+    roles.iter().map(|role| cursor_role(role)).collect()
+}
+
+fn cursor_image(name: &str, data: &[u8]) -> Option<RgbaImage> {
+    if !name.ends_with(".cur") {
+        return None;
+    }
+    let icon = crate::winamp::cursors::decode_cur(data).ok()?;
+    let bitmap = icon.image();
+    RgbaImage::from_raw(bitmap.width(), bitmap.height(), bitmap.pixels().to_vec())
+}
+
+fn cursor_hotspot(data: &[u8]) -> [u32; 2] {
+    crate::winamp::cursors::decode_cur(data)
+        .map(|icon| [icon.hotspot_x(), icon.hotspot_y()])
+        .unwrap_or_default()
+}
+
+fn archive_entry(name: &str, data: &[u8], image: Option<&RgbaImage>) -> Result<Vec<u8>> {
+    let Some(image) = image else {
+        return Ok(data.to_vec());
+    };
+    if name.ends_with(".cur") {
+        let [x, y] = cursor_hotspot(data);
+        return crate::winamp::cursors::encode_cur(
+            image.width(),
+            image.height(),
+            image.as_raw(),
+            x,
+            y,
+        );
+    }
+    let mut opaque = image.clone();
+    for pixel in opaque.pixels_mut() {
+        if pixel.0[3] < 128 {
+            pixel.0 = [0, 0, 0, 255];
+        }
+    }
+    let mut bytes = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(opaque)
+        .to_rgb8()
+        .write_to(&mut bytes, image::ImageFormat::Bmp)?;
+    Ok(bytes.into_inner())
+}
+
 fn relative_luminance(c: [u8; 4]) -> f64 {
     let channel = |v: u8| {
         let s = v as f64 / 255.;
@@ -495,6 +555,8 @@ impl Document {
             entry.read_to_end(&mut data)?;
             if name.ends_with(".bmp") {
                 let image = image::load_from_memory(&data)?.to_rgba8();
+                images.insert(name.clone(), image);
+            } else if let Some(image) = cursor_image(&name, &data) {
                 images.insert(name.clone(), image);
             }
             files.insert(name, data);
@@ -757,8 +819,17 @@ impl Document {
                 bail!("Unknown layer {id}");
             }
         }
-        if !["main", "equalizer", "playlist", "atlas", "canvas"].contains(&view.panel.as_str()) {
-            bail!("panel must be main, equalizer, playlist, atlas, or canvas");
+        if ![
+            "main",
+            "equalizer",
+            "playlist",
+            "atlas",
+            "canvas",
+            "cursors",
+        ]
+        .contains(&view.panel.as_str())
+        {
+            bail!("panel must be main, equalizer, playlist, atlas, canvas, or cursors");
         }
         if view.panel == "atlas" && !self.images.contains_key(&view.sheet) {
             bail!("Unknown atlas {}", view.sheet);
@@ -1042,6 +1113,9 @@ impl Document {
                 })
                 .unwrap_or_default();
         }
+        if view.panel == "cursors" {
+            return self.cursor_layers();
+        }
         if view.panel == "canvas" {
             let mut all = Vec::new();
             for (panel, offset) in [("main", 0), ("equalizer", 116), ("playlist", 232)] {
@@ -1066,6 +1140,29 @@ impl Document {
             .into_iter()
             .filter(|layer| self.images.contains_key(&layer.sheet))
             .collect()
+    }
+    fn cursor_layers(&self) -> Vec<Layer> {
+        let mut out = Vec::new();
+        for (index, (_, name)) in crate::winamp::cursors::SkinCursor::files()
+            .into_iter()
+            .enumerate()
+        {
+            let Some(image) = self.images.get(name) else {
+                continue;
+            };
+            let (width, height) = image.dimensions();
+            let rect = [0, 0, width, height];
+            let (x, y) = mapping::cursor_cell(index as u32);
+            out.push(Layer {
+                id: name.trim_end_matches(".cur").to_string(),
+                sheet: name.to_string(),
+                source: rect,
+                destination: [x, y, width, height],
+                variants: vec![rect],
+                labels: vec!["always".into()],
+            });
+        }
+        out
     }
     pub fn sheets(&self) -> Vec<(String, u32, u32)> {
         self.images
@@ -2891,6 +2988,141 @@ impl Document {
             })
             .collect()
     }
+    pub fn cursors_report(&self) -> Value {
+        let drawn: Vec<Value> = crate::winamp::cursors::SkinCursor::files()
+            .into_iter()
+            .map(|(_, name)| {
+                let image = self.images.get(name);
+                let hotspot = self
+                    .files
+                    .get(name)
+                    .map(|data| cursor_hotspot(data))
+                    .unwrap_or_default();
+                json!({
+                    "region": name.trim_end_matches(".cur"),
+                    "file": name,
+                    "drawn": image.is_some(),
+                    "size": image.map(|i| [i.width(), i.height()]),
+                    "hotspot": image.map(|_| hotspot),
+                })
+            })
+            .collect();
+        let present = drawn.iter().filter(|c| c["drawn"] == true).count();
+        json!({
+            "regions": drawn,
+            "drawn": present,
+            "of": crate::winamp::cursors::SkinCursor::COUNT,
+        })
+    }
+    pub fn draw_cursors(
+        &mut self,
+        roles: &[String],
+        overwrite: bool,
+        source: &str,
+    ) -> Result<Value> {
+        self.finish_stroke();
+        let wanted = cursor_roles(roles)?;
+        let todo: Vec<_> = wanted
+            .into_iter()
+            .filter(|(_, name)| overwrite || !self.images.contains_key(*name))
+            .collect();
+        if todo.is_empty() {
+            return Ok(json!({"drawn": [], "note": "every region asked for already has a cursor"}));
+        }
+        let palette = super::cursor_art::palette(&self.images);
+        self.record(self.snapshot(), "Draw cursors".into(), source);
+        let mut drawn = Vec::new();
+        for (role, name) in todo {
+            let (image, hotspot) = super::cursor_art::draw(role, &palette);
+            let bytes = crate::winamp::cursors::encode_cur(
+                image.width(),
+                image.height(),
+                image.as_raw(),
+                hotspot[0],
+                hotspot[1],
+            )?;
+            self.images.insert(name.to_string(), image);
+            self.files.insert(name.to_string(), bytes);
+            drawn.push(name);
+        }
+        self.changed();
+        let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+        Ok(json!({
+            "drawn": drawn,
+            "palette": {
+                "ink": hex(palette.ink),
+                "body": hex(palette.body),
+                "accent": hex(palette.accent),
+            },
+        }))
+    }
+    pub fn remove_cursors(&mut self, roles: &[String], source: &str) -> Result<Value> {
+        self.finish_stroke();
+        let wanted = cursor_roles(roles)?;
+        let todo: Vec<&'static str> = wanted
+            .into_iter()
+            .filter(|(_, name)| self.images.contains_key(*name))
+            .map(|(_, name)| name)
+            .collect();
+        if todo.is_empty() {
+            return Ok(json!({"removed": []}));
+        }
+        self.record(self.snapshot(), "Remove cursors".into(), source);
+        for name in &todo {
+            self.images.remove(*name);
+            self.files.remove(*name);
+        }
+        self.changed();
+        Ok(json!({"removed": todo}))
+    }
+    pub fn set_cursor_hotspot(
+        &mut self,
+        role: &str,
+        x: u32,
+        y: u32,
+        source: &str,
+    ) -> Result<Value> {
+        self.finish_stroke();
+        let (_, name) = cursor_role(role)?;
+        let image = self
+            .images
+            .get(name)
+            .with_context(|| format!("{name} has no cursor to aim yet"))?
+            .clone();
+        let bytes = crate::winamp::cursors::encode_cur(
+            image.width(),
+            image.height(),
+            image.as_raw(),
+            x,
+            y,
+        )?;
+        self.record(self.snapshot(), format!("Aim {name}"), source);
+        self.files.insert(name.to_string(), bytes);
+        self.changed();
+        Ok(json!({"file": name, "hotspot": [x, y]}))
+    }
+    pub fn nudge_cursor_hotspot(
+        &mut self,
+        role: &str,
+        dx: i32,
+        dy: i32,
+        source: &str,
+    ) -> Result<Value> {
+        let (_, name) = cursor_role(role)?;
+        let image = self
+            .images
+            .get(name)
+            .with_context(|| format!("{name} has no cursor to aim yet"))?;
+        let (width, height) = image.dimensions();
+        let at = self
+            .files
+            .get(name)
+            .map(|data| cursor_hotspot(data))
+            .unwrap_or_default();
+        let x = (at[0] as i32 + dx).clamp(0, width.saturating_sub(1) as i32) as u32;
+        let y = (at[1] as i32 + dy).clamp(0, height.saturating_sub(1) as i32) as u32;
+        self.set_cursor_hotspot(role, x, y, source)
+    }
     pub fn make_portable(&mut self, source: &str) -> Result<Value> {
         self.finish_stroke();
         let found = self.divergences();
@@ -3613,21 +3845,7 @@ impl Document {
                 .compression_method(zip::CompressionMethod::Deflated);
             for (name, data) in &self.files {
                 writer.start_file(name, opts)?;
-                if let Some(image) = images.get(name) {
-                    let mut im = image.clone();
-                    for p in im.pixels_mut() {
-                        if p.0[3] < 128 {
-                            p.0 = [0, 0, 0, 255];
-                        }
-                    }
-                    let mut bytes = Cursor::new(Vec::new());
-                    image::DynamicImage::ImageRgba8(im)
-                        .to_rgb8()
-                        .write_to(&mut bytes, image::ImageFormat::Bmp)?;
-                    writer.write_all(bytes.get_ref())?;
-                } else {
-                    writer.write_all(data)?;
-                }
+                writer.write_all(&archive_entry(name, data, images.get(name))?)?;
             }
             writer.finish()?;
         }
@@ -3937,6 +4155,42 @@ mod tests {
             writer.finish().unwrap();
         }
         Document::open(&output.into_inner(), None).unwrap()
+    }
+
+    /// A cursor arrives as an ordinary sheet, so every tool in the editor draws
+    /// on it, and it leaves as a cursor again rather than as a bitmap.
+    #[test]
+    fn a_cursor_edited_here_leaves_the_archive_as_a_cursor() {
+        let mut document = document_with_a_cursor();
+        document
+            .images
+            .get_mut("normal.cur")
+            .expect("the cursor opened as an editable sheet")
+            .put_pixel(0, 0, Rgba([10, 200, 30, 255]));
+
+        let bytes = document.archive().expect("archive");
+        let reopened = Document::open(&bytes, None).expect("reopen");
+        let cursor = reopened.images.get("normal.cur").expect("cursor survives");
+        assert_eq!(cursor.get_pixel(0, 0).0, [10, 200, 30, 255]);
+    }
+
+    /// The hotspot is the one thing a cursor carries that a bitmap does not,
+    /// and nothing in the editor touches it, so it has to come back unchanged.
+    #[test]
+    fn editing_a_cursor_leaves_its_hotspot_where_it_was() {
+        let mut document = document_with_a_cursor();
+        let before = cursor_hotspot(document.files.get("normal.cur").expect("cursor file"));
+        document
+            .images
+            .get_mut("normal.cur")
+            .expect("cursor sheet")
+            .put_pixel(1, 1, Rgba([1, 2, 3, 255]));
+
+        let bytes = document.archive().expect("archive");
+        let reopened = Document::open(&bytes, None).expect("reopen");
+        let after = cursor_hotspot(reopened.files.get("normal.cur").expect("cursor file"));
+        assert_eq!(before, [1, 0], "the fixture's hotspot");
+        assert_eq!(after, before);
     }
 
     /// A skin's cursors are part of the skin. The Studio draws bitmaps, so it

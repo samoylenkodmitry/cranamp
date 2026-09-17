@@ -1,5 +1,6 @@
 #![allow(unused_braces)]
 mod brush;
+mod cursor_art;
 mod draft;
 mod guides;
 mod mapping;
@@ -2677,6 +2678,85 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                     },
                                 );
                             }
+                            let report = d.lock().unwrap().cursors_report();
+                            let drawn = report["drawn"].as_u64().unwrap_or(0);
+                            let of = report["of"].as_u64().unwrap_or(0);
+                            let mut row = 122.;
+                            {
+                                let target = d.clone();
+                                ListChoice(
+                                    format!("The cursor set      {drawn} of {of}"),
+                                    12.,
+                                    row,
+                                    drawer_w - 24.,
+                                    current_panel == "cursors",
+                                    move || {
+                                        state(
+                                            &target,
+                                            json!({"panel":"cursors","layer":"auto","zoom":2,"presentation":false}),
+                                        );
+                                        live.set(false);
+                                        review.set(false);
+                                        pan.set([0, 0]);
+                                    },
+                                );
+                            }
+                            row += 38.;
+                            if drawn < of {
+                                let target = d.clone();
+                                ListChoice(
+                                    format!("Draw the {} it is missing", of - drawn),
+                                    12.,
+                                    row,
+                                    drawer_w - 24.,
+                                    false,
+                                    move || {
+                                        let mut doc = target.lock().unwrap();
+                                        let _ = doc.draw_cursors(&[], false, "editor");
+                                        let _ =
+                                            doc.state(json!({"panel":"cursors","layer":"auto"}));
+                                        drop(doc);
+                                        live.set(false);
+                                        review.set(false);
+                                        pan.set([0, 0]);
+                                    },
+                                );
+                            }
+                            if drawn < of {
+                                row += 38.;
+                            }
+                            if current_panel == "cursors" {
+                                let aiming = d.lock().unwrap().view.layer.clone();
+                                for (i, (label, dx, dy)) in [
+                                    ("Aim left", -1i32, 0i32),
+                                    ("Aim right", 1, 0),
+                                    ("Aim up", 0, -1),
+                                    ("Aim down", 0, 1),
+                                ]
+                                .into_iter()
+                                .enumerate()
+                                {
+                                    let target = d.clone();
+                                    let region = aiming.clone();
+                                    let width = (drawer_w - 32.) / 4.;
+                                    ListChoice(
+                                        label.into(),
+                                        12. + i as f32 * (width + 4.),
+                                        row,
+                                        width,
+                                        false,
+                                        move || {
+                                            let mut doc = target.lock().unwrap();
+                                            let _ =
+                                                doc.nudge_cursor_hotspot(&region, dx, dy, "editor");
+                                        },
+                                    );
+                                }
+                            }
+                            if current_panel == "cursors" {
+                                row += 38.;
+                            }
+                            let sheets_at = row + 10.;
                             for (i, (name, w, h)) in sheets.into_iter().enumerate() {
                                 let target = d.clone();
                                 let on = current_panel == "atlas" && current_sheet == name;
@@ -2684,7 +2764,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                 ListChoice(
                                     caption,
                                     12.,
-                                    130. + i as f32 * 38.,
+                                    sheets_at + i as f32 * 38.,
                                     drawer_w - 24.,
                                     on,
                                     move || {
@@ -3518,7 +3598,11 @@ mod integration_tests {
         assert!(!doc.view.presentation);
         assert!(doc.planes.is_empty(), "the skin, not a layered copy of it");
         let exported = entries(&doc.archive().unwrap());
-        assert_eq!(exported.len(), 15);
+        assert_eq!(
+            exported.len(),
+            15 + crate::winamp::cursors::SkinCursor::COUNT,
+            "thirteen sheets, two text files, and one cursor per region"
+        );
         assert_eq!(exported, entries(super::super::BUNDLED_SKINS[0].bytes));
         super::super::bundled_skin().expect("Catamp must load in the player");
     }
