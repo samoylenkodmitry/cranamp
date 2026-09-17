@@ -3912,6 +3912,72 @@ mod tests {
     fn document() -> Document {
         Document::open(include_bytes!("../../../assets/winamp.wsz"), None).unwrap()
     }
+    /// The bundled skin with a `NORMAL.CUR` written alongside it.
+    fn document_with_a_cursor() -> Document {
+        let source = include_bytes!("../../../assets/winamp.wsz");
+        let cursor = crate::winamp::cursors::tests::cursor_file(&[
+            crate::winamp::cursors::tests::monochrome_2x2(),
+        ]);
+        let mut zip = zip::ZipArchive::new(Cursor::new(source.as_slice())).unwrap();
+        let mut output = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut output);
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            for index in 0..zip.len() {
+                let mut entry = zip.by_index(index).unwrap();
+                let name = entry.name().to_string();
+                let mut data = Vec::new();
+                entry.read_to_end(&mut data).unwrap();
+                writer.start_file(name, opts).unwrap();
+                writer.write_all(&data).unwrap();
+            }
+            writer.start_file("NORMAL.CUR", opts).unwrap();
+            writer.write_all(&cursor).unwrap();
+            writer.finish().unwrap();
+        }
+        Document::open(&output.into_inner(), None).unwrap()
+    }
+
+    /// A skin's cursors are part of the skin. The Studio draws bitmaps, so it
+    /// must carry the `.cur` files through untouched rather than dropping them
+    /// on the way out.
+    #[test]
+    fn a_skin_edited_here_keeps_the_cursors_it_arrived_with() {
+        let mut document = document_with_a_cursor();
+        document
+            .draw(&json!({"operations":[{"op":"pixel","x":40,"y":90,"color":"#123456"}]}))
+            .unwrap();
+
+        for (what, bytes) in [
+            ("the export", document.archive().unwrap()),
+            ("the live preview", document.preview_archive().unwrap()),
+        ] {
+            let skin = crate::winamp::skin::load_skin(&bytes)
+                .unwrap_or_else(|error| panic!("{what} should load: {error:#}"));
+            assert!(
+                skin.cursors
+                    .get(crate::winamp::cursors::SkinCursor::MainWindow)
+                    .is_some(),
+                "{what} dropped the skin's cursor"
+            );
+        }
+    }
+
+    /// Making a skin portable drops the entries no player reads. A cursor is
+    /// read, so the repair has to leave it alone.
+    #[test]
+    fn making_a_skin_portable_keeps_its_cursors() {
+        let mut document = document_with_a_cursor();
+
+        let report = document.make_portable("test").unwrap();
+
+        assert!(
+            document.files.contains_key("normal.cur"),
+            "the repair dropped the skin's cursor: {report}"
+        );
+    }
+
     #[test]
     fn magenta_is_a_colour_here_because_it_is_a_colour_in_every_other_player() {
         let mut d = Document::blank();

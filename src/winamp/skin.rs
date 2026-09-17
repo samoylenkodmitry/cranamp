@@ -1,3 +1,4 @@
+use super::cursors::{self, SkinCursors};
 use anyhow::{Context, Result};
 use cranpose_ui::ImageBitmap;
 use std::cmp::Reverse;
@@ -21,6 +22,9 @@ pub struct WinampSkin {
     pub display_text_color: [u8; 4],
     pub palette: SkinPalette,
     pub viscolor: VisColor,
+    /// The `.cur` files the archive carried, one per region of the player.
+    /// Empty for a skin that ships bitmaps only, which is most of them.
+    pub cursors: SkinCursors,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SkinPalette {
@@ -112,6 +116,7 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
     };
     let display_text_color =
         sample_text_bitmap_color(&text).unwrap_or_else(|| default_display_text_color(viscolor));
+    let cursors = cursors::load_cursors(&files);
     Ok(WinampSkin {
         main: decode("main.bmp")?,
         titlebar: decode("titlebar.bmp")?,
@@ -129,6 +134,7 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
         display_text_color,
         palette,
         viscolor,
+        cursors,
     })
 }
 fn default_text_bitmap() -> ImageBitmap {
@@ -292,6 +298,8 @@ fn decode_bmp(bytes: &[u8]) -> Result<ImageBitmap> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::winamp::cursors::SkinCursor;
+    use cranpose_ui::PointerIcon;
     use std::io::{Cursor, Read, Write};
     #[test]
     fn normalize_name_extracts_file_name() {
@@ -350,6 +358,121 @@ mod tests {
             default_display_text_color(skin.viscolor)
         );
     }
+    /// The bundled skin with extra entries written alongside it.
+    fn bundled_skin_plus(extra: &[(&str, Vec<u8>)]) -> Vec<u8> {
+        let mut source =
+            zip::ZipArchive::new(Cursor::new(include_bytes!("../../assets/winamp.wsz")))
+                .expect("bundled skin should be a zip");
+        let mut output = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut output);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            for index in 0..source.len() {
+                let mut file = source
+                    .by_index(index)
+                    .expect("zip entry should be readable");
+                let name = file.name().to_string();
+                let mut data = Vec::new();
+                file.read_to_end(&mut data)
+                    .expect("zip entry bytes should be readable");
+                writer
+                    .start_file(name, options)
+                    .expect("zip entry should be writable");
+                writer
+                    .write_all(&data)
+                    .expect("zip entry should be written");
+            }
+            for (name, data) in extra {
+                writer
+                    .start_file(*name, options)
+                    .expect("extra entry should be writable");
+                writer
+                    .write_all(data)
+                    .expect("extra entry should be written");
+            }
+            writer.finish().expect("zip should finish");
+        }
+        output.into_inner()
+    }
+
+    fn sample_cursor() -> Vec<u8> {
+        cursors::tests::cursor_file(&[cursors::tests::monochrome_2x2()])
+    }
+
+    #[test]
+    fn a_skin_that_ships_cursors_hands_them_to_the_regions_that_read_them() {
+        let wsz = bundled_skin_plus(&[
+            ("NORMAL.CUR", sample_cursor()),
+            ("cursors/VOLBAR.CUR", sample_cursor()),
+        ]);
+
+        let skin = load_skin(&wsz).expect("skin with cursors should load");
+
+        assert_eq!(skin.cursors.len(), 2);
+        let volume = skin
+            .cursors
+            .get(SkinCursor::VolumeBar)
+            .expect("VOLBAR.CUR reaches the volume slider");
+        let PointerIcon::Custom(volume) = volume else {
+            panic!("a skin cursor is a custom pointer icon");
+        };
+        assert_eq!(volume.image().width(), 2);
+        assert_eq!(volume.hotspot_x(), 1);
+        assert!(skin.cursors.get(SkinCursor::MainWindow).is_some());
+        assert!(skin.cursors.get(SkinCursor::PositionBar).is_none());
+    }
+
+    /// The portability check reports entries no player reads, and the Studio's
+    /// repair drops exactly what it reports. Cursors are read, so they have to
+    /// survive both.
+    #[test]
+    fn a_cursor_file_is_not_an_entry_no_player_reads() {
+        let entries: Vec<SkinEntry> = cursors::CLASSIC_CURSORS
+            .iter()
+            .map(|name| ((*name).to_string(), None))
+            .collect();
+
+        let reported = divergences(&entries);
+
+        for (name, _) in &entries {
+            assert!(
+                !reported.iter().any(|divergence| divergence.entry == *name),
+                "{name} was reported as an entry no player reads"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cursor_name_no_player_knows_is_still_reported() {
+        let reported = divergences(&[("mystery.cur".to_string(), None)]);
+
+        assert!(
+            reported
+                .iter()
+                .any(|divergence| divergence.entry == "mystery.cur"),
+            "an unknown cursor name should still be reported: {reported:?}"
+        );
+    }
+
+    #[test]
+    fn the_bundled_skin_ships_no_cursors_and_keeps_the_platform_arrow() {
+        let skin =
+            load_skin(include_bytes!("../../assets/winamp.wsz")).expect("bundled skin should load");
+
+        assert!(skin.cursors.is_empty());
+    }
+
+    #[test]
+    fn a_broken_cursor_does_not_cost_the_skin() {
+        let wsz = bundled_skin_plus(&[("NORMAL.CUR", b"not a cursor".to_vec())]);
+
+        let skin = load_skin(&wsz).expect("a skin with one broken cursor still loads");
+
+        assert!(skin.cursors.is_empty());
+        assert_eq!(skin.main.width(), 275);
+    }
+
     #[test]
     fn sample_text_bitmap_color_uses_visible_glyph_pixels() {
         let bitmap = ImageBitmap::from_rgba8(
@@ -489,7 +612,8 @@ pub fn divergences(entries: &[SkinEntry]) -> Vec<Divergence> {
     }
     for (entry, size) in entries {
         let classic = CLASSIC_SHEETS.iter().any(|(sheet, _, _)| sheet == entry)
-            || CLASSIC_EXTRAS.contains(&entry.as_str());
+            || CLASSIC_EXTRAS.contains(&entry.as_str())
+            || cursors::CLASSIC_CURSORS.contains(&entry.as_str());
         let prose = entry.rsplit_once('.').is_some_and(|(_, extension)| {
             matches!(extension, "txt" | "md" | "nfo" | "html" | "diz")
         });

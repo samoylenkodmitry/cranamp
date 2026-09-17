@@ -2,6 +2,7 @@
 #![cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
 #[cfg(any(target_arch = "wasm32", test))]
 mod browser_skins;
+pub mod cursors;
 mod pixel_grid;
 mod pixel_text;
 pub mod skin;
@@ -22,10 +23,12 @@ use cranpose_ui::text::{FontFamily, ParagraphStyle, TextOverflow, TextUnit};
 use cranpose_ui::{
     composable, current_density, Alignment, BasicText, BasicTextField, Box, BoxSpec, Button,
     ButtonSpec, Canvas, Color, Column, ColumnSpec, LinearArrangement, Modifier, Point,
-    PointerEventKind, PointerInputScope, Row, RowSpec, Size, SpanStyle, Text, TextStyle,
+    PointerEventKind, PointerIcon, PointerInputScope, Row, RowSpec, Size, SpanStyle, Text,
+    TextStyle,
 };
 use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
+use cursors::SkinCursor;
 use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
 use std::cell::Cell;
@@ -335,6 +338,8 @@ const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 19;
 #[cfg(not(target_arch = "wasm32"))]
 const PLAYLIST_THUMB_SCROLL_FRAME_MS: u64 = 16;
 const PLAYLIST_SCROLL_HIT_PAD_X: f32 = 8.0;
+/// The square at the playlist's bottom-right corner that resizes the window.
+const PLAYLIST_RESIZE_HANDLE: f32 = 16.0;
 const DEFAULT_EQ_VALUES: [f32; 11] = [0.5; 11];
 const EQ_ON_BUTTON_HIT_AREA: SpriteRect = (14.0, 18.0, 25.0, 12.0);
 const EQ_AUTO_BUTTON_HIT_AREA: SpriteRect = (40.0, 18.0, 32.0, 12.0);
@@ -1903,6 +1908,7 @@ fn WinampInlineStage(
                     skin.pledit.clone(),
                     skin.palette,
                     skin.display_text_color,
+                    skin.cursors.clone(),
                     state,
                     WinampDragTarget::Inline(windows.playlist),
                     WinampWindowSize::Fixed(Size::new(PLAYLIST_WIDTH, PLAYLIST_HEIGHT)),
@@ -1967,6 +1973,7 @@ fn WinampStackedStage(
                         skin.pledit.clone(),
                         skin.palette,
                         skin.display_text_color,
+                        skin.cursors.clone(),
                         state,
                         playlist_drag_target,
                         WinampWindowSize::Fixed(Size::new(
@@ -2209,11 +2216,13 @@ fn WinampNativeWindows(
                     let pledit = skin.pledit.clone();
                     let palette = skin.palette;
                     let display_text_color = skin.display_text_color;
+                    let cursors = skin.cursors.clone();
                     move || {
                         PlaylistWindow(
                             pledit.clone(),
                             palette,
                             display_text_color,
+                            cursors.clone(),
                             state,
                             WinampDragTarget::NativeGroup,
                             WinampWindowSize::State(peer_windows.playlist),
@@ -2325,11 +2334,13 @@ pub fn WinampStandaloneApp() {
                     let pledit = skin.pledit.clone();
                     let palette = skin.palette;
                     let display_text_color = skin.display_text_color;
+                    let cursors = skin.cursors.clone();
                     move || {
                         PlaylistWindow(
                             pledit.clone(),
                             palette,
                             display_text_color,
+                            cursors.clone(),
                             state,
                             WinampDragTarget::NativeGroup,
                             WinampWindowSize::State(peer_windows.playlist),
@@ -2387,6 +2398,11 @@ fn MainWindow(
                 MAIN_TITLE_BAR_SELECTED,
                 0.0,
                 0.0,
+                scale,
+            );
+            CursorRegions(
+                skin.cursors.clone(),
+                main_window_cursor_areas().to_vec(),
                 scale,
             );
             WindowDragHandle(drag_target, MAIN_TITLE_DRAG_HIT_AREA, scale);
@@ -2894,6 +2910,7 @@ fn EqualizerWindow(
             if snapshot.eq_enabled {
                 EqCurve(snapshot.eq_values, skin.display_text_color, scale);
             }
+            CursorRegions(skin.cursors.clone(), equalizer_cursor_areas(), scale);
             WindowDragHandle(drag_target, EQ_TITLE_DRAG_HIT_AREA, scale);
             {
                 let state_click = state;
@@ -3758,6 +3775,7 @@ fn PlaylistWindow(
     pledit: ImageBitmap,
     palette: SkinPalette,
     display_text_color: [u8; 4],
+    cursors: cursors::SkinCursors,
     state: MutableState<WinampState>,
     drag_target: WinampDragTarget,
     window_size: WinampWindowSize,
@@ -3872,6 +3890,17 @@ fn PlaylistWindow(
                 bottom_y,
                 scale,
             );
+            CursorRegions(
+                cursors.clone(),
+                playlist_cursor_areas(PlaylistCursorLayout {
+                    width,
+                    height,
+                    list_height,
+                    scroll_track_x,
+                })
+                .to_vec(),
+                scale,
+            );
             PlaylistScrollbar(
                 pledit.clone(),
                 scroll_track_x,
@@ -3940,10 +3969,10 @@ fn PlaylistWindow(
             WindowResizeHandle(
                 drag_target,
                 WindowResizeDirection::SouthEast,
-                width - 16.0,
-                height - 16.0,
-                16.0,
-                16.0,
+                width - PLAYLIST_RESIZE_HANDLE,
+                height - PLAYLIST_RESIZE_HANDLE,
+                PLAYLIST_RESIZE_HANDLE,
+                PLAYLIST_RESIZE_HANDLE,
                 scale,
             );
         },
@@ -5562,6 +5591,176 @@ fn VerticalDragSlider(
             .reverse_direction(invert),
         |_| {},
     );
+}
+/// The main window's cursor regions, listed from the window itself down to
+/// the controls that override it.
+///
+/// Order matters: a region that contains another is listed first, because the
+/// framework hands the cursor to the topmost hit region and later siblings sit
+/// on top. `main_window_cursor_areas_run_general_to_specific` is the guard.
+fn main_window_cursor_areas() -> [(SkinCursor, SpriteRect); 10] {
+    [
+        (SkinCursor::MainWindow, MAIN_WINDOW),
+        (SkinCursor::MainTitleBar, TITLE_DRAG_AREA),
+        (
+            SkinCursor::MainMenu,
+            button_area(POS_OPTIONS_BUTTON, MAIN_OPTIONS_BUTTON),
+        ),
+        (
+            SkinCursor::MainMinimize,
+            button_area(POS_MINIMIZE_BUTTON, MAIN_MINIMIZE_BUTTON),
+        ),
+        (
+            SkinCursor::MainWindowshade,
+            button_area(POS_SHADE_BUTTON, MAIN_SHADE_BUTTON),
+        ),
+        (
+            SkinCursor::MainClose,
+            button_area(POS_CLOSE_BUTTON, MAIN_CLOSE_BUTTON),
+        ),
+        (
+            SkinCursor::SongName,
+            (
+                POS_MAIN_TRACK_TEXT.0,
+                POS_MAIN_TRACK_TEXT.1,
+                MAIN_TRACK_TEXT_WIDTH,
+                WINAMP_SYSTEM_LINE_HEIGHT,
+            ),
+        ),
+        (
+            SkinCursor::PositionBar,
+            (POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3),
+        ),
+        (
+            SkinCursor::VolumeBar,
+            (
+                POS_VOLUME.0,
+                POS_VOLUME.1,
+                VOLUME_BG_WIDTH,
+                VOLUME_BG_HEIGHT,
+            ),
+        ),
+        (
+            SkinCursor::BalanceBar,
+            (
+                POS_BALANCE.0,
+                POS_BALANCE.1,
+                BALANCE_BG_WIDTH,
+                BALANCE_BG_HEIGHT,
+            ),
+        ),
+    ]
+}
+
+/// The equalizer's cursor regions: the window, its title bar, its close button
+/// and every band slider, in that order.
+fn equalizer_cursor_areas() -> Vec<(SkinCursor, SpriteRect)> {
+    let mut areas = vec![
+        (SkinCursor::EqualizerWindow, EQ_WINDOW),
+        (SkinCursor::EqualizerTitleBar, EQ_DRAG_AREA),
+        (
+            SkinCursor::EqualizerClose,
+            button_area(POS_EQ_CLOSE_BUTTON, EQ_CLOSE_BUTTON),
+        ),
+    ];
+    areas.extend(EQ_SLIDER_XS.map(|slider_x| {
+        (
+            SkinCursor::EqualizerSlider,
+            (
+                slider_x,
+                EQ_SLIDER_BG_Y,
+                EQ_SLIDER_BG.2,
+                EQ_SLIDER_TRACK_HEIGHT,
+            ),
+        )
+    }));
+    areas
+}
+
+/// The playlist's cursor regions. Its window grows with the handle at its
+/// corner, so every rectangle is measured against the current size rather than
+/// the classic one.
+fn playlist_cursor_areas(layout: PlaylistCursorLayout) -> [(SkinCursor, SpriteRect); 4] {
+    [
+        (
+            SkinCursor::PlaylistWindow,
+            (0.0, 0.0, layout.width, layout.height),
+        ),
+        (
+            SkinCursor::PlaylistTitleBar,
+            (0.0, 0.0, layout.width, PLAYLIST_DRAG_AREA.3),
+        ),
+        (
+            SkinCursor::PlaylistScrollBar,
+            (
+                layout.scroll_track_x - PLAYLIST_SCROLL_HIT_PAD_X,
+                PLAYLIST_LIST_BG.1,
+                PLAYLIST_SCROLL_TRACK.2 + PLAYLIST_SCROLL_HIT_PAD_X * 2.0,
+                layout.list_height,
+            ),
+        ),
+        (
+            SkinCursor::PlaylistResize,
+            (
+                layout.width - PLAYLIST_RESIZE_HANDLE,
+                layout.height - PLAYLIST_RESIZE_HANDLE,
+                PLAYLIST_RESIZE_HANDLE,
+                PLAYLIST_RESIZE_HANDLE,
+            ),
+        ),
+    ]
+}
+
+/// The playlist measurements its cursor regions are cut from.
+#[derive(Clone, Copy, PartialEq)]
+struct PlaylistCursorLayout {
+    width: f32,
+    height: f32,
+    list_height: f32,
+    scroll_track_x: f32,
+}
+
+/// Emits one cursor region per entry the skin has a cursor for.
+#[composable]
+fn CursorRegions(cursors: cursors::SkinCursors, areas: Vec<(SkinCursor, SpriteRect)>, scale: f32) {
+    if cursors.is_empty() {
+        return;
+    }
+    for (region, area) in areas {
+        CursorRegion(cursors.get(region), area, scale);
+    }
+}
+
+/// The rectangle a title-bar button occupies: where it is drawn, at the size
+/// of its sprite.
+fn button_area(position: (f32, f32), sprite: SpriteRect) -> SpriteRect {
+    (position.0, position.1, sprite.2, sprite.3)
+}
+
+/// Declares the pointer's appearance over one rectangle of a skin window.
+///
+/// The region draws nothing; it exists so the framework has somewhere to hang
+/// a cursor. Regions are emitted from the general to the specific — the whole
+/// window first, then the title bar, then the buttons on it — because the
+/// topmost hit region under the pointer is the one that decides, and later
+/// siblings sit on top. The controls themselves name no cursor, so they let
+/// the region beneath them answer.
+///
+/// A skin that names no cursor for this region emits nothing at all, which is
+/// what leaves the Catamp skins on the platform's own arrow.
+#[composable]
+fn CursorRegion(cursor: Option<PointerIcon>, area: SpriteRect, scale: f32) {
+    if let Some(cursor) = cursor {
+        let bounds = pixel_grid::rect(area.0, area.1, area.2, area.3, scale);
+        Box(
+            Modifier::empty()
+                .size_points(bounds.width, bounds.height)
+                .absolute_offset(bounds.x, bounds.y)
+                .pointer_icon(cursor),
+            BoxSpec::default(),
+            || {},
+        );
+    }
 }
 #[composable]
 fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32) {
@@ -8155,6 +8354,126 @@ mod tests {
     fn test_playlist(tracks: Vec<Track>) -> Rc<Vec<Track>> {
         Rc::new(tracks)
     }
+    /// Whether `outer` covers every point of `inner`.
+    fn contains(outer: SpriteRect, inner: SpriteRect) -> bool {
+        inner.0 >= outer.0
+            && inner.1 >= outer.1
+            && inner.0 + inner.2 <= outer.0 + outer.2
+            && inner.1 + inner.3 <= outer.1 + outer.3
+    }
+
+    /// The cursor of the topmost region wins, and a later sibling is drawn on
+    /// top: a region that swallows another must therefore be listed before it,
+    /// or the window's own cursor would sit over every control on it.
+    fn assert_general_to_specific(areas: &[(SkinCursor, SpriteRect)]) {
+        for (index, (region, area)) in areas.iter().enumerate() {
+            for (earlier_region, earlier) in &areas[..index] {
+                assert!(
+                    !(contains(*area, *earlier) && *area != *earlier),
+                    "{region:?} {area:?} swallows {earlier_region:?} {earlier:?} \
+                     but is listed after it"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn main_window_cursor_areas_run_general_to_specific() {
+        assert_general_to_specific(&main_window_cursor_areas());
+    }
+
+    #[test]
+    fn equalizer_cursor_areas_run_general_to_specific() {
+        assert_general_to_specific(&equalizer_cursor_areas());
+    }
+
+    #[test]
+    fn playlist_cursor_areas_run_general_to_specific() {
+        let layout = PlaylistCursorLayout {
+            width: PLAYLIST_WIDTH,
+            height: PLAYLIST_HEIGHT,
+            list_height: PLAYLIST_LIST_BG.3,
+            scroll_track_x: PLAYLIST_WIDTH - 15.0,
+        };
+        assert_general_to_specific(&playlist_cursor_areas(layout));
+    }
+
+    #[test]
+    fn every_main_window_cursor_region_lands_on_the_window() {
+        for (region, area) in main_window_cursor_areas() {
+            assert!(
+                contains(MAIN_WINDOW, area),
+                "{region:?} at {area:?} falls outside the main window"
+            );
+        }
+    }
+
+    #[test]
+    fn the_title_bar_buttons_carry_their_own_cursor_over_the_title_bar() {
+        let buttons = [
+            SkinCursor::MainMenu,
+            SkinCursor::MainMinimize,
+            SkinCursor::MainWindowshade,
+            SkinCursor::MainClose,
+        ];
+        for (region, area) in main_window_cursor_areas() {
+            if buttons.contains(&region) {
+                assert!(
+                    contains(TITLE_DRAG_AREA, area),
+                    "{region:?} at {area:?} is not on the title bar"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_playlist_resize_cursor_covers_the_handle_that_resizes_it() {
+        let layout = PlaylistCursorLayout {
+            width: 400.0,
+            height: 300.0,
+            list_height: 200.0,
+            scroll_track_x: 385.0,
+        };
+        let resize = playlist_cursor_areas(layout)
+            .into_iter()
+            .find_map(|(region, area)| (region == SkinCursor::PlaylistResize).then_some(area))
+            .expect("the playlist names a resize region");
+
+        assert_eq!(
+            resize,
+            (
+                layout.width - PLAYLIST_RESIZE_HANDLE,
+                layout.height - PLAYLIST_RESIZE_HANDLE,
+                PLAYLIST_RESIZE_HANDLE,
+                PLAYLIST_RESIZE_HANDLE,
+            ),
+            "the cursor region must track the handle WindowResizeHandle places"
+        );
+    }
+
+    #[test]
+    fn every_region_the_ui_draws_has_a_cursor_file_to_read() {
+        let mut drawn: Vec<SkinCursor> = main_window_cursor_areas()
+            .into_iter()
+            .chain(equalizer_cursor_areas())
+            .chain(playlist_cursor_areas(PlaylistCursorLayout {
+                width: PLAYLIST_WIDTH,
+                height: PLAYLIST_HEIGHT,
+                list_height: PLAYLIST_LIST_BG.3,
+                scroll_track_x: PLAYLIST_WIDTH - 15.0,
+            }))
+            .map(|(region, _)| region)
+            .collect();
+        drawn.sort_by_key(|region| region.file_name());
+        drawn.dedup();
+
+        assert_eq!(
+            drawn.len(),
+            cursors::SkinCursor::COUNT,
+            "a cursor the loader reads has no region on screen, or the other way round"
+        );
+    }
+
     #[test]
     fn time_digits_are_mapped_correctly() {
         assert_eq!(time_digits(0.0), [0, 0, 0, 0]);

@@ -104,6 +104,14 @@ Plus `pledit.txt` and `viscolor.txt`. That is the whole skin. Cranamp reads no
 sheet the classic format does not define, so a skin drawn here looks the same in
 any player that reads `.wsz`. `studio_validate` is what keeps it that way.
 
+A skin may also carry Windows `.cur` cursor files — `NORMAL.CUR`,
+`TITLEBAR.CUR`, `VOLBAR.CUR` and the rest of the classic set. The Studio draws
+bitmaps and never touches them; it carries them through the export and the live
+preview untouched, and `studio_validate` counts them as entries a player reads
+rather than offering to drop them. Cranamp swaps the pointer over the matching
+region, so a cursor you add by hand shows up in the preview as it will in the
+player.
+
 Sheets with something non-obvious about them carry a note, shown in the status
 line the moment the sheet is opened and repeated in draw results:
 

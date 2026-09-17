@@ -9,6 +9,7 @@ A Winamp-style music player in Rust, powered by [Cranpose](https://github.com/sa
 - **Platforms** — Windows, macOS, Linux, Android, iOS and web.
 - **Catamp** — Six pixel-cat skins bundled by default: Silverplay, Feral Night, Cat Scan, Seance, Salvage and Freefall.
 - **Classic skins** — Import and switch Winamp `.wsz` and `.zip` skins.
+- **Skin cursors** — Classic `.cur` pointers per region, wherever the platform has a cursor.
 - **Web skin library** — Keep skins and your selection across browser reloads.
 - **Local music** — Open audio files and folders through platform file pickers.
 - **Streaming** — Play audio URLs and listen to Cranamp FM.
