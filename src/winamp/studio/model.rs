@@ -653,7 +653,7 @@ impl Document {
             }
             if !self.unmapped_pixels.is_empty() {
                 self.message = format!(
-                    "{} pixels have no bitmap source; the classic playlist fill is a palette colour, not artwork — turn on “List canvas” to paint there",
+                    "{} pixels have no bitmap source; the classic playlist fill is one flat PLEDIT.TXT colour, not artwork — turn on “Playlist has its own background” in Skin options to paint there",
                     self.unmapped_pixels.len()
                 );
                 self.revision += 1;
@@ -2652,7 +2652,7 @@ impl Document {
         );
         if !self.unmapped_pixels.is_empty() {
             self.message.push_str(&format!(
-                "; {} pixels have no bitmap source (classic playlist fill)",
+                "; {} pixels have no bitmap source — the classic playlist fill is one flat PLEDIT.TXT colour, not artwork. Turn on “Playlist has its own background” in Skin options to paint there",
                 self.unmapped_pixels.len()
             ));
             if before_revision == self.revision {
@@ -3198,8 +3198,13 @@ impl Document {
                     } else {
                         261
                     };
+                    let gutter = if self.images.contains_key("plselection.bmp") {
+                        8
+                    } else {
+                        0
+                    };
                     vec![
-                        ("TRACK ROWS", [12, 20, 243, h - 58]),
+                        ("TRACK ROWS", [16 + gutter, 20, 227 - gutter, h - 58]),
                         ("TIME / TOTAL", [132, h - 28, 72, 8]),
                         ("ELAPSED", [192, h - 14, 30, 8]),
                     ]
@@ -5844,5 +5849,27 @@ mod tests {
             ]}))
             .unwrap();
         assert!(report["covered_pixels"].is_null(), "not news: {report}");
+    }
+
+    #[test]
+    fn the_track_row_rectangle_follows_the_selection_marker_gutter() {
+        let mut d = Document::blank();
+        d.open_on_whole_skin();
+        let rows = |d: &mut Document| {
+            d.guides()
+                .into_iter()
+                .find(|g| g.id == "runtime.playlist.TRACK ROWS")
+                .expect("a track rows rectangle")
+                .rect
+        };
+        assert!(!d.images.contains_key("plselection.bmp"));
+        assert_eq!(rows(&mut d)[0], 16, "list at 12, text inset 4");
+        d.set_playlist_selection(true, "test");
+        assert!(d.images.contains_key("plselection.bmp"));
+        let with = rows(&mut d);
+        assert_eq!(with[0], 24, "the marker gutter moves every row eight right");
+        assert_eq!(with[2], 219, "and takes eight from the width");
+        d.set_playlist_selection(false, "test");
+        assert_eq!(rows(&mut d)[0], 16, "and gives them back");
     }
 }

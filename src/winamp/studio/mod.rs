@@ -3158,7 +3158,7 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                             if playlist_background {
                                 "Playlist has its own background"
                             } else {
-                                "Playlist reuses the main background"
+                                "Playlist is one flat PLEDIT.TXT colour"
                             }
                             .into(),
                             12.,

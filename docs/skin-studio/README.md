@@ -431,7 +431,7 @@ Everything about the skin that is not painted into a sheet.
 | `eq_travel` | 1..52 | equalizer slider travel; default 52 |
 | `visualizer_glass` | bool | off, the player fills the spectrum's whole rectangle with VISCOLOR slot 0 — an opaque box no sheet contains and no canvas render shows |
 | `playlist_background` | bool | adds `plbg.bmp` 243×203 and an editable `list.background` |
-| `playlist_selection` | bool | adds `plselection.bmp` 243×11; the runtime reserves an eight-pixel marker gutter |
+| `playlist_selection` | bool | adds `plselection.bmp` 243×11. The player then insets every track row by eight pixels to leave room for the marker, so this option moves the text of every row. `runtime.playlist.TRACK ROWS` follows it |
 | `eq_handles` | bool | adds `eqhandles.bmp` 154×50, eleven columns, normal above pressed |
 | `playlist_colors` | six keys | `PLEDIT.TXT` |
 | `visualizer_colors` | 24 colours | `VISCOLOR.TXT` |
@@ -640,7 +640,7 @@ All describe the transaction in hand.
 | `pixels_written`, `bounds` | how much ink, and the rectangle it landed in |
 | `ms` | how long the transaction took |
 | `clipped_pixels` | fell outside the chosen sprites |
-| `unmapped_pixels` | no bitmap source at all — the classic playlist fill. Turn on **List canvas** to paint there |
+| `unmapped_pixels` | no bitmap source at all — the classic playlist fill, which is one flat PLEDIT.TXT colour. Turn on **Playlist has its own background** in Skin options to paint there |
 | `unsampled_pixels` | landed in a gap between a sheet's cells, where nothing will ever show it |
 | `overwrites` | two *different* canvas pixels wrote one shared source cell; `overwrite_sample` says which |
 | `keyed_blends` | an `opacity`, an image's alpha or glass read `#ff00ff` as a colour, turning a glow to mud and glass to magenta and taking the cell's transparency with it |
