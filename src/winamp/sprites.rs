@@ -152,6 +152,11 @@ pub const EQ_THUMB_XS: [f32; 11] = [
 pub const PLAYLIST_WIDTH: f32 = 275.0;
 pub const PLAYLIST_HEIGHT: f32 = 261.0;
 pub const PLAYLIST_DRAG_AREA: SpriteRect = (0.0, 0.0, PLAYLIST_WIDTH, 20.0);
+/// The playlist's close button, measured from the window's right edge the way
+/// Winamp measures it: `{-(275-264), 3, -(275-272), 12}`.
+pub const PLAYLIST_CLOSE_BUTTON_INSET: f32 = 11.0;
+/// The close button's size, from the same rectangle.
+pub const PLAYLIST_CLOSE_BUTTON: SpriteRect = (0.0, 3.0, 9.0, 9.0);
 pub const PLAYLIST_TOP_LEFT_CORNER: SpriteRect = (0.0, 21.0, 25.0, 20.0);
 pub const PLAYLIST_TOP_TILE: SpriteRect = (127.0, 21.0, 25.0, 20.0);
 pub const PLAYLIST_TITLE_BAR: SpriteRect = (26.0, 21.0, 100.0, 20.0);

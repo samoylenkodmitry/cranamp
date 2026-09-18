@@ -2501,22 +2501,18 @@ fn MainWindow(
             }
             let title = main_display_title(&snapshot);
             let title_description = title.clone();
-            let title = if snapshot.playback == PlaybackState::Playing {
-                marquee_system_text(title, MAIN_TRACK_TEXT_WIDTH, snapshot.title_marquee_phase)
-            } else {
-                let capacity = (MAIN_TRACK_TEXT_WIDTH / 6.0).floor() as usize;
-                if title.chars().count() > capacity {
-                    format!(
-                        "{}...",
-                        title
-                            .chars()
-                            .take(capacity.saturating_sub(3))
-                            .collect::<String>()
-                    )
-                } else {
-                    title
-                }
-            };
+            let title_scroll = cranpose_core::rememberMutableStateOf(|| 0.0f32);
+            let scrolled_title = cranpose_core::rememberMutableStateOf(String::new);
+            if scrolled_title.get_non_reactive() != title_description {
+                scrolled_title.set(title_description.clone());
+                title_scroll.set(0.0);
+            }
+            let title_phase = snapshot.title_marquee_phase + title_scroll.get();
+            let title = track_text_window(
+                title,
+                snapshot.playback == PlaybackState::Playing,
+                title_phase,
+            );
             StyledSystemWinampText(
                 title,
                 title_description,
@@ -2529,6 +2525,17 @@ fn MainWindow(
                 },
                 skin.display_text_color,
                 WINAMP_SYSTEM_TEXT_METRICS,
+            );
+            SongTitleScroll(
+                ControlRect::new(
+                    POS_MAIN_TRACK_TEXT.0,
+                    POS_MAIN_TRACK_TEXT.1,
+                    MAIN_TRACK_TEXT_WIDTH,
+                    WINAMP_SYSTEM_LINE_HEIGHT,
+                    scale,
+                ),
+                title_scroll,
+                state,
             );
             MainMetaReadouts(snapshot.clone(), scale, skin.display_text_color);
             Sprite(
@@ -3849,13 +3856,23 @@ fn PlaylistWindow(
                 scale,
             );
             Sprite(pledit.clone(), PLAYLIST_TITLE_BAR, title_x, 0.0, scale);
-            Sprite(
-                pledit.clone(),
-                PLAYLIST_TOP_RIGHT_CORNER,
-                width - PLAYLIST_TOP_RIGHT_CORNER.2,
-                0.0,
-                scale,
-            );
+            {
+                let state_click = state;
+                PressableSpriteHitArea(
+                    pledit.clone(),
+                    PLAYLIST_TOP_RIGHT_CORNER,
+                    PLAYLIST_TOP_RIGHT_CORNER,
+                    PressableSpriteLayout {
+                        sprite_x: width - PLAYLIST_TOP_RIGHT_CORNER.2,
+                        sprite_y: 0.0,
+                        hit_area: playlist_close_button_area(width),
+                    },
+                    scale,
+                    move || {
+                        state_click.update(|s| s.playlist_visible = false);
+                    },
+                );
+            }
             TiledSprite(
                 pledit.clone(),
                 PLAYLIST_LEFT_TILE,
@@ -5009,6 +5026,77 @@ struct SystemTextBox {
     height: f32,
     scale: f32,
 }
+/// The stretch of the track title the display shows: the marquee window while a
+/// track plays or the pointer has scrolled it, and the ellipsis otherwise.
+fn track_text_window(title: String, playing: bool, phase: f32) -> String {
+    if playing || phase > 0.0 {
+        return marquee_system_text(title, MAIN_TRACK_TEXT_WIDTH, phase);
+    }
+    let capacity = (MAIN_TRACK_TEXT_WIDTH / WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH).floor() as usize;
+    if title.chars().count() <= capacity {
+        return title;
+    }
+    format!(
+        "{}...",
+        title
+            .chars()
+            .take(capacity.saturating_sub(3))
+            .collect::<String>()
+    )
+}
+/// Winamp lets the pointer drag the track title sideways to read past the end
+/// of the display, which is why a classic skin names a left-right cursor for
+/// it. Dragging holds the marquee still so the text follows the pointer rather
+/// than fighting it, and where it is left is where it resumes from.
+#[composable]
+fn SongTitleScroll(area: ControlRect, scroll: MutableState<f32>, state: MutableState<WinampState>) {
+    let anchor = cranpose_core::rememberMutableStateOf(|| None::<(f32, f32, f32)>);
+    let step = scaled(WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH, area.scale).max(1.0);
+    Box(
+        Modifier::empty()
+            .size_points(area.scaled_width(), area.scaled_height())
+            .absolute_offset(area.scaled_x(), area.scaled_y())
+            .pointer_input((), move |scope: PointerInputScope| async move {
+                scope
+                    .await_pointer_event_scope(|await_scope| async move {
+                        loop {
+                            let event = await_scope.await_pointer_event().await;
+                            let phase = state.get_non_reactive().title_marquee_phase;
+                            match event.kind {
+                                PointerEventKind::Down => {
+                                    anchor.set(Some((
+                                        event.position.x,
+                                        phase,
+                                        scroll.get_non_reactive(),
+                                    )));
+                                    event.consume();
+                                }
+                                PointerEventKind::Move => {
+                                    let Some((from_x, from_phase, from_scroll)) = anchor.get()
+                                    else {
+                                        continue;
+                                    };
+                                    if !event.buttons.contains(PointerButton::Primary) {
+                                        anchor.set(None);
+                                        continue;
+                                    }
+                                    let travelled = (event.position.x - from_x) / step;
+                                    scroll.set(from_scroll + (from_phase - phase) - travelled);
+                                    event.consume();
+                                }
+                                PointerEventKind::Up | PointerEventKind::Cancel => {
+                                    anchor.set(None);
+                                }
+                                _ => {}
+                            }
+                        }
+                    })
+                    .await;
+            }),
+        BoxSpec::default(),
+        || {},
+    );
+}
 fn marquee_system_text(text: String, width: f32, phase: f32) -> String {
     let max_chars = (width / WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH).ceil().max(1.0) as usize;
     let char_count = text.chars().count();
@@ -5632,7 +5720,7 @@ fn main_window_cursor_areas() -> [(SkinCursor, SpriteRect); 10] {
             (POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3),
         ),
         (
-            SkinCursor::VolumeBar,
+            SkinCursor::VolumeBalance,
             (
                 POS_VOLUME.0,
                 POS_VOLUME.1,
@@ -5641,7 +5729,7 @@ fn main_window_cursor_areas() -> [(SkinCursor, SpriteRect); 10] {
             ),
         ),
         (
-            SkinCursor::BalanceBar,
+            SkinCursor::VolumeBalance,
             (
                 POS_BALANCE.0,
                 POS_BALANCE.1,
@@ -5680,7 +5768,16 @@ fn equalizer_cursor_areas() -> Vec<(SkinCursor, SpriteRect)> {
 /// The playlist's cursor regions. Its window grows with the handle at its
 /// corner, so every rectangle is measured against the current size rather than
 /// the classic one.
-fn playlist_cursor_areas(layout: PlaylistCursorLayout) -> [(SkinCursor, SpriteRect); 4] {
+/// Where the playlist's close button sits for a window of `width`.
+fn playlist_close_button_area(width: f32) -> SpriteRect {
+    (
+        width - PLAYLIST_CLOSE_BUTTON_INSET,
+        PLAYLIST_CLOSE_BUTTON.1,
+        PLAYLIST_CLOSE_BUTTON.2,
+        PLAYLIST_CLOSE_BUTTON.3,
+    )
+}
+fn playlist_cursor_areas(layout: PlaylistCursorLayout) -> [(SkinCursor, SpriteRect); 5] {
     [
         (
             SkinCursor::PlaylistWindow,
@@ -5689,6 +5786,10 @@ fn playlist_cursor_areas(layout: PlaylistCursorLayout) -> [(SkinCursor, SpriteRe
         (
             SkinCursor::PlaylistTitleBar,
             (0.0, 0.0, layout.width, PLAYLIST_DRAG_AREA.3),
+        ),
+        (
+            SkinCursor::PlaylistClose,
+            playlist_close_button_area(layout.width),
         ),
         (
             SkinCursor::PlaylistScrollBar,
@@ -8472,6 +8573,64 @@ mod tests {
     #[test]
     fn equalizer_cursor_areas_run_general_to_specific() {
         assert_general_to_specific(&equalizer_cursor_areas());
+    }
+
+    #[test]
+    fn dragging_the_track_title_shows_a_later_part_of_it() {
+        let title =
+            "A Very Long Track Name That Cannot Possibly Fit In The Display At Once".to_string();
+
+        let resting = track_text_window(title.clone(), true, 0.0);
+        let scrolled = track_text_window(title.clone(), true, 6.0);
+
+        assert_ne!(
+            resting, scrolled,
+            "the marquee phase picks which stretch of the title is on screen"
+        );
+        assert!(
+            title.contains(scrolled.trim_end_matches("...")),
+            "the scrolled window is a stretch of the real title"
+        );
+    }
+
+    #[test]
+    fn a_title_nobody_has_scrolled_is_cut_with_an_ellipsis_while_stopped() {
+        let title =
+            "A Very Long Track Name That Cannot Possibly Fit In The Display At Once".to_string();
+
+        let stopped = track_text_window(title.clone(), false, 0.0);
+        let dragged = track_text_window(title, false, 6.0);
+
+        assert!(
+            stopped.ends_with("..."),
+            "a stopped player cuts the title rather than scrolling it: {stopped}"
+        );
+        assert!(
+            !dragged.ends_with("...") || dragged != stopped,
+            "once the pointer has dragged it, the title scrolls even while stopped"
+        );
+    }
+
+    #[test]
+    fn the_playlist_close_button_sits_inside_its_title_bar() {
+        let layout = PlaylistCursorLayout {
+            width: PLAYLIST_WIDTH,
+            height: PLAYLIST_HEIGHT,
+            list_height: PLAYLIST_LIST_BG.3,
+            scroll_track_x: PLAYLIST_WIDTH - 15.0,
+        };
+        let close = playlist_close_button_area(layout.width);
+
+        assert!(
+            contains((0.0, 0.0, layout.width, PLAYLIST_DRAG_AREA.3), close),
+            "the close button {close:?} must sit on the playlist's title bar"
+        );
+        assert!(
+            playlist_cursor_areas(layout)
+                .iter()
+                .any(|(region, _)| *region == SkinCursor::PlaylistClose),
+            "the playlist names a cursor for its close button, as PCLOSE.CUR expects"
+        );
     }
 
     #[test]

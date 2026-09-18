@@ -417,6 +417,28 @@ fn cursor_roles(
     roles.iter().map(|role| cursor_role(role)).collect()
 }
 
+/// The archive entry a removal names. Wider than [`cursor_role`]: any file in
+/// the classic vocabulary can be dropped, including the vestigial ones like
+/// `volbar.cur` that skins carry but no player reads.
+fn cursor_file(role: &str) -> Result<&'static str> {
+    let lower = role.to_ascii_lowercase();
+    let stem = lower.strip_suffix(".cur").unwrap_or(lower.as_str());
+    crate::winamp::cursors::CLASSIC_CURSORS
+        .into_iter()
+        .find(|name| name.trim_end_matches(".cur") == stem)
+        .with_context(|| format!("Unknown cursor {role}"))
+}
+
+fn cursor_files_to_remove(roles: &[String]) -> Result<Vec<&'static str>> {
+    if roles.is_empty() {
+        return Ok(crate::winamp::cursors::SkinCursor::files()
+            .iter()
+            .map(|(_, name)| *name)
+            .collect());
+    }
+    roles.iter().map(|role| cursor_file(role)).collect()
+}
+
 fn cursor_image(name: &str, data: &[u8]) -> Option<RgbaImage> {
     if !name.ends_with(".cur") {
         return None;
@@ -3073,11 +3095,9 @@ impl Document {
     }
     pub fn remove_cursors(&mut self, roles: &[String], source: &str) -> Result<Value> {
         self.finish_stroke();
-        let wanted = cursor_roles(roles)?;
-        let todo: Vec<&'static str> = wanted
+        let todo: Vec<&'static str> = cursor_files_to_remove(roles)?
             .into_iter()
-            .filter(|(_, name)| self.images.contains_key(*name))
-            .map(|(_, name)| name)
+            .filter(|name| self.images.contains_key(*name) || self.files.contains_key(*name))
             .collect();
         if todo.is_empty() {
             return Ok(json!({"removed": []}));

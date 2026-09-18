@@ -143,14 +143,21 @@ The drawer's four **Aim** buttons move it a pixel at a time.
 | `studio_cursors {action: "draw", regions: ["posbar"], overwrite: true}` | Redraws named regions over artwork already there. |
 | `studio_cursors {action: "draw", style: "needle-bold"}` | Cuts the set to a named silhouette instead of the one the colours pick. |
 | `studio_cursors {action: "hotspot", regions: ["normal"], hotspot: [0, 0]}` | Moves where a region's pointer points. |
-| `studio_cursors {action: "remove", regions: ["psize"]}` | Drops cursors from the skin. |
+| `studio_cursors {action: "remove", regions: ["psize"]}` | Drops cursors from the skin. Any name in the classic vocabulary works, including the vestigial `volbar`, so a skin can shed art no player reads. |
 
-The shape follows what the region does, not what it is called: a window and a
-button both take the plain pointer, because a button is clicked rather than
-dragged; a title bar takes the four-way arrow, because it moves its window in
-both directions; the seek bar, volume and balance take the sideways bar; the
-equalizer bands and the playlist scroll take the upright one; and only the
-playlist's corner takes the diagonal.
+The shape follows what the region does, and it follows Winamp. Winamp's own
+cursor table pairs every file with the stock Windows cursor it falls back to
+when a skin ships none, which states its intent outright: `IDC_MOVEMAIN` for the
+three title bars, `IDC_LRSCROLL` for the seek bar, the volume and balance
+sliders and the track title, `IDC_UDSCROLL` for the equalizer bands and the
+playlist scroll, `IDC_RESIZE` for the playlist's corner, and `IDC_DANGER` for
+the close buttons. The Studio draws the same set: a four-way arrow, a sideways
+bar, an upright bar, a diagonal, and a pointer marked with a cross.
+
+Two names in the classic vocabulary do not map the way their spelling suggests.
+Winamp reads `VOLBAL.CUR` for the volume slider *and* the balance slider — one
+region, not two — and never reads `VOLBAR.CUR` at all, though most skins carry
+one. A skin may keep it; nothing will show it.
 
 `draw` reads its colours off the sheets the player always shows: the darkest
 colour the skin uses often becomes the outline, the lightest the body of the

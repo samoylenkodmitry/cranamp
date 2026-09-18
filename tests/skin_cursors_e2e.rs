@@ -167,7 +167,7 @@ fn studio_presenting(path: &std::path::Path) -> AppShell<HitGraphRenderer> {
 fn a_skin_cursor_reaches_the_pointer_over_the_region_it_names() {
     let path = skin_with_cursors(
         "cranamp-cursor-test.wsz",
-        &[("NORMAL.CUR", false), ("VOLBAR.CUR", true)],
+        &[("NORMAL.CUR", false), ("VOLBAL.CUR", true)],
     );
     let mut shell = studio_presenting(&path);
     let [origin_x, origin_y, zoom] =
@@ -197,7 +197,7 @@ fn a_skin_cursor_reaches_the_pointer_over_the_region_it_names() {
         "the seek bar names no cursor of its own, so the window's answer stands"
     );
 
-    let volume = hover_at(130.0, 62.0).expect("the volume slider carries VOLBAR.CUR");
+    let volume = hover_at(130.0, 62.0).expect("the volume slider carries VOLBAL.CUR");
     assert_ne!(
         volume, body,
         "the slider's own cursor replaces the window's"
@@ -214,7 +214,7 @@ fn a_skin_cursor_reaches_the_pointer_over_the_region_it_names() {
 
 #[test]
 fn a_region_without_a_cursor_leaves_the_pointer_to_the_platform() {
-    let path = skin_with_cursors("cranamp-cursor-volume-only.wsz", &[("VOLBAR.CUR", true)]);
+    let path = skin_with_cursors("cranamp-cursor-volume-only.wsz", &[("VOLBAL.CUR", true)]);
     let mut shell = studio_presenting(&path);
     let [origin_x, origin_y, zoom] =
         cranamp::winamp::studio::player_scene().expect("the preview reports where it drew");
