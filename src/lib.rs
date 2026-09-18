@@ -5,10 +5,12 @@ mod fonts;
 mod sync;
 pub mod winamp;
 use cranpose::AppLauncher;
+cranpose::app_capabilities!();
 const TITLE: &str = "Cranamp";
 const APPLICATION_ID: &str = "com.cranamp.app";
 fn launcher() -> AppLauncher {
     AppLauncher::new()
+        .with_capabilities(&CAPABILITIES)
         .with_title(TITLE)
         .with_application_id(APPLICATION_ID)
         .with_fonts(fonts::APP_FONTS)
