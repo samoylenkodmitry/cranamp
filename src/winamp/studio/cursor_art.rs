@@ -191,6 +191,9 @@ pub enum Shape {
     SlideY,
     /// A corner-to-corner bar, for a corner that resizes.
     Resize,
+    /// A pointer marked with a cross, for a button that closes a window.
+    /// Winamp falls these back to `IDC_DANGER` rather than the plain arrow.
+    Danger,
 }
 
 impl Shape {
@@ -202,28 +205,56 @@ impl Shape {
             | SkinCursor::PlaylistWindow
             | SkinCursor::MainMenu
             | SkinCursor::MainMinimize
-            | SkinCursor::MainWindowshade
-            | SkinCursor::MainClose
-            | SkinCursor::EqualizerClose => Self::Arrow,
+            | SkinCursor::MainWindowshade => Self::Arrow,
+            SkinCursor::MainClose | SkinCursor::EqualizerClose | SkinCursor::PlaylistClose => {
+                Self::Danger
+            }
             SkinCursor::MainTitleBar
             | SkinCursor::EqualizerTitleBar
             | SkinCursor::PlaylistTitleBar => Self::Move,
-            SkinCursor::SongName
-            | SkinCursor::VolumeBar
-            | SkinCursor::BalanceBar
-            | SkinCursor::PositionBar => Self::SlideX,
+            SkinCursor::SongName | SkinCursor::VolumeBalance | SkinCursor::PositionBar => {
+                Self::SlideX
+            }
             SkinCursor::EqualizerSlider | SkinCursor::PlaylistScrollBar => Self::SlideY,
             SkinCursor::PlaylistResize => Self::Resize,
         }
     }
 
-    /// Where the pointer actually points.
+    /// Where the pointer actually points. The ones drawn as a pointer point
+    /// at their own tip; the bars point at their middle.
     pub fn hotspot(self) -> [u32; 2] {
         match self {
-            Self::Arrow => [0, 0],
+            Self::Arrow | Self::Danger => [0, 0],
             _ => [CURSOR_SIDE / 2, CURSOR_SIDE / 2],
         }
     }
+
+    /// The points this shape covers and the colour it is filled with.
+    fn stroke(self, palette: &Palette, style: Style) -> (Vec<(i32, i32)>, [u8; 4]) {
+        match self {
+            Self::Arrow => (arrow_points(style.silhouette), palette.body),
+            Self::SlideX => (slide_points(false, style.weight()), palette.accent),
+            Self::Move => (move_points(style.weight()), palette.accent),
+            Self::SlideY => (slide_points(true, style.weight()), palette.accent),
+            Self::Resize => (resize_points(style.weight()), palette.body),
+            Self::Danger => (
+                danger_points(style.silhouette, style.weight()),
+                palette.accent,
+            ),
+        }
+    }
+}
+
+/// A pointer with a cross beside it: the shape a close button takes.
+fn danger_points(silhouette: Silhouette, weight: i32) -> Vec<(i32, i32)> {
+    let mut points = arrow_points(silhouette);
+    for step in 0..9 {
+        for offset in -weight..=weight {
+            points.push((16 + step + offset, 16 + step));
+            points.push((24 - step + offset, 16 + step));
+        }
+    }
+    points
 }
 
 /// The silhouette a skin's pointers are cut to.
@@ -509,13 +540,7 @@ fn resize_points(weight: i32) -> Vec<(i32, i32)> {
 pub fn draw(role: SkinCursor, palette: &Palette, style: Style) -> (RgbaImage, [u32; 2]) {
     let shape = Shape::of(role);
     let mut canvas = Canvas::new();
-    let (points, colour) = match shape {
-        Shape::Arrow => (arrow_points(style.silhouette), palette.body),
-        Shape::SlideX => (slide_points(false, style.weight()), palette.accent),
-        Shape::Move => (move_points(style.weight()), palette.accent),
-        Shape::SlideY => (slide_points(true, style.weight()), palette.accent),
-        Shape::Resize => (resize_points(style.weight()), palette.body),
-    };
+    let (points, colour) = shape.stroke(palette, style);
     canvas.body(&points, colour, palette.ink, style.ring());
     (canvas.image, shape.hotspot())
 }
@@ -670,8 +695,7 @@ mod tests {
         ] {
             assert_eq!(Shape::of(title), Shape::Move, "{title:?}");
         }
-        assert_eq!(Shape::of(SkinCursor::VolumeBar), Shape::SlideX);
-        assert_eq!(Shape::of(SkinCursor::BalanceBar), Shape::SlideX);
+        assert_eq!(Shape::of(SkinCursor::VolumeBalance), Shape::SlideX);
     }
 
     #[test]
@@ -687,13 +711,24 @@ mod tests {
         );
         assert_ne!(
             Shape::of(SkinCursor::EqualizerSlider),
-            Shape::of(SkinCursor::VolumeBar)
+            Shape::of(SkinCursor::VolumeBalance)
         );
         assert_eq!(Shape::of(SkinCursor::PlaylistResize), Shape::Resize);
-        assert_eq!(
+        for close in [
+            SkinCursor::MainClose,
+            SkinCursor::EqualizerClose,
+            SkinCursor::PlaylistClose,
+        ] {
+            assert_eq!(
+                Shape::of(close),
+                Shape::Danger,
+                "Winamp falls a close button back to IDC_DANGER, not the plain arrow: {close:?}"
+            );
+        }
+        assert_ne!(
             Shape::of(SkinCursor::MainClose),
-            Shape::of(SkinCursor::MainWindow),
-            "a button is clicked, not dragged; classic skins leave it the plain pointer"
+            Shape::of(SkinCursor::MainMinimize),
+            "closing a window is not the same as minimising it"
         );
     }
 

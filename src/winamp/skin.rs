@@ -404,7 +404,7 @@ mod tests {
     fn a_skin_that_ships_cursors_hands_them_to_the_regions_that_read_them() {
         let wsz = bundled_skin_plus(&[
             ("NORMAL.CUR", sample_cursor()),
-            ("cursors/VOLBAR.CUR", sample_cursor()),
+            ("cursors/VOLBAL.CUR", sample_cursor()),
         ]);
 
         let skin = load_skin(&wsz).expect("skin with cursors should load");
@@ -412,8 +412,8 @@ mod tests {
         assert_eq!(skin.cursors.len(), 2);
         let volume = skin
             .cursors
-            .get(SkinCursor::VolumeBar)
-            .expect("VOLBAR.CUR reaches the volume slider");
+            .get(SkinCursor::VolumeBalance)
+            .expect("VOLBAL.CUR reaches the volume and balance sliders");
         let PointerIcon::Custom(volume) = volume else {
             panic!("a skin cursor is a custom pointer icon");
         };
@@ -421,6 +421,21 @@ mod tests {
         assert_eq!(volume.hotspot_x(), 1);
         assert!(skin.cursors.get(SkinCursor::MainWindow).is_some());
         assert!(skin.cursors.get(SkinCursor::PositionBar).is_none());
+    }
+
+    #[test]
+    fn volbar_is_carried_but_never_read() {
+        let wsz = bundled_skin_plus(&[("VOLBAR.CUR", sample_cursor())]);
+
+        let skin = load_skin(&wsz).expect("skin with cursors should load");
+
+        assert!(
+            skin.cursors.get(SkinCursor::VolumeBalance).is_none(),
+            "Winamp's cursor table names VolBal.cur for the volume and balance \
+             sliders and never loads VolBar.cur, so a skin shipping only \
+             VOLBAR.CUR leaves those sliders with the window's own pointer"
+        );
+        assert_eq!(skin.cursors.len(), 0);
     }
 
     /// The portability check reports entries no player reads, and the Studio's

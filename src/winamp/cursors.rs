@@ -37,10 +37,10 @@ pub enum SkinCursor {
     SongName,
     /// `POSBAR.CUR` — the seek bar.
     PositionBar,
-    /// `VOLBAR.CUR` — the volume slider.
-    VolumeBar,
-    /// `VOLBAL.CUR` — the balance slider.
-    BalanceBar,
+    /// `VOLBAL.CUR` — the volume and balance sliders, which Winamp treats as
+    /// one region rather than two. `VOLBAR.CUR` is carried in skins but no
+    /// player reads it.
+    VolumeBalance,
     /// `EQNORMAL.CUR` — anywhere on the equalizer with nothing more specific.
     EqualizerWindow,
     /// `EQTITLE.CUR` — the equalizer's title bar.
@@ -53,6 +53,8 @@ pub enum SkinCursor {
     PlaylistWindow,
     /// `PTBAR.CUR` — the playlist's title bar.
     PlaylistTitleBar,
+    /// `PCLOSE.CUR` — the playlist's close button.
+    PlaylistClose,
     /// `PVSCROLL.CUR` — the playlist's scroll bar.
     PlaylistScrollBar,
     /// `PSIZE.CUR` — the playlist's resize corner.
@@ -74,14 +76,14 @@ impl SkinCursor {
         (Self::MainClose, "close.cur"),
         (Self::SongName, "songname.cur"),
         (Self::PositionBar, "posbar.cur"),
-        (Self::VolumeBar, "volbar.cur"),
-        (Self::BalanceBar, "volbal.cur"),
+        (Self::VolumeBalance, "volbal.cur"),
         (Self::EqualizerWindow, "eqnormal.cur"),
         (Self::EqualizerTitleBar, "eqtitle.cur"),
         (Self::EqualizerClose, "eqclose.cur"),
         (Self::EqualizerSlider, "eqslid.cur"),
         (Self::PlaylistWindow, "pnormal.cur"),
         (Self::PlaylistTitleBar, "ptbar.cur"),
+        (Self::PlaylistClose, "pclose.cur"),
         (Self::PlaylistScrollBar, "pvscroll.cur"),
         (Self::PlaylistResize, "psize.cur"),
     ];
@@ -111,7 +113,7 @@ impl SkinCursor {
 /// windowshade mode and over the playlist's own title-bar buttons, which
 /// Cranamp does not draw. A skin carrying one of those files is still carrying
 /// something a player uses, so the portability check must not offer to drop it.
-pub const CLASSIC_CURSORS: [&str; 27] = [
+pub const CLASSIC_CURSORS: [&str; 28] = [
     "close.cur",
     "eqclose.cur",
     "eqnormal.cur",
@@ -119,6 +121,7 @@ pub const CLASSIC_CURSORS: [&str; 27] = [
     "eqtitle.cur",
     "mainmenu.cur",
     "min.cur",
+    "mmenu.cur",
     "normal.cur",
     "pclose.cur",
     "pnormal.cur",
@@ -812,7 +815,7 @@ pub(super) mod tests {
             cursor_file(&[monochrome_2x2()]),
         );
         files.insert(
-            SkinCursor::VolumeBar.file_name().to_string(),
+            SkinCursor::VolumeBalance.file_name().to_string(),
             cursor_file(&[monochrome_2x2()]),
         );
 
@@ -820,7 +823,7 @@ pub(super) mod tests {
 
         assert_eq!(cursors.len(), 2);
         assert!(cursors.get(SkinCursor::MainWindow).is_some());
-        assert!(cursors.get(SkinCursor::VolumeBar).is_some());
+        assert!(cursors.get(SkinCursor::VolumeBalance).is_some());
         assert!(cursors.get(SkinCursor::PlaylistResize).is_none());
     }
 
