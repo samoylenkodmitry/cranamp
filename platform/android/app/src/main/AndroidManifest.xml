@@ -2,17 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!--
-        Reading the user's own music. Everything the framework needs — the
-        network, the media-playback foreground service, the package installer —
-        is contributed by the Cranpose Gradle plugin (`dev.cranpose.android`)
-        and the `media` and `update` service modules the build asks for.
-    -->
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-
     <application
         android:allowBackup="true"
         android:label="Cranamp"

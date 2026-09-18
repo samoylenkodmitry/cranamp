@@ -26,6 +26,12 @@ rm -rf "$APP"
 mkdir -p "$APP"
 cp "$BIN" "$APP/$APP_NAME"
 cp "$SCRIPT_DIR/Info.plist" "$APP/Info.plist"
+USAGE="$ROOT/target/cranpose/cranamp-usage.plist"
+if [ ! -f "$USAGE" ]; then
+  echo "no usage declaration at $USAGE; the cranamp build script writes it" >&2
+  exit 1
+fi
+/usr/libexec/PlistBuddy -c "Merge $USAGE" "$APP/Info.plist" >/dev/null
 
 build_version="$(xcrun vtool -show-build-version "$APP/$APP_NAME" 2>/dev/null || true)"
 case "$build_version" in
