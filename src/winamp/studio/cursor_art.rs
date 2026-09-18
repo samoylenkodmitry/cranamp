@@ -177,19 +177,17 @@ pub fn palette(images: &BTreeMap<String, RgbaImage>) -> Palette {
 
 /// The shape a region's pointer takes.
 ///
-/// The shape says what the region does; two regions that behave differently
-/// never share one.
+/// Classic skins hand out the same pointer nearly everywhere: a title bar you
+/// drag, a slider you pull and a list you scroll all keep the plain arrow, in
+/// Winamp exactly as on the desktop around it. Directional arrows mean resize
+/// and nothing else, so only the corner that resizes gets one. A cursor that
+/// changes shape over a control is making a promise about what the control
+/// does, and a promise the region cannot keep is worse than no cursor at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
-    /// A plain pointer, for a window with nothing more specific under it.
+    /// The plain pointer, which is what almost every region gets.
     Arrow,
-    /// A left-right bar, for something dragged sideways.
-    SlideX,
-    /// A four-way arrow, for a bar that drags its whole window about.
-    Move,
-    /// An up-down bar, for something dragged up and down.
-    SlideY,
-    /// A corner-to-corner bar, for a corner that resizes.
+    /// A corner-to-corner bar, for the one corner that resizes.
     Resize,
 }
 
@@ -197,23 +195,8 @@ impl Shape {
     /// The shape that suits `role`.
     pub fn of(role: SkinCursor) -> Self {
         match role {
-            SkinCursor::MainWindow
-            | SkinCursor::EqualizerWindow
-            | SkinCursor::PlaylistWindow
-            | SkinCursor::MainMenu
-            | SkinCursor::MainMinimize
-            | SkinCursor::MainWindowshade
-            | SkinCursor::MainClose
-            | SkinCursor::EqualizerClose => Self::Arrow,
-            SkinCursor::MainTitleBar
-            | SkinCursor::EqualizerTitleBar
-            | SkinCursor::PlaylistTitleBar => Self::Move,
-            SkinCursor::SongName
-            | SkinCursor::VolumeBar
-            | SkinCursor::BalanceBar
-            | SkinCursor::PositionBar => Self::SlideX,
-            SkinCursor::EqualizerSlider | SkinCursor::PlaylistScrollBar => Self::SlideY,
             SkinCursor::PlaylistResize => Self::Resize,
+            _ => Self::Arrow,
         }
     }
 
@@ -221,7 +204,7 @@ impl Shape {
     pub fn hotspot(self) -> [u32; 2] {
         match self {
             Self::Arrow => [0, 0],
-            _ => [CURSOR_SIDE / 2, CURSOR_SIDE / 2],
+            Self::Resize => [CURSOR_SIDE / 2, CURSOR_SIDE / 2],
         }
     }
 }
@@ -451,39 +434,6 @@ fn arrow_points(silhouette: Silhouette) -> Vec<(i32, i32)> {
     points
 }
 
-fn slide_points(vertical: bool, weight: i32) -> Vec<(i32, i32)> {
-    let middle = (CURSOR_SIDE / 2) as i32;
-    let mut points = Vec::new();
-    for i in 6..=26 {
-        for offset in -weight..=weight {
-            points.push(if vertical {
-                (middle + offset, i)
-            } else {
-                (i, middle + offset)
-            });
-        }
-    }
-    for step in 0..6 {
-        for (end, direction) in [(6, 1), (26, -1)] {
-            let along = end + direction * step;
-            if vertical {
-                points.push((middle - step, along));
-                points.push((middle + step, along));
-            } else {
-                points.push((along, middle - step));
-                points.push((along, middle + step));
-            }
-        }
-    }
-    points
-}
-
-fn move_points(weight: i32) -> Vec<(i32, i32)> {
-    let mut points = slide_points(false, weight);
-    points.extend(slide_points(true, weight));
-    points
-}
-
 fn resize_points(weight: i32) -> Vec<(i32, i32)> {
     let mut points = Vec::new();
     for i in 7..=24 {
@@ -511,10 +461,7 @@ pub fn draw(role: SkinCursor, palette: &Palette, style: Style) -> (RgbaImage, [u
     let mut canvas = Canvas::new();
     let (points, colour) = match shape {
         Shape::Arrow => (arrow_points(style.silhouette), palette.body),
-        Shape::SlideX => (slide_points(false, style.weight()), palette.accent),
-        Shape::Move => (move_points(style.weight()), palette.accent),
-        Shape::SlideY => (slide_points(true, style.weight()), palette.accent),
-        Shape::Resize => (resize_points(style.weight()), palette.body),
+        Shape::Resize => (resize_points(style.weight()), palette.accent),
     };
     canvas.body(&points, colour, palette.ink, style.ring());
     (canvas.image, shape.hotspot())
@@ -638,9 +585,9 @@ mod tests {
     }
 
     #[test]
-    fn a_pointer_points_at_its_own_tip_and_a_slider_at_its_middle() {
+    fn a_pointer_points_at_its_own_tip_and_the_resize_bar_at_its_middle() {
         assert_eq!(Shape::Arrow.hotspot(), [0, 0]);
-        assert_eq!(Shape::SlideX.hotspot(), [16, 16]);
+        assert_eq!(Shape::Resize.hotspot(), [16, 16]);
     }
 
     #[test]
@@ -659,42 +606,38 @@ mod tests {
         assert_eq!(first.1, second.1);
     }
 
-    /// A title bar drags its window in both directions at once. A one-axis
-    /// slider says it only moves sideways, which is the wrong promise.
+    /// Winamp, macOS and Windows all keep the plain pointer over a title bar
+    /// you drag, a slider you pull and a list you scroll. A directional arrow
+    /// means resize, so a region that cannot be resized must not show one.
     #[test]
-    fn a_title_bar_is_not_drawn_as_a_sideways_slider() {
-        for title in [
-            SkinCursor::MainTitleBar,
-            SkinCursor::EqualizerTitleBar,
-            SkinCursor::PlaylistTitleBar,
-        ] {
-            assert_eq!(Shape::of(title), Shape::Move, "{title:?}");
+    fn only_the_corner_that_resizes_shows_a_directional_pointer() {
+        for (role, name) in SkinCursor::files() {
+            let shape = Shape::of(role);
+            if role == SkinCursor::PlaylistResize {
+                assert_eq!(shape, Shape::Resize, "{name}");
+            } else {
+                assert_eq!(
+                    shape,
+                    Shape::Arrow,
+                    "{name} promises something the plain pointer does not"
+                );
+            }
         }
-        assert_eq!(Shape::of(SkinCursor::VolumeBar), Shape::SlideX);
-        assert_eq!(Shape::of(SkinCursor::BalanceBar), Shape::SlideX);
     }
 
+    /// The song title is drawn text with no handler behind it. A pointer that
+    /// suggests dragging it is describing a control that is not there.
     #[test]
-    fn regions_that_do_different_things_do_not_share_a_shape() {
-        assert_ne!(
-            Shape::of(SkinCursor::MainWindow),
-            Shape::of(SkinCursor::PositionBar)
-        );
-        assert_eq!(
-            Shape::of(SkinCursor::PositionBar),
-            Shape::SlideX,
-            "seeking drags the thumb sideways"
-        );
-        assert_ne!(
-            Shape::of(SkinCursor::EqualizerSlider),
-            Shape::of(SkinCursor::VolumeBar)
-        );
-        assert_eq!(Shape::of(SkinCursor::PlaylistResize), Shape::Resize);
-        assert_eq!(
-            Shape::of(SkinCursor::MainClose),
-            Shape::of(SkinCursor::MainWindow),
-            "a button is clicked, not dragged; classic skins leave it the plain pointer"
-        );
+    fn a_region_that_does_nothing_keeps_the_plain_pointer() {
+        for role in [
+            SkinCursor::SongName,
+            SkinCursor::MainTitleBar,
+            SkinCursor::VolumeBar,
+            SkinCursor::PlaylistScrollBar,
+            SkinCursor::EqualizerSlider,
+        ] {
+            assert_eq!(Shape::of(role), Shape::Arrow, "{role:?}");
+        }
     }
 
     #[test]

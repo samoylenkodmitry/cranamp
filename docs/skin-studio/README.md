@@ -118,12 +118,11 @@ line the moment the sheet is opened and repeated in draw results:
 
 ## Cursors
 
-A classic skin names a pointer for each region of the player: the plain arrow
-over a window, the four-way arrow over a title bar that moves it, the sideways
-bar over the seek
-bar. There are eighteen regions, each one a `.cur` file, and a skin that ships
-none falls back to the desktop arrow — the one part of the window that would not
-belong to the skin.
+A classic skin names a pointer for each region of the player: its own arrow over
+the window, over the title bar, over every button and slider, and the diagonal
+over the corner that resizes the playlist. There are eighteen regions, each one a
+`.cur` file, and a skin that ships none falls back to the desktop arrow — the one
+part of the window that would not belong to the skin.
 
 A cursor opens as an ordinary sheet, so every brush, layer, undo and colour
 operation in the editor works on it the way it works on `main.bmp`. The
@@ -131,8 +130,8 @@ operation in the editor works on it the way it works on `main.bmp`. The
 one by name, so a single pointer can be opened on its own and drawn at any zoom.
 
 The one thing a cursor carries that a bitmap does not is its hotspot: the pixel
-it actually points at. An arrow points at its own tip, a slider at its middle.
-The drawer's four **Aim** buttons move it a pixel at a time.
+it actually points at. An arrow points at its own tip, the resize pointer at its
+middle. The drawer's four **Aim** buttons move it a pixel at a time.
 
 `studio_cursors` is the same capability for an agent:
 
@@ -145,17 +144,17 @@ The drawer's four **Aim** buttons move it a pixel at a time.
 | `studio_cursors {action: "hotspot", regions: ["normal"], hotspot: [0, 0]}` | Moves where a region's pointer points. |
 | `studio_cursors {action: "remove", regions: ["psize"]}` | Drops cursors from the skin. |
 
-The shape follows what the region does, not what it is called: a window and a
-button both take the plain pointer, because a button is clicked rather than
-dragged; a title bar takes the four-way arrow, because it moves its window in
-both directions; the seek bar, volume and balance take the sideways bar; the
-equalizer bands and the playlist scroll take the upright one; and only the
-playlist's corner takes the diagonal.
+Seventeen of the eighteen are the same arrow. That is the classic behaviour and
+the desktop's: a pointer says where it points, not what the pixel under it will
+do, and a directional pointer means the edge under it can be dragged to a new
+size. So a title bar, a button, a seek bar and a track title all take the skin's
+plain arrow, and only the playlist's corner — the one region that really does
+resize — takes the diagonal.
 
 `draw` reads its colours off the sheets the player always shows: the darkest
 colour the skin uses often becomes the outline, the lightest the body of the
-pointer, and the most saturated marks the regions that do something when
-dragged. A pointer that would vanish is not drawn — the body and the outline are
+pointer, and the most saturated fills the resize corner, so the one pointer that
+differs is the one that reads as different. A pointer that would vanish is not drawn — the body and the outline are
 checked against what each sheet covers itself in, and fall back to plain white
 on black rather than leave a cursor the skin swallows.
 

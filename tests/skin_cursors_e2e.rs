@@ -14,9 +14,14 @@ use cranpose_app_shell::AppShell;
 use cranpose_core::location_key;
 use cranpose_ui::PointerIcon;
 
-/// Points inside the main window, in the surface coordinates
-/// `WinampSurfaceApp` draws it at.
+/// Where `WinampSurfaceApp` draws the main window, so a point inside it can be
+/// written the way the skin's own coordinates read.
 const MAIN_WINDOW_ORIGIN: (f32, f32) = (26.0, 22.0);
+
+/// The playlist's resize corner in the same surface coordinates: the bottom
+/// right of the third window down, and the one region of the player that a
+/// drag really does resize.
+const PLAYLIST_RESIZE_CORNER: (f32, f32) = (290.0, 518.0);
 
 fn surface_app() -> AppShell<HitGraphRenderer> {
     let root_key = location_key(file!(), line!(), column!());
@@ -31,41 +36,53 @@ fn surface_app() -> AppShell<HitGraphRenderer> {
     shell
 }
 
-fn hover(shell: &mut AppShell<HitGraphRenderer>, (x, y): (f32, f32)) {
-    shell.set_cursor(MAIN_WINDOW_ORIGIN.0 + x, MAIN_WINDOW_ORIGIN.1 + y);
+fn hover(shell: &mut AppShell<HitGraphRenderer>, (x, y): (f32, f32)) -> Option<PointerIcon> {
+    shell.set_cursor(x, y);
     pump(shell);
+    shell.take_pointer_icon_change()
+}
+
+/// A point written in the main window's own coordinates, as a point on the
+/// surface.
+fn in_main_window((x, y): (f32, f32)) -> (f32, f32) {
+    (MAIN_WINDOW_ORIGIN.0 + x, MAIN_WINDOW_ORIGIN.1 + y)
 }
 
 #[test]
-fn the_bundled_skin_asks_for_its_own_pointer_over_its_own_regions() {
+fn the_bundled_skin_keeps_one_pointer_everywhere_but_the_corner_that_resizes() {
     let mut shell = surface_app();
     let _ = shell.take_pointer_icon_change();
 
-    hover(&mut shell, (137.0, 100.0));
-    let body = shell
-        .take_pointer_icon_change()
+    let body = hover(&mut shell, in_main_window((137.0, 100.0)))
         .expect("the window body asks for the skin's own arrow");
     assert!(
         matches!(body, PointerIcon::Custom(_)),
         "the bundled skin draws its own pointer rather than naming a system one: {body:?}"
     );
 
-    hover(&mut shell, (120.0, 76.0));
-    let seek = shell
-        .take_pointer_icon_change()
-        .expect("the seek bar asks for a pointer of its own");
-    assert_ne!(
-        seek, body,
-        "the seek bar and the window body must not share a pointer"
-    );
+    for (name, point) in [
+        ("the title bar", (137.0, 7.0)),
+        ("the seek bar", (120.0, 76.0)),
+        ("the track title", (137.0, 27.0)),
+        ("the play button", (39.0, 91.0)),
+        ("the volume slider", (130.0, 62.0)),
+    ] {
+        assert_eq!(
+            hover(&mut shell, in_main_window(point)),
+            None,
+            "{name} is not resized by a drag, so it keeps the pointer the window already had"
+        );
+    }
 
-    hover(&mut shell, (137.0, 7.0));
-    let title = shell
-        .take_pointer_icon_change()
-        .expect("the title bar asks for a pointer of its own");
-    assert_ne!(
-        title, seek,
-        "the title bar and the seek bar must not share a pointer"
+    let corner = hover(&mut shell, PLAYLIST_RESIZE_CORNER)
+        .expect("the playlist's resize corner asks for a pointer of its own");
+    let PointerIcon::Custom(corner) = corner else {
+        panic!("the resize corner draws the skin's own pointer, not a system one");
+    };
+    assert_eq!(
+        (corner.hotspot_x(), corner.hotspot_y()),
+        (16, 16),
+        "the resize pointer points at its own middle rather than a tip"
     );
 }
 
