@@ -28,11 +28,32 @@ impl Layer {
         self.source[2..] != self.destination[2..]
     }
 }
+pub const CURSOR_COLUMNS: u32 = 6;
+
+pub const CURSOR_CELL: u32 = 40;
+
+pub const CURSOR_GAP: u32 = 8;
+
+pub fn cursor_cell(index: u32) -> (u32, u32) {
+    (
+        CURSOR_GAP + (index % CURSOR_COLUMNS) * CURSOR_CELL,
+        CURSOR_GAP + (index / CURSOR_COLUMNS) * CURSOR_CELL,
+    )
+}
+
+fn cursor_panel_size() -> (u32, u32) {
+    let rows = (crate::winamp::cursors::SkinCursor::COUNT as u32).div_ceil(CURSOR_COLUMNS);
+    (
+        CURSOR_GAP + CURSOR_COLUMNS * CURSOR_CELL,
+        CURSOR_GAP + rows * CURSOR_CELL,
+    )
+}
+
 pub fn size(panel: &str) -> (u32, u32) {
-    if panel == "playlist" {
-        (275, 261)
-    } else {
-        (275, 116)
+    match panel {
+        "playlist" => (275, 261),
+        "cursors" => cursor_panel_size(),
+        _ => (275, 116),
     }
 }
 fn variant_labels(id: &str, sheet: &str, count: usize) -> Vec<String> {

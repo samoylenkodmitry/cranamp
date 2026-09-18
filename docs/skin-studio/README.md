@@ -104,6 +104,10 @@ Plus `pledit.txt` and `viscolor.txt`. That is the whole skin. Cranamp reads no
 sheet the classic format does not define, so a skin drawn here looks the same in
 any player that reads `.wsz`. `studio_validate` is what keeps it that way.
 
+A skin also carries Windows `.cur` cursor files — `NORMAL.CUR`, `TITLEBAR.CUR`,
+`VOLBAR.CUR` and the rest of the classic set. They are drawn here like anything
+else: see [Cursors](#cursors).
+
 Sheets with something non-obvious about them carry a note, shown in the status
 line the moment the sheet is opened and repeated in draw results:
 
@@ -111,6 +115,63 @@ line the moment the sheet is opened and repeated in draw results:
 | --- | --- |
 | `text.bmp` | read for one colour, never drawn as artwork |
 | `titlebar.bmp` | mostly shade-mode art Cranamp never draws |
+
+## Cursors
+
+A classic skin names a pointer for each region of the player: the plain arrow
+over a window, the four-way arrow over a title bar that moves it, the sideways
+bar over the seek
+bar. There are eighteen regions, each one a `.cur` file, and a skin that ships
+none falls back to the desktop arrow — the one part of the window that would not
+belong to the skin.
+
+A cursor opens as an ordinary sheet, so every brush, layer, undo and colour
+operation in the editor works on it the way it works on `main.bmp`. The
+`cursors` panel lays all eighteen out as a grid; the atlases drawer lists each
+one by name, so a single pointer can be opened on its own and drawn at any zoom.
+
+The one thing a cursor carries that a bitmap does not is its hotspot: the pixel
+it actually points at. An arrow points at its own tip, a slider at its middle.
+The drawer's four **Aim** buttons move it a pixel at a time.
+
+`studio_cursors` is the same capability for an agent:
+
+| Call | What it does |
+| --- | --- |
+| `studio_cursors {}` | Lists the eighteen regions: which are drawn, their size and hotspot. |
+| `studio_cursors {action: "draw"}` | Draws every missing cursor in the skin's own colours and opens them on the canvas. |
+| `studio_cursors {action: "draw", regions: ["posbar"], overwrite: true}` | Redraws named regions over artwork already there. |
+| `studio_cursors {action: "draw", style: "needle-bold"}` | Cuts the set to a named silhouette instead of the one the colours pick. |
+| `studio_cursors {action: "hotspot", regions: ["normal"], hotspot: [0, 0]}` | Moves where a region's pointer points. |
+| `studio_cursors {action: "remove", regions: ["psize"]}` | Drops cursors from the skin. |
+
+The shape follows what the region does, not what it is called: a window and a
+button both take the plain pointer, because a button is clicked rather than
+dragged; a title bar takes the four-way arrow, because it moves its window in
+both directions; the seek bar, volume and balance take the sideways bar; the
+equalizer bands and the playlist scroll take the upright one; and only the
+playlist's corner takes the diagonal.
+
+`draw` reads its colours off the sheets the player always shows: the darkest
+colour the skin uses often becomes the outline, the lightest the body of the
+pointer, and the most saturated marks the regions that do something when
+dragged. A pointer that would vanish is not drawn — the body and the outline are
+checked against what each sheet covers itself in, and fall back to plain white
+on black rather than leave a cursor the skin swallows.
+
+The silhouette is the skin's own. `style` cuts the whole set to one of eight —
+`sharp`, `chisel`, `needle` and `block`, each on its own or `-bold` for a
+two-pixel outline. Left out, the style comes from the skin's colours, so two
+skins get pointers cut differently without anyone choosing, and one skin picks
+the same style every time it is drawn.
+
+Two skins therefore differ in both colour and cut, and drawing the same skin
+twice changes nothing. It is a starting point, not a substitute for drawing: the
+result is ordinary artwork, and every brush is still pointed at it.
+
+Nothing here leaves the classic format. `studio_validate` counts a `.cur` as an
+entry a player reads rather than offering to drop it, and the export writes it
+back as a Windows cursor with its hotspot intact.
 
 ## Pointer and touch controls
 

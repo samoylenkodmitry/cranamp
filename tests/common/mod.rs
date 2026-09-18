@@ -1,12 +1,11 @@
+// Shared by every end-to-end test; each one uses the part it needs.
+#![allow(dead_code)]
 use cranpose_app_shell::AppShell;
-use cranpose_foundation::PointerEvent;
-use cranpose_render_common::graph::ProjectiveTransform;
-use cranpose_render_common::graph_scene::{ClickAction, HitGeometry, Scene};
+use cranpose_render_common::graph::{HitTestNode, ProjectiveTransform};
+use cranpose_render_common::graph_scene::{ClickAction, HitGeometry, HitTargetSpec, Scene};
 use cranpose_render_common::hit_graph::{collect_hits_from_graph, HitGraphSink};
 use cranpose_render_common::{RenderScene, Renderer};
 use cranpose_ui::{LayoutTree, Size};
-use cranpose_ui_graphics::{Point, RoundedCornerShape};
-use std::rc::Rc;
 #[derive(Default)]
 pub struct HitGraphRenderer {
     scene: Scene,
@@ -20,17 +19,22 @@ impl HitGraphSink for SceneHitSink<'_> {
         node_id: cranpose_core::NodeId,
         capture_path: &[cranpose_core::NodeId],
         geometry: HitGeometry,
-        shape: Option<RoundedCornerShape>,
-        click_actions: &[Rc<dyn Fn(Point)>],
-        pointer_inputs: &[Rc<dyn Fn(PointerEvent)>],
+        hit: &HitTestNode,
     ) {
         self.scene.push_hit(
             node_id,
             capture_path,
             geometry,
-            shape,
-            click_actions.iter().cloned().map(ClickAction::WithPoint),
-            pointer_inputs,
+            HitTargetSpec {
+                shape: hit.shape,
+                click_actions: hit
+                    .click_actions
+                    .iter()
+                    .cloned()
+                    .map(ClickAction::WithPoint),
+                pointer_inputs: &hit.pointer_inputs,
+                pointer_icon: hit.pointer_icon.as_ref(),
+            },
         );
     }
 }
