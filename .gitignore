@@ -14,3 +14,6 @@
 # On-device UI test output.
 platform/ios/uitests/results.xcresult/
 __pycache__/
+
+# RustRover's project folder, which every agent opens per AGENTS.md.
+.idea/
