@@ -15,5 +15,5 @@ fn main() {
         cranamp::winamp::studio::stdio_bridge();
         return;
     }
-    cranamp::create_desktop_app().run_windows(cranamp::winamp::WinampStandaloneApp);
+    cranamp::create_desktop_app().run(cranamp::winamp::WinampStandaloneApp);
 }
