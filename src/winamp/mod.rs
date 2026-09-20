@@ -13,8 +13,7 @@ use crate::audio::{self, Track};
 #[cfg(target_os = "android")]
 use cranpose::{rememberAndroidHostWindowState, AndroidHostWindowState};
 use cranpose::{
-    rememberWindowState, WindowAttachPolicy, WindowConfig, WindowGroup, WindowId,
-    WindowModifierExt, WindowMoveMode, WindowNode, WindowResizeDirection, WindowState,
+    rememberWindowState, WindowConfig, WindowModifierExt, WindowResizeDirection, WindowState,
 };
 use cranpose_core::{self, MutableState};
 use cranpose_foundation::text::{TextFieldState, TextRange};
@@ -281,7 +280,91 @@ enum WinampDragTarget {
         host_window: AndroidHostWindowState,
         overlay_position: MutableState<Point>,
     },
-    NativeGroup,
+    Native,
+    Tearable {
+        pane: WinampPane,
+        dock: MutableState<WinampDock>,
+        offset: Point,
+        main_window: WindowState,
+        state: WindowState,
+    },
+    Dockable {
+        pane: WinampPane,
+        dock: MutableState<WinampDock>,
+        main_window: WindowState,
+        state: WindowState,
+        stack_height: f32,
+    },
+}
+/// A window of the player that sits in the main window until it is pulled out.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum WinampPane {
+    Equalizer,
+    Playlist,
+}
+
+/// Which panes have been pulled out of the main window. A pane that is not
+/// here is docked: it is drawn inside the main window rather than in a
+/// window of its own.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct WinampDock {
+    torn: Vec<WinampPane>,
+}
+impl WinampDock {
+    fn docked(&self, pane: WinampPane) -> bool {
+        !self.torn.contains(&pane)
+    }
+    fn tear(&mut self, pane: WinampPane) {
+        if self.docked(pane) {
+            self.torn.push(pane);
+        }
+    }
+    fn dock(&mut self, pane: WinampPane) {
+        self.torn.retain(|held| *held != pane);
+    }
+}
+/// How far a docked pane's title has to travel before the pane leaves the
+/// main window for one of its own, which is far enough that the press that
+/// only meant to move the whole stack does not tear anything off it.
+const WINAMP_TEAR_REACH: f32 = 18.0;
+fn pane_left_the_stack(travel: Point) -> bool {
+    travel.x.abs() > WINAMP_TEAR_REACH || travel.y.abs() > WINAMP_TEAR_REACH
+}
+/// A pane docks when its top edge meets the bottom of the stack, which is the
+/// edge the group snaps it to, and it is still over the stack rather than off
+/// to one side of it. The stack aligns it once it is in, so the sideways reach
+/// is the pane's own width rather than the snap distance.
+fn pane_came_back_to_its_slot(origin: Point, slot: Point) -> bool {
+    (origin.y - slot.y).abs() <= WINAMP_DOCK_REACH && (origin.x - slot.x).abs() <= MAIN_WIDTH / 2.0
+}
+/// How near the bottom of the stack a pane has to be put down to go back into
+/// it. The group's own snap is a few pixels, which is a distance a hand with a
+/// mouse in it misses, so the stack reaches further than the snap does.
+const WINAMP_DOCK_REACH: f32 = 24.0;
+/// Puts a pane back in the stack when it is let go on the stack's lower edge.
+///
+/// The decision is taken once, when the button comes up, and never while the
+/// pane is being carried. A window in a group is snapped to the edge it meets
+/// as it is dragged, so a pane on its way past the stack reports the stack's
+/// own edge every other move; docking on those reports puts a pane back the
+/// moment it is dragged over the place it came from.
+fn dock_a_pane_let_go_on_the_stack(
+    pane: WinampPane,
+    pane_window: WindowState,
+    main_window: WindowState,
+    stack_height: f32,
+    dock: MutableState<WinampDock>,
+) {
+    let Some(origin) = pane_window.position_non_reactive() else {
+        return;
+    };
+    let Some(home) = main_window.position_non_reactive() else {
+        return;
+    };
+    let slot = Point::new(home.x, home.y + stack_height);
+    if pane_came_back_to_its_slot(origin, slot) {
+        dock.update(|held| held.dock(pane));
+    }
 }
 #[derive(Clone, Copy, PartialEq)]
 enum WinampCloseAction {
@@ -500,7 +583,7 @@ struct WinampWindowPlacement {
     initial_position: WinampInitialWindowPosition,
     state: WindowState,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 #[allow(dead_code)]
 enum WinampInitialWindowPosition {
     Host(Point),
@@ -508,22 +591,23 @@ enum WinampInitialWindowPosition {
 }
 #[composable]
 pub(crate) fn remember_winamp_tab_state() -> WinampTabState {
-    let peer_windows = WinampPeerWindowStates {
-        main: rememberWindowState(MAIN_WIDTH, MAIN_HEIGHT),
-        equalizer: rememberWindowState(EQ_WIDTH, EQ_HEIGHT),
-        playlist: rememberWindowState(PLAYLIST_WIDTH, PLAYLIST_HEIGHT),
-    };
-    remember_saved_window_config(peer_windows);
-    WinampTabState {
-        player: cranpose_core::rememberMutableStateOf(initial_winamp_state),
-        detached: cranpose_core::rememberMutableStateOf(native_winamp_windows_available),
+    let tab_state = cranpose_core::remember(|| WinampTabState {
+        player: cranpose_core::mutableStateOf(initial_winamp_state()),
+        detached: cranpose_core::mutableStateOf(native_winamp_windows_available()),
         inline_windows: WinampInlineWindowStates {
-            main: cranpose_core::rememberMutableStateOf(|| Point::new(26.0, 22.0)),
-            equalizer: cranpose_core::rememberMutableStateOf(|| Point::new(26.0, 142.0)),
-            playlist: cranpose_core::rememberMutableStateOf(|| Point::new(26.0, 262.0)),
+            main: cranpose_core::mutableStateOf(Point::new(26.0, 22.0)),
+            equalizer: cranpose_core::mutableStateOf(Point::new(26.0, 142.0)),
+            playlist: cranpose_core::mutableStateOf(Point::new(26.0, 262.0)),
         },
-        peer_windows,
-    }
+        peer_windows: WinampPeerWindowStates {
+            main: WindowState::new(MAIN_WIDTH, MAIN_HEIGHT),
+            equalizer: WindowState::new(EQ_WIDTH, EQ_HEIGHT),
+            playlist: WindowState::new(PLAYLIST_WIDTH, PLAYLIST_HEIGHT),
+        },
+    })
+    .with(|state| *state);
+    remember_saved_window_config(tab_state.peer_windows);
+    tab_state
 }
 #[composable]
 pub(crate) fn WinampTab(tab_state: WinampTabState) {
@@ -533,6 +617,11 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
     let detached = native_available && tab_state.detached.get();
     let snapshot = state.get();
     let skin_state = remember_winamp_skin(state);
+    // Held across the inline/detached toggle on purpose: these used to live
+    // inside the detached branch, so switching to inline and back forgot
+    // which panes were docked and where the settings window was.
+    let settings_window = rememberWindowState(SETTINGS_WIDTH, SETTINGS_HEIGHT);
+    let dock = cranpose_core::rememberMutableStateOf(WinampDock::default);
     WinampRuntimeEffects(state, tab_state.peer_windows, skin_state);
     let skin = match skin_state.get() {
         Ok(skin) => skin,
@@ -572,15 +661,25 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
                     scale,
                 );
             } else {
-                WinampNativeWindows(
-                    skin.clone(),
+                let inline = tab_state.inline_windows;
+                WinampWindowStack(WinampWindowStackSpec {
+                    skin: skin.clone(),
                     state,
                     skin_state,
-                    tab_state.inline_windows,
-                    tab_state.peer_windows,
+                    peer_windows: tab_state.peer_windows,
+                    settings_window,
+                    places: WinampWindowPlaces {
+                        main: WinampInitialWindowPosition::Host(inline.main.get()),
+                        equalizer: WinampInitialWindowPosition::Host(inline.equalizer.get()),
+                        playlist: WinampInitialWindowPosition::Host(inline.playlist.get()),
+                        settings: WinampInitialWindowPosition::Host(inline.main.get()),
+                    },
+                    close: WinampCloseAction::SetStatus,
                     scale,
-                    snapshot.clone(),
-                );
+                    playlist_min_height: scaled(PLAYLIST_HEIGHT, scale),
+                    dock,
+                    snapshot: snapshot.clone(),
+                });
             }
         },
     );
@@ -2146,109 +2245,207 @@ fn android_pointer_screen_position(global_position: Point) -> Point {
     let origin = android_winamp_surface_origin();
     Point::new(origin.x + global_position.x, origin.y + global_position.y)
 }
-#[composable]
-fn WinampNativeWindows(
+#[derive(Clone, PartialEq)]
+struct WinampWindowStackSpec {
     skin: WinampSkin,
     state: MutableState<WinampState>,
     skin_state: WinampSkinState,
-    inline_windows: WinampInlineWindowStates,
     peer_windows: WinampPeerWindowStates,
+    settings_window: WindowState,
+    places: WinampWindowPlaces,
+    close: WinampCloseAction,
     scale: f32,
+    playlist_min_height: f32,
+    dock: MutableState<WinampDock>,
     snapshot: WinampState,
-) {
-    let settings_window = rememberWindowState(SETTINGS_WIDTH, SETTINGS_HEIGHT);
-    WindowGroup("cranamp-winamp", winamp_attach_policy(), move || {
-        WindowNode(
-            winamp_main_window_id(),
-            winamp_window_config(WinampWindowPlacement {
-                title: CRANAMP_WINAMP_MAIN_TITLE,
-                initial_position: WinampInitialWindowPosition::Host(inline_windows.main.get()),
-                state: peer_windows.main,
-            }),
-            {
-                let skin = skin.clone();
-                move || {
-                    MainWindow(
-                        skin.clone(),
-                        state,
-                        skin_state,
-                        WinampDragTarget::NativeGroup,
-                        WinampCloseAction::SetStatus,
-                        scale,
-                    );
-                }
+}
+#[derive(Clone, Copy, PartialEq)]
+struct WinampWindowPlaces {
+    main: WinampInitialWindowPosition,
+    equalizer: WinampInitialWindowPosition,
+    playlist: WinampInitialWindowPosition,
+    settings: WinampInitialWindowPosition,
+}
+#[composable]
+fn WinampWindowStack(spec: WinampWindowStackSpec) {
+    let WinampWindowStackSpec {
+        skin,
+        state,
+        skin_state,
+        peer_windows,
+        settings_window,
+        places,
+        close,
+        scale,
+        playlist_min_height: playlist_window_min_height,
+        dock,
+        snapshot,
+    } = spec;
+    let held = dock.get();
+    let eq_shown = snapshot.eq_visible;
+    let playlist_shown = snapshot.playlist_visible;
+    let eq_docked = eq_shown && held.docked(WinampPane::Equalizer);
+    let playlist_docked = playlist_shown && held.docked(WinampPane::Playlist);
+    let playlist_height = peer_windows
+        .playlist
+        .size()
+        .height
+        .max(playlist_min_height());
+    let stack_height = MAIN_HEIGHT
+        + if eq_docked { EQ_HEIGHT } else { 0.0 }
+        + if playlist_docked {
+            playlist_height
+        } else {
+            0.0
+        };
+    if peer_windows.main.size_non_reactive().height != stack_height {
+        peer_windows
+            .main
+            .set_size(Size::new(MAIN_WIDTH, stack_height));
+    }
+    let display_text_color = skin.display_text_color;
+    Box(
+        Modifier::empty().window(winamp_window_config(WinampWindowPlacement {
+            title: CRANAMP_WINAMP_MAIN_TITLE,
+            initial_position: places.main,
+            state: peer_windows.main,
+        })),
+        BoxSpec::default(),
+        move || {
+            MainWindow(
+                skin.clone(),
+                state,
+                skin_state,
+                WinampDragTarget::Native,
+                close,
+                scale,
+            );
+            if eq_shown {
+                // Docked or not, the pane is composed here, once. The window
+                // modifier is what pulls it out: with it the subtree draws in
+                // an OS window of its own, without it inside the stack's, and
+                // the node keeps its state and its effects either way. The
+                // pixel grid starts where the pane does, so the seam between
+                // two panes lands on one physical pixel.
+                let offset = Point::new(0.0, MAIN_HEIGHT);
+                let eq_skin = skin.clone();
+                Box(
+                    if eq_docked {
+                        Modifier::empty()
+                    } else {
+                        Modifier::empty().window(winamp_window_config(WinampWindowPlacement {
+                            title: CRANAMP_WINAMP_EQUALIZER_TITLE,
+                            initial_position: places.equalizer,
+                            state: peer_windows.equalizer,
+                        }))
+                    },
+                    BoxSpec::default(),
+                    move || {
+                        pixel_grid::provide([0.0, if eq_docked { offset.y } else { 0.0 }], || {
+                            EqualizerWindow(
+                                eq_skin.clone(),
+                                state,
+                                if eq_docked {
+                                    WinampDragTarget::Tearable {
+                                        pane: WinampPane::Equalizer,
+                                        dock,
+                                        offset,
+                                        main_window: peer_windows.main,
+                                        state: peer_windows.equalizer,
+                                    }
+                                } else {
+                                    WinampDragTarget::Dockable {
+                                        pane: WinampPane::Equalizer,
+                                        dock,
+                                        main_window: peer_windows.main,
+                                        state: peer_windows.equalizer,
+                                        stack_height,
+                                    }
+                                },
+                                scale,
+                            );
+                        });
+                    },
+                );
+            }
+            if playlist_shown {
+                let offset = Point::new(0.0, MAIN_HEIGHT + if eq_docked { EQ_HEIGHT } else { 0.0 });
+                let pl_skin = skin.clone();
+                Box(
+                    if playlist_docked {
+                        Modifier::empty()
+                    } else {
+                        Modifier::empty().window(
+                            winamp_window_config(WinampWindowPlacement {
+                                title: CRANAMP_WINAMP_PLAYLIST_TITLE,
+                                initial_position: places.playlist,
+                                state: peer_windows.playlist,
+                            })
+                            .with_resizable(true)
+                            .with_min_size(
+                                scaled(PLAYLIST_WIDTH, scale),
+                                playlist_window_min_height,
+                            ),
+                        )
+                    },
+                    BoxSpec::default(),
+                    move || {
+                        pixel_grid::provide(
+                            [0.0, if playlist_docked { offset.y } else { 0.0 }],
+                            || {
+                                PlaylistWindow(
+                                    pl_skin.pledit.clone(),
+                                    pl_skin.palette,
+                                    pl_skin.display_text_color,
+                                    pl_skin.cursors.clone(),
+                                    state,
+                                    if playlist_docked {
+                                        WinampDragTarget::Tearable {
+                                            pane: WinampPane::Playlist,
+                                            dock,
+                                            offset,
+                                            main_window: peer_windows.main,
+                                            state: peer_windows.playlist,
+                                        }
+                                    } else {
+                                        WinampDragTarget::Dockable {
+                                            pane: WinampPane::Playlist,
+                                            dock,
+                                            main_window: peer_windows.main,
+                                            state: peer_windows.playlist,
+                                            stack_height,
+                                        }
+                                    },
+                                    if playlist_docked {
+                                        WinampWindowSize::Fixed(Size::new(
+                                            scaled(PLAYLIST_WIDTH, scale),
+                                            scaled(playlist_height, scale),
+                                        ))
+                                    } else {
+                                        WinampWindowSize::State(peer_windows.playlist)
+                                    },
+                                    scale,
+                                );
+                            },
+                        );
+                    },
+                );
+            }
+        },
+    );
+    if snapshot.settings_open {
+        Box(
+            Modifier::empty().window(winamp_window_config(WinampWindowPlacement {
+                title: CRANAMP_WINAMP_SETTINGS_TITLE,
+                initial_position: places.settings,
+                state: settings_window,
+            })),
+            BoxSpec::default(),
+            move || {
+                SettingsPanel(state, skin_state, display_text_color, 0.0, 0.0, true, scale);
             },
         );
-        if snapshot.eq_visible {
-            WindowNode(
-                winamp_equalizer_window_id(),
-                winamp_window_config(WinampWindowPlacement {
-                    title: CRANAMP_WINAMP_EQUALIZER_TITLE,
-                    initial_position: WinampInitialWindowPosition::Host(
-                        inline_windows.equalizer.get(),
-                    ),
-                    state: peer_windows.equalizer,
-                }),
-                {
-                    let skin = skin.clone();
-                    move || {
-                        EqualizerWindow(skin.clone(), state, WinampDragTarget::NativeGroup, scale);
-                    }
-                },
-            );
-        }
-        if snapshot.playlist_visible {
-            WindowNode(
-                winamp_playlist_window_id(),
-                winamp_window_config(WinampWindowPlacement {
-                    title: CRANAMP_WINAMP_PLAYLIST_TITLE,
-                    initial_position: WinampInitialWindowPosition::Host(
-                        inline_windows.playlist.get(),
-                    ),
-                    state: peer_windows.playlist,
-                })
-                .with_resizable(true)
-                .with_min_size(
-                    scaled(PLAYLIST_WIDTH, scale),
-                    scaled(PLAYLIST_HEIGHT, scale),
-                ),
-                {
-                    let pledit = skin.pledit.clone();
-                    let palette = skin.palette;
-                    let display_text_color = skin.display_text_color;
-                    let cursors = skin.cursors.clone();
-                    move || {
-                        PlaylistWindow(
-                            pledit.clone(),
-                            palette,
-                            display_text_color,
-                            cursors.clone(),
-                            state,
-                            WinampDragTarget::NativeGroup,
-                            WinampWindowSize::State(peer_windows.playlist),
-                            scale,
-                        );
-                    }
-                },
-            );
-        }
-        if snapshot.settings_open {
-            WindowNode(
-                settings_window_id(),
-                winamp_window_config(WinampWindowPlacement {
-                    title: CRANAMP_WINAMP_SETTINGS_TITLE,
-                    initial_position: WinampInitialWindowPosition::Host(inline_windows.main.get()),
-                    state: settings_window,
-                }),
-                {
-                    let display_text_color = skin.display_text_color;
-                    move || {
-                        SettingsPanel(state, skin_state, display_text_color, 0.0, 0.0, true, scale);
-                    }
-                },
-            );
-        }
-    });
+    }
 }
 #[composable]
 pub fn WinampStandaloneApp() {
@@ -2260,6 +2457,7 @@ pub fn WinampStandaloneApp() {
     };
     remember_saved_window_config(peer_windows);
     let settings_window = rememberWindowState(SETTINGS_WIDTH, SETTINGS_HEIGHT);
+    let dock = cranpose_core::rememberMutableStateOf(WinampDock::default);
     let skin_state = remember_winamp_skin(state);
     WinampRuntimeEffects(state, peer_windows, skin_state);
     let snapshot = state.get();
@@ -2273,109 +2471,23 @@ pub fn WinampStandaloneApp() {
             return;
         }
     };
-    WindowGroup("cranamp-winamp", winamp_attach_policy(), move || {
-        WindowNode(
-            winamp_main_window_id(),
-            winamp_window_config(WinampWindowPlacement {
-                title: CRANAMP_WINAMP_MAIN_TITLE,
-                initial_position: WinampInitialWindowPosition::Screen(default_main_position()),
-                state: peer_windows.main,
-            }),
-            {
-                let skin = skin.clone();
-                move || {
-                    MainWindow(
-                        skin.clone(),
-                        state,
-                        skin_state,
-                        WinampDragTarget::NativeGroup,
-                        WinampCloseAction::CloseApp,
-                        ui_scale(),
-                    );
-                }
-            },
-        );
-        if snapshot.eq_visible {
-            WindowNode(
-                winamp_equalizer_window_id(),
-                winamp_window_config(WinampWindowPlacement {
-                    title: CRANAMP_WINAMP_EQUALIZER_TITLE,
-                    initial_position: WinampInitialWindowPosition::Screen(
-                        default_equalizer_position(),
-                    ),
-                    state: peer_windows.equalizer,
-                }),
-                {
-                    let skin = skin.clone();
-                    move || {
-                        EqualizerWindow(
-                            skin.clone(),
-                            state,
-                            WinampDragTarget::NativeGroup,
-                            ui_scale(),
-                        );
-                    }
-                },
-            );
-        }
-        if snapshot.playlist_visible {
-            WindowNode(
-                winamp_playlist_window_id(),
-                winamp_window_config(WinampWindowPlacement {
-                    title: CRANAMP_WINAMP_PLAYLIST_TITLE,
-                    initial_position: WinampInitialWindowPosition::Screen(
-                        default_playlist_position(),
-                    ),
-                    state: peer_windows.playlist,
-                })
-                .with_resizable(true)
-                .with_min_size(PLAYLIST_WIDTH, playlist_min_height()),
-                {
-                    let pledit = skin.pledit.clone();
-                    let palette = skin.palette;
-                    let display_text_color = skin.display_text_color;
-                    let cursors = skin.cursors.clone();
-                    move || {
-                        PlaylistWindow(
-                            pledit.clone(),
-                            palette,
-                            display_text_color,
-                            cursors.clone(),
-                            state,
-                            WinampDragTarget::NativeGroup,
-                            WinampWindowSize::State(peer_windows.playlist),
-                            ui_scale(),
-                        );
-                    }
-                },
-            );
-        }
-        if snapshot.settings_open {
-            WindowNode(
-                settings_window_id(),
-                winamp_window_config(WinampWindowPlacement {
-                    title: CRANAMP_WINAMP_SETTINGS_TITLE,
-                    initial_position: WinampInitialWindowPosition::Screen(
-                        default_settings_position(),
-                    ),
-                    state: settings_window,
-                }),
-                {
-                    let display_text_color = skin.display_text_color;
-                    move || {
-                        SettingsPanel(
-                            state,
-                            skin_state,
-                            display_text_color,
-                            0.0,
-                            0.0,
-                            true,
-                            ui_scale(),
-                        );
-                    }
-                },
-            );
-        }
+    WinampWindowStack(WinampWindowStackSpec {
+        skin,
+        state,
+        skin_state,
+        peer_windows,
+        settings_window,
+        places: WinampWindowPlaces {
+            main: WinampInitialWindowPosition::Screen(default_main_position()),
+            equalizer: WinampInitialWindowPosition::Screen(default_equalizer_position()),
+            playlist: WinampInitialWindowPosition::Screen(default_playlist_position()),
+            settings: WinampInitialWindowPosition::Screen(default_settings_position()),
+        },
+        close: WinampCloseAction::CloseApp,
+        scale: ui_scale(),
+        playlist_min_height: playlist_min_height(),
+        dock,
+        snapshot,
     });
 }
 #[composable]
@@ -3636,7 +3748,7 @@ fn SettingsPanel(
         move || {
             if with_drag {
                 WindowDragHandle(
-                    WinampDragTarget::NativeGroup,
+                    WinampDragTarget::Native,
                     (0.0, 0.0, SETTINGS_WIDTH - 30.0, 26.0),
                     scale,
                 );
@@ -5869,8 +5981,36 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
         .size_points(scaled(area.2, scale), scaled(area.3, scale))
         .absolute_offset(scaled(area.0, scale), scaled(area.1, scale));
     match drag_target {
-        WinampDragTarget::NativeGroup => {
-            Box(modifier.window_drag_area(), BoxSpec::default(), || {});
+        WinampDragTarget::Native => {
+            Box(
+                modifier.window_drag_area(|| {}, || {}),
+                BoxSpec::default(),
+                || {},
+            );
+        }
+        WinampDragTarget::Dockable {
+            pane,
+            dock,
+            main_window,
+            state: pane_window,
+            stack_height,
+        } => {
+            Box(
+                modifier.window_drag_area(
+                    || {},
+                    move || {
+                        dock_a_pane_let_go_on_the_stack(
+                            pane,
+                            pane_window,
+                            main_window,
+                            stack_height,
+                            dock,
+                        );
+                    },
+                ),
+                BoxSpec::default(),
+                || {},
+            );
         }
         #[cfg(target_os = "android")]
         WinampDragTarget::AndroidHost {
@@ -5935,6 +6075,60 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
                                         | PointerEventKind::Zoom
                                         | PointerEventKind::Enter
                                         | PointerEventKind::Exit => {}
+                                    }
+                                }
+                            })
+                            .await;
+                    }
+                }),
+                BoxSpec::default(),
+                || {},
+            );
+        }
+        WinampDragTarget::Tearable {
+            pane,
+            dock,
+            offset,
+            main_window,
+            state: pane_window,
+        } => {
+            let pressed_at = cranpose_core::rememberMutableStateOf(|| None::<Point>);
+            Box(
+                modifier.pointer_input((), {
+                    move |scope: PointerInputScope| async move {
+                        scope
+                            .await_pointer_event_scope(|await_scope| async move {
+                                loop {
+                                    let event = await_scope.await_pointer_event().await;
+                                    match event.kind {
+                                        PointerEventKind::Down => {
+                                            pressed_at.set(Some(event.global_position));
+                                            event.consume();
+                                        }
+                                        PointerEventKind::Move => {
+                                            let Some(start) = pressed_at.get() else {
+                                                continue;
+                                            };
+                                            let travel = Point::new(
+                                                event.global_position.x - start.x,
+                                                event.global_position.y - start.y,
+                                            );
+                                            if pane_left_the_stack(travel) {
+                                                pressed_at.set(None);
+                                                let home = main_window
+                                                    .position_non_reactive()
+                                                    .unwrap_or(Point::new(0.0, 0.0));
+                                                pane_window.set_position(Some(Point::new(
+                                                    snap_to_pixel(home.x + offset.x + travel.x),
+                                                    snap_to_pixel(home.y + offset.y + travel.y),
+                                                )));
+                                                dock.update(|held| held.tear(pane));
+                                            }
+                                        }
+                                        PointerEventKind::Up | PointerEventKind::Cancel => {
+                                            pressed_at.set(None);
+                                        }
+                                        _ => {}
                                     }
                                 }
                             })
@@ -6014,17 +6208,66 @@ fn WindowResizeHandle(
     height: f32,
     scale: f32,
 ) {
-    if !matches!(drag_target, WinampDragTarget::NativeGroup) {
-        return;
+    let modifier = Modifier::empty()
+        .size_points(scaled(width, scale), scaled(height, scale))
+        .absolute_offset(scaled(x, scale), scaled(y, scale));
+    match drag_target {
+        WinampDragTarget::Native | WinampDragTarget::Dockable { .. } => {
+            Box(
+                modifier.window_resize_area(direction),
+                BoxSpec::default(),
+                || {},
+            );
+        }
+        // A pane docked in the stack has no window of its own to resize: the
+        // window around it belongs to the stack, and the platform would
+        // refuse in any case, because that window is not resizable. Dragging
+        // the corner grows the pane, and the stack's window follows the pane.
+        WinampDragTarget::Tearable {
+            state: pane_window, ..
+        } => {
+            let grabbed = cranpose_core::rememberMutableStateOf(|| None::<(f32, f32)>);
+            Box(
+                modifier.pointer_input((), move |scope: PointerInputScope| async move {
+                    scope
+                        .await_pointer_event_scope(|await_scope| async move {
+                            loop {
+                                let event = await_scope.await_pointer_event().await;
+                                match event.kind {
+                                    PointerEventKind::Down => {
+                                        grabbed.set(Some((
+                                            event.global_position.y,
+                                            pane_window.size_non_reactive().height,
+                                        )));
+                                        event.consume();
+                                    }
+                                    PointerEventKind::Move => {
+                                        let Some((grabbed_at, held)) = grabbed.get() else {
+                                            continue;
+                                        };
+                                        let grown =
+                                            held + (event.global_position.y - grabbed_at) / scale;
+                                        pane_window.set_size(Size::new(
+                                            pane_window.size_non_reactive().width,
+                                            grown.max(playlist_min_height()),
+                                        ));
+                                        event.consume();
+                                    }
+                                    PointerEventKind::Up | PointerEventKind::Cancel => {
+                                        grabbed.set(None);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        })
+                        .await;
+                }),
+                BoxSpec::default(),
+                || {},
+            );
+        }
+        _ => {}
     }
-    Box(
-        Modifier::empty()
-            .size_points(scaled(width, scale), scaled(height, scale))
-            .absolute_offset(scaled(x, scale), scaled(y, scale))
-            .window_resize_area(direction),
-        BoxSpec::default(),
-        || {},
-    );
 }
 #[composable]
 fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, scale: f32) {
@@ -8083,8 +8326,6 @@ pub(crate) fn sync_config_path() -> std::path::PathBuf {
 }
 const WINAMP_NATIVE_HOST_OFFSET_X: f32 = 640.0;
 const WINAMP_NATIVE_HOST_OFFSET_Y: f32 = 118.0;
-const WINAMP_ATTACH_EPSILON: f32 = 3.0;
-const WINAMP_SNAP_DISTANCE: f32 = 8.0;
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SavedWindowConfig {
@@ -8331,25 +8572,6 @@ fn winamp_window_config(placement: WinampWindowPlacement) -> WindowConfig {
     let state = placement.state;
     base_winamp_window_config(placement).with_state(state)
 }
-fn winamp_attach_policy() -> WindowAttachPolicy {
-    WindowAttachPolicy::new(
-        WINAMP_SNAP_DISTANCE,
-        WINAMP_ATTACH_EPSILON,
-        WindowMoveMode::DragLeaderOnly(vec![winamp_main_window_id()]),
-    )
-}
-fn winamp_main_window_id() -> WindowId {
-    WindowId::from_static("cranamp-winamp-main")
-}
-fn winamp_equalizer_window_id() -> WindowId {
-    WindowId::from_static("cranamp-winamp-equalizer")
-}
-fn winamp_playlist_window_id() -> WindowId {
-    WindowId::from_static("cranamp-winamp-playlist")
-}
-fn settings_window_id() -> WindowId {
-    WindowId::from_static("cranamp-winamp-settings")
-}
 fn winamp_window_modifier(
     width: f32,
     height: f32,
@@ -8370,7 +8592,10 @@ fn winamp_window_modifier(
         WinampDragTarget::AndroidHost { position, .. } => {
             modifier.offset(scaled(position.x, scale), scaled(position.y, scale))
         }
-        WinampDragTarget::NativeGroup => modifier,
+        WinampDragTarget::Native | WinampDragTarget::Dockable { .. } => modifier,
+        WinampDragTarget::Tearable { offset, .. } => {
+            modifier.offset(scaled(offset.x, scale), scaled(offset.y, scale))
+        }
     }
 }
 fn ui_scale() -> f32 {
@@ -9646,3 +9871,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/dock_tests.rs"]
+mod dock_tests;

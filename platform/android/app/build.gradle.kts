@@ -42,6 +42,12 @@ cranpose {
     workspaceRoot.set("../../..")
     cargoPackage.set("cranamp")
     features.set(listOf("android", "renderer-wgpu"))
+    // The plugin builds debug variants for x86_64, which was the emulator's
+    // architecture when every development machine was an Intel one. On an
+    // Apple Silicon Mac both the emulator and the phone in the drawer are
+    // arm64, and an APK carrying only x86_64 installs on neither: `adb
+    // install` fails with INSTALL_FAILED_NO_MATCHING_ABIS.
+    debugAbis.set(listOf("arm64-v8a"))
     releaseAbis.set(listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
     label.set("Cranamp")
     // Playback continues with the app off screen, and the visualiser reads
@@ -87,6 +93,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            // A debug build is signed with the debug key, so Android refuses
+            // to install it over the released Cranamp, which is signed with
+            // the real one: INSTALL_FAILED_UPDATE_INCOMPATIBLE. Under its own
+            // application id it goes on beside that copy instead, and neither
+            // has to be uninstalled to make room for the other.
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
