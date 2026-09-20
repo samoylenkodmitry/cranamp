@@ -2,7 +2,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-project="$here/uitests/CranampUITests.xcodeproj"
+project="$here/CranampUITests.xcodeproj"
 
 device=""
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
@@ -19,7 +19,7 @@ fi
   exit 1
 }
 
-results="${CRANAMP_UITEST_RESULTS:-$here/uitests/results.xcresult}"
+results="${CRANAMP_UITEST_RESULTS:-$here/../../target/ios-uitests.xcresult}"
 rm -rf "$results"
 
 echo "Running UI tests on $device" >&2

@@ -166,11 +166,14 @@ dragged. A pointer that would vanish is not drawn — the body and the outline a
 checked against what each sheet covers itself in, and fall back to plain white
 on black rather than leave a cursor the skin swallows.
 
-The silhouette is the skin's own. `style` cuts the whole set to one of eight —
+The silhouette is the skin's own. `style` offers the eight established arrow cuts —
 `sharp`, `chisel`, `needle` and `block`, each on its own or `-bold` for a
 two-pixel outline. Left out, the style comes from the skin's colours, so two
 skins get pointers cut differently without anyone choosing, and one skin picks
-the same style every time it is drawn.
+the same style every time it is drawn. `paw` and `paw-bold` are explicit cat themes:
+four toes, visible pads and small movement, slider, resize or close marks.
+Cursor colors come from the visible composite, including paint planes. A paw
+keeps its pads distinct even when the theme's accent matches its fur.
 
 Two skins therefore differ in both colour and cut, and drawing the same skin
 twice changes nothing. It is a starting point, not a substitute for drawing: the
@@ -774,11 +777,75 @@ storing an in-memory clipboard. **Lift pixels** captures only the selected
 layers with their transparency, or the visible composition in Auto; picking up
 pixels does not modify the skin or add a history step.
 
-`studio_study` produces a read-only board: the crop at native size above an
-integer enlargement. `values: true` is a grayscale view, `(54R + 183G + 19B)/256`.
+`studio_study` produces a read-only board: the crop plus four surrounding native
+pixels by default, at native size above an integer enlargement. `padding: 0`
+requests an exact isolated crop; `padding` accepts 0..32 and clamps to the surface.
+The response includes `study.requested_rect`, `context_rect`, source ownership,
+runtime footprints and every overlapping sprite, including its state count. `values: true` is a grayscale view, `(54R + 183G + 19B)/256`.
 `geometry: true` marks sprite footprints; `grid: true` adds a display-only grid;
 `reference` and `reference_rect` place a reference alongside without importing
-its pixels. It changes nothing.
+its pixels. `states: true` produces a labelled 2×2 board for ON/UP, ON/DOWN,
+OFF/UP and OFF/DOWN using immutable view copies. These are editor composites;
+use `studio_screenshot` for runtime content. Neither the view nor the document,
+selection or history changes. State boards require the canvas and full composite.
+
+The GUI Pixel Study also includes four surrounding pixels by default, with a
+toggle for an exact crop. It follows the current composited drawing even after
+a region was lifted; the clipboard remains separate. The crop stays valid at
+canvas edges and shows counts for paintable, runtime-hidden and palette-only pixels.
+
+A quick boundary inspection now takes one call:
+
+```json
+{"name":"studio_study","arguments":{"rect":[208,37,63,24],"states":true,"path":"target/readout-study.png"}}
+```
+
+For an annotated revision, list each marked native rectangle in a manifest and
+run `node tools/skin-studio/region_review.mjs manifest.json before target/review`
+then `after` against the revised document. This captures context, four editor
+states, exact ownership and four actual GPU states for each region, and writes
+a side-by-side HTML board. The script preserves the drawing brush and masks.
+Inspect every crop and its halo; capture and mapping counts are not visual approval.
+
+To count the exact visible colors in a native crop, use the pixel inspector:
+
+```json
+{"name":"studio_pixel","arguments":{"x":40,"y":165,"width":38,"height":52,"palette":true}}
+```
+
+The optional `palette` report includes RGBA values, hexadecimal colors, pixel
+counts, and the total number of distinct colors. It returns the 32 most frequent
+colors, with `truncated: true` if there are more. It samples the rendered canvas
+including visible paint layers without changing the document or undo history.
+Readability diagnostics also use the composited text atlas, including layer
+visibility and opacity, so their reported ink matches the exported player skin.
+
+Before treating space as unavailable, inspect its exact native pixels:
+
+```json
+{"name":"studio_coverage","arguments":{"rect":[16,24,253,60],"rows":true}}
+{"name":"studio_coverage","arguments":{"rect":[0,0,275,377],"path":"target/coverage.png"}}
+```
+
+The tool is read-only. It reports source targets, states, repeated destinations,
+runtime footprints and counts, with an optional character or color map.
+`studio_pixel` always includes the same `paintability` report.
+
+| Map | Meaning |
+| --- | --- |
+| D | Paintable bitmap without a runtime footprint |
+| S | Paintable sprite with states or repeated source cells |
+| R | Paintable bitmap beneath runtime text, digits or a curve |
+| O | Paintable bitmap hidden by the spectrum's opaque GPU background, even while stopped |
+| P | Playlist color fill with no bitmap source; use PLEDIT.TXT |
+| X | No mapped bitmap on the current surface |
+
+Runtime rectangles are not exclusion masks. Paintable margins can sit directly
+beside or beneath readouts. Keep changing text legible and compare the editor
+with `studio_screenshot`: the editor shows underlying artwork that a live
+overlay may cover. Coverage does not apply the current selection, masks, clip,
+or paint-plane locks. On a raw atlas it describes writable source pixels;
+`studio_rectangles {"gaps":true}` identifies pixels no player samples.
 
 ## Source layout
 
@@ -786,7 +853,9 @@ its pixels. It changes nothing.
 | --- | --- |
 | `src/winamp/studio/mapping.rs` | source/destination mappings from Cranamp's own sprite constants; state variants and shared-tile metadata |
 | `src/winamp/studio/model.rs` | editable bitmaps, transactional drawing, history, composition, palette edits, WSZ serialization |
-| `src/winamp/studio/mod.rs` | desktop Cranpose UI and the production-player preview |
+| `src/winamp/studio/model/coverage.rs` | exact paintable pixels, runtime occlusion and palette-only fill |
+| `src/winamp/studio/skin_studio.rs` | SkinStudio workspace and canvas composition |
+| `src/winamp/studio/mod.rs` | shared UI components, desktop host and production-player preview |
 | `src/winamp/studio/draft.rs` | the recoverable draft, and the skin a hosted editor hands back to the player |
 | `src/winamp/studio/mcp.rs` | MCP schemas, the JSON-RPC endpoint, the stdio relay |
 | `tools/skin-studio/client.mjs` | the thin development client |
@@ -810,7 +879,7 @@ reload, both pressed variants, all 28 slider frames, every state mapping's
 bounds, atomic rollback, shared human/MCP undo, and round trips through the
 production skin loader. They verify pixel routing, not illustration quality.
 
-`tests/studio_drawing_e2e.rs` and `tests/studio_handset_e2e.rs` drive the real
+`test/studio_drawing_e2e.rs` and `test/studio_handset_e2e.rs` drive the real
 editor through cranpose's hit dispatch — the first at the reference window size,
 the second at 393×780 — so the claim that one editor lays out at every size is a
 test rather than an intention: the same eight panel buttons, the same panels,
@@ -824,3 +893,39 @@ well as the integer-zoom desktop window.
 Playlist borders must use `TiledSprite`, not `StretchSprite`: nearest-neighbour
 sampling alone does not preserve sprite geometry when a source cell is enlarged
 to fill a border.
+
+## Catamp Catnip
+
+The bundled **Catamp Catnip** skin wears the **Catnip FM** takeover: one warm
+paper canvas, a giant pink noodle cat across the main/EQ join, a sleepy violet
+cat across the EQ/playlist join, and a ginger cat along the footer. Fish, yarn,
+little mice and hand-lettered marks are the controls. Seven editable paint
+layers preserve the large silhouettes, individual characters and final join repairs.
+
+- [Player skin](../../assets/skins/Catamp%20Catnip.wsz)
+- [Layered Studio project](../../assets/skins/Catamp%20Catnip.cstudio)
+- [GPU preview](../../assets/skins/Catamp%20Catnip.png)
+- [Native Studio drawing recipe](../../tools/skin-studio/catnip.mjs)
+
+Open the project with `cargo run -- --skin-studio 'assets/skins/Catamp Catnip.cstudio'`.
+With Studio running, `node tools/skin-studio/catnip.mjs` rebuilds it from the
+bundled Silverplay base using native MCP brushes, paths, stamps and text.
+The recipe checks for unsaved work first, then opens its base, paints all seven
+layers, validates portability and readability, and saves the WSZ, project and
+actual player screenshot.
+
+Review covered active/inactive and released/pressed states, minimum/maximum
+slider positions, and the tallest playlist. The exported WSZ was reloaded and
+rendered identically to the layered project at native resolution.
+
+## Catamp Moon Garden
+
+[Moon Garden](moon-garden.md) adapts an imagegen concept into a native 275×377
+Winamp skin: ivy, lanterns, a distant village and two ivory cats. The new skin
+has its own WSZ, seven-layer project and pixel replay recipe; Catnip remains saved
+separately. The continuous scene is painted through Studio MCP's one-pixel pencil
+using an 80-color grid sampled from the generated reference. Native pixel repairs
+and functional controls adapt that scene to the skin format. Authored pixel clusters
+add bellflowers, moths, fuller foliage and native-size books; the cats retain natural
+proportions and the arch clears the live spectrum. The source image,
+palette grid and exact generation prompt are preserved with the project.

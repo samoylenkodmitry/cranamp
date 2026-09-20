@@ -13,6 +13,24 @@ pub fn crop(im: &RgbaImage, rect: [u32; 4]) -> Result<RgbaImage> {
     );
     Ok(image::imageops::crop_imm(im, x, y, w, h).to_image())
 }
+/// Exact colours in a native crop, ordered by coverage with deterministic ties.
+pub fn palette(im: &RgbaImage, rect: [u32; 4]) -> Result<Value> {
+    let region = crop(im, rect)?;
+    let mut counts = std::collections::BTreeMap::<[u8; 4], u32>::new();
+    for pixel in region.pixels() {
+        *counts.entry(pixel.0).or_default() += 1;
+    }
+    let unique_colors = counts.len();
+    let mut colors: Vec<_> = counts.into_iter().collect();
+    colors.sort_by_key(|(rgba, count)| (std::cmp::Reverse(*count), *rgba));
+    let colors: Vec<_> = colors.into_iter().take(32).map(|(rgba, count)| {
+        serde_json::json!({"rgba": rgba, "hex": format!("#{:02x}{:02x}{:02x}{:02x}", rgba[0], rgba[1], rgba[2], rgba[3]), "pixels": count})
+    }).collect();
+    Ok(
+        serde_json::json!({"rect": rect, "pixels": u64::from(rect[2]) * u64::from(rect[3]), "unique_colors": unique_colors, "truncated": unique_colors > 32, "colors": colors}),
+    )
+}
+
 pub fn enlarged(im: &RgbaImage, zoom: u32, grid: bool) -> RgbaImage {
     let mut out = image::imageops::resize(
         im,
@@ -41,17 +59,128 @@ pub fn value_view(im: &RgbaImage) -> RgbaImage {
     }
     out
 }
-pub fn board(doc: &Document, args: &Value) -> Result<RgbaImage> {
+pub fn context_rect(rect: [u32; 4], size: (u32, u32), padding: u32) -> Result<[u32; 4]> {
+    let [x, y, w, h] = rect;
+    anyhow::ensure!(
+        w > 0
+            && h > 0
+            && x.checked_add(w).is_some_and(|n| n <= size.0)
+            && y.checked_add(h).is_some_and(|n| n <= size.1),
+        "Study rectangle must fit image"
+    );
+    let left = x.saturating_sub(padding);
+    let top = y.saturating_sub(padding);
+    Ok([
+        left,
+        top,
+        (x + w).saturating_add(padding).min(size.0) - left,
+        (y + h).saturating_add(padding).min(size.1) - top,
+    ])
+}
+
+pub fn region(doc: &Document, args: &Value) -> Result<([u32; 4], [u32; 4], u32)> {
+    let size = doc.canvas_size();
     let rect: [u32; 4] = args
         .get("rect")
         .map(|v| serde_json::from_value(v.clone()))
         .transpose()?
         .or(doc.selection)
-        .unwrap_or([0, 0, 80, 60]);
+        .unwrap_or([0, 0, 80.min(size.0), 60.min(size.1)]);
+    let padding = args
+        .get("padding")
+        .map(|v| {
+            v.as_u64()
+                .filter(|n| *n <= 32)
+                .ok_or_else(|| anyhow::anyhow!("Study padding is an integer 0..32"))
+        })
+        .transpose()?
+        .unwrap_or(4) as u32;
+    Ok((rect, context_rect(rect, size, padding)?, padding))
+}
+
+pub fn report(doc: &Document, args: &Value) -> Result<Value> {
+    let (requested, rect, padding) = region(doc, args)?;
+    let (coverage, _) = doc.coverage(rect, false)?;
+    Ok(serde_json::json!({
+        "requested_rect": requested, "context_rect": rect, "padding": padding,
+        "paintability": coverage,
+        "state_order": if args["states"] == true {
+            serde_json::json!([{"active":true,"pressed":false},{"active":true,"pressed":true},
+                {"active":false,"pressed":false},{"active":false,"pressed":true}])
+        } else { serde_json::json!([{"active":doc.view.active,"pressed":doc.view.pressed}]) },
+        "note": "Editor composites, not GPU screenshots. Read the exterior halo and every overlapping target/state; runtime footprints are not exclusion masks. Use studio_screenshot for the live player. No pixels, selection, view or history are changed."
+    }))
+}
+
+pub fn board(doc: &Document, args: &Value) -> Result<RgbaImage> {
+    if args["states"] != true {
+        return board_view(doc, args, None);
+    }
+    anyhow::ensure!(
+        args["selected"] != true,
+        "State studies show the full composite; omit selected"
+    );
+    anyhow::ensure!(
+        doc.view.panel != "atlas",
+        "State studies need the canvas, not an atlas"
+    );
+    let mut panels = Vec::new();
+    for (active, pressed, label) in [
+        (true, false, "ON / UP"),
+        (true, true, "ON / DOWN"),
+        (false, false, "OFF / UP"),
+        (false, true, "OFF / DOWN"),
+    ] {
+        let mut view = doc.view.clone();
+        view.active = active;
+        view.pressed = pressed;
+        panels.push((board_view(doc, args, Some(&view))?, label));
+    }
+    let cell_w = panels[0].0.width().max(96);
+    let cell_h = panels[0].0.height() + 12;
+    anyhow::ensure!(
+        cell_w * 2 <= 8192 && cell_h * 2 <= 8192,
+        "State study too large; use a smaller rectangle"
+    );
+    let mut out = RgbaImage::from_pixel(cell_w * 2, cell_h * 2, Rgba([23, 28, 38, 255]));
+    for (index, (panel, label)) in panels.iter().enumerate() {
+        let x = index as u32 % 2 * cell_w;
+        let y = index as u32 / 2 * cell_h;
+        image::imageops::overlay(&mut out, panel, x as i64, (y + 12) as i64);
+        for (i, ch) in label.chars().enumerate() {
+            for (dy, bits) in crate::winamp::pixel_text::glyph(ch)
+                .unwrap_or([0; 7])
+                .iter()
+                .enumerate()
+            {
+                for dx in 0..5 {
+                    if bits & (1 << (4 - dx)) != 0 {
+                        out.put_pixel(
+                            x + 16 + i as u32 * 6 + dx,
+                            y + 3 + dy as u32,
+                            Rgba([197, 208, 219, 255]),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn board_view(
+    doc: &Document,
+    args: &Value,
+    view: Option<&super::model::View>,
+) -> Result<RgbaImage> {
+    let (_, rect, _) = region(doc, args)?;
     let zoom = args["zoom"].as_u64().unwrap_or(4);
     anyhow::ensure!((1..=8).contains(&zoom), "Study zoom is 1..8");
     let zoom = zoom as u32;
-    let mut im = if args["selected"] == true {
+    let mut im = if let Some(view) = view {
+        let (w, h) = doc.canvas_size();
+        doc.render_patch_for(view, [0, 0, w as i32, h as i32]).image
+    } else if args["selected"] == true {
         doc.selected_image()
     } else {
         doc.render()
@@ -122,43 +251,5 @@ pub fn board(doc: &Document, args: &Value) -> Result<RgbaImage> {
     Ok(out)
 }
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn value_preview_preserves_native_geometry_alpha_and_source() {
-        let im =
-            RgbaImage::from_raw(3, 1, vec![255, 0, 0, 23, 0, 255, 0, 127, 0, 0, 255, 255]).unwrap();
-        let before = im.clone();
-        let v = value_view(&im);
-        assert_eq!(im, before);
-        assert_eq!(v.dimensions(), im.dimensions());
-        assert_eq!(v.get_pixel(0, 0), &Rgba([54, 54, 54, 23]));
-        assert_eq!(v.get_pixel(1, 0), &Rgba([182, 182, 182, 127]));
-        assert_eq!(v.get_pixel(2, 0), &Rgba([19, 19, 19, 255]));
-        let d = Document::blank();
-        let status = d.status();
-        board(&d, &serde_json::json!({"rect":[0,0,20,20],"values":true})).unwrap();
-        assert_eq!(d.status(), status);
-    }
-    #[test]
-    fn studies_are_native_and_read_only() {
-        let d = Document::blank();
-        let before = d.status();
-        let b = board(&d, &serde_json::json!({"rect":[2,3,2,3],"zoom":4})).unwrap();
-        assert_eq!(d.status(), before);
-        assert_eq!(b.dimensions(), (40, 63));
-        for y in 0..3 {
-            for x in 0..2 {
-                for yy in 0..4 {
-                    for xx in 0..4 {
-                        assert_eq!(
-                            b.get_pixel(16 + x * 4 + xx, 35 + y * 4 + yy),
-                            b.get_pixel(16 + x, 16 + y)
-                        );
-                    }
-                }
-            }
-        }
-        assert!(board(&d, &serde_json::json!({"rect":[274,114,2,2]})).is_err());
-    }
-}
+#[path = "../../../test/unit/winamp/studio/study/tests.rs"]
+mod tests;

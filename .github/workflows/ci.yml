@@ -28,7 +28,7 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
       - name: State-holder gate
-        run: python3 scripts/ci/state_holder_gate.py
+        run: python3 test/state_holder_gate.py
       - name: Check native
         run: cargo check --all-targets
       - name: Clippy
@@ -54,7 +54,7 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
       - name: Web host interaction tests
-        run: node --test scripts/test-web-host.mjs
+        run: node --test test/web_host.mjs
       - name: Build wasm widget
         run: ./build-web.sh
 

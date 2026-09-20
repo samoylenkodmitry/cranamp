@@ -1,0 +1,87 @@
+{
+  "name": "Moon Garden marked-boundary review",
+  "padding": 4,
+  "playlist_height": 145,
+  "regions": [
+    {
+      "id": "crown",
+      "rect": [
+        0,
+        0,
+        27,
+        21
+      ],
+      "expectation": "The flower menu has ivy behind it, with no opaque square."
+    },
+    {
+      "id": "sky",
+      "rect": [
+        176,
+        17,
+        95,
+        40
+      ],
+      "expectation": "The crescent, sky and village continue behind both channel states."
+    },
+    {
+      "id": "spectrum",
+      "rect": [
+        14,
+        36,
+        98,
+        39
+      ],
+      "expectation": "The arch rounds the spectrum corner; only the actual opaque runtime footprint remains flat."
+    },
+    {
+      "id": "seek",
+      "rect": [
+        9,
+        66,
+        68,
+        23
+      ],
+      "expectation": "Garden pixels cross the fixed seek-track boundary."
+    },
+    {
+      "id": "preamp",
+      "rect": [
+        12,
+        143,
+        43,
+        78
+      ],
+      "expectation": "The tail narrows before the shared preamp strip instead of being sliced vertically."
+    },
+    {
+      "id": "eq_right",
+      "rect": [
+        228,
+        146,
+        47,
+        80
+      ],
+      "expectation": "The flower bed has an irregular fern edge and a complete lantern."
+    },
+    {
+      "id": "playlist_top",
+      "rect": [
+        0,
+        233,
+        30,
+        36
+      ],
+      "expectation": "The native-width ivy continues from the unique cap into the repeated rail."
+    },
+    {
+      "id": "playlist_foot",
+      "rect": [
+        0,
+        325,
+        38,
+        37
+      ],
+      "expectation": "The rail continues into the footer garden without a chopped triangle."
+    }
+  ]
+}
