@@ -1,11 +1,12 @@
 [package]
 name = "cranamp"
-version = "0.1.69"
+version = "0.1.70"
 edition = "2021"
 description = "A Cranpose-powered Winamp-style multiplatform audio player."
 license = "Apache-2.0"
 repository = "https://github.com/samoylenkodmitry/cranamp"
 publish = false
+autotests = false
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Oz", "--all-features"]
@@ -23,6 +24,38 @@ required-features = ["desktop"]
 name = "cranamp-ios"
 path = "src/ios_main.rs"
 required-features = ["ios"]
+
+[[test]]
+name = "studio_drawing_e2e"
+path = "test/studio_drawing_e2e.rs"
+
+[[test]]
+name = "platform_entry_points"
+path = "test/platform_entry_points.rs"
+
+[[test]]
+name = "web_has_no_filesystem"
+path = "test/web_has_no_filesystem.rs"
+
+[[test]]
+name = "settings_e2e"
+path = "test/settings_e2e.rs"
+
+[[test]]
+name = "studio_handset_e2e"
+path = "test/studio_handset_e2e.rs"
+
+[[test]]
+name = "bundled_skins_are_portable"
+path = "test/bundled_skins_are_portable.rs"
+
+[[test]]
+name = "skin_cursors_e2e"
+path = "test/skin_cursors_e2e.rs"
+
+[[test]]
+name = "test_location"
+path = "test/test_location.rs"
 
 [features]
 default = ["renderer-wgpu", "desktop"]
