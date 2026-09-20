@@ -27,6 +27,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Format
         run: cargo fmt --all --check
+      - name: State-holder gate
+        run: python3 scripts/ci/state_holder_gate.py
       - name: Check native
         run: cargo check --all-targets
       - name: Clippy
