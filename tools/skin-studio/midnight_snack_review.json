@@ -1,0 +1,77 @@
+{
+  "name": "Midnight Snack visual review",
+  "padding": 4,
+  "playlist_height": 145,
+  "regions": [
+    {
+      "id": "upper_cats",
+      "rect": [
+        0,
+        0,
+        275,
+        70
+      ],
+      "expectation": "Both small cats have complete faces outside the live readouts; title controls and channel lamps blend into the scene."
+    },
+    {
+      "id": "hero_join",
+      "rect": [
+        0,
+        82,
+        275,
+        76
+      ],
+      "expectation": "The tabby crosses the main/EQ join; paws remain whole and pressed sprites retain the fur."
+    },
+    {
+      "id": "kitten",
+      "rect": [
+        34,
+        177,
+        46,
+        54
+      ],
+      "expectation": "The stalking kitten fits between the shared preamp and band tracks."
+    },
+    {
+      "id": "playlist_join",
+      "rect": [
+        0,
+        218,
+        275,
+        40
+      ],
+      "expectation": "No face is cut by the repeating title cells; repeated yarn blends into surrounding ground."
+    },
+    {
+      "id": "left_rail",
+      "rect": [
+        0,
+        246,
+        16,
+        103
+      ],
+      "expectation": "The repeating rail connects to both cap and footer."
+    },
+    {
+      "id": "right_rail",
+      "rect": [
+        252,
+        246,
+        23,
+        103
+      ],
+      "expectation": "Scroll sprite and repeated rail have matching ground in every state."
+    },
+    {
+      "id": "footer",
+      "rect": [
+        0,
+        339,
+        275,
+        38
+      ],
+      "expectation": "Sleeping cat silhouette remains complete around readable live time and footer marks."
+    }
+  ]
+}

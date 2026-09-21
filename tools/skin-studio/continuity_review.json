@@ -1,0 +1,57 @@
+{
+  "name": "Midnight Snack — continuous strokes",
+  "padding": 4,
+  "playlist_height": 145,
+  "regions": [
+    {
+      "id": "cat-preamp",
+      "rect": [
+        80,
+        130,
+        126,
+        24
+      ],
+      "expectation": "No orphaned dark preamp stripe across the cat; runtime EQ curve stays a separate live overlay."
+    },
+    {
+      "id": "fabric-join",
+      "rect": [
+        16,
+        200,
+        246,
+        52
+      ],
+      "expectation": "One fabric coordinate system across EQ and playlist title, no phase reset or 18-to-25 pixel jump."
+    },
+    {
+      "id": "rail-left",
+      "rect": [
+        0,
+        238,
+        20,
+        120
+      ],
+      "expectation": "Left border strokes meet title and footer without caps; repeated section works at every height."
+    },
+    {
+      "id": "footer-join",
+      "rect": [
+        105,
+        339,
+        42,
+        38
+      ],
+      "expectation": "Sleeping cat tail and room backdrop meet as one composed painting, without a straight crop edge at x127."
+    },
+    {
+      "id": "rail-right",
+      "rect": [
+        251,
+        238,
+        24,
+        139
+      ],
+      "expectation": "Right border meets header and footer in one continuous stroke."
+    }
+  ]
+}

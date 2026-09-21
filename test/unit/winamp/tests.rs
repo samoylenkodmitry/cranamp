@@ -526,6 +526,24 @@ fn visualizer_bitmap_is_blank_when_stopped() {
         .iter()
         .all(|pixel| *pixel == [0, 0, 0, 255]));
 }
+
+#[test]
+fn keyed_visualizer_background_leaves_art_visible_and_keeps_lit_bars() {
+    let mut palette = VisColor::default();
+    palette.0[0] = [255, 0, 255, 255];
+    let stopped = visualizer_bitmap(false, [0.8; audio::VISUALIZER_BAND_COUNT], palette);
+    assert!(stopped
+        .pixels()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|p| p[3] == 0));
+    let playing = visualizer_bitmap(true, [0.5; audio::VISUALIZER_BAND_COUNT], palette);
+    let pixels = playing.pixels().as_chunks::<4>().0;
+    assert!(pixels.iter().any(|p| p[3] == 0));
+    assert!(pixels.iter().any(|p| p[3] == 255 && p[1] > 180));
+    assert!(!pixels.contains(&[255, 0, 255, 255]));
+}
 #[test]
 fn every_bundled_skin_loads_from_the_bytes_compiled_into_the_binary() {
     for skin in BUNDLED_SKINS {

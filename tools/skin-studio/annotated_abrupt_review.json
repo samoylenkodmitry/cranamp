@@ -1,0 +1,57 @@
+{
+  "name": "Midnight Snack — marked visual breaks",
+  "playlist_height": 145,
+  "padding": 4,
+  "regions": [
+    {
+      "id": "spectrum",
+      "rect": [
+        22,
+        41,
+        83,
+        21
+      ],
+      "expectation": "The live spectrum floats over attic artwork, without an opaque rectangular hole."
+    },
+    {
+      "id": "quilt-top",
+      "rect": [
+        16,
+        143,
+        243,
+        33
+      ],
+      "expectation": "Bedding flows into the quilt without a straight clipped horizontal edge."
+    },
+    {
+      "id": "quilt-left",
+      "rect": [
+        0,
+        151,
+        85,
+        79
+      ],
+      "expectation": "Side illustration, kitten nest and quilt meet without rectangular cutouts."
+    },
+    {
+      "id": "quilt-right",
+      "rect": [
+        238,
+        148,
+        37,
+        82
+      ],
+      "expectation": "Right illustration continues naturally into the quilt."
+    },
+    {
+      "id": "playlist-footer",
+      "rect": [
+        0,
+        326,
+        275,
+        39
+      ],
+      "expectation": "The playlist shadow transitions into the footer without a hard horizontal cut."
+    }
+  ]
+}

@@ -7,5 +7,6 @@ All test code and fixtures live here.
 - `python3 test/state_holder_gate.py` checks remembered state holders.
 - `test/macos/` contains the native docking and playlist-resize checks.
 - `test/ios/run-uitests.sh <device-udid>` runs the Xcode UI suite in `ios/`. Results are written under `target/`.
+- With Skin Studio running, `node test/skin-studio/midnight_snack.mjs` checks project/export GPU equality, exact spectrum/editor pixels, keyed preamp and all 28 EQ track frames, and continuous border/footer pixels at all 29 playlist tile phases. It also captures control states, slider endpoints and five playlist sizes.
 
 Keep implementation files free of test bodies and test-only helpers. The `test_location` integration target checks the boundary.

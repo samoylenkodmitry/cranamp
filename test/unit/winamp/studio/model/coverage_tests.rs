@@ -63,6 +63,31 @@ fn playlist_fill_is_distinct_from_its_editable_footer_at_every_height() {
         assert_eq!(footer["counts"]["paintable"], 1);
     }
 }
+
+#[test]
+fn keyed_spectrum_coverage_and_real_writer_probe_agree_after_export_reload() {
+    let mut doc = canvas();
+    let mut colors = vec!["#ffe8b1"; 24];
+    colors[0] = "#ff00ff";
+    doc.visualizer_palette(&json!({"colors":colors})).unwrap();
+    let mut reloaded = Document::open(&doc.archive().unwrap(), None).unwrap();
+    reloaded.open_on_whole_skin();
+    let (report, _) = reloaded.coverage([24, 43, 76, 16], true).unwrap();
+    assert_eq!(report["counts"]["opaque_runtime"], 0);
+    assert_eq!(report["counts"]["paintable"], 76 * 16);
+    assert!(report["rows"].as_array().unwrap().iter().all(|r| r
+        .as_str()
+        .unwrap()
+        .chars()
+        .all(|c| c == 'R')));
+    let probe = reloaded.probe_pixels([24, 43, 76, 16], false).unwrap();
+    assert_eq!(probe["mismatches"], 0);
+    assert!(probe["states"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| s["coverage"]["counts"]["opaque_runtime"] == 0));
+}
 #[test]
 fn coverage_reports_repeats_and_never_changes_art_history_or_view() {
     let doc = canvas();

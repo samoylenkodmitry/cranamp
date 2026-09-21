@@ -139,7 +139,7 @@ fn making_a_skin_portable_keeps_its_cursors() {
 }
 
 #[test]
-fn magenta_is_a_colour_here_because_it_is_a_colour_in_every_other_player() {
+fn magenta_is_a_sprite_hole_in_composition_and_literal_ink_in_the_atlas() {
     let mut d = Document::blank();
     for p in d.images.get_mut("main.bmp").unwrap().pixels_mut() {
         *p = Rgba([20, 30, 40, 255]);
@@ -150,8 +150,8 @@ fn magenta_is_a_colour_here_because_it_is_a_colour_in_every_other_player() {
     d.state(json!({"panel":"canvas"})).unwrap();
     assert_eq!(
         d.render().get_pixel(40, 90),
-        &Rgba([255, 0, 255, 255]),
-        "the play button is magenta, and that is what every player draws"
+        &Rgba([20, 30, 40, 255]),
+        "Cranamp's sprite key must reveal the local artwork underneath"
     );
     d.state(json!({"panel":"atlas","sheet":"cbuttons.bmp","layers":[]}))
         .unwrap();

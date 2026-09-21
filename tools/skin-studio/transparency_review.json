@@ -1,0 +1,37 @@
+{
+  "name": "Fish without lunchboxes — sprite transparency",
+  "padding": 4,
+  "playlist_height": 145,
+  "regions": [
+    {
+      "id": "horizontal-fish",
+      "rect": [
+        16,
+        54,
+        248,
+        29
+      ],
+      "expectation": "Fish silhouettes reveal the local artwork; no traveling fabric rectangles."
+    },
+    {
+      "id": "equalizer-fish",
+      "rect": [
+        19,
+        154,
+        239,
+        64
+      ],
+      "expectation": "All shared EQ handles are silhouettes in released and pressed states."
+    },
+    {
+      "id": "scroll-fish",
+      "rect": [
+        256,
+        252,
+        11,
+        87
+      ],
+      "expectation": "Complete eight-pixel fish with a keyed exterior throughout scroll travel."
+    }
+  ]
+}

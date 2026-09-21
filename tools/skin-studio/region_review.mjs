@@ -36,7 +36,10 @@ try{
     for(const active of [true,false])for(const pressed of [false,true]){
       await canvas({active,pressed,presentation:true});
       const file=prefix+'-gpu-'+Number(active)+Number(pressed)+'.png';
-      await call('studio_screenshot',{presentation:true,panel:'all',crop,magnify:4,path:path.join(out,file)});
+      // GPU crops already include the player's zoom. Keep a full-width review
+      // under the endpoint's 2048-pixel edge limit instead of failing at 4x.
+      const magnify=Math.max(1,Math.min(4,Math.floor(2048/(Math.max(crop[2],crop[3])*2))));
+      await call('studio_screenshot',{presentation:true,panel:'all',crop,magnify,path:path.join(out,file)});
       images.push({active,pressed,file});
     }
     report[phase].regions.push({...region,crop,coverage,images,state_board:prefix+'-states.png'});

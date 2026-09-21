@@ -1227,7 +1227,10 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                 Modifier::empty().size_points(room.0 + 24., 780.),
                 BoxSpec::default(),
                 move || {
-                    let divergences = { shared.lock().unwrap().divergences() };
+                    let (divergences, transparency) = {
+                        let doc = shared.lock().unwrap();
+                        (doc.divergences(), doc.transparency_report())
+                    };
                     Label("SKIN OPTIONS".into(), 12., 17., 270., 14., FG);
                     Label(
                         "The colours below are the whole skin, apart from the sheets.\nEvery player reads them, so every player shows what you see."
@@ -1241,8 +1244,11 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                     Label("PLAYS THE SAME ELSEWHERE".into(), 12., 86., 260., 11., DIM);
                     if divergences.is_empty() {
                         Label(
-                            "Yes. Every entry in this skin is one the format \ndefines, and every sheet is big enough for its sprites."
-                                .into(),
+                            if transparency["key_pixels"] == 0 {
+                                "Yes. Every entry in this skin is one the format \ndefines, and every sheet is big enough for its sprites."
+                            } else {
+                                "Sprite holes work in Cranamp. Other players'\nmagenta-key support has not been verified."
+                            }.into(),
                             12.,
                             104.,
                             355.,
@@ -1264,6 +1270,13 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                             );
                         }
                     }
+                    let opaque = transparency["opaque_moving_sprites"]
+                        .as_array()
+                        .map_or(0, Vec::len);
+                    Label(
+                        format!("SPRITE TRANSPARENCY\n{opaque} opaque moving cells to review.\n#ff00ff makes a sprite hole; erasing reveals older paint.\nCheck silhouettes at both ends of their travel."),
+                        12., 260., 355., 11., if opaque > 0 { FG } else { DIM },
+                    );
                     let (playlist_colours, visualizer_colours) =
                         { shared.lock().unwrap().text_palettes() };
                     let brush = { shared.lock().unwrap().view.color.clone() };
@@ -1326,7 +1339,7 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                         DIM,
                     );
                     Label(
-                        "24 slots: 0 background, 1 grid dots, 2-17 the analyzer bar from\nthe top of it down to its foot, 18-22 the oscilloscope, 23 the peak dot."
+                        "0 background (#ff00ff reveals skin), 1 dots, 2-17 analyzer.\n18-22 oscilloscope, 23 peak. Click a slot to use the brush color."
                             .into(),
                         12.,
                         560.,
@@ -1900,12 +1913,21 @@ fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
     }
     let d = shared.clone();
     Choice(
-        "Transparent (#ff00ff)".into(),
+        "Sprite hole (#ff00ff)".into(),
         12.,
         82. + field_size.1 + 172.,
         200.,
         current.eq_ignore_ascii_case("#ff00ff"),
         move || state(&d, json!({"color":"#ff00ff"})),
+    );
+    let d = shared.clone();
+    Choice(
+        "Erase this paint layer".into(),
+        12.,
+        82. + field_size.1 + 200.,
+        200.,
+        current == "transparent",
+        move || state(&d, json!({"color":"transparent"})),
     );
 }
 #[composable]
@@ -1924,7 +1946,7 @@ fn StudyChooser(
             (p[1].max(0) / 16 * 16) as u32,
         ]
     });
-    let (im, rect, chosen, coverage) = {
+    let (im, rect, chosen, coverage, flat_count) = {
         let d = shared.lock().unwrap();
         let chosen = d.selection.is_some();
         let mut r = d.selection.unwrap_or_else(|| match at {
@@ -1939,7 +1961,12 @@ fn StudyChooser(
         let r = study::context_rect(r, image.dimensions(), if context.get() { 4 } else { 0 })
             .unwrap_or(r);
         let coverage = d.coverage(r, false).ok().map(|(report, _)| report);
-        (study::crop(&image, r).ok(), r, chosen, coverage)
+        let flat_count = d
+            .flat_regions(r)
+            .ok()
+            .and_then(|v| v["regions"].as_array().map(Vec::len))
+            .unwrap_or(0);
+        (study::crop(&image, r).ok(), r, chosen, coverage, flat_count)
     };
     Label(
         if chosen {
@@ -2030,6 +2057,16 @@ fn StudyChooser(
         }
     }
     let transforms = room.1 - 96.;
+    if flat_count > 0 {
+        Label(
+            format!("{flat_count} flat drawable areas — inspect before leaving blank"),
+            12.,
+            transforms - 62.,
+            room.0,
+            10.,
+            FG,
+        );
+    }
     if let Some(coverage) = coverage {
         let c = &coverage["counts"];
         Label(

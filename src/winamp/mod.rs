@@ -806,6 +806,11 @@ const BUNDLED_SKINS: &[BundledSkin] = &[
         label: "Catamp Moon Garden (Bundled)",
         bytes: include_bytes!("../../assets/skins/Catamp Moon Garden.wsz"),
     },
+    BundledSkin {
+        id: "midnight-snack",
+        label: "Catamp Midnight Snack (Bundled)",
+        bytes: include_bytes!("../../assets/skins/Catamp Midnight Snack.wsz"),
+    },
 ];
 const BUNDLED_PREFIX: &str = "bundled:";
 fn bundled_skin_entry(path: &str) -> Option<&'static BundledSkin> {
