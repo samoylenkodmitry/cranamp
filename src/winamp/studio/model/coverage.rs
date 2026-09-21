@@ -26,6 +26,13 @@ impl Document {
         );
         let layers = self.layers();
         let guides = self.guides();
+        let spectrum_opaque = self
+            .files
+            .get("viscolor.txt")
+            .map(|bytes| crate::winamp::skin::parse_viscolor_txt(bytes))
+            .unwrap_or_default()
+            .background()[3]
+            == 255;
         let runtime: Vec<_> = guides
             .iter()
             .filter(|g| g.runtime && self.view.panel != "atlas" && intersects(rect, g.rect))
@@ -57,10 +64,11 @@ impl Document {
             for xx in x..x + w {
                 let top = layers.iter().rev().find(|l| l.map(xx, yy).is_some());
                 let under_runtime = runtime.iter().any(|g| contains(g.rect, xx, yy));
-                // draw_visualizer fills its entire rectangle even while stopped.
-                let opaque_runtime = runtime
-                    .iter()
-                    .any(|g| g.label == "SPECTRUM" && contains(g.rect, xx, yy));
+                // A keyed VISCOLOR background reveals the real skin underneath.
+                let opaque_runtime = spectrum_opaque
+                    && runtime
+                        .iter()
+                        .any(|g| g.label == "SPECTRUM" && contains(g.rect, xx, yy));
                 let palette_only = match self.view.panel.as_str() {
                     "canvas" => contains([12, 252, 243, sh.saturating_sub(290)], xx, yy),
                     "playlist" => contains([12, 20, 243, sh.saturating_sub(58)], xx, yy),
@@ -119,7 +127,7 @@ impl Document {
                 "X":"No mapped bitmap source on this surface.",
             },
             "targets":targets.into_values().collect::<Vec<_>>(),
-            "runtime_footprints":runtime.iter().map(|g|json!({"id":g.id,"rect":g.rect,"opaque_background":g.label=="SPECTRUM"})).collect::<Vec<_>>(),
+            "runtime_footprints":runtime.iter().map(|g|json!({"id":g.id,"rect":g.rect,"opaque_background":spectrum_opaque && g.label=="SPECTRUM"})).collect::<Vec<_>>(),
             "note":"Coverage describes source ownership, independent of selection, clip, masks and locked paint planes. Runtime footprints are not exclusion masks: inspect the exact pixels, keep live content legible, and verify the actual GPU player. Bitmap fonts and shared cells may affect other states or locations.",
         });
         if rows {

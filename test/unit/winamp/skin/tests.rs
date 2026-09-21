@@ -3,6 +3,18 @@ use crate::winamp::cursors::SkinCursor;
 use cranpose_ui::PointerIcon;
 use std::io::{Cursor, Read, Write};
 #[test]
+fn bmp_sprite_key_becomes_gpu_alpha_but_neighboring_purple_stays_ink() {
+    let mut bytes = Cursor::new(Vec::new());
+    let image =
+        image::RgbImage::from_raw(3, 1, vec![255, 0, 255, 254, 0, 255, 128, 0, 128]).unwrap();
+    image.write_to(&mut bytes, image::ImageFormat::Bmp).unwrap();
+    let decoded = decode_bmp(bytes.get_ref()).unwrap();
+    assert_eq!(
+        decoded.pixels(),
+        &[0, 0, 0, 0, 254, 0, 255, 255, 128, 0, 128, 255]
+    );
+}
+#[test]
 fn normalize_name_extracts_file_name() {
     assert_eq!(normalize_name("SKINS\\MAIN.BMP"), "main.bmp");
     assert_eq!(normalize_name("foo/bar/PLAYPAUS.BMP"), "playpaus.bmp");
@@ -212,6 +224,13 @@ fn sample_text_bitmap_color_skips_opaque_background() {
     )
     .expect("test bitmap should be valid");
     assert_eq!(sample_text_bitmap_color(&bitmap), Some([12, 20, 28, 255]));
+}
+#[test]
+fn display_ink_ignores_literal_sprite_keys_in_editor_atlases() {
+    assert_eq!(
+        sample_display_ink(&[255, 0, 255, 255, 8, 16, 24, 255], 2),
+        Some([12, 20, 28, 255])
+    );
 }
 #[test]
 fn load_bundled_skin_parses_pledit_palette() {

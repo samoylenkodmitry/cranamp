@@ -1,0 +1,57 @@
+{
+  "name": "Midnight Snack — blank area correction",
+  "padding": 4,
+  "playlist_height": 145,
+  "regions": [
+    {
+      "id": "readouts",
+      "rect": [
+        40,
+        20,
+        225,
+        39
+      ],
+      "expectation": "Continuous dark attic artwork beneath live glyphs; only the exact spectrum rectangle is opaque."
+    },
+    {
+      "id": "horizontal_sliders",
+      "rect": [
+        17,
+        55,
+        248,
+        28
+      ],
+      "expectation": "Continuous setting across every track, readable fish handles with no broad empty strips."
+    },
+    {
+      "id": "equalizer_field",
+      "rect": [
+        19,
+        154,
+        239,
+        64
+      ],
+      "expectation": "Shared tracks and gaps contain joined fabric artwork, not cleared rectangles."
+    },
+    {
+      "id": "equalizer_playlist_join",
+      "rect": [
+        0,
+        214,
+        275,
+        38
+      ],
+      "expectation": "Illustrated quilt/cats meet repeated cap without reinstating flat blank cells."
+    },
+    {
+      "id": "footer",
+      "rect": [
+        0,
+        339,
+        275,
+        38
+      ],
+      "expectation": "Complete sleeping cat and detailed native footer margins beneath readouts."
+    }
+  ]
+}

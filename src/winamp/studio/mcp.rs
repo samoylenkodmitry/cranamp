@@ -218,16 +218,17 @@ fn operation_schema() -> Value {
         "align":{"enum":["left","center","right"],"description":"Put the word in a box width wide that starts at x, rather than at x itself. A centred caption is (cell - ink) / 2."},
         "points":{"type":"array","items":{"type":"array","items":{"type":"number"}},
                   "description":"Relative to x/y, first point is the start: [x,y] line, [cx,cy,x,y] quadratic, [c1x,c1y,c2x,c2y,x,y] cubic."},
-        "color":{"type":"string","description":"#rrggbb; #ff00ff erases."},
+        "color":{"type":"string","description":"#rrggbb or #rrggbbaa. Opaque #ff00ff punches a sprite hole through to the artwork beneath it; it is preserved in BMP export. transparent / alpha 0 erases only the active paint layer and reveals older sprite paint. Use full opacity for exact key pixels."},
         "ramp":{"type":"array","items":{"type":"string"},"description":"Exact palette colours along ramp_axis. A short ramp gives bands, not a gradient."},
         "ramp_axis":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},
-        "rows":{"type":"array","items":{"type":"string"},"description":"One character per pixel. A character the palette lacks is skipped, which is how you spell transparency."},
+        "rows":{"type":"array","items":{"type":"string"},"description":"One character per pixel. Missing palette characters SKIP and preserve existing paint. For a complete sprite silhouette, fill its whole cell with #ff00ff first, then stamp the shape, or map spaces explicitly to #ff00ff. Never copy a fixed background into a moving handle."},
         "palette":{"type":"object","additionalProperties":{"type":"string"}},
         "text":{"type":"string","description":"The word to set, in one of the two faces. The pen moves (cell+spacing)*scale per character, where cell is 5 or 4. studio_canvas measure gives the width first. It has A-Z a-z 0-9 - : . , / \\ \" ( ) [ ] + = _ ! ? & # % * < > | only. unsupported_characters names the rest."},
         "face":{"enum":["5x7","small"],"description":"small is a 4x5 small-caps face for the cells a classic skin gives a word and no room for one -- a 14-pixel equalizer caption, a 27-pixel mono lamp. It has no lower case, so a-z are drawn as capitals rather than skipped."},
         "scale":{"type":"integer","minimum":1,"maximum":8},
         "spacing":{"type":"integer","minimum":-2,"maximum":8},
-        "data":{"type":"string","description":"Base64 PNG, at most 2048x2048, one source pixel per skin pixel. Alpha 0 stays put. Part alpha blends with the surface as it stands and lands opaque. Good to add light to art that is there, bad for a redraw."},
+        "data":{"type":"string","description":"Base64 PNG, at most 2048x2048. Defaults to one source pixel per skin pixel. source_rect crops first; explicit width AND height then resize with nearest neighbour, preserving hard pixel edges. Alpha 0 stays put. Part alpha blends with the surface as it stands and lands opaque."},
+        "source_rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4,"description":"For image only: [x,y,width,height] inside the source PNG, before optional resizing. Defaults to the whole image."},
         "material":{"enum":["glass"],"description":"Lay glass into a filled shape, tinted with the brush colour."},
         "bevel":{"type":"number","minimum":1,"maximum":128},
         "refraction":{"type":"number","minimum":0,"maximum":32},
@@ -247,9 +248,10 @@ fn tools() -> Vec<Value> {
         tool("studio_rectangles", "Where each sprite state sits on the canvas, plus the two kinds of rectangle that have no sprite. Narrow it with at, sheet, id, runtime for the readouts the player writes, or hit for controls the player hit-tests but never draws. gaps lists the parts of a sheet no cell uses.", json!({"select":{"type":"string"},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One substring, or several. Case does not matter."},"at":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4,"description":"Everything that overlaps this [x,y,width,height] box on the surface in hand: what a new band would cross. A plain list says where each one is, not what sits next to what."},"runtime":{"type":"boolean"},"gaps":{"type":"boolean","description":"The parts of one sheet no sprite reads, as rectangles, so you can keep ink out of them. pledit.bmp column 125 falls between the two footer flaps. Takes sheet, or uses the open one."},"hit":{"type":"boolean"}}), &[]),
         tool("studio_layers", "Paint planes above the original sheets. list, add, select, set, move, merge_down and delete. A plane has a name, an opacity, and switches for shown, locked and clipped to the plane below.", json!({"action":{"enum":["list","add","select","set","move","merge_down","delete"]},"id":{"type":"string"},"name":{"type":"string"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"clip_below":{"type":"boolean"},"opacity":{"type":"integer","minimum":0,"maximum":255},"index":{"type":"integer","minimum":0}}), &[]),
         tool("studio_options", "The skin apart from its sheets: the six PLEDIT.TXT colours and the 24 VISCOLOR.TXT colours. It answers readability: the contrast of every colour the player writes against the art behind it. Leave everything out to read them all.", json!({"playlist_colors":{"type":"object","additionalProperties":{"type":"string"}},"visualizer_colors":{"type":"array","items":{"type":"string"},"minItems":24,"maxItems":24}}), &[]),
-        tool("studio_validate", "Whether this skin looks the same in every player that reads .wsz. It names each entry no player reads, each sheet the format needs and the skin lacks, and each sheet too small for its own sprites. An empty list means the skin is portable. fix repairs what it can: it drops the entries no player reads and grows the sheets that are too small.", json!({"fix":{"type":"boolean","description":"Repair instead of report. A grown sheet repeats its own edge into the new rows, so it looks the way it looked before."}}), &[]),
+        tool("studio_validate", "Check format divergences and sprite transparency. Empty divergences means the archive structure passes; keyed sprites keep plays_the_same_elsewhere false because other players' color-key support is unverified. transparency lists moving cells and opaque_moving_sprites to review. fix repairs missing/undersized sheets and unpainted alpha pixels, preserving deliberate #ff00ff holes.", json!({"fix":{"type":"boolean","description":"Repair instead of report. A grown sheet repeats its own edge into the new rows. Deliberate sprite holes are never baked into a fixed background."}}), &[]),
         tool("studio_cursors", "The pointers a skin shows over its own regions: the 18 .cur files a classic player reads, from the main window's plain arrow to the playlist's resize corner. Leave everything out to list which regions are drawn. draw makes the missing ones in the skin's own colours and opens them on the canvas, where every brush works on them as on any sheet. regions narrows any action to the ones you name. overwrite redraws regions that already have a cursor. remove drops them. hotspot moves the point a region's pointer actually points at.", json!({"action":{"enum":["list","draw","remove","hotspot"]},"regions":{"type":"array","items":{"type":"string"},"description":"Region names such as normal, titlebar, posbar, volbar, eqslid, psize, with or without .cur. Leave it out for every region."},"overwrite":{"type":"boolean","description":"Redraw a region that already has a cursor instead of leaving the artwork alone."},"style":{"enum":super::cursor_art::Style::ALL.iter().map(|style|style.name()).collect::<Vec<_>>(),"description":"The silhouette the whole set is cut to. paw and paw-bold draw cat paws with functional direction marks. Left out, the established arrow styles are chosen from the skin palette."},"hotspot":{"type":"array","items":{"type":"integer","minimum":0},"minItems":2,"maxItems":2,"description":"Where in the 32x32 image the pointer actually points. An arrow points at its own tip, a slider at its middle."}}), &[]),
         tool("studio_status", "The shared document: path, revision, unsaved edits, history depth, sheets, paint planes and the whole view. surface says which surface a stroke lands on.", json!({}), &[]),
+        tool("studio_probe", "Probe EVERY native pixel with the real paint engine on a disposable document, in all four active/pressed views and all source variants. Separates writable sources from palette-only fill and opaque runtime content. No live document changes. rect defaults to the entire current surface. path writes complete JSON with per-pixel coverage and verified rows; rows includes the maps in the reply too. Use before leaving any blank for controls.", json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"rows":{"type":"boolean"},"path":{"type":"string"}}), &[]),
         tool("studio_coverage", "Inspect exact pixel ownership before treating a region as unavailable. Separates paintable pixels, stateful/repeated sprites, paintable backgrounds beneath runtime footprints, and palette-only playlist fill. Runtime footprints are NOT exclusion masks. Read-only; rows adds a character map, image or path adds a color map.", json!({"rect":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"rows":{"type":"boolean"},"image":{"type":"boolean"},"path":{"type":"string"}}), &["rect"]),
         tool("studio_new", "Make an empty classic skin. Nothing is kept from the old one. Set discard to true if there are unsaved edits.", json!({"discard":{"type":"boolean"}}), &[]),
         tool("studio_open", "Load a WSZ into the open Studio. Set discard to true if there are unsaved edits.", json!({"path":{"type":"string"},"discard":{"type":"boolean"}}), &["path"]),
@@ -264,7 +266,12 @@ fn tools() -> Vec<Value> {
         tool("studio_redo", "Redo one step of the shared history.", json!({}), &[]),
         tool("studio_screenshot", "The player's own scene, as the GPU draws it, once the revision you ask for is on screen. panel crops to one window in that window's coordinates. crop takes scene pixels, or that panel's own skin pixels when panel is given too. presentation puts the window into the live stack first.", json!({"path":{"type":"string"},"panel":{"enum":["main","equalizer","playlist","all"]},"presentation":{"type":"boolean"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"Enlarge the capture, nearest neighbour, up to 2048 pixels a side. One transport key is 23x18 of a 1280x1000 scene."}}), &[]),
         tool("studio_export", "Write a WSZ. It runs through the player's own skin loader first and writes the file in one step. It reports undrawn_sprites for sprites still empty and hard_to_read for a readout under 3:1. It never refuses for either. Left without a path it writes back over the file the skin was opened from, so a run of open, edit, export cannot put one skin's artwork under another skin's name.", json!({"path":{"type":"string","description":"Where to write. Left out, the skin is written back where it came from."}}), &["path"]),
-    ]
+    ].into_iter().map(|mut entry| {
+        if entry["name"] == "studio_draw" {
+            entry["inputSchema"]["properties"]["require_continuity"] = json!({"type":"boolean","description":"On the joined canvas, refuse and roll back a draw whose final opaque ink is clipped, hidden/replaced by another sprite, conflicting in shared cells, or unmapped. states:all checks all four active/pressed composites. The continuity report includes exact native samples and covering sources. Intentional occlusion can warn; keyed holes and erasure are not ink checks. Preview reports without committing."});
+        }
+        entry
+    }).collect()
 }
 fn text(value: Value) -> Value {
     json!({"content":[{"type":"text","text":value.to_string()}]})
@@ -572,6 +579,27 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
             }
             report
         }
+        "studio_probe" => {
+            let (w, h) = doc.canvas_size();
+            let rect = args
+                .get("rect")
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()?
+                .unwrap_or([0, 0, w, h]);
+            let mut report =
+                doc.probe_pixels(rect, args["rows"] == true || args["path"].is_string())?;
+            if let Some(path) = args["path"].as_str() {
+                std::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
+                if args["rows"] != true {
+                    for state in report["states"].as_array_mut().unwrap() {
+                        state.as_object_mut().unwrap().remove("verified_rows");
+                        state["coverage"].as_object_mut().unwrap().remove("rows");
+                    }
+                }
+                report["path"] = json!(wrote(path));
+            }
+            report
+        }
         "studio_coverage" => {
             let rect = serde_json::from_value(args["rect"].clone())
                 .context("rect must be [x,y,width,height]")?;
@@ -786,6 +814,10 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                     .map(|(k, v)| (k.to_string(), json!(v)))
                     .collect::<serde_json::Map<String, Value>>(),
                 "visualizer_colors": visualizer,
+                "visualizer_background": {
+                    "transparent": visualizer.first().is_some_and(|c| c.eq_ignore_ascii_case("#ff00ff")),
+                    "note": "Set background slot 0 to #ff00ff to reveal skin artwork beneath the spectrum. Lit bars remain visible. Other players may interpret this color differently."
+                },
                 "visualizer_slots": VISUALIZER_SLOTS,
                 "readability": readability,
             })
@@ -824,9 +856,11 @@ pub fn call(name: &str, args: Value, shared: &SharedDocument) -> Result<Value> {
                 doc.make_portable("MCP")?
             } else {
                 let divergences = doc.divergences();
+                let transparency = doc.transparency_report();
                 json!({
-                    "plays_the_same_elsewhere": divergences.is_empty(),
+                    "plays_the_same_elsewhere": divergences.is_empty() && transparency["key_pixels"] == 0,
                     "divergences": divergences,
+                    "transparency": transparency,
                 })
             }
         }

@@ -81,6 +81,11 @@ A stroke may cross a window boundary; each pixel is routed to whichever BMP
 sheet owns it. Layer IDs are qualified: `main.background`,
 `equalizer.background`, `playlist.bottom.right`.
 
+Author a crossing once in canvas coordinates, keeping one texture phase across
+components. Every `studio_draw` includes a visible-ink `continuity` report;
+`require_continuity:true` rolls back an interrupted or unverified stroke.
+See [continuous strokes](continuity.md) for scope and review requirements.
+
 Classic playlist rails repeat every 29 rows; the header tile is 25×20 and is drawn nine
 times; the footer follows the final cropped tile at any height. Tiles are drawn
 at native size and cropped, never stretched.
@@ -100,9 +105,11 @@ sharing the pencil and the history. `← The whole skin` returns.
 | `volume.bmp` | 68×433 | `pledit.bmp` | 280×190 |
 | | | `text.bmp` | 155×18 |
 
-Plus `pledit.txt` and `viscolor.txt`. That is the whole skin. Cranamp reads no
-sheet the classic format does not define, so a skin drawn here looks the same in
-any player that reads `.wsz`. `studio_validate` is what keeps it that way.
+Plus `pledit.txt` and `viscolor.txt`. These are the classic skin sheets. Cranamp
+interprets opaque `#ff00ff` as a sprite hole and as a transparent VISCOLOR
+background in slot 0. This reveals painted artwork beneath live spectrum bars;
+other players' interpretation of the key is not verified. `studio_validate`
+reports export differences and transparency usage.
 
 A skin also carries Windows `.cur` cursor files — `NORMAL.CUR`, `TITLEBAR.CUR`,
 `VOLBAR.CUR` and the rest of the classic set. They are drawn here like anything
@@ -284,7 +291,7 @@ both panels, and every drawing operation may override its own.
 
 | Field | Range | Panel control |
 | --- | --- | --- |
-| `color` | `#rrggbb`; `#ff00ff` erases | colour pills, HEX box, **Colour picker…** |
+| `color` | `#rrggbb`; opaque `#ff00ff` is a sprite hole; `transparent` erases the active layer | colour pills, HEX box, **Colour picker…** |
 | `brush_size` | 1..32 | WIDTH |
 | `filled` | bool | **Fill shapes** |
 | `ramp_to`, `ramp_axis` | colour or null; `down`/`across` | GRADIENT |
@@ -507,12 +514,13 @@ Whether the skin looks the same everywhere. It names three things:
 | an entry no player reads | it is dead weight, and whatever it holds is invisible |
 | a classic sheet the skin lacks | every player needs it |
 | a sheet smaller than its own sprites | part of a state falls outside it |
-| clear pixels a sprite reads | a `.wsz` sheet is opaque; another player draws them flat magenta |
+| clear pixels a sprite reads | RGB BMP cannot retain alpha; unpainted base pixels export as black |
 
 `{"fix": true}` repairs all four. It drops the entries no player reads, grows
 and adds the sheets, and paints every clear pixel the colour the player already
-showed under it, so the skin keeps the face it had. Run it until it answers
-`plays_the_same_elsewhere`; one pass repairs one round of consequences.
+showed under it, so the skin keeps the face it had. Deliberate magenta sprite
+holes are preserved. Keyed skins keep `plays_the_same_elsewhere: false` because
+other players' key support is unverified. See [sprite transparency](transparency.md).
 
 ### PLEDIT.TXT
 
@@ -747,8 +755,10 @@ one entry per variant.
 | `studio_export` | `path`, `bytes`, and when there is something to say `undrawn_sprites` and `hard_to_read` |
 | `studio_layers`, `studio_history`, `studio_project` | the planes, the history (seekable with `cursor`), the project file |
 
-`ground` and `readability` read every opaque pixel as ink, `#ff00ff` included:
-a `.wsz` sheet is opaque and every player draws magenta as magenta.
+`ground` and `readability` use the composed canvas, where opaque `#ff00ff`
+reveals the next sprite beneath it. Raw atlas and selected clipboard views
+retain the literal key. Draw, study, validate and export include a `transparency`
+report; review every `opaque_moving_sprites` cell at multiple positions.
 
 ### studio_screenshot
 
@@ -917,6 +927,16 @@ actual player screenshot.
 Review covered active/inactive and released/pressed states, minimum/maximum
 slider positions, and the tallest playlist. The exported WSZ was reloaded and
 rendered identically to the layered project at native resolution.
+
+## Catamp Midnight Snack
+
+[Midnight Snack](midnight-snack.md) is a continuous cat snack party with a tabby
+across the main/EQ join, fish-shaped faders, a native fish moon across the
+EQ/playlist join, and five editable painting layers. The recipe uses Studio's
+[explicit image cropping and native sizing](image-stamps.md), then paints
+control states and details with native brushes. It is available in the bundled
+skin picker. The [pixel audit](pixel-audit.md) probes every native pixel and
+reports flat drawable areas for visual review.
 
 ## Catamp Moon Garden
 

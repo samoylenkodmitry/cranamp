@@ -1,0 +1,13 @@
+# Midnight Snack blank-area correction
+
+The earlier review missed broad drawable holes. I requested empty control regions in the reference prompt, then explicitly cleared the readout surround, slider tracks, EQ field, playlist cap and footer. I treated readability and shared-source constraints as reasons for empty backgrounds. The existing coverage tool already said runtime footprints were not exclusions; I failed to act on that information. Portability tests and attractive cat crops did not justify approving the whole composition.
+
+The baseline is preserved locally in `target/blank-audit-before.cstudio`. The native correction rectangles are in [blank_audit_review.json](../../tools/skin-studio/blank_audit_review.json), with before/after editor crops, four-pixel halos and four GPU states in `target/blank-audit-review/index.html`.
+
+The exhaustive paint-engine probe checked 103,675 native pixels in each of four active/pressed views: **414,700 checks, zero mismatches**. At the standard 275×377 canvas size, 82,534 pixels have writable bitmap sources; 21,141 are palette-only playlist fill. Of the writable pixels, 1,216 lie behind the opaque spectrum. All other bitmap space can carry artwork, including underneath runtime text. The source targets still impose sharing between repeated slider cells.
+
+The new flat-area diagnostic caught the original holes: a 12,343-pixel component near the main readouts with a 52×52 solid square, and a 21,741-pixel component around the EQ/cap with a 37×37 solid square. The repaired skin restores the illustrated attic behind readouts and horizontal controls; all shared EQ track states carry woven fabric aligned with the intervening background; the cap and footer carry artwork. Small cats fit complete source regions. Crop edges were blended using lifted native Studio pixels, and the duplicate footer-cat remnant was removed.
+
+The remaining flat-area reports concern small uniform parts of the deliberate fabric pattern (8×8 squares), not the original broad midnight-plum clears. These warnings remain visible rather than being suppressed. The classic playlist interior and opaque spectrum still use runtime fills.
+
+Validation: 307 Rust unit tests and 35 integration tests passed, including exhaustive per-pixel probes, read-only behavior, resized playlist geometry and flat-area detection beneath text. RustRover build succeeded. The live GPU check passed: it compares the layered project with the WSZ byte-for-byte and captures slider extremes, four focus/press states and five playlist heights. Visual review and machine checks are separate evidence; see the saved GPU preview and local crop board.

@@ -1,8 +1,11 @@
+mod audit;
+mod continuity;
 mod coverage;
 #[cfg(test)]
 #[path = "../../../test/unit/winamp/studio/model/join_tests.rs"]
 mod join_tests;
 mod patch;
+mod transparency;
 use super::mapping::{self, Layer};
 use anyhow::{bail, Context, Result};
 use image::{Pixel, Rgba, RgbaImage};
@@ -394,6 +397,7 @@ pub struct Document {
     painted_bounds: Option<[i32; 4]>,
     clipped_pixels: usize,
     atlas_writes: BTreeMap<AtlasPixel, AtlasInk>,
+    stroke_intent: BTreeMap<[i32; 2], [u8; 4]>,
     operation_box: Option<(usize, [u32; 4])>,
     overwrites: usize,
     overwrite_note: Option<String>,
@@ -549,6 +553,7 @@ impl Document {
             painted_bounds: None,
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
+            stroke_intent: BTreeMap::new(),
             operation_box: None,
             preview: None,
             overwrites: 0,
@@ -606,6 +611,7 @@ impl Document {
             clipped_pixels: 0,
             atlas_writes: BTreeMap::new(),
             operation_box: None,
+            stroke_intent: BTreeMap::new(),
             preview: None,
             overwrites: 0,
             overwrite_note: None,
@@ -735,6 +741,10 @@ impl Document {
                     self.unmapped_pixels.len()
                 );
                 self.revision += 1;
+            }
+            let review = self.stroke_continuity(self.view.states == SCOPE_ALL);
+            if review["continuous"] == false {
+                self.message.push_str(&format!("; stroke interrupted: {} hidden/replaced pixel-state checks; inspect overlapping sprites", review["mismatches"]));
             }
         }
     }
@@ -1219,11 +1229,15 @@ impl Document {
     }
     fn forget_atlas_writes(&mut self) {
         self.atlas_writes.clear();
+        self.stroke_intent.clear();
         self.overwrites = 0;
         self.overwrite_note = None;
     }
     fn note_atlas_writes(&mut self, touched: Vec<AtlasWrite>) {
         for (key, colour, at) in touched {
+            if self.view.panel == "canvas" {
+                self.stroke_intent.insert(at, colour);
+            }
             self.operation_box = match self.operation_box {
                 Some((sheet, [x0, y0, w, h])) if sheet == key.0 => {
                     let (nx, ny) = (x0.min(key.1), y0.min(key.2));
@@ -1411,7 +1425,11 @@ impl Document {
                         continue;
                     };
                     if let Some(pixel) = stack.at(layer.source[0] + sx, layer.source[1] + sy) {
-                        if pixel.0[3] > 0 {
+                        if pixel.0[3] > 0
+                            && (view.panel == "atlas"
+                                || layer.sheet.ends_with(".cur")
+                                || !crate::winamp::skin::is_sprite_key(pixel.0))
+                        {
                             image.put_pixel(x - x0, y - y0, pixel);
                         }
                     }
@@ -1581,6 +1599,18 @@ impl Document {
         let composite = self.composite_images();
         let hits: Vec<Value> = self.layers().iter().rev().filter_map(|l| l.map(x, y).map(|(sx, sy)| json!({"layer":l.id,"sheet":l.sheet,"atlas_pixel":[l.source[0]+sx,l.source[1]+sy],"local_pixel":[sx,sy],"variants":l.variants.len(),"shared_or_stretched":l.stretched(),"rgba":composite.get(&l.sheet).and_then(|im|im.get_pixel_checked(l.source[0]+sx,l.source[1]+sy)).map(|p|p.0)}))).collect();
         let mut out = json!({"canvas_pixel":[x,y],"surface":self.surface(),"hits":hits});
+        for hit in out["hits"].as_array_mut().unwrap() {
+            let rgba = serde_json::from_value::<[u8; 4]>(hit["rgba"].clone()).ok();
+            hit["sprite_key"] = json!(
+                rgba.is_some_and(crate::winamp::skin::is_sprite_key)
+                    && hit["sheet"].as_str().is_some_and(|s| s.ends_with(".bmp"))
+            );
+        }
+        out["visible_rgba"] = json!(self
+            .render_patch([x as i32, y as i32, 1, 1])
+            .image
+            .get_pixel_checked(0, 0)
+            .map(|p| p.0));
         if w != 1 || h != 1 {
             out["rect"] = json!(rect);
         }
@@ -2495,6 +2525,50 @@ impl Document {
                                 im.width() <= 2048 && im.height() <= 2048,
                                 "Image is at most 2048x2048"
                             );
+                            if let Some(rect) = op.get("source_rect") {
+                                let rect = rect
+                                    .as_array()
+                                    .context("image source_rect needs [x,y,width,height]")?;
+                                anyhow::ensure!(
+                                    rect.len() == 4,
+                                    "image source_rect needs four integers"
+                                );
+                                let r: Vec<u32> = rect
+                                    .iter()
+                                    .map(|v| {
+                                        v.as_u64()
+                                            .and_then(|n| u32::try_from(n).ok())
+                                            .context("image source_rect needs nonnegative integers")
+                                    })
+                                    .collect::<Result<_>>()?;
+                                anyhow::ensure!(
+                                    r[2] > 0
+                                        && r[3] > 0
+                                        && r[0]
+                                            .checked_add(r[2])
+                                            .is_some_and(|end| end <= im.width())
+                                        && r[1]
+                                            .checked_add(r[3])
+                                            .is_some_and(|end| end <= im.height()),
+                                    "image source_rect must be inside the source image"
+                                );
+                                im = image::imageops::crop_imm(&im, r[0], r[1], r[2], r[3])
+                                    .to_image();
+                            }
+                            if op.get("width").is_some() || op.get("height").is_some() {
+                                let (width, height) =
+                                    (integer(op, "width", 0)?, integer(op, "height", 0)?);
+                                anyhow::ensure!(
+                                    (1..=2048).contains(&width) && (1..=2048).contains(&height),
+                                    "image resizing needs both width and height in 1..=2048"
+                                );
+                                im = image::imageops::resize(
+                                    &im,
+                                    width as u32,
+                                    height as u32,
+                                    image::imageops::FilterType::Nearest,
+                                );
+                            }
                             if im.pixels().any(|p| p[3] > 0 && p[3] < 255) {
                                 let base = self.render_patch([
                                     x,
@@ -2630,11 +2704,22 @@ impl Document {
             if places.len() > 1 {
                 report["repeated"] = json!({"places": places.len()});
             }
+            report["continuity"] = self.stroke_continuity(base_scope == Scope::All);
             if !swept.is_empty() {
                 report["swept"] = json!({"fields": swept.clone(), "steps": steps});
             }
             if let Some(covered) = self.covered_by_a_sibling_part() {
                 report["covered_pixels"] = covered;
+            }
+            if let Some([x0, y0, x1, y1]) = bounds {
+                if let Ok(review) = self.flat_regions([
+                    x0 as u32,
+                    y0 as u32,
+                    (x1 - x0 + 1) as u32,
+                    (y1 - y0 + 1) as u32,
+                ]) {
+                    report["flat_drawable_areas"] = review;
+                }
             }
             self.preview = Some(self.render());
             self.restore(before);
@@ -2644,6 +2729,14 @@ impl Document {
             self.painted_bounds = bounds;
             report["ms"] = json!(started.elapsed().as_millis() as u64);
             return Ok(report);
+        }
+        let continuity = self.stroke_continuity(base_scope == Scope::All);
+        if args["require_continuity"] == true && continuity["continuous"] != true {
+            self.restore(before);
+            self.revision = before_revision;
+            self.dirty = before_dirty;
+            self.unmapped_pixels = previous_unmapped;
+            bail!("Joined stroke refused without changing artwork/history: {continuity}");
         }
         if before != self.snapshot() {
             self.changed();
@@ -2767,6 +2860,44 @@ impl Document {
             if self.view.panel == "atlas" {
                 result["note"] = json!(note);
             }
+        }
+        if let Some([x0, y0, x1, y1]) = self.painted_bounds {
+            if (x1 - x0 + 1) as i64 * (y1 - y0 + 1) as i64 >= 256 {
+                let review = self.flat_regions([
+                    x0 as u32,
+                    y0 as u32,
+                    (x1 - x0 + 1) as u32,
+                    (y1 - y0 + 1) as u32,
+                ]);
+                match review {
+                    Ok(review) => {
+                        let count = review["regions"].as_array().unwrap().len();
+                        if count > 0 {
+                            self.message
+                                .push_str(&format!("; {count} flat drawable areas need review"));
+                            result["flat_drawable_areas"] = review;
+                        }
+                    }
+                    Err(error) => {
+                        result["flat_area_review_unavailable"] = json!(error.to_string());
+                    }
+                }
+            }
+        }
+        if continuity["continuous"] == false {
+            self.message.push_str(
+                "; stroke interrupted: inspect continuity samples and overlapping sprites",
+            );
+        }
+        result["continuity"] = continuity;
+        result["transparency"] = self.transparency_report();
+        if !result["transparency"]["opaque_moving_sprites"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+        {
+            self.message
+                .push_str("; opaque moving sprite cells need review");
         }
         result["ms"] = json!(started.elapsed().as_millis() as u64);
         Ok(result)
@@ -2930,7 +3061,7 @@ impl Document {
             .collect();
         entries.sort();
         let mut found = crate::winamp::skin::divergences(&entries);
-        for (sheet, image) in &self.images {
+        for (sheet, image) in &self.composite_images() {
             let Some((mask, width)) = self.sampled_mask(sheet) else {
                 continue;
             };
@@ -2946,10 +3077,10 @@ impl Document {
                     entry: sheet.clone(),
                     problem: format!(
                         "{clear} pixels a sprite reads are clear, and a .wsz sheet \
-                         cannot hold clear pixels; another player draws them as \
-                         flat magenta"
+                         cannot hold alpha; unpainted pixels export as black"
                     ),
-                    fix: "paint them, or move the sprite off them".into(),
+                    fix: "paint them; use opaque #ff00ff for deliberate Cranamp sprite holes"
+                        .into(),
                 });
             }
         }
@@ -3164,7 +3295,10 @@ impl Document {
         self.finish_stroke();
         let found = self.divergences();
         if found.is_empty() {
-            return Ok(json!({"plays_the_same_elsewhere":true,"changed":[]}));
+            let transparency = self.transparency_report();
+            return Ok(
+                json!({"plays_the_same_elsewhere":transparency["key_pixels"] == 0,"changed":[],"transparency":transparency}),
+            );
         }
         self.record(self.snapshot(), "Make the skin portable".into(), source);
         let mut changed: Vec<String> = Vec::new();
@@ -3215,7 +3349,8 @@ impl Document {
         changed.extend(self.flatten_clear_sprite_pixels());
         self.changed();
         Ok(json!({
-            "plays_the_same_elsewhere": self.divergences().is_empty(),
+            "plays_the_same_elsewhere": self.divergences().is_empty() && self.transparency_report()["key_pixels"] == 0,
+            "transparency": self.transparency_report(),
             "changed": changed,
         }))
     }
@@ -4058,8 +4193,22 @@ impl Document {
                 unreadable.len()
             ));
         }
+        let flat = self.canvas_flat_review()?;
+        if !flat.as_array().unwrap().is_empty() {
+            self.message
+                .push_str("; flat drawable areas need visual review");
+        }
         self.revision += 1;
-        let mut out = json!({"path":path,"bytes":bytes.len()});
+        let transparency = self.transparency_report();
+        if !transparency["opaque_moving_sprites"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+        {
+            self.message
+                .push_str("; opaque moving sprite cells need review");
+        }
+        let mut out = json!({"path":path,"bytes":bytes.len(),"flat_drawable_areas":flat,"transparency":transparency});
         if !undrawn.is_empty() {
             out["undrawn_sprites"] = json!(undrawn);
         }

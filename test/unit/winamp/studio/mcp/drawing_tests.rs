@@ -144,6 +144,87 @@ fn an_image_stamps_its_opaque_pixels_and_leaves_the_transparent_ones_alone() {
     assert_eq!(doc.render().get_pixel(40, 30).0, [0x11, 0x22, 0x33, 0xff]);
     assert_eq!(doc.render().get_pixel(41, 31).0, before);
 }
+
+#[test]
+fn an_image_crop_resizes_with_exact_pixels_and_keeps_transparency() {
+    let shared = blank();
+    result(
+        &shared,
+        "studio_draw",
+        json!({"layers":["main.background"],
+        "operations":[{"op":"rect","x":120,"y":20,"width":4,"height":4,"color":"#202060"}]}),
+    );
+    let mut im = image::RgbaImage::from_pixel(4, 2, image::Rgba([255, 0, 0, 255]));
+    im.put_pixel(1, 0, image::Rgba([0x11, 0x22, 0x33, 255]));
+    im.put_pixel(2, 0, image::Rgba([0x44, 0x55, 0x66, 255]));
+    im.put_pixel(1, 1, image::Rgba([0, 0, 0, 0]));
+    im.put_pixel(2, 1, image::Rgba([255, 255, 255, 128]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    im.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    result(
+        &shared,
+        "studio_draw",
+        json!({"layers":["main.background"],
+        "operations":[{"op":"image","x":120,"y":20,"data":base64(png.get_ref()),
+            "source_rect":[1,0,2,2],"width":4,"height":4}]}),
+    );
+    let doc = shared.lock().unwrap();
+    let rendered = doc.render();
+    for y in 0..4 {
+        for x in 0..4 {
+            let expected = match (x / 2, y / 2) {
+                (0, 0) => [0x11, 0x22, 0x33, 255],
+                (1, 0) => [0x44, 0x55, 0x66, 255],
+                (0, 1) => [0x20, 0x20, 0x60, 255],
+                _ => [0x90, 0x90, 0xb0, 255],
+            };
+            assert_eq!(rendered.get_pixel(120 + x, 20 + y).0, expected);
+        }
+    }
+    drop(doc);
+    result(&shared, "studio_undo", json!({}));
+    assert_eq!(
+        shared.lock().unwrap().render().get_pixel(120, 20).0,
+        [0x20, 0x20, 0x60, 255]
+    );
+}
+
+#[test]
+fn invalid_image_geometry_rolls_back_the_entire_transaction() {
+    let shared = blank();
+    let im = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 255, 255, 255]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    im.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let before = shared.lock().unwrap().render();
+    let status = result(&shared, "studio_status", json!({}));
+    for geometry in [
+        json!({"width":4}),
+        json!({"width":0,"height":4}),
+        json!({"width":2049,"height":4}),
+        json!({"width":2.5,"height":4}),
+        json!({"source_rect":[1,0,2,2]}),
+        json!({"source_rect":[0,0,0,2]}),
+        json!({"source_rect":[0,0,2]}),
+        json!({"source_rect":[-1,0,1,1]}),
+        json!({"source_rect":[4294967295u64,0,2,2]}),
+    ] {
+        let mut op = json!({"op":"image","x":120,"y":20,"data":base64(png.get_ref())});
+        op.as_object_mut()
+            .unwrap()
+            .extend(geometry.as_object().unwrap().clone());
+        let refused = call(
+            "studio_draw",
+            json!({"layers":["main.background"],
+            "operations":[{"op":"pixel","x":120,"y":20,"color":"#123456"},op]}),
+            &shared,
+        );
+        assert!(refused.is_err(), "{geometry}");
+        assert_eq!(shared.lock().unwrap().render(), before, "{geometry}");
+        let after = result(&shared, "studio_status", json!({}));
+        assert_eq!(after["revision"], status["revision"]);
+        assert_eq!(after["undo"], status["undo"]);
+    }
+}
 #[test]
 fn a_stroke_reports_what_fell_outside_the_sprites_it_was_aimed_at() {
     let shared = blank();

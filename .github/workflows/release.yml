@@ -202,6 +202,7 @@ jobs:
              "assets/skins/Catamp Seance.wsz" "assets/skins/Catamp Salvage.wsz" \
              "assets/skins/Catamp Freefall.wsz" \
              "assets/skins/Catamp Catnip.wsz" "assets/skins/Catamp Moon Garden.wsz" \
+             "assets/skins/Catamp Midnight Snack.wsz" \
              "$package_dir/skins/"
           cp assets/demo-music/generated/*.mp3 "$package_dir/demo-music/"
           cp assets/demo-music/generated/cranamp-demo-playlist.m3u "$package_dir/demo-music/"

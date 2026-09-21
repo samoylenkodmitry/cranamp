@@ -61,7 +61,12 @@ impl VisColor {
         self.0[23]
     }
     pub fn background(&self) -> [u8; 4] {
-        self.0[0]
+        // Match sprite holes: a keyed spectrum leaves the skin underneath visible.
+        if is_sprite_key(self.0[0]) {
+            [0; 4]
+        } else {
+            self.0[0]
+        }
     }
     pub fn dots(&self) -> [u8; 4] {
         self.0[1]
@@ -159,7 +164,7 @@ pub(crate) fn sample_display_ink(pixels: &[u8], total_pixels: usize) -> Option<[
     let mut opaque_pixels = 0usize;
     let mut counts: HashMap<[u8; 3], usize> = HashMap::new();
     for pixel in pixels.as_chunks::<4>().0 {
-        if pixel[3] < 128 {
+        if pixel[3] < 128 || is_sprite_key(*pixel) {
             continue;
         }
         opaque_pixels += 1;
@@ -289,9 +294,19 @@ fn normalize_name(name: &str) -> String {
         .trim()
         .to_ascii_lowercase()
 }
+/// Opaque magenta is the sprite hole marker in Cranamp bitmap sheets.
+/// Keep it opaque while editing/exporting; decode it only at presentation time.
+pub(crate) fn is_sprite_key(pixel: [u8; 4]) -> bool {
+    pixel == [255, 0, 255, 255]
+}
 fn decode_bmp(bytes: &[u8]) -> Result<ImageBitmap> {
     let dynamic = image::load_from_memory(bytes).context("image decode")?;
-    let rgba = dynamic.to_rgba8();
+    let mut rgba = dynamic.to_rgba8();
+    for pixel in rgba.pixels_mut() {
+        if is_sprite_key(pixel.0) {
+            *pixel = image::Rgba([0, 0, 0, 0]);
+        }
+    }
     ImageBitmap::from_rgba8(rgba.width(), rgba.height(), rgba.into_raw())
         .context("failed to create image bitmap")
 }

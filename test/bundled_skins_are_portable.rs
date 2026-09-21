@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 use cranamp::winamp::skin;
 #[test]
-fn every_bundled_skin_plays_the_same_in_any_player_that_reads_wsz() {
+fn every_bundled_skin_uses_classic_entries_and_loads() {
     let mut checked = 0;
     for entry in std::fs::read_dir("assets/skins").expect("assets/skins") {
         let path = entry.expect("a directory entry").path();
@@ -13,7 +13,7 @@ fn every_bundled_skin_plays_the_same_in_any_player_that_reads_wsz() {
         let found = skin::divergences(&entries);
         assert!(
             found.is_empty(),
-            "{} carries something no other player honours: {found:#?}",
+            "{} has unsupported archive differences: {found:#?}",
             path.display()
         );
         skin::load_skin(&bytes).expect("the player's own loader takes it");

@@ -104,6 +104,8 @@ pub fn report(doc: &Document, args: &Value) -> Result<Value> {
     Ok(serde_json::json!({
         "requested_rect": requested, "context_rect": rect, "padding": padding,
         "paintability": coverage,
+        "flat_drawable_areas": doc.flat_regions(rect)?,
+        "transparency": doc.transparency_report(),
         "state_order": if args["states"] == true {
             serde_json::json!([{"active":true,"pressed":false},{"active":true,"pressed":true},
                 {"active":false,"pressed":false},{"active":false,"pressed":true}])
