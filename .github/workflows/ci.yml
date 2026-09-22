@@ -54,7 +54,7 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
       - name: Web host interaction tests
-        run: node --test test/web_host.mjs
+        run: node --test test/web_host.mjs test/release_workflow.mjs
       - name: Build wasm widget
         run: ./build-web.sh
 

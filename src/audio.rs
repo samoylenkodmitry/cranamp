@@ -242,7 +242,7 @@ fn equalizer_value_gain_db(value: f32) -> f32 {
 }
 fn media_item(track: &Track) -> Option<MediaItem> {
     let path = track.path.as_deref()?;
-    let uri = if has_uri_scheme(path) {
+    let uri = if cfg!(target_arch = "wasm32") || has_uri_scheme(path) {
         path.to_string()
     } else {
         cranpose_services::uri_for_path(std::path::Path::new(path))
