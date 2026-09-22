@@ -43,7 +43,8 @@ fn a_drawer_named_on_the_document_is_the_drawer_this_layout_opens() {
         ("tools", "DRAWING TOOLS"),
         ("layers", "PAINTING LAYERS"),
         ("targets", "SPRITE TARGETS"),
-        ("options", "SKIN OPTIONS"),
+        ("options", "CLASSIC WINAMP SKIN"),
+        ("equalizer", "EQ WORKBENCH"),
         ("history", "EDIT HISTORY"),
     ] {
         let document = cranamp::winamp::studio::open_document(None).expect("a document");
@@ -108,13 +109,13 @@ fn stamp_repeat_and_sweep_are_reachable_where_there_is_no_sidebar() {
     }
 }
 #[test]
-fn whether_the_skin_plays_the_same_elsewhere_is_reachable_where_there_is_no_sidebar() {
+fn the_export_format_check_is_reachable_where_there_is_no_sidebar() {
     let document = cranamp::winamp::studio::open_document(None).expect("a document");
     open(&document, "options", "pencil");
     let mut shell = touch(document);
     let texts = visible_texts(&mut shell);
     assert!(
-        contains(&texts, "PLAYS THE SAME ELSEWHERE"),
-        "a hand needs the portability readout too; visible={texts:?}"
+        contains(&texts, "EXPORT FORMAT CHECK"),
+        "the export format check must be available on a handset; visible={texts:?}"
     );
 }
