@@ -1,0 +1,47 @@
+{
+  "name": "Purr Chaos continuous controls",
+  "playlist_height": 145,
+  "padding": 4,
+  "regions": [
+    {
+      "id": "title-shade",
+      "rect": [
+        234,
+        0,
+        30,
+        16
+      ],
+      "expectation": "Title illustration and shade/close controls share a continuous backdrop in both focus states."
+    },
+    {
+      "id": "volume-balance",
+      "rect": [
+        103,
+        55,
+        137,
+        19
+      ],
+      "expectation": "Both paw controls move over continuous artwork with no pale rectangular frames."
+    },
+    {
+      "id": "seek-branch",
+      "rect": [
+        14,
+        70,
+        251,
+        20
+      ],
+      "expectation": "The golden fish continues through the seek area; the moving sardine tin has no paper-colored cutout at any travel position."
+    },
+    {
+      "id": "scroll-footer",
+      "rect": [
+        253,
+        336,
+        20,
+        26
+      ],
+      "expectation": "Repeated right rail flows into the footer and kitten without a bright rectangular splice."
+    }
+  ]
+}

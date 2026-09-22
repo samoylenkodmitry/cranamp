@@ -45,6 +45,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let undo_at = action.take(76.);
     let redo_at = action.take(76.);
     let live_at = action.take(140.);
+    let classic_at = action.take(170.);
     let sheet_at = action.take(150.);
     let pan_at = (!scene.sidebar()).then(|| action.take(96.));
     let (player_at, apply_at) = if hosted {
@@ -92,6 +93,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
             &[
                 (1, "Sprite targets", 120.),
                 (9, "Skin options", 116.),
+                (10, "EQ workbench", 124.),
                 (3, "Skin atlases", 116.),
                 (2, "Edit history", 108.),
             ]
@@ -105,6 +107,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 (2, "Edit history", 108.),
                 (5, "Pixel study", 104.),
                 (9, "Skin options", 116.),
+                (10, "EQ workbench", 124.),
             ]
         };
         list.iter()
@@ -492,6 +495,14 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     }
                 },
             );
+            Label(
+                "Classic Winamp skin".into(),
+                classic_at.0 + 6.,
+                classic_at.1 + 7.,
+                160.,
+                11.,
+                DIM,
+            );
             let sheet_doc = document.clone();
             let has_subject = sheet_subject.is_some();
             Toggle(
@@ -639,7 +650,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     export_at.0,
                     export_at.1,
                     88.,
-                    move || match d.lock().unwrap().archive() {
+                    move || match d.lock().unwrap().export_archive() {
                         Ok(bytes) => {
                             pending_export.set(Some(bytes));
                             export.launch(cranpose::SaveDocumentRequest::new(
@@ -1719,6 +1730,8 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                             ColorChooser(d.clone(), revision, room);
                         } else if open_drawer == 9 {
                             SkinOptionsChooser(d.clone(), revision, room);
+                        } else if open_drawer == 10 {
+                            equalizer::EqualizerChooser(d.clone(), revision, room, review, live);
                         } else {
                             Label("SKIN ATLASES".into(), 12., 17., 260., 14., FG);
                             Label(

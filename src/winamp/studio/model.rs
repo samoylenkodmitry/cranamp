@@ -1,10 +1,13 @@
 mod audit;
 mod continuity;
 mod coverage;
+mod equalizer;
+mod font;
 #[cfg(test)]
 #[path = "../../../test/unit/winamp/studio/model/join_tests.rs"]
 mod join_tests;
 mod patch;
+mod regions;
 mod transparency;
 use super::mapping::{self, Layer};
 use anyhow::{bail, Context, Result};
@@ -191,6 +194,7 @@ pub const DRAWERS: &[&str] = &[
     "picker",
     "files",
     "states",
+    "equalizer",
 ];
 pub(super) struct Patch {
     pub(super) image: RgbaImage,
@@ -263,6 +267,7 @@ pub struct View {
     pub zoom: u32,
     pub preview_playlist_height: u32,
     pub presentation: bool,
+    pub classic_preview: bool,
     pub color: String,
     pub brush_size: u32,
     pub brush: String,
@@ -312,6 +317,7 @@ impl Default for View {
             zoom: 3,
             preview_playlist_height: 145,
             presentation: false,
+            classic_preview: true,
             color: "#ffffff".into(),
             brush_size: 1,
             brush: "pencil".into(),
@@ -365,6 +371,7 @@ pub struct PaintLayer {
 }
 #[derive(Clone, PartialEq)]
 struct Snapshot {
+    eq_artwork_only: bool,
     planes: Vec<PaintLayer>,
     images: BTreeMap<String, RgbaImage>,
     files: BTreeMap<String, Vec<u8>>,
@@ -376,6 +383,7 @@ struct HistoryItem {
     source: String,
 }
 pub struct Document {
+    pub eq_artwork_only: bool,
     pub planes: Vec<PaintLayer>,
     pub view: View,
     pub revision: u64,
@@ -460,6 +468,17 @@ fn cursor_hotspot(data: &[u8]) -> [u32; 2] {
         .unwrap_or_default()
 }
 
+/// The preview and the BMP writer share this matte for unfinished paint.
+/// A completed export must have opaque source pixels; layers may still use alpha.
+fn classic_pixel(pixel: [u8; 4]) -> [u8; 4] {
+    let alpha = u32::from(pixel[3]);
+    [
+        ((u32::from(pixel[0]) * alpha + 127) / 255) as u8,
+        ((u32::from(pixel[1]) * alpha + 127) / 255) as u8,
+        ((u32::from(pixel[2]) * alpha + 127) / 255) as u8,
+        255,
+    ]
+}
 fn archive_entry(name: &str, data: &[u8], image: Option<&RgbaImage>) -> Result<Vec<u8>> {
     let Some(image) = image else {
         return Ok(data.to_vec());
@@ -476,9 +495,7 @@ fn archive_entry(name: &str, data: &[u8], image: Option<&RgbaImage>) -> Result<V
     }
     let mut opaque = image.clone();
     for pixel in opaque.pixels_mut() {
-        if pixel.0[3] < 128 {
-            pixel.0 = [0, 0, 0, 255];
-        }
+        pixel.0 = classic_pixel(pixel.0);
     }
     let mut bytes = Cursor::new(Vec::new());
     image::DynamicImage::ImageRgba8(opaque)
@@ -528,11 +545,13 @@ impl Document {
             files.insert(name.to_string(), vec![]);
         }
         let saved = Snapshot {
+            eq_artwork_only: false,
             planes: vec![],
             images: images.clone(),
             files: files.clone(),
         };
         Self {
+            eq_artwork_only: false,
             planes: vec![],
             view: View::default(),
             revision: 0,
@@ -590,7 +609,11 @@ impl Document {
             }
             files.insert(name, data);
         }
+        let eq_artwork_only = images
+            .get("eqmain.bmp")
+            .is_some_and(|im| im.width() >= 275 && im.height() == 163);
         Ok(Self {
+            eq_artwork_only,
             planes: vec![],
             view: View::default(),
             revision: 0,
@@ -598,6 +621,7 @@ impl Document {
             path,
             dirty: false,
             saved: Snapshot {
+                eq_artwork_only,
                 planes: vec![],
                 images: images.clone(),
                 files: files.clone(),
@@ -627,12 +651,14 @@ impl Document {
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
+            eq_artwork_only: self.eq_artwork_only,
             planes: self.planes.clone(),
             images: self.images.clone(),
             files: self.files.clone(),
         }
     }
     fn restore(&mut self, s: Snapshot) {
+        self.eq_artwork_only = s.eq_artwork_only;
         self.images = s.images;
         self.planes = s.planes;
         if self
@@ -743,6 +769,12 @@ impl Document {
                 self.revision += 1;
             }
             let review = self.stroke_continuity(self.view.states == SCOPE_ALL);
+            if self.scope_writes.keys().any(|id| {
+                id.starts_with("equalizer.band")
+                    && (id.ends_with(".track") || id.ends_with(".thumb"))
+            }) {
+                self.message.push_str("; EQ source is shared by all eleven bands. EQ workbench previews mixed levels.");
+            }
             if review["continuous"] == false {
                 self.message.push_str(&format!("; stroke interrupted: {} hidden/replaced pixel-state checks; inspect overlapping sprites", review["mismatches"]));
             }
@@ -824,6 +856,8 @@ impl Document {
             object.insert(k.clone(), v.clone());
         }
         let mut view: View = serde_json::from_value(value)?;
+        // Older projects stored false. Classic semantics are now unconditional.
+        view.classic_preview = true;
         if (view.panel != self.view.panel || view.sheet != self.view.sheet)
             && patch.get("clip").is_none()
         {
@@ -1017,11 +1051,11 @@ impl Document {
     pub fn sheet_note(sheet: &str) -> Option<&'static str> {
         match sheet {
             "text.bmp" => Some(
-                "text.bmp is not drawn. Cranamp sets titles and readouts in its \
-                 own 5x7 face and reads this sheet only to sample the display \
-                 ink: the most common opaque colour, or the second most common \
-                 when more than two thirds of the sheet is opaque. Paint it in \
-                 the colour the readouts should be.",
+                "text.bmp supplies the actual 5x6 bitmap glyphs for titles, bitrate, \
+                 sample rate and playlist timers. Row 0: A-Z, quote, @ and space at \
+                 column 30. Row 1 starts with 0-9, then punctuation. Row 2 starts \
+                 with Å Ö Ä ? *. Keep glyphs inside their cells; preview reads every \
+                 pixel, including the background. Classic players copy it opaquely.",
             ),
             "titlebar.bmp" => Some(
                 "Most of this sheet is classic shade-mode artwork Cranamp does \
@@ -1090,6 +1124,14 @@ impl Document {
     fn sampled_mask(&self, sheet: &str) -> Option<(Vec<bool>, u32)> {
         let (w, h) = self.images.get(sheet)?.dimensions();
         let mut mask = vec![false; (w as usize) * (h as usize)];
+        if sheet == "text.bmp" {
+            for y in 0..h.min(18) {
+                let row_width = if y < 12 { 155 } else { 25 };
+                for x in 0..w.min(row_width) {
+                    mask[(y * w + x) as usize] = true;
+                }
+            }
+        }
         let mut view = self.view.clone();
         view.panel = "canvas".into();
         view.preview_playlist_height = 522;
@@ -1172,7 +1214,16 @@ impl Document {
         let layers = mapping::layers(view);
         layers
             .into_iter()
+            .map(|mut layer| {
+                if layer.sheet == "numbers.bmp" && self.images.contains_key("nums_ex.bmp") {
+                    layer.sheet = "nums_ex.bmp".into();
+                }
+                layer
+            })
             .filter(|layer| self.images.contains_key(&layer.sheet))
+            .filter(|layer| {
+                !(self.eq_artwork_only && layer.sheet == "eqmain.bmp" && layer.source[1] >= 163)
+            })
             .collect()
     }
     fn cursor_layers(&self) -> Vec<Layer> {
@@ -1425,17 +1476,20 @@ impl Document {
                         continue;
                     };
                     if let Some(pixel) = stack.at(layer.source[0] + sx, layer.source[1] + sy) {
-                        if pixel.0[3] > 0
-                            && (view.panel == "atlas"
-                                || layer.sheet.ends_with(".cur")
-                                || !crate::winamp::skin::is_sprite_key(pixel.0))
-                        {
-                            image.put_pixel(x - x0, y - y0, pixel);
+                        if layer.sheet.ends_with(".cur") {
+                            if pixel.0[3] > 0 {
+                                image.put_pixel(x - x0, y - y0, pixel);
+                            }
+                        } else {
+                            // Match the 24-bit export even for an unfinished source cell.
+                            // Export validation requires the author to resolve this alpha.
+                            image.put_pixel(x - x0, y - y0, Rgba(classic_pixel(pixel.0)));
                         }
                     }
                 }
             }
         }
+        self.clip_region_preview(view, &mut image, origin);
         Patch { image, origin }
     }
     fn sheet_stack(&self, sheet: &str) -> Option<SheetStack<'_>> {
@@ -1601,7 +1655,8 @@ impl Document {
         let mut out = json!({"canvas_pixel":[x,y],"surface":self.surface(),"hits":hits});
         for hit in out["hits"].as_array_mut().unwrap() {
             let rgba = serde_json::from_value::<[u8; 4]>(hit["rgba"].clone()).ok();
-            hit["sprite_key"] = json!(
+            hit["sprite_key"] = json!(false);
+            hit["literal_magenta"] = json!(
                 rgba.is_some_and(crate::winamp::skin::is_sprite_key)
                     && hit["sheet"].as_str().is_some_and(|s| s.ends_with(".bmp"))
             );
@@ -3052,10 +3107,16 @@ impl Document {
             .files
             .keys()
             .map(|name| {
-                let size = self
-                    .images
-                    .get(name)
-                    .map(|image| (image.width(), image.height()));
+                let size = self.images.get(name).map(|image| {
+                    (
+                        image.width(),
+                        if self.eq_artwork_only && name == "eqmain.bmp" {
+                            163
+                        } else {
+                            image.height()
+                        },
+                    )
+                });
                 (name.clone(), size)
             })
             .collect();
@@ -3069,7 +3130,11 @@ impl Document {
                 .iter()
                 .enumerate()
                 .filter(|(i, sampled)| {
-                    **sampled && image.get_pixel(*i as u32 % width, *i as u32 / width).0[3] < 128
+                    **sampled
+                        && !(self.eq_artwork_only
+                            && sheet == "eqmain.bmp"
+                            && *i as u32 / width >= 163)
+                        && image.get_pixel(*i as u32 % width, *i as u32 / width).0[3] < 255
                 })
                 .count();
             if clear > 0 {
@@ -3079,7 +3144,7 @@ impl Document {
                         "{clear} pixels a sprite reads are clear, and a .wsz sheet \
                          cannot hold alpha; unpainted pixels export as black"
                     ),
-                    fix: "paint them; use opaque #ff00ff for deliberate Cranamp sprite holes"
+                    fix: "Paint an opaque background in every source variant. BMP controls have no alpha or color key."
                         .into(),
                 });
             }
@@ -3087,62 +3152,7 @@ impl Document {
         found.sort_by(|a, b| a.entry.cmp(&b.entry));
         found
     }
-    fn flatten_clear_sprite_pixels(&mut self) -> Vec<String> {
-        let mut view = self.view.clone();
-        view.panel = "canvas".into();
-        view.preview_playlist_height = 522;
-        let (w, h) = self.canvas_size_for(&view);
-        let canvas = self
-            .render_patch_for(&view, [0, 0, w as i32, h as i32])
-            .image;
-        let layers = self.layers_for(&view);
-        let mut filled: std::collections::BTreeMap<String, u32> = Default::default();
-        for layer in &layers {
-            let Some(image) = self.images.get(&layer.sheet) else {
-                continue;
-            };
-            let (w, h) = image.dimensions();
-            let [dx, dy, dw, dh] = layer.destination;
-            let mut paint: Vec<(u32, u32, Rgba<u8>)> = Vec::new();
-            for variant in &layer.variants {
-                for y in 0..dh {
-                    for x in 0..dw {
-                        let sx = variant[0] + x * variant[2] / dw.max(1);
-                        let sy = variant[1] + y * variant[3] / dh.max(1);
-                        if sx >= w || sy >= h || image.get_pixel(sx, sy).0[3] >= 128 {
-                            continue;
-                        }
-                        let under = canvas
-                            .get_pixel_checked(dx + x, dy + y)
-                            .copied()
-                            .filter(|p| p.0[3] >= 128)
-                            .unwrap_or(Rgba([0, 0, 0, 255]));
-                        paint.push((sx, sy, Rgba([under.0[0], under.0[1], under.0[2], 255])));
-                    }
-                }
-            }
-            if paint.is_empty() {
-                continue;
-            }
-            let sheet = layer.sheet.clone();
-            let image = self.images.get_mut(&sheet).expect("the sheet is there");
-            let mut count = 0;
-            for (x, y, colour) in paint {
-                if image.get_pixel(x, y).0[3] < 128 {
-                    image.put_pixel(x, y, colour);
-                    count += 1;
-                }
-            }
-            *filled.entry(sheet).or_default() += count;
-        }
-        filled
-            .into_iter()
-            .filter(|(_, count)| *count > 0)
-            .map(|(sheet, count)| {
-                format!("painted {count} clear pixels in {sheet} the colour the player already showed there")
-            })
-            .collect()
-    }
+
     pub fn cursors_report(&self) -> Value {
         let drawn: Vec<Value> = crate::winamp::cursors::SkinCursor::files()
             .into_iter()
@@ -3291,68 +3301,12 @@ impl Document {
         let y = (at[1] as i32 + dy).clamp(0, height.saturating_sub(1) as i32) as u32;
         self.set_cursor_hotspot(role, x, y, source)
     }
-    pub fn make_portable(&mut self, source: &str) -> Result<Value> {
+    pub fn make_portable(&mut self, _source: &str) -> Result<Value> {
         self.finish_stroke();
-        let found = self.divergences();
-        if found.is_empty() {
-            let transparency = self.transparency_report();
-            return Ok(
-                json!({"plays_the_same_elsewhere":transparency["key_pixels"] == 0,"changed":[],"transparency":transparency}),
-            );
-        }
-        self.record(self.snapshot(), "Make the skin portable".into(), source);
-        let mut changed: Vec<String> = Vec::new();
-        let clear: Vec<String> = found
-            .iter()
-            .filter(|d| d.problem.contains("clear"))
-            .map(|d| d.entry.clone())
-            .collect();
-        for divergence in found.iter().filter(|d| !clear.contains(&d.entry)) {
-            let entry = divergence.entry.clone();
-            let classic = crate::winamp::skin::CLASSIC_SHEETS
-                .iter()
-                .find(|(sheet, _, _)| *sheet == entry);
-            let Some((_, width, height)) = classic else {
-                self.images.remove(&entry);
-                self.files.remove(&entry);
-                if self.view.sheet == entry {
-                    self.view.sheet = "main.bmp".into();
-                }
-                changed.push(format!("dropped {entry}, which no player reads"));
-                continue;
-            };
-            let grown = match self.images.get(&entry) {
-                Some(old) => {
-                    let (was, tall) = old.dimensions();
-                    let mut image = RgbaImage::new((*width).max(was), (*height).max(tall));
-                    for y in 0..image.height() {
-                        for x in 0..image.width() {
-                            let pixel = *old.get_pixel(x.min(was - 1), y.min(tall - 1));
-                            image.put_pixel(x, y, pixel);
-                        }
-                    }
-                    changed.push(format!(
-                        "grew {entry} from {was}x{tall} to {}x{}, repeating its edge",
-                        image.width(),
-                        image.height()
-                    ));
-                    image
-                }
-                None => {
-                    changed.push(format!("added {entry} at {width}x{height}, empty"));
-                    RgbaImage::new(*width, *height)
-                }
-            };
-            self.images.insert(entry.clone(), grown);
-            self.files.insert(entry, Vec::new());
-        }
-        changed.extend(self.flatten_clear_sprite_pixels());
-        self.changed();
-        Ok(json!({
-            "plays_the_same_elsewhere": self.divergences().is_empty() && self.transparency_report()["key_pixels"] == 0,
-            "transparency": self.transparency_report(),
-            "changed": changed,
-        }))
+        let report = self.classic_report()?;
+        anyhow::ensure!(report["exportable"] == true,
+            "Automatic portability repair cannot choose artwork for shared or moving cells. Resolve the exact divergences from studio_validate, paint opaque backgrounds in every variant, then validate again. No artwork was changed.");
+        Ok(report)
     }
     pub(super) fn text_palettes(&self) -> (Vec<(&'static str, String)>, Vec<String>) {
         let hex = |c: [u8; 4]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
@@ -3880,7 +3834,14 @@ impl Document {
                 .compression_method(zip::CompressionMethod::Deflated);
             z.start_file("base.wsz", opts)?;
             z.write_all(&self.archive_with_images(&self.images)?)?;
-            let manifest = json!({"version":1,"view":self.view,"skin_path":self.path,"layers":self.paint_layer_info()["layers"]});
+            let manifest = json!({"version":2,"format_profile":"classic-winamp-v1","eq_artwork_only":self.eq_artwork_only,"view":self.view,"skin_path":self.path,"layers":self.paint_layer_info()["layers"]});
+            // A project preserves unfinished base alpha independently of the opaque WSZ preview.
+            for (name, image) in &self.images {
+                z.start_file(format!("base/{name}.png"), opts)?;
+                let mut data = Cursor::new(Vec::new());
+                image.write_to(&mut data, image::ImageFormat::Png)?;
+                z.write_all(data.get_ref())?;
+            }
             z.start_file("project.json", opts)?;
             z.write_all(&serde_json::to_vec_pretty(&manifest)?)?;
             for (i, p) in self.planes.iter().enumerate() {
@@ -3919,8 +3880,25 @@ impl Document {
         let mut meta = String::new();
         z.by_name("project.json")?.read_to_string(&mut meta)?;
         let meta: Value = serde_json::from_str(&meta)?;
-        anyhow::ensure!(meta["version"] == 1, "Unsupported project version");
+        anyhow::ensure!(
+            meta["version"] == 1 || meta["version"] == 2,
+            "Unsupported project version"
+        );
         let mut d = Self::open(&base, meta["skin_path"].as_str().map(str::to_owned))?;
+        if meta["version"] == 2 {
+            for (name, image) in &mut d.images {
+                if let Ok(mut entry) = z.by_name(&format!("base/{name}.png")) {
+                    let mut data = Vec::new();
+                    entry.read_to_end(&mut data)?;
+                    let restored = image::load_from_memory(&data)?.to_rgba8();
+                    anyhow::ensure!(
+                        restored.dimensions() == image.dimensions(),
+                        "Base dimensions differ from atlas"
+                    );
+                    *image = restored;
+                }
+            }
+        }
         let planes = meta["layers"]
             .as_array()
             .context("Project layers missing")?;
@@ -3957,14 +3935,48 @@ impl Document {
                 images,
             });
         }
+        d.eq_artwork_only = meta["eq_artwork_only"]
+            .as_bool()
+            .unwrap_or(d.eq_artwork_only);
         d.state(meta["view"].clone())?;
         d.saved = d.snapshot();
         d.dirty = false;
-        d.message = "Opened layered project".into();
+        d.message = if meta["version"] == 1 {
+            "Opened legacy project in classic mode. Magenta is now opaque; review the source cells before exporting.".into()
+        } else {
+            "Opened classic Winamp project".into()
+        };
         Ok(d)
     }
     pub fn archive(&self) -> Result<Vec<u8>> {
-        self.archive_with_images(&self.composite_images())
+        // Internal serialization also supports unfinished documents and test fixtures.
+        // Publishing paths must use export_archive, which checks the source pixels.
+        self.archive_with_images(&self.export_images())
+    }
+    pub fn export_archive(&self) -> Result<Vec<u8>> {
+        let issues = self.divergences();
+        anyhow::ensure!(
+            issues.is_empty(),
+            "Classic WSZ export blocked: {}",
+            issues
+                .iter()
+                .map(|d| format!("{}: {}. {}", d.entry, d.problem, d.fix))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        let bytes = self.archive_with_images(&self.export_images())?;
+        let audit = crate::winamp::skin::audit_classic_archive(&bytes)?;
+        anyhow::ensure!(
+            audit.exportable,
+            "Classic WSZ export blocked: {}",
+            audit
+                .errors
+                .iter()
+                .map(|d| format!("{}: {}. {}", d.entry, d.problem, d.fix))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        Ok(bytes)
     }
     pub fn preview_archive(&self) -> Result<Vec<u8>> {
         let composite = self.composite_images();
@@ -4048,7 +4060,8 @@ impl Document {
             .get("text.bmp")
             .and_then(|im| {
                 let total = (im.width() as usize).saturating_mul(im.height() as usize);
-                crate::winamp::skin::sample_display_ink(im.as_raw(), total)
+                let opaque: Vec<u8> = im.pixels().flat_map(|p| classic_pixel(p.0)).collect();
+                crate::winamp::skin::sample_display_ink(&opaque, total)
             })
             .unwrap_or([153, 204, 236, 255])
     }
@@ -4162,7 +4175,7 @@ impl Document {
     }
     pub fn export(&mut self, path: &Path) -> Result<Value> {
         self.finish_stroke();
-        let bytes = self.archive()?;
+        let bytes = self.export_archive()?;
         crate::winamp::skin::load_skin(&bytes)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;

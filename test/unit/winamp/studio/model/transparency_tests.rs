@@ -1,5 +1,40 @@
 use super::*;
 
+#[test]
+fn a_keyed_spectrum_alone_is_a_classic_bitmap_difference() {
+    let mut doc = document();
+    let colors: Vec<_> = (0..24)
+        .map(|i| if i == 0 { "#ff00ff" } else { "#112233" })
+        .collect();
+    doc.visualizer_palette(&json!({"colors":colors})).unwrap();
+    let report = doc.transparency_report();
+    assert_eq!(report["key_pixels"], 0);
+    assert_eq!(report["keyed_spectrum"], false);
+    assert_eq!(report["classic_bitmap_compatible"], true);
+    assert_eq!(doc.make_portable("test").unwrap()["exportable"], true);
+}
+
+#[test]
+fn studio_edits_the_preferred_extended_number_sheet() {
+    let mut doc = document();
+    let numbers = doc.images.remove("numbers.bmp").unwrap();
+    doc.files.remove("numbers.bmp");
+    doc.images.insert("nums_ex.bmp".into(), numbers);
+    doc.files.insert("nums_ex.bmp".into(), Vec::new());
+    let digits: Vec<_> = doc
+        .layers()
+        .into_iter()
+        .filter(|l| l.id.starts_with("main.digit"))
+        .collect();
+    assert_eq!(digits.len(), 4);
+    assert!(digits.iter().all(|l| l.sheet == "nums_ex.bmp"));
+    let bytes = doc.archive().unwrap();
+    assert!(crate::winamp::skin::load_skin(&bytes).is_ok());
+    doc.draw(&json!({"origin":"main.digit0","operations":[{"op":"pixel","x":0,"y":0,"color":"#123456"}]})).unwrap();
+    let skin = crate::winamp::skin::load_skin(&doc.archive().unwrap()).unwrap();
+    assert_eq!(&skin.numbers.pixels()[..4], &[18, 52, 86, 255]);
+}
+
 fn document() -> Document {
     let mut doc = Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap();
     doc.open_on_whole_skin();
@@ -9,7 +44,7 @@ fn document() -> Document {
 #[test]
 fn keyed_holes_survive_planes_archive_and_every_handle_position() {
     let mut doc = document();
-    // Key replaces the entire older opaque cell, then ink occupies just its centre.
+    // Magenta is opaque. Every position must copy the same complete source cell.
     doc.paint_layer_command(&json!({"action":"add","name":"silhouette"}), "test")
         .unwrap();
     doc.draw(
@@ -70,7 +105,7 @@ fn keyed_holes_survive_planes_archive_and_every_handle_position() {
                 };
                 let actual = patch(&doc);
                 assert_eq!(actual, patch(&reopened));
-                let background = patch(&under);
+                assert_ne!(patch(&under), actual);
                 for yy in 0..h {
                     for xx in 0..w {
                         assert_eq!(
@@ -78,7 +113,7 @@ fn keyed_holes_survive_planes_archive_and_every_handle_position() {
                             if [xx, yy] == [7, 5] {
                                 &Rgba([244, 189, 104, 255])
                             } else {
-                                background.get_pixel(xx, yy)
+                                &Rgba([255, 0, 255, 255])
                             }
                         );
                     }
@@ -110,7 +145,8 @@ fn erase_skip_and_key_are_distinct_and_atlas_exposes_the_key() {
         "missing stamp symbol must skip"
     );
     let pixel = doc.inspect([thumb.destination[0], thumb.destination[1], 1, 1], None);
-    assert_eq!(pixel["hits"][0]["sprite_key"], true);
+    assert_eq!(pixel["hits"][0]["sprite_key"], false);
+    assert_eq!(pixel["hits"][0]["literal_magenta"], true);
     doc.draw(&paint("transparent")).unwrap();
     assert_eq!(
         raw(&doc),
@@ -141,7 +177,7 @@ fn textured_small_rectangles_warn_in_both_states_without_mutation() {
             .iter()
             .filter(|c| c["id"] == "main.volume.thumb")
             .count(),
-        2
+        0
     );
     assert_eq!(doc.status(), before);
     doc.draw(
@@ -156,10 +192,10 @@ fn textured_small_rectangles_warn_in_both_states_without_mutation() {
         .any(|c| c["id"] == "main.volume.thumb"));
     let before = doc.composite_images();
     let report = doc.make_portable("test").unwrap();
-    assert_eq!(report["plays_the_same_elsewhere"], false);
+    assert_eq!(report["exportable"], true);
     assert_eq!(
         doc.composite_images(),
         before,
-        "portability repair must preserve key holes"
+        "validation must preserve literal magenta ink"
     );
 }

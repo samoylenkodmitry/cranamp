@@ -18,7 +18,7 @@ impl Document {
         let ink: Vec<_> = self
             .stroke_intent
             .iter()
-            .filter(|(_, c)| c[3] == 255 && !crate::winamp::skin::is_sprite_key(**c))
+            .filter(|(_, c)| c[3] == 255)
             .collect();
         let mut samples = Vec::new();
         let mut mismatches = 0;
@@ -52,7 +52,7 @@ impl Document {
                         let sources: Vec<_> = layers.iter().rev().filter_map(|l| {
                             let (x,y) = l.map(at[0] as u32,at[1] as u32)?;
                             let p = self.sheet_stack(&l.sheet)?.at(l.source[0]+x,l.source[1]+y)?;
-                            if p[3] == 0 || crate::winamp::skin::is_sprite_key(p.0) { return None; }
+                            if p[3] == 0 { return None; }
                             Some(json!({"id":l.id,"sheet":l.sheet,"source":[l.source[0]+x,l.source[1]+y],"rgba":p.0}))
                         }).collect();
                         samples.push(json!({"at":at,"wanted":wanted,"visible":actual,
@@ -73,7 +73,7 @@ impl Document {
             "checked":checked,"states":states.len(),"mismatches":mismatches,"samples":samples,
             "clipped_pixels":self.clipped_pixels,"shared_source_overwrites":self.overwrites,
             "unmapped_pixels":self.unmapped_pixels.len(),
-            "note":"Checks final opaque native ink against the composed editor, after source writes. Key holes, layer erasure and masked-out pixels are not ink checks. Intentional occlusion may warn. This cannot judge pre-existing artistic seams; inspect the halo and GPU, including moving states. Author a crossing once in canvas coordinates, without restarting texture phase or clipping it per component."})
+            "note":"Checks final opaque native ink against the composed editor, after source writes. Magenta is opaque ink. Layer erasure and masked-out pixels are not ink checks. Intentional occlusion may warn. This cannot judge pre-existing artistic seams; inspect the halo and GPU, including moving states. Author a crossing once in canvas coordinates, without restarting texture phase or clipping it per component."})
     }
 }
 

@@ -65,7 +65,6 @@ fn every_mcp_instrument_survives_panel_tile_and_footer_joins() {
                     if i == 1 {
                         d.view.active = false;
                         assert_footprint(&d, &r, &before, &label);
-                        d.make_portable("test").unwrap();
                         let flattened = d.render();
                         let mut reopened = Document::open(&d.archive().unwrap(), None).unwrap();
                         reopened.view = d.view.clone();
@@ -138,7 +137,7 @@ fn masks_mirrors_and_selected_parts_preserve_join_coverage() {
     }
     d.state(
         json!({"alpha_lock":false,"mask_colors":[],"clip":null,"mirror_x":true,
-        "layers":["equalizer.background","equalizer.title"]}),
+        "layers":["equalizer.background","equalizer.title","equalizer.close"]}),
     )
     .unwrap();
     d.draw(&json!({"operations":[{"op":"line","x":6,"y":116,"x2":6,"y2":137,"color":"#eeaa22"}]}))

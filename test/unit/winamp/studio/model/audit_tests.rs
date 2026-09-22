@@ -4,6 +4,7 @@ use super::*;
 fn every_joined_pixel_is_probed_in_all_four_states_without_touching_the_document() {
     let mut doc = Document::blank();
     doc.open_on_whole_skin();
+    doc.view.playback = 1;
     doc.view.clip = Some([0, 0, 1, 1]);
     doc.view.alpha_lock = true;
     doc.view.mask_colors = vec!["#ffffff".into()];
@@ -40,6 +41,7 @@ fn every_joined_pixel_is_probed_in_all_four_states_without_touching_the_document
 fn flat_warnings_include_text_backdrops_but_exclude_opaque_runtime_and_palette_fill() {
     let mut doc = Document::blank();
     doc.open_on_whole_skin();
+    doc.view.playback = 1;
     doc.draw(&json!({"operations":[{"op":"rect","x":0,"y":0,"width":275,"height":377,"fill":true,"color":"#19182c"}],"layers":[],"states":"all"})).unwrap();
     let text = doc.flat_regions([110, 24, 151, 19]).unwrap();
     assert!(!text["regions"].as_array().unwrap().is_empty());

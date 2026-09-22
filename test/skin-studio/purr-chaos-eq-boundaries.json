@@ -1,0 +1,47 @@
+{
+  "name": "Purr Chaos EQ immersion",
+  "playlist_height": 145,
+  "padding": 4,
+  "regions": [
+    {
+      "id": "resting-paw",
+      "rect": [
+        76,
+        146,
+        35,
+        17
+      ],
+      "expectation": "The resting cat paw ends with a complete contour, not a flat clipping line at the EQ tracks."
+    },
+    {
+      "id": "kitten-leg",
+      "rect": [
+        19,
+        188,
+        27,
+        30
+      ],
+      "expectation": "The kitten leg and book retain their full silhouette beside the preamp track."
+    },
+    {
+      "id": "eq-field",
+      "rect": [
+        19,
+        150,
+        238,
+        72
+      ],
+      "expectation": "The EQ field is deliberate continuous artwork; shared frames and mixed levels do not create accidental rectangular cutouts."
+    },
+    {
+      "id": "footer-sign-edge",
+      "rect": [
+        219,
+        350,
+        19,
+        27
+      ],
+      "expectation": "The sign edge tapers into the paper and kitten area without an unexplained vertical crop."
+    }
+  ]
+}

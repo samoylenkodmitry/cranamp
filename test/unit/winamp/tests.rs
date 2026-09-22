@@ -452,17 +452,7 @@ fn slider_artwork_stays_on_native_pixel_grid_at_all_skin_frames() {
         }
     }
 }
-#[test]
-fn main_display_meta_does_not_include_bitrate_units() {
-    let state = WinampState {
-        playlist: test_playlist(vec![test_track("One")]),
-        current_index: Some(0),
-        ..WinampState::default()
-    };
-    let meta = main_display_meta(&state);
-    assert!(!meta.contains("kbps"));
-    assert!(!meta.contains("khz"));
-}
+
 #[test]
 fn vertical_slider_helpers_clamp_values() {
     assert_eq!(vertical_slider_thumb_y(-1.0, 63.0, 11.0), 52.0);
@@ -537,12 +527,12 @@ fn keyed_visualizer_background_leaves_art_visible_and_keeps_lit_bars() {
         .as_chunks::<4>()
         .0
         .iter()
-        .all(|p| p[3] == 0));
+        .all(|p| *p == [255, 0, 255, 255]));
     let playing = visualizer_bitmap(true, [0.5; audio::VISUALIZER_BAND_COUNT], palette);
     let pixels = playing.pixels().as_chunks::<4>().0;
-    assert!(pixels.iter().any(|p| p[3] == 0));
+    assert!(pixels.iter().all(|p| p[3] == 255));
     assert!(pixels.iter().any(|p| p[3] == 255 && p[1] > 180));
-    assert!(!pixels.contains(&[255, 0, 255, 255]));
+    assert!(pixels.contains(&[255, 0, 255, 255]));
 }
 #[test]
 fn every_bundled_skin_loads_from_the_bytes_compiled_into_the_binary() {

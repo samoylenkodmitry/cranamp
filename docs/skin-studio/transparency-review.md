@@ -1,5 +1,7 @@
 # Midnight Snack transparency correction
 
+> Historical review of a retired Cranamp-only rendering mode. Its key-transparency claims and recipe are obsolete. Use [classic compatibility](classic-compatibility.md) and [REGION.TXT window cutouts](transparency.md). Current bundled skins have been migrated to opaque classic BMP cells.
+
 The original repaint put fabric into each moving fish's entire rectangle. That fabric travelled with the control instead of revealing the artwork at its current position. Studio also contradicted itself: the color picker called opaque magenta transparent, MCP called it erasure, and the renderer treated it as purple. Layer erasure and sprite holes were conflated.
 
 The repaired project keeps the five earlier layers and adds **06 · Fish without lunchboxes** through Studio MCP. All ten distinct released/pressed source cells now contain silhouette ink and an opaque magenta exterior: **1,162 keyed pixels**, no fully opaque moving cells, no missing or alpha-only pixels in those cells. The eight-pixel scroll fish is no longer clipped from a nine-pixel stamp. The replay script produces the same keyed handles on a fresh build.

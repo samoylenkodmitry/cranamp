@@ -113,11 +113,12 @@ fn key_only_draws_are_unverified_and_strict_mode_preserves_the_document() {
     let mut args = json!({"preview":true,"states":"all","operations":[
         {"op":"line","x":90,"y":135,"x2":108,"y2":150,"color":"#ff00ff"}]});
     let out = d.draw(&args).unwrap();
-    assert_eq!(out["continuity"]["continuous"], Value::Null);
-    assert_eq!(out["continuity"]["checked"], 0);
-    args["preview"] = json!(false);
-    args["require_continuity"] = json!(true);
-    assert!(d.draw(&args).is_err());
+    assert_eq!(out["continuity"]["continuous"], true);
+    assert!(out["continuity"]["checked"].as_u64().unwrap() > 0);
     assert_eq!(d.render(), pixels);
     assert_eq!(d.status(), status);
+    args["preview"] = json!(false);
+    args["require_continuity"] = json!(true);
+    assert!(d.draw(&args).is_ok());
+    assert_ne!(d.render(), pixels);
 }

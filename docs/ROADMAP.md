@@ -29,9 +29,14 @@
 
 - [ ] Load user-selected `.wsz` skins at runtime.
 - [ ] Parse classic playlist formats (`.m3u`, `.pls`).
+- [ ] Add Spotify playlist support.
+- [ ] Add internet radio support, for example [Planet3l Radio](https://planet3l.com/radio/).
 - [ ] Add accurate track duration, seek position, and end-of-track advance.
 - [ ] Implement shuffle order and repeat-one/repeat-all semantics.
 - [ ] Add equalizer DSP or disable EQ controls until backed by audio processing.
+- [ ] Add DSP plugin support.
+- [ ] Enable WAV, FLAC, and other lossless audio formats.
+- [ ] Later: explore WACUP support after DSP plugin support.
 
 ## Phase 4: Release Quality
 

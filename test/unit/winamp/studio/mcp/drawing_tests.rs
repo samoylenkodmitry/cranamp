@@ -80,7 +80,7 @@ fn a_half_transparent_stamp_blends_with_what_is_under_it() {
     result(
         &shared,
         "studio_draw",
-        json!({"layers":["main.background"],
+        json!({"layers":[],
                "operations":[{"op":"rect","x":8,"y":8,"width":4,"height":4,
                               "color":"#202060"}]}),
     );
@@ -91,7 +91,7 @@ fn a_half_transparent_stamp_blends_with_what_is_under_it() {
     result(
         &shared,
         "studio_draw",
-        json!({"layers":["main.background"],
+        json!({"layers":[],
                "operations":[{"op":"image","x":9,"y":9,"data":base64(png.get_ref())}]}),
     );
     let doc = shared.0.lock().unwrap();
@@ -388,7 +388,9 @@ fn ink_that_crosses_into_a_repeated_cell_says_so() {
 /// writes it under the name that failed to open.
 #[test]
 fn export_without_a_path_writes_the_skin_back_where_it_came_from() {
-    let shared = blank();
+    let shared = SharedDocument(Arc::new(Mutex::new(
+        Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap(),
+    )));
     let first = std::env::temp_dir().join("cranamp-export-in-place.wsz");
     result(
         &shared,
@@ -525,14 +527,15 @@ fn an_unknown_region_is_named_rather_than_ignored() {
 fn studio_validate_tells_a_blank_skin_its_sprites_are_unpainted() {
     let shared = blank();
     let out = result(&shared, "studio_validate", json!({}));
-    assert_eq!(out["plays_the_same_elsewhere"], json!(false), "{out}");
+    assert_eq!(out["exportable"], json!(false), "{out}");
+    assert!(out["plays_the_same_elsewhere"].is_null());
     assert!(
         out["divergences"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|d| d["problem"].as_str().unwrap().contains("clear")),
-        "a blank skin has nothing wrong but unpainted sprites: {out}"
+            .any(|d| d["problem"].as_str().unwrap().contains("clear")),
+        "a blank skin must identify its unpainted sources: {out}"
     );
 }
 

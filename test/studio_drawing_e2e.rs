@@ -4,12 +4,13 @@ use common::{pump, visible_texts, HitGraphRenderer};
 use cranpose_app_shell::AppShell;
 use cranpose_core::location_key;
 const WINDOW: (u32, u32) = (1160, 850);
-const CANVAS_ORIGIN: (f32, f32) = (230.0, 128.0);
+// At this viewport the EQ workbench wraps onto a second panel-toolbar row.
+const CANVAS_ORIGIN: (f32, f32) = (230.0, 166.0);
 const INK_SWATCH: (f32, f32) = (89.0, 344.0);
 const COLOUR_PICKER: (f32, f32) = (114.0, 379.0);
 const PICK_PIXEL: (f32, f32) = (157.0, 173.0);
 const NEW_BLANK: (f32, f32) = (1093.0, 55.0);
-const PANEL_ROW: [(f32, f32); 8] = [
+const PANEL_ROW: [(f32, f32); 9] = [
     (79.0, 93.0),
     (210.0, 93.0),
     (342.0, 93.0),
@@ -18,6 +19,7 @@ const PANEL_ROW: [(f32, f32); 8] = [
     (738.0, 93.0),
     (852.0, 93.0),
     (970.0, 93.0),
+    (82.0, 131.0),
 ];
 const INK_SOURCE: (u32, u32) = (140, 106);
 fn canvas_point(source: (u32, u32)) -> (f32, f32) {
@@ -246,8 +248,9 @@ fn every_window_s_options_are_reachable_without_scrolling_the_canvas() {
     click(&mut shell, PANEL_ROW[7]);
     let texts = visible_texts(&mut shell);
     for option in [
-        "SKIN OPTIONS",
-        "PLAYS THE SAME ELSEWHERE",
+        "CLASSIC WINAMP SKIN",
+        "EXPORT FORMAT CHECK",
+        "WINDOW CUTOUTS",
         "PLEDIT.TXT",
         "VISCOLOR.TXT",
     ] {
@@ -405,7 +408,7 @@ fn the_mode_that_cannot_paint_puts_the_drawing_tools_away() {
 fn the_state_sheet_asks_for_a_sprite_instead_of_picking_one() {
     let document = cranamp::winamp::studio::open_document(None).expect("bundled document");
     let mut shell = studio(document);
-    click(&mut shell, (409.0, 55.0));
+    click(&mut shell, (589.0, 55.0));
     let texts = visible_texts(&mut shell);
     assert!(
         contains(&texts, "Choose one sprite in Sprite targets"),

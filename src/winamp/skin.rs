@@ -4,8 +4,23 @@ use cranpose_ui::ImageBitmap;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
+mod compatibility;
+pub mod regions;
+pub use compatibility::{audit_classic_archive, ClassicAudit};
+/// Classic Winamp BMPs are opaque, including magenta. There is no sprite color key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BitmapMode {
+    Classic,
+}
+impl BitmapMode {
+    pub fn spectrum_background(self, palette: VisColor) -> [u8; 4] {
+        palette.background()
+    }
+}
 #[derive(Clone, PartialEq)]
 pub struct WinampSkin {
+    pub regions: regions::Regions,
+    pub bitmap_mode: BitmapMode,
     pub main: ImageBitmap,
     pub titlebar: ImageBitmap,
     pub cbuttons: ImageBitmap,
@@ -61,12 +76,7 @@ impl VisColor {
         self.0[23]
     }
     pub fn background(&self) -> [u8; 4] {
-        // Match sprite holes: a keyed spectrum leaves the skin underneath visible.
-        if is_sprite_key(self.0[0]) {
-            [0; 4]
-        } else {
-            self.0[0]
-        }
+        self.0[0]
     }
     pub fn dots(&self) -> [u8; 4] {
         self.0[1]
@@ -88,6 +98,9 @@ impl Default for VisColor {
     }
 }
 pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
+    load_skin_with_mode(wsz_bytes, BitmapMode::Classic)
+}
+pub fn load_skin_with_mode(wsz_bytes: &[u8], mode: BitmapMode) -> Result<WinampSkin> {
     let mut archive = zip::ZipArchive::new(Cursor::new(wsz_bytes))
         .context("failed to open winamp .wsz archive")?;
     let mut files: HashMap<String, Vec<u8>> = HashMap::new();
@@ -105,7 +118,7 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
         let bytes = files
             .get(name)
             .with_context(|| format!("missing required skin entry: {name}"))?;
-        decode_bmp(bytes).with_context(|| format!("failed to decode {name}"))
+        decode_bmp_with_mode(bytes, mode).with_context(|| format!("failed to decode {name}"))
     };
     let palette = files
         .get("pledit.txt")
@@ -116,13 +129,19 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
         .map(|bytes| parse_viscolor_txt(bytes))
         .unwrap_or_default();
     let text = match files.get("text.bmp") {
-        Some(bytes) => decode_bmp(bytes).context("failed to decode text.bmp")?,
+        Some(bytes) => decode_bmp_with_mode(bytes, mode).context("failed to decode text.bmp")?,
         None => default_text_bitmap(),
     };
     let display_text_color =
         sample_text_bitmap_color(&text).unwrap_or_else(|| default_display_text_color(viscolor));
     let cursors = cursors::load_cursors(&files);
     Ok(WinampSkin {
+        regions: files
+            .get("region.txt")
+            .map(|bytes| regions::Regions::parse(bytes))
+            .transpose()?
+            .unwrap_or_default(),
+        bitmap_mode: mode,
         main: decode("main.bmp")?,
         titlebar: decode("titlebar.bmp")?,
         cbuttons: decode("cbuttons.bmp")?,
@@ -132,7 +151,11 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
         balance: decode("balance.bmp")?,
         playpaus: decode("playpaus.bmp")?,
         monoster: decode("monoster.bmp")?,
-        numbers: decode("numbers.bmp")?,
+        numbers: files
+            .get("nums_ex.bmp")
+            .and_then(|bytes| decode_bmp_with_mode(bytes, mode).ok())
+            .map(Ok)
+            .unwrap_or_else(|| decode("numbers.bmp"))?,
         eqmain: decode("eqmain.bmp")?,
         pledit: decode("pledit.bmp")?,
         text,
@@ -143,10 +166,15 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
     })
 }
 fn default_text_bitmap() -> ImageBitmap {
-    let width = 155;
-    let height = 12;
-    ImageBitmap::from_rgba8(width, height, vec![0; width as usize * height as usize * 4])
-        .expect("default transparent text atlas should be valid")
+    let mut archive = zip::ZipArchive::new(Cursor::new(include_bytes!("../../assets/winamp.wsz")))
+        .expect("bundled classic skin");
+    let mut bytes = Vec::new();
+    archive
+        .by_name("text.bmp")
+        .expect("bundled text.bmp")
+        .read_to_end(&mut bytes)
+        .expect("bundled font bytes");
+    decode_bmp(&bytes).expect("bundled classic font")
 }
 fn default_display_text_color(viscolor: VisColor) -> [u8; 4] {
     viscolor
@@ -179,7 +207,7 @@ pub(crate) fn sample_display_ink(pixels: &[u8], total_pixels: usize) -> Option<[
         return None;
     }
     let mut ranked = counts.into_iter().collect::<Vec<_>>();
-    ranked.sort_by_key(|entry| Reverse(entry.1));
+    ranked.sort_by_key(|entry| (Reverse(entry.1), entry.0));
     let likely_has_opaque_background =
         total_pixels > 0 && opaque_pixels > total_pixels.saturating_mul(2) / 3 && ranked.len() > 1;
     let color = ranked
@@ -294,18 +322,19 @@ fn normalize_name(name: &str) -> String {
         .trim()
         .to_ascii_lowercase()
 }
-/// Opaque magenta is the sprite hole marker in Cranamp bitmap sheets.
-/// Keep it opaque while editing/exporting; decode it only at presentation time.
+/// Detect the obsolete Cranamp color key for migration diagnostics only.
+/// This color is ordinary opaque magenta in both the editor and the player.
 pub(crate) fn is_sprite_key(pixel: [u8; 4]) -> bool {
     pixel == [255, 0, 255, 255]
 }
 fn decode_bmp(bytes: &[u8]) -> Result<ImageBitmap> {
+    decode_bmp_with_mode(bytes, BitmapMode::Classic)
+}
+fn decode_bmp_with_mode(bytes: &[u8], _mode: BitmapMode) -> Result<ImageBitmap> {
     let dynamic = image::load_from_memory(bytes).context("image decode")?;
     let mut rgba = dynamic.to_rgba8();
     for pixel in rgba.pixels_mut() {
-        if is_sprite_key(pixel.0) {
-            *pixel = image::Rgba([0, 0, 0, 0]);
-        }
+        pixel.0[3] = 255;
     }
     ImageBitmap::from_rgba8(rgba.width(), rgba.height(), rgba.into_raw())
         .context("failed to create image bitmap")
@@ -324,7 +353,7 @@ pub const CLASSIC_SHEETS: &[(&str, u32, u32)] = &[
     ("monoster.bmp", 56, 24),
     ("playpaus.bmp", 42, 9),
     ("numbers.bmp", 99, 13),
-    ("text.bmp", 155, 18),
+    ("text.bmp", 155, 12),
     ("eqmain.bmp", 275, 315),
     ("pledit.bmp", 280, 186),
 ];
@@ -364,7 +393,8 @@ pub fn divergences(entries: &[SkinEntry]) -> Vec<Divergence> {
             continue;
         };
         if let Some((w, h)) = size {
-            if w < width || h < height {
+            let artwork_only_eq = *sheet == "eqmain.bmp" && *w >= 275 && *h == 163;
+            if !artwork_only_eq && (w < width || h < height) {
                 out.push(Divergence {
                     entry: (*sheet).into(),
                     problem: format!(

@@ -35,7 +35,12 @@ impl Document {
             == 255;
         let runtime: Vec<_> = guides
             .iter()
-            .filter(|g| g.runtime && self.view.panel != "atlas" && intersects(rect, g.rect))
+            .filter(|g| {
+                g.runtime
+                    && self.view.panel != "atlas"
+                    && intersects(rect, g.rect)
+                    && (g.label != "SPECTRUM" || self.view.playback != 0)
+            })
             .collect();
         let mut targets = BTreeMap::<String, Value>::new();
         for layer in layers.iter().filter(|l| intersects(rect, l.destination)) {
@@ -64,7 +69,7 @@ impl Document {
             for xx in x..x + w {
                 let top = layers.iter().rev().find(|l| l.map(xx, yy).is_some());
                 let under_runtime = runtime.iter().any(|g| contains(g.rect, xx, yy));
-                // A keyed VISCOLOR background reveals the real skin underneath.
+                // Classic VISCOLOR backgrounds are opaque, including magenta.
                 let opaque_runtime = spectrum_opaque
                     && runtime
                         .iter()
@@ -122,7 +127,7 @@ impl Document {
                 "D":"Paintable bitmap; no runtime footprint at this pixel.",
                 "S":"Paintable sprite with states or repeated cells. Inspect variants and shared destinations.",
                 "R":"Paintable bitmap beneath a runtime footprint. Only live content may cover the artwork; this is NOT an inaccessible region.",
-                "O":"Paintable bitmap, but the GPU player covers it with the solid VISCOLOR spectrum background even while stopped. The editor can show paint the player hides.",
+                "O":"Paintable bitmap covered by the solid VISCOLOR spectrum background in this playback state. Stopping reveals the source artwork.",
                 "P":"No bitmap source: playlist color fill. Use PLEDIT.TXT colors.",
                 "X":"No mapped bitmap source on this surface.",
             },
@@ -137,6 +142,9 @@ impl Document {
     }
 }
 
+#[cfg(test)]
+#[path = "../../../../test/unit/winamp/studio/model/stopped_coverage_tests.rs"]
+mod stopped_tests;
 #[cfg(test)]
 #[path = "../../../../test/unit/winamp/studio/model/coverage_tests.rs"]
 mod tests;

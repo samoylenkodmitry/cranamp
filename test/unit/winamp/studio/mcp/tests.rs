@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn classic_preview_switch_is_exposed_and_never_rewrites_exported_art() {
+    let shared = document();
+    let before = shared.lock().unwrap().archive().unwrap();
+    call("studio_options", json!({"classic_preview":true}), &shared).unwrap();
+    assert!(shared.lock().unwrap().view.classic_preview);
+    assert_eq!(shared.lock().unwrap().archive().unwrap(), before);
+    assert!(call("studio_options", json!({"classic_preview":false}), &shared).is_err());
+    assert!(shared.lock().unwrap().view.classic_preview);
+    assert_eq!(shared.lock().unwrap().archive().unwrap(), before);
+}
+
+#[test]
 fn pixel_palette_reports_composited_colors_without_changing_document_or_history() {
     let shared = SharedDocument(Arc::new(Mutex::new(Document::blank())));
     call("studio_atlas", json!({"sheet":"main.bmp"}), &shared).unwrap();
