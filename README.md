@@ -1,7 +1,4 @@
 
-
-https://github.com/user-attachments/assets/2d95ee4d-d2ff-4568-bb8f-e7fac91c7eae
-
 # Cranamp
 
 A Winamp-style music player in Rust, powered by [Cranpose](https://github.com/samoylenkodmitry/Cranpose).
