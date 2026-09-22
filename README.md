@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/2d95ee4d-d2ff-4568-bb8f-e7fac91c7eae
+
 # Cranamp
 
 A Winamp-style music player in Rust, powered by [Cranpose](https://github.com/samoylenkodmitry/Cranpose).
@@ -34,3 +38,7 @@ A Winamp-style music player in Rust, powered by [Cranpose](https://github.com/sa
 | Connected canvas & painting layers | Pixel tools & source-part guides |
 | --- | --- |
 | ![Skin Studio with connected canvas and painting layers](docs/images/studio-layers.png) | ![Skin Studio with pixel drawing tools and sprite guides](docs/images/studio-tools.png) |
+
+
+https://github.com/user-attachments/assets/8c768bfa-eb62-44f6-9629-9e0ae89e0210
+
