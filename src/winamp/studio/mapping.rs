@@ -69,10 +69,7 @@ fn variant_labels(id: &str, sheet: &str, count: usize) -> Vec<String> {
     let named =
         |names: &[&str]| -> Vec<String> { names.iter().map(|s| (*s).to_string()).collect() };
     if sheet == "pledit" && matches!(id, "top.left" | "top.tile" | "top.right" | "title") {
-        return named(&[
-            "unfocused · classic only; Cranamp never draws this row",
-            "focused · what the player always draws",
-        ]);
+        return named(&["unfocused", "focused"]);
     }
     if id == "title" {
         return named(&["focused", "unfocused"]);
@@ -354,7 +351,7 @@ pub fn layers(v: &View) -> Vec<Layer> {
                 vec![EQ_PREAMP_LINE],
                 0,
                 86,
-                26,
+                17 + crate::winamp::eq_graph::preamp_y(v.eq[0] as f32 / 27.),
                 None,
             );
             add(
@@ -438,7 +435,7 @@ pub fn layers(v: &View) -> Vec<Layer> {
             add(
                 "top.left",
                 "pledit",
-                vec![(0., 0., 25., 20.), PLAYLIST_TOP_LEFT_CORNER],
+                vec![(0., 21., 25., 20.), PLAYLIST_TOP_LEFT_CORNER],
                 active,
                 0,
                 0,
@@ -447,7 +444,7 @@ pub fn layers(v: &View) -> Vec<Layer> {
             add(
                 "top.tile",
                 "pledit",
-                vec![(127., 0., 25., 20.), PLAYLIST_TOP_TILE],
+                vec![(127., 21., 25., 20.), PLAYLIST_TOP_TILE],
                 active,
                 25,
                 0,
@@ -456,7 +453,7 @@ pub fn layers(v: &View) -> Vec<Layer> {
             add(
                 "title",
                 "pledit",
-                vec![(26., 0., 100., 20.), PLAYLIST_TITLE_BAR],
+                vec![(26., 21., 100., 20.), PLAYLIST_TITLE_BAR],
                 active,
                 87,
                 0,
@@ -465,7 +462,7 @@ pub fn layers(v: &View) -> Vec<Layer> {
             add(
                 "top.right",
                 "pledit",
-                vec![(153., 0., 25., 20.), PLAYLIST_TOP_RIGHT_CORNER],
+                vec![(153., 21., 25., 20.), PLAYLIST_TOP_RIGHT_CORNER],
                 active,
                 250,
                 0,

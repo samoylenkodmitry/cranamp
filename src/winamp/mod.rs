@@ -1,10 +1,13 @@
 #![allow(non_snake_case)]
 #![cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
+mod bitmap_font;
 #[cfg(any(target_arch = "wasm32", test))]
 mod browser_skins;
 pub mod cursors;
+mod eq_graph;
 mod pixel_grid;
 mod pixel_text;
+mod region_clip;
 pub mod skin;
 mod sprites;
 #[cfg(not(target_os = "ios"))]
@@ -489,7 +492,6 @@ const EQ_PRESET_MENU_ROW_HEIGHT: f32 = 12.0;
 const WINAMP_SYSTEM_FONT_SIZE: f32 = 8.25;
 const WINAMP_SYSTEM_LINE_HEIGHT: f32 = 10.0;
 const WINAMP_SYSTEM_TEXT_Y_ADJUST: f32 = -2.25;
-const WINAMP_SYSTEM_MEASURE_CHAR_WIDTH: f32 = 6.0;
 const WINAMP_PLAYLIST_FONT_SIZE: f32 = 9.25;
 const WINAMP_PLAYLIST_LINE_HEIGHT: f32 = 11.0;
 const WINAMP_PLAYLIST_TEXT_Y_ADJUST: f32 = -2.5;
@@ -498,7 +500,7 @@ const WINAMP_PLAYLIST_TEXT_X: f32 = 4.0;
 const WINAMP_PLAYLIST_TEXT_Y: f32 = 1.0;
 const WINAMP_PLAYLIST_SELECTION_HEIGHT: f32 = 11.0;
 const WINAMP_PLAYLIST_SELECTION_Y_OFFSET: f32 = 0.0;
-const WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH: f32 = 6.0;
+const WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH: f32 = 5.0;
 #[derive(Clone, Copy, PartialEq)]
 struct SystemTextMetrics {
     font_size: f32,
@@ -810,6 +812,11 @@ const BUNDLED_SKINS: &[BundledSkin] = &[
         id: "midnight-snack",
         label: "Catamp Midnight Snack (Bundled)",
         bytes: include_bytes!("../../assets/skins/Catamp Midnight Snack.wsz"),
+    },
+    BundledSkin {
+        id: "purr-chaos",
+        label: "Catamp Purr Chaos (Bundled)",
+        bytes: include_bytes!("../../assets/skins/Catamp Purr Chaos Font Fixed.wsz"),
     },
 ];
 const BUNDLED_PREFIX: &str = "bundled:";
@@ -2021,7 +2028,7 @@ fn WinampInlineStage(
                 PlaylistWindow(
                     skin.pledit.clone(),
                     skin.palette,
-                    skin.display_text_color,
+                    skin.text.clone(),
                     skin.cursors.clone(),
                     state,
                     WinampDragTarget::Inline(windows.playlist),
@@ -2086,7 +2093,7 @@ fn WinampStackedStage(
                     PlaylistWindow(
                         skin.pledit.clone(),
                         skin.palette,
-                        skin.display_text_color,
+                        skin.text.clone(),
                         skin.cursors.clone(),
                         state,
                         playlist_drag_target,
@@ -2411,7 +2418,7 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
                                 PlaylistWindow(
                                     pl_skin.pledit.clone(),
                                     pl_skin.palette,
-                                    pl_skin.display_text_color,
+                                    pl_skin.text.clone(),
                                     pl_skin.cursors.clone(),
                                     state,
                                     if playlist_docked {
@@ -2516,7 +2523,8 @@ fn MainWindow(
 ) {
     let snapshot = state.get();
     Box(
-        winamp_window_modifier(MAIN_WIDTH, MAIN_HEIGHT, scale, drag_target),
+        winamp_window_modifier(MAIN_WIDTH, MAIN_HEIGHT, scale, drag_target)
+            .then(region_clip::modifier(&skin.regions, "Normal", scale)),
         BoxSpec::default(),
         move || {
             Sprite(skin.main.clone(), MAIN_WINDOW, 0.0, 0.0, scale);
@@ -2610,21 +2618,25 @@ fn MainWindow(
                 POS_STATUS.1,
                 scale,
             );
-            Visualizer(
-                snapshot.playback == PlaybackState::Playing,
-                skin.viscolor,
-                scale,
-            );
-            let digits = time_digits(snapshot.elapsed_seconds);
-            for (i, digit) in digits.iter().enumerate() {
-                let pos = POS_TIME_DIGITS[i];
-                Sprite(
-                    skin.numbers.clone(),
-                    digit_rect(*digit),
-                    pos.0,
-                    pos.1,
+            if snapshot.playback != PlaybackState::Stopped {
+                Visualizer(
+                    snapshot.playback == PlaybackState::Playing,
+                    skin.viscolor,
+                    skin.bitmap_mode,
                     scale,
                 );
+            }
+            if snapshot.playback != PlaybackState::Stopped {
+                for (i, digit) in time_digits(snapshot.elapsed_seconds).iter().enumerate() {
+                    let pos = POS_TIME_DIGITS[i];
+                    Sprite(
+                        skin.numbers.clone(),
+                        digit_rect(*digit),
+                        pos.0,
+                        pos.1,
+                        scale,
+                    );
+                }
             }
             let title = main_display_title(&snapshot);
             let title_description = title.clone();
@@ -2640,18 +2652,17 @@ fn MainWindow(
                 snapshot.playback == PlaybackState::Playing,
                 title_phase,
             );
-            StyledSystemWinampText(
+            BitmapWinampText(
+                skin.text.clone(),
                 title,
                 title_description,
                 SystemTextBox {
                     x: POS_MAIN_TRACK_TEXT.0,
                     y: POS_MAIN_TRACK_TEXT.1,
                     width: MAIN_TRACK_TEXT_WIDTH,
-                    height: WINAMP_SYSTEM_LINE_HEIGHT,
+                    height: bitmap_font::HEIGHT as f32,
                     scale,
                 },
-                skin.display_text_color,
-                WINAMP_SYSTEM_TEXT_METRICS,
             );
             SongTitleScroll(
                 ControlRect::new(
@@ -2664,7 +2675,7 @@ fn MainWindow(
                 title_scroll,
                 state,
             );
-            MainMetaReadouts(snapshot.clone(), scale, skin.display_text_color);
+            // The media service does not expose bitrate/sample rate; leave them blank.
             Sprite(
                 skin.monoster.clone(),
                 MONO_OFF,
@@ -3010,6 +3021,7 @@ fn MainWindow(
                     },
                 );
             }
+            region_clip::HoleInputShields(skin.regions.clone(), "Normal", scale);
         },
     );
 }
@@ -3022,7 +3034,8 @@ fn EqualizerWindow(
 ) {
     let snapshot = state.get();
     Box(
-        winamp_window_modifier(EQ_WIDTH, EQ_HEIGHT, scale, drag_target),
+        winamp_window_modifier(EQ_WIDTH, EQ_HEIGHT, scale, drag_target)
+            .then(region_clip::modifier(&skin.regions, "Equalizer", scale)),
         BoxSpec::default(),
         move || {
             Sprite(skin.eqmain.clone(), EQ_WINDOW, 0.0, 0.0, scale);
@@ -3038,12 +3051,10 @@ fn EqualizerWindow(
                 skin.eqmain.clone(),
                 EQ_PREAMP_LINE,
                 POS_EQ_PREAMP_LINE.0,
-                POS_EQ_PREAMP_LINE.1,
+                POS_EQ_GRAPH_BG.1 + eq_graph::preamp_y(snapshot.eq_values[0]) as f32,
                 scale,
             );
-            if snapshot.eq_enabled {
-                EqCurve(snapshot.eq_values, skin.display_text_color, scale);
-            }
+            EqCurve(snapshot.eq_values, skin.eqmain.clone(), scale);
             CursorRegions(skin.cursors.clone(), equalizer_cursor_areas(), scale);
             WindowDragHandle(drag_target, EQ_TITLE_DRAG_HIT_AREA, scale);
             {
@@ -3231,6 +3242,7 @@ fn EqualizerWindow(
                     },
                 );
             }
+            region_clip::HoleInputShields(skin.regions.clone(), "Equalizer", scale);
             if snapshot.eq_preset_menu_open {
                 EqPresetMenu(state, skin.display_text_color, scale);
             }
@@ -3908,7 +3920,7 @@ fn native_sprite_tiles(source: SpriteRect, width: f32, height: f32) -> Vec<(Spri
 fn PlaylistWindow(
     pledit: ImageBitmap,
     palette: SkinPalette,
-    display_text_color: [u8; 4],
+    text_atlas: ImageBitmap,
     cursors: cursors::SkinCursors,
     state: MutableState<WinampState>,
     drag_target: WinampDragTarget,
@@ -4066,7 +4078,7 @@ fn PlaylistWindow(
                 list_height,
                 scale,
             );
-            PlaylistFooterReadouts(snapshot.clone(), bottom_y, scale, display_text_color);
+            PlaylistFooterReadouts(snapshot.clone(), bottom_y, scale, text_atlas.clone());
             PlaylistFooterControls(state, footer_menu, bottom_y, scale);
             if snapshot.playlist_search_visible {
                 PlaylistSearchOverlay(
@@ -4374,32 +4386,33 @@ fn playlist_min_height() -> f32 {
     145.0
 }
 #[composable]
-fn PlaylistFooterReadouts(
-    snapshot: WinampState,
-    bottom_y: f32,
-    scale: f32,
-    display_text_color: [u8; 4],
-) {
+fn PlaylistFooterReadouts(snapshot: WinampState, bottom_y: f32, scale: f32, atlas: ImageBitmap) {
     let summary = playlist_footer_summary(&snapshot);
-    SystemWinampText(
+    BitmapWinampText(
+        atlas.clone(),
+        summary.clone(),
         summary,
-        132.0,
-        bottom_y + 10.0,
-        72.0,
-        WINAMP_SYSTEM_LINE_HEIGHT,
-        scale,
-        display_text_color,
+        SystemTextBox {
+            x: 132.0,
+            y: bottom_y + 10.0,
+            width: 72.0,
+            height: 6.0,
+            scale,
+        },
     );
     let elapsed = format_duration_compact(snapshot.elapsed_seconds);
-    let width = system_text_width(&elapsed);
-    SystemWinampText(
+    let width = elapsed.chars().count() as f32 * bitmap_font::WIDTH as f32;
+    BitmapWinampText(
+        atlas,
+        elapsed.clone(),
         elapsed,
-        221.0 - width,
-        bottom_y + 24.0,
-        width + 2.0,
-        WINAMP_SYSTEM_LINE_HEIGHT,
-        scale,
-        display_text_color,
+        SystemTextBox {
+            x: 221.0 - width,
+            y: bottom_y + 24.0,
+            width,
+            height: 6.0,
+            scale,
+        },
     );
 }
 #[composable]
@@ -4817,9 +4830,6 @@ fn format_duration_compact(seconds: f32) -> String {
         format!("{minutes}:{seconds:02}")
     }
 }
-fn system_text_width(text: &str) -> f32 {
-    text.chars().count() as f32 * WINAMP_SYSTEM_MEASURE_CHAR_WIDTH
-}
 #[derive(Clone, Copy, PartialEq)]
 struct PlaylistMenuLayout {
     window_width: f32,
@@ -5023,6 +5033,36 @@ fn SystemWinampText(
         },
         color,
         WINAMP_SYSTEM_TEXT_METRICS,
+    );
+}
+#[composable]
+fn BitmapWinampText(atlas: ImageBitmap, text: String, description: String, layout: SystemTextBox) {
+    let bitmap = bitmap_font::render(&atlas, &text, layout.width.max(1.0) as u32);
+    cranpose_ui::Image(
+        cranpose_ui::BitmapRegionPainter(
+            bitmap.clone(),
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: bitmap.width() as f32,
+                height: bitmap.height() as f32,
+            },
+            cranpose_ui::ImageSampling::Nearest,
+        ),
+        Some(description),
+        Modifier::empty()
+            .size_points(
+                scaled(layout.width, layout.scale),
+                scaled(bitmap_font::HEIGHT as f32, layout.scale),
+            )
+            .absolute_offset(
+                scaled(layout.x, layout.scale),
+                scaled(layout.y, layout.scale),
+            ),
+        Alignment::TOP_START,
+        cranpose_ui::ContentScale::FillBounds,
+        1.0,
+        None,
     );
 }
 #[composable]
@@ -5255,57 +5295,7 @@ fn main_display_title(state: &WinampState) -> String {
         .unwrap_or_else(|| state.status.clone())
 }
 #[composable]
-fn MainMetaReadouts(state: WinampState, scale: f32, display_text_color: [u8; 4]) {
-    if state
-        .current_index
-        .and_then(|index| state.playlist.get(index))
-        .is_some()
-    {
-        SystemWinampText(
-            "320".to_string(),
-            POS_MAIN_META_TEXT.0,
-            POS_MAIN_META_TEXT.1 - 2.0,
-            20.0,
-            WINAMP_SYSTEM_LINE_HEIGHT,
-            scale,
-            display_text_color,
-        );
-        SystemWinampText(
-            "44".to_string(),
-            POS_MAIN_META_TEXT.0 + 45.0,
-            POS_MAIN_META_TEXT.1 - 2.0,
-            16.0,
-            WINAMP_SYSTEM_LINE_HEIGHT,
-            scale,
-            display_text_color,
-        );
-        return;
-    }
-    SystemWinampText(
-        main_display_meta(&state),
-        POS_MAIN_META_TEXT.0,
-        POS_MAIN_META_TEXT.1 - 2.0,
-        MAIN_META_TEXT_WIDTH,
-        WINAMP_SYSTEM_LINE_HEIGHT,
-        scale,
-        display_text_color,
-    );
-}
-fn main_display_meta(state: &WinampState) -> String {
-    let prefix = match state.playback {
-        PlaybackState::Playing => "PLAY",
-        PlaybackState::Paused => "PAUSE",
-        PlaybackState::Stopped => "STOP",
-    };
-    let count = state.playlist.len();
-    if count == 0 {
-        return prefix.to_string();
-    }
-    let index = state.current_index.map(|index| index + 1).unwrap_or(1);
-    format!("{prefix} {index:02}/{count:02}")
-}
-#[composable]
-fn Visualizer(playing: bool, viscolor: VisColor, scale: f32) {
+fn Visualizer(playing: bool, viscolor: VisColor, mode: skin::BitmapMode, scale: f32) {
     let refresh_tick = cranpose_core::rememberMutableStateOf(|| 0_u64);
     cranpose_core::LaunchedEffectAsync(playing, move |_scope| {
         Box::pin(async move {
@@ -5335,18 +5325,26 @@ fn Visualizer(playing: bool, viscolor: VisColor, scale: f32) {
             } else {
                 [0.0; audio::VISUALIZER_BAND_COUNT]
             };
-            draw_visualizer(scope, playing, bands, viscolor, scale);
+            draw_visualizer_background(
+                scope,
+                playing,
+                bands,
+                viscolor,
+                mode.spectrum_background(viscolor),
+                scale,
+            );
         },
     );
 }
-fn draw_visualizer(
+fn draw_visualizer_background(
     scope: &mut dyn cranpose_ui_graphics::DrawScope,
     playing: bool,
     bands: audio::VisualizerBands,
     viscolor: VisColor,
+    background: [u8; 4],
     scale: f32,
 ) {
-    let bg = color_from_rgba_u8(viscolor.background());
+    let bg = color_from_rgba_u8(background);
     scope.draw_rect(Brush::solid(bg));
     if !playing {
         return;
@@ -5381,8 +5379,8 @@ fn color_from_rgba_u8(color: [u8; 4]) -> Color {
     Color::from_rgba_u8(color[0], color[1], color[2], color[3])
 }
 #[composable]
-fn EqCurve(values: [f32; 11], display_text_color: [u8; 4], scale: f32) {
-    let bitmap = eq_curve_bitmap(values, display_text_color);
+fn EqCurve(values: [f32; 11], atlas: ImageBitmap, scale: f32) {
+    let bitmap = eq_graph::render(values, &atlas);
     let width = scaled(EQ_GRAPH_BG.2, scale);
     let height = scaled(EQ_GRAPH_BG.3, scale);
     cranpose_ui::Image(
@@ -5409,73 +5407,7 @@ fn EqCurve(values: [f32; 11], display_text_color: [u8; 4], scale: f32) {
         None,
     );
 }
-fn eq_curve_bitmap(values: [f32; 11], display_text_color: [u8; 4]) -> ImageBitmap {
-    let width = EQ_GRAPH_BG.2 as u32;
-    let height = EQ_GRAPH_BG.3 as u32;
-    let mut pixels = vec![0u8; width as usize * height as usize * 4];
-    let band_values = &values[1..];
-    let mut points = Vec::with_capacity(band_values.len());
-    for (index, value) in band_values.iter().copied().enumerate() {
-        let x = if band_values.len() <= 1 {
-            0
-        } else {
-            2 + ((index as f32 / (band_values.len() - 1) as f32) * (width - 5) as f32).round()
-                as i32
-        };
-        let y = 2 + ((1.0 - clamp01(value)) * (height - 5) as f32).round() as i32;
-        points.push((x, y));
-    }
-    for pair in points.windows(2) {
-        let from = pair[0];
-        let to = pair[1];
-        draw_bitmap_line(&mut pixels, width, height, from, to, display_text_color);
-    }
-    ImageBitmap::from_rgba8(width, height, pixels)
-        .expect("rendered EQ curve bitmap should be valid")
-}
-fn draw_bitmap_line(
-    pixels: &mut [u8],
-    width: u32,
-    height: u32,
-    from: (i32, i32),
-    to: (i32, i32),
-    color: [u8; 4],
-) {
-    let (mut x0, mut y0) = from;
-    let (x1, y1) = to;
-    let dx = (x1 - x0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let dy = -(y1 - y0).abs();
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx + dy;
-    loop {
-        set_bitmap_pixel(pixels, width, height, x0, y0, color);
-        if x0 == x1 && y0 == y1 {
-            break;
-        }
-        let e2 = err * 2;
-        if e2 >= dy {
-            err += dy;
-            x0 += sx;
-        }
-        if e2 <= dx {
-            err += dx;
-            y0 += sy;
-        }
-    }
-}
-fn set_bitmap_pixel(pixels: &mut [u8], width: u32, height: u32, x: i32, y: i32, color: [u8; 4]) {
-    if x < 0 || y < 0 {
-        return;
-    }
-    let x = x as u32;
-    let y = y as u32;
-    if x >= width || y >= height {
-        return;
-    }
-    let offset = ((y * width + x) * 4) as usize;
-    pixels[offset..offset + 4].copy_from_slice(&color);
-}
+
 fn visualizer_band_height(bands: audio::VisualizerBands, bar: usize) -> f32 {
     let level = bands.get(bar).copied().unwrap_or(0.0).clamp(0.0, 1.0);
     level * 16.0
@@ -8504,7 +8436,7 @@ fn base_winamp_window_config(placement: WinampWindowPlacement) -> WindowConfig {
         }
     };
     config
-        .with_transparent(false)
+        .with_transparent(true)
         .with_resizable(false)
         .with_visible(true)
 }

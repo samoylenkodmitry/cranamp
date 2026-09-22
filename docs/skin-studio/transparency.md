@@ -1,21 +1,22 @@
-# Sprite holes, erasure and skipped ink
+# Classic window transparency
 
-Opaque `#ff00ff` marks a sprite hole in Cranamp. The editor composes paint layers first, then skips keyed pixels while placing each sprite over the joined canvas. The player converts the same exact key to GPU alpha. Atlas views and selected-sprite clipboard pixels retain the opaque marker; BMP export preserves it. Cursors retain their own alpha and do not use this bitmap key.
+Classic Winamp skins support hard window cutouts through **REGION.TXT**. This is independent of BMP pixels: magenta (#ff00ff) is opaque artwork, and VISCOLOR slot 0 is an opaque RGB background. Classic controls copy complete rectangular source cells. There is no portable BMP sprite color key or partial opacity.
 
-`transparent` or alpha zero erases the active paint layer and reveals older sprite paint. A missing stamp palette character skips the pixel entirely. Neither operation replaces old opaque sprite backgrounds with holes. Unpainted base pixels export as black because RGB BMP cannot retain alpha.
+In Skin options, pick the exterior color with the brush and choose **Cut Normal exterior** or **Cut Equalizer exterior**. Studio flood-fills that exact color from the edges of MAIN.BMP or EQMAIN.BMP's 275×116 background and generates the region without changing any bitmap. **Reset** restores a rectangular window; Undo restores the prior configuration.
 
-For a moving fish, cat paw, or other silhouette:
+For automation use studio_regions:
 
-1. Target the exact sprite with `origin`.
-2. Fill its complete width and height with opaque `#ff00ff`.
-3. Stamp the subject at full opacity. Spaces may skip because the whole cell is already keyed; alternatively map them explicitly to the key.
-4. Repeat for every released/pressed variant. Shared EQ handles need one source repair.
-5. Inspect native crops plus a four-pixel halo in all four states and GPU previews at both travel endpoints and intermediate positions.
+- action:"generate", section:"Normal", transparent_color:"#ff00ff" cuts only that explicitly selected exterior color. exterior_only:false also cuts matching interior pixels.
+- Supply rows instead for a precise mask: 116 strings of 275 characters, # visible and . cut out. WindowShade and EqualizerWS take 14 rows.
+- action:"normalize" converts an imported polygon region to its native-pixel mask and regenerates portable rectangles.
+- action:"list" reads masks; action:"remove" removes the selected section.
 
-Do not paste a fabric patch into a handle. It moves independently of its backdrop and creates a mismatched rectangle.
+Studio serializes each mask as merged, disjoint four-point rectangles. This matters because Winamp uses nonzero-winding polygons, Webamp uses SVG polygons, and Audacious uses each polygon's bounding rectangle. Rectangles preserve the same pixel outline in all three. The generator rejects wholly invisible windows and masks exceeding Winamp's INI value buffer rather than writing truncated geometry. Playlist regions are not in this profile.
 
-Draw, study, validate and export return `transparency`: exact key count, each distinct moving source cell, per-cell key/alpha/opaque/missing counts, and `opaque_moving_sprites`. The last list catches even tiny textured rectangles. It is a review warning, since a rectangular control can be intentional. `studio_pixel` reports raw `rgba`, `sprite_key` on each source hit, and the visible composed `visible_rgba`.
+A window hole removes **all** content at that point, including text, controls and the background itself. It cannot make a fish slider reveal the illustration behind it. Design opaque moving cells against a compatible track cross-section; inspect released/pressed states and both endpoints. Do not copy unique fixed artwork into a moving handle.
 
-Cranamp supports this key. Identical transparency in other players is not verified, so `studio_validate.plays_the_same_elsewhere` remains false for keyed skins. Its format `divergences` may still be empty. Portability repair preserves deliberate keys instead of baking in a fixed background.
+Editing-layer alpha still works. Erasing reveals lower paint; a missing stamp symbol skips paint. Layered projects retain source alpha. WSZ export requires complete opaque sampled cells and emits RGB BMPs. CUR cursor transparency is separate.
 
-The Midnight Snack bug combined an artwork error (a fabric rectangle under every fish) with contradictory tools: the GUI called magenta transparent and MCP called it erasure, while the editor/player rendered purple. Regression tests now exercise exact key decoding, neighboring purple ink, layer erasure versus skip, export/reopen, both source states, and every volume position.
+The joined editor and full-height GPU player apply REGION.TXT. Native player surfaces allow alpha; the Studio presentation backdrop is black, so cutouts appear black there. Cranamp does not yet implement windowshade views: their regions are authored and preserved for external players, not previewed as functional shade windows. Invisible controls are shielded from activation; native OS click-through behavior is not certified.
+
+See [classic compatibility](classic-compatibility.md) for export checks and cross-player verification limits.

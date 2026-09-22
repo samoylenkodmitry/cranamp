@@ -139,7 +139,7 @@ fn making_a_skin_portable_keeps_its_cursors() {
 }
 
 #[test]
-fn magenta_is_a_sprite_hole_in_composition_and_literal_ink_in_the_atlas() {
+fn magenta_is_opaque_ink_in_composition_and_the_atlas() {
     let mut d = Document::blank();
     for p in d.images.get_mut("main.bmp").unwrap().pixels_mut() {
         *p = Rgba([20, 30, 40, 255]);
@@ -150,8 +150,8 @@ fn magenta_is_a_sprite_hole_in_composition_and_literal_ink_in_the_atlas() {
     d.state(json!({"panel":"canvas"})).unwrap();
     assert_eq!(
         d.render().get_pixel(40, 90),
-        &Rgba([20, 30, 40, 255]),
-        "Cranamp's sprite key must reveal the local artwork underneath"
+        &Rgba([255, 0, 255, 255]),
+        "Classic BMP controls copy magenta opaquely"
     );
     d.state(json!({"panel":"atlas","sheet":"cbuttons.bmp","layers":[]}))
         .unwrap();
@@ -279,7 +279,10 @@ fn a_draw_reports_the_operation_that_failed_the_glyphs_it_skipped_and_ink_nothin
         .unwrap();
     assert_eq!(result["unsupported_characters"], json!(["@", "é"]));
     assert!(result["pixels_written"].as_u64().unwrap() > 0);
-    assert!(result["note"].as_str().unwrap().contains("not drawn"));
+    assert!(result["note"]
+        .as_str()
+        .unwrap()
+        .contains("actual 5x6 bitmap glyphs"));
     d.state(json!({"panel":"atlas","sheet":"pledit.bmp","layer":"sheet"}))
         .unwrap();
     let result = d
@@ -1244,11 +1247,9 @@ fn a_skin_that_was_never_drawn_says_so_when_it_is_exported() {
     let dir = std::env::temp_dir().join("cranamp-undrawn-test");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("blank.wsz");
-    let out = d.export(&path).unwrap();
-    assert!(
-        out["undrawn_sprites"].as_array().unwrap().len() > 50,
-        "export has to say so: {out}"
-    );
+    std::fs::write(&path, b"previous export").unwrap();
+    assert!(d.export(&path).unwrap_err().to_string().contains("clear"));
+    assert_eq!(std::fs::read(&path).unwrap(), b"previous export");
     std::fs::remove_file(&path).ok();
 }
 #[test]
@@ -1301,10 +1302,10 @@ fn unsampled_pixels_counts_ink_rather_than_clearing_and_never_drawn_sheets() {
         .unwrap();
     let out = d
         .draw(&json!({"operations":[
-            {"op":"rect","x":0,"y":0,"width":155,"height":18,"color":"#ffdf9c"}]}))
+            {"op":"rect","x":0,"y":0,"width":155,"height":12,"color":"#ffdf9c"}]}))
         .unwrap();
     assert_eq!(out["unsampled_pixels"], 0, "{out}");
-    assert_eq!(out["sheet_is_never_drawn"], true, "{out}");
+    assert!(out["sheet_is_never_drawn"].is_null(), "{out}");
     d.state(json!({"panel":"atlas","sheet":"pledit.bmp","layer":"sheet"}))
         .unwrap();
     let out = d
@@ -1539,7 +1540,7 @@ fn review_crop_preserves_repeated_tile_source_offsets() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|p| p["sheet"] == "pledit.bmp" && p["source_overlap"] == json!([128, 23, 4, 3])));
+        .any(|p| p["sheet"] == "pledit.bmp" && p["source_overlap"] == json!([128, 2, 4, 3])));
 }
 #[test]
 fn the_main_sheet_is_the_full_classic_height_with_no_aliased_row() {
@@ -1696,7 +1697,10 @@ fn at_repeats_a_transaction_and_a_swept_field_walks_the_variants() {
         .unwrap();
     assert_eq!(report["repeated"]["places"], json!(3));
     for dy in 0..3 {
-        assert_eq!(d.render().get_pixel(200, 100 + dy * 2).0, [0, 255, 0, 255]);
+        assert_eq!(
+            d.images["main.bmp"].get_pixel(200, 100 + dy * 2).0,
+            [0, 255, 0, 255]
+        );
     }
     let mut d = Document::blank();
     d.open_on_whole_skin();
@@ -1715,9 +1719,18 @@ fn at_repeats_a_transaction_and_a_swept_field_walks_the_variants() {
     );
     let blue = |d: &mut Document, frame: u8| {
         d.state(json!({ "balance": frame })).unwrap();
-        let im = d.render();
+        let track = d
+            .layers()
+            .into_iter()
+            .find(|l| l.id == "main.balance.track")
+            .unwrap();
+        let images = d.composite_images();
+        let im = &images[&track.sheet];
         (177..215)
-            .find(|x| im.get_pixel(*x, 60).0 == [0, 0, 255, 255])
+            .find(|x| {
+                let (sx, sy) = track.map(*x, 60).unwrap();
+                im.get_pixel(track.source[0] + sx, track.source[1] + sy).0 == [0, 0, 255, 255]
+            })
             .unwrap_or_else(|| panic!("frame {frame} has no swept pixel"))
     };
     assert_eq!(blue(&mut d, 0), 178, "the first frame is where it starts");

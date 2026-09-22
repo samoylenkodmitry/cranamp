@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>Classic skin comparison</title>
+<style>body{margin:0;background:#313948;color:#fff;font:14px system-ui}header{position:fixed;z-index:10000;top:0;left:0;padding:12px;background:#111b}button,select{font:inherit;margin-right:8px}#stage{position:absolute;inset:70px 0 0}#status{margin-left:12px}</style>
+<header><label>Skin <select id="skin"></select></label><button id="load">Load</button><button id="region">Region fixture</button><button id="next">Next skin</button><span id="status">Loading Webamp…</span></header><div id="stage"></div>
+<script src="https://unpkg.com/webamp@2.3.1/built/webamp.bundle.min.js"></script>
+<script>
+const names=["Catamp Cardboard.wsz","Catamp Cat Scan.wsz","Catamp Catnip.wsz","Catamp Feral Night.wsz","Catamp Freefall.wsz","Catamp Midnight Snack.wsz","Catamp Moon Garden.wsz","Catamp Moonlit.wsz","Catamp Purr Chaos Font Fixed.wsz","Catamp Purr Chaos Polished.wsz","Catamp Purr Chaos.wsz","Catamp Purrmission Atelier.wsz","Catamp Purrmission Pixel Edition.wsz","Catamp Purrmission.wsz","Catamp Salvage.wsz","Catamp Sampler.wsz","Catamp Seance.wsz","Catamp Silverplay.wsz"];
+const picker=document.querySelector('#skin'),status=document.querySelector('#status');
+for(const name of names)picker.add(new Option(name,name));
+picker.value='Catamp Purr Chaos Font Fixed.wsz';
+const url=name=>'/assets/skins/'+encodeURIComponent(name)+'?review='+Date.now();
+// Silent test media stays entirely in this browser; no network track requests.
+const data=new ArrayBuffer(44+8000*2),view=new DataView(data);
+const chars=(i,s)=>[...s].forEach((c,j)=>view.setUint8(i+j,c.charCodeAt(0)));
+chars(0,'RIFF');view.setUint32(4,data.byteLength-8,true);chars(8,'WAVEfmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,8000,true);view.setUint32(28,16000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);chars(36,'data');view.setUint32(40,16000,true);
+const media=URL.createObjectURL(new Blob([data],{type:'audio/wav'}));
+const app=new Webamp({initialSkin:{url:url(picker.value)},initialTracks:[{url:media,metaData:{title:'Retro Tracker',artist:''},duration:100},{url:media,metaData:{title:'Neon Ambient',artist:''},duration:90},{url:media,metaData:{title:'Lo-Fi Jungle',artist:''},duration:120}],windowLayout:{main:{position:{x:0,y:0}},equalizer:{position:{x:0,y:116}},playlist:{position:{x:0,y:232},size:[0,4]}}});
+app.renderWhenReady(document.querySelector('#stage')).then(()=>status.textContent='Webamp '+Webamp.VERSION+' · '+picker.value).catch(e=>status.textContent=String(e));
+const load=async()=>{const name=picker.value; status.textContent='Loading '+name; app.setSkinFromUrl(url(name)); await app.skinIsLoaded(); status.textContent='Webamp '+Webamp.VERSION+' · '+name};
+document.querySelector('#load').onclick=load;
+document.querySelector('#next').onclick=()=>{picker.selectedIndex=(picker.selectedIndex+1)%names.length;load()};
+document.querySelector('#region').onclick=async()=>{picker.value='Catamp Purr Chaos Font Fixed.wsz';status.textContent='Loading region fixture…';app.setSkinFromUrl('/target/classic-migration/region-fixture.wsz?review='+Date.now());await app.skinIsLoaded();status.textContent='REGION.TXT test: cut corner and live digits'};
+</script>

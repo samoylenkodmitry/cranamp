@@ -64,7 +64,7 @@ pub(super) fn publish(shared: &SharedDocument) -> anyhow::Result<(Vec<u8>, Strin
     #[cfg(target_arch = "wasm32")]
     {
         doc.finish_stroke();
-        let bytes = doc.archive()?;
+        let bytes = doc.export_archive()?;
         super::super::skin::load_skin(&bytes)?;
         let key = super::super::browser_skins::save(
             cranpose_services::preferences().as_ref(),

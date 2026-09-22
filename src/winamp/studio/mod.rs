@@ -2,6 +2,7 @@
 mod brush;
 pub(crate) mod cursor_art;
 mod draft;
+mod equalizer;
 mod guides;
 mod mapping;
 mod material;
@@ -816,6 +817,7 @@ fn drawer_id(name: &str) -> u8 {
         "layers" => 7,
         "picker" => 8,
         "options" => 9,
+        "equalizer" => 10,
         _ => 0,
     }
 }
@@ -830,6 +832,7 @@ fn drawer_name(id: u8) -> &'static str {
         7 => "layers",
         8 => "picker",
         9 => "options",
+        10 => "equalizer",
         _ => "none",
     }
 }
@@ -1224,43 +1227,23 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
         move || {
             let shared = shared.clone();
             Box(
-                Modifier::empty().size_points(room.0 + 24., 780.),
+                Modifier::empty().size_points(room.0 + 24., 1050.),
                 BoxSpec::default(),
                 move || {
-                    let (divergences, transparency) = {
-                        let doc = shared.lock().unwrap();
-                        (doc.divergences(), doc.transparency_report())
-                    };
-                    Label("SKIN OPTIONS".into(), 12., 17., 270., 14., FG);
-                    Label(
-                        "The colours below are the whole skin, apart from the sheets.\nEvery player reads them, so every player shows what you see."
-                            .into(),
-                        12.,
-                        41.,
-                        355.,
-                        11.,
-                        DIM,
-                    );
-                    Label("PLAYS THE SAME ELSEWHERE".into(), 12., 86., 260., 11., DIM);
-                    if divergences.is_empty() {
-                        Label(
-                            if transparency["key_pixels"] == 0 {
-                                "Yes. Every entry in this skin is one the format \ndefines, and every sheet is big enough for its sprites."
-                            } else {
-                                "Sprite holes work in Cranamp. Other players'\nmagenta-key support has not been verified."
-                            }.into(),
-                            12.,
-                            104.,
-                            355.,
-                            11.,
-                            FG,
-                        );
-                    } else {
-                        for (i, divergence) in divergences.iter().take(4).enumerate() {
+                    let report = shared.lock().unwrap().classic_report().unwrap_or_else(|e| json!({"exportable":false,"divergences":[{"entry":"Skin","problem":e.to_string(),"fix":"Review source sheets"}]}));
+                    Label("CLASSIC WINAMP SKIN".into(), 12., 17., 300., 14., FG);
+                    Label("Opaque BMPs and explicit palettes.\nEditor, player and export use the same pixels.".into(), 12., 41., 355., 11., DIM);
+                    Label("EXPORT FORMAT CHECK".into(), 12., 86., 260., 11., DIM);
+                    if report["exportable"] == true {
+                        Label("Ready to export. Review the art and control states\nin the GPU and the target players before publishing.".into(), 12., 104., 355., 11., FG);
+                    } else if let Some(errors) = report["divergences"].as_array() {
+                        for (i, error) in errors.iter().take(4).enumerate() {
                             Label(
                                 format!(
                                     "{} — {}\n{}",
-                                    divergence.entry, divergence.problem, divergence.fix
+                                    error["entry"].as_str().unwrap_or(""),
+                                    error["problem"].as_str().unwrap_or(""),
+                                    error["fix"].as_str().unwrap_or("")
                                 ),
                                 12.,
                                 104. + i as f32 * 34.,
@@ -1270,12 +1253,41 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                             );
                         }
                     }
-                    let opaque = transparency["opaque_moving_sprites"]
-                        .as_array()
-                        .map_or(0, Vec::len);
+                    Label("OPAQUE SPRITES\nMagenta is a color, not transparency.\nMoving handles carry their complete rectangle.\nInspect every state and travel endpoint.".into(), 12., 260., 355., 11., DIM);
+                    let font_doc = shared.clone();
+                    Action(
+                        "Build classic text font".into(),
+                        12.,
+                        340.,
+                        200.,
+                        move || {
+                            let mut doc = font_doc.lock().unwrap();
+                            let (colors, _) = doc.text_palettes();
+                            let ink = colors
+                                .iter()
+                                .find(|(k, _)| *k == "Normal")
+                                .unwrap()
+                                .1
+                                .clone();
+                            let background = colors
+                                .iter()
+                                .find(|(k, _)| *k == "NormalBG")
+                                .unwrap()
+                                .1
+                                .clone();
+                            if let Err(e) = doc.classic_font(&ink, &background) {
+                                doc.message = e.to_string();
+                                doc.revision += 1;
+                            }
+                        },
+                    );
                     Label(
-                        format!("SPRITE TRANSPARENCY\n{opaque} opaque moving cells to review.\n#ff00ff makes a sprite hole; erasing reveals older paint.\nCheck silhouettes at both ends of their travel."),
-                        12., 260., 355., 11., if opaque > 0 { FG } else { DIM },
+                        "Replaces text.bmp on the active paint layer. Undo restores it.".into(),
+                        12.,
+                        375.,
+                        355.,
+                        10.,
+                        DIM,
                     );
                     let (playlist_colours, visualizer_colours) =
                         { shared.lock().unwrap().text_palettes() };
@@ -1339,7 +1351,7 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                         DIM,
                     );
                     Label(
-                        "0 background (#ff00ff reveals skin), 1 dots, 2-17 analyzer.\n18-22 oscilloscope, 23 peak. Click a slot to use the brush color."
+                        "0 opaque background, 1 dots, 2-17 analyzer.\n18-22 oscilloscope, 23 peak. Click a slot to use the brush color."
                             .into(),
                         12.,
                         560.,
@@ -1379,6 +1391,51 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                         );
                     }
                     Label("AUTOMATION".into(), 12., 694., 200., 11., DIM);
+                    Label(
+                        "WINDOW CUTOUTS · REGION.TXT".into(),
+                        12.,
+                        800.,
+                        350.,
+                        11.,
+                        DIM,
+                    );
+                    Label("Choose the exterior color with the brush. Cutouts reveal\nthe window beneath ALL artwork and controls. Undo restores them.".into(), 12., 820., 350., 10., DIM);
+                    for (i, section) in ["Normal", "Equalizer"].into_iter().enumerate() {
+                        let d = shared.clone();
+                        Action(
+                            format!("Cut {section} exterior"),
+                            12.,
+                            860. + i as f32 * 42.,
+                            205.,
+                            move || {
+                                let mut doc = d.lock().unwrap();
+                                let color = doc.view.color.clone();
+                                match doc.window_regions(&json!({"action":"generate","section":section,"transparent_color":color,"exterior_only":true})) {
+                                Ok(_) => doc.message = format!("Generated {section} window mask; review GPU cutouts"),
+                                Err(e) => {
+                                    doc.message = e.to_string();
+                                    doc.revision += 1;
+                                }
+                            }
+                            },
+                        );
+                        let d = shared.clone();
+                        Action(
+                            "Reset".into(),
+                            230.,
+                            860. + i as f32 * 42.,
+                            90.,
+                            move || {
+                                let mut doc = d.lock().unwrap();
+                                if let Err(e) = doc
+                                    .window_regions(&json!({"action":"remove","section":section}))
+                                {
+                                    doc.message = e.to_string();
+                                    doc.revision += 1;
+                                }
+                            },
+                        );
+                    }
                     Label(
                         "This editor is also an MCP server, so an agent can paint\ninto the same document and share its undo history.\n\n  127.0.0.1:18765\n  cranamp --skin-studio-mcp"
                             .into(),
@@ -1613,7 +1670,10 @@ fn LivePlayer(shared: SharedDocument, revision: u64, scale: f32, playlist_height
         }
         preview
     });
-    let initial = shared.lock().unwrap().preview_archive().unwrap();
+    let initial = {
+        let doc = shared.lock().unwrap();
+        doc.preview_archive().unwrap()
+    };
     let skin_state = cranpose_core::rememberMutableStateOf(move || {
         super::skin::load_skin(&initial).map_err(|e| format!("{e:#}"))
     });
@@ -1623,6 +1683,11 @@ fn LivePlayer(shared: SharedDocument, revision: u64, scale: f32, playlist_height
         skin_state.set(super::skin::load_skin(&bytes).map_err(|e| format!("{e:#}")));
         let v = d.view.clone();
         state.update(|s| {
+            s.playback = match v.playback {
+                1 => super::PlaybackState::Playing,
+                2 => super::PlaybackState::Paused,
+                _ => super::PlaybackState::Stopped,
+            };
             s.volume = v.volume as f32 / 27.;
             s.balance = v.balance as f32 / 27.;
             s.position = v.position as f32 / 27.;
@@ -1913,7 +1978,7 @@ fn ColorChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
     }
     let d = shared.clone();
     Choice(
-        "Sprite hole (#ff00ff)".into(),
+        "Magenta ink (#ff00ff)".into(),
         12.,
         82. + field_size.1 + 172.,
         200.,

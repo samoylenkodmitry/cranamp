@@ -1,5 +1,7 @@
 # Midnight Snack continuity correction
 
+Historical review of the retired Cranamp-only transparency convention. Its keyed-sprite claims do not describe current rendering or exports. Use the [classic compatibility contract](classic-compatibility.md).
+
 This earlier review verified stroke routing but missed the composition breaks later marked by the user. See [the annotated correction](annotated-abrupt-review.md) for the current artwork, findings and validation.
 
 The interrupted strokes were an authoring mistake. The joined-canvas brushes already route across components; I instead generated separate textile rectangles with local Y origins and changed the repeat from 18 to 25 pixels. I also used a handwritten target list that omitted `equalizer.preamp.line`, and joined two footer crops at a straight splice. Source-write counts did not prove that the final visible ink matched.

@@ -1,5 +1,7 @@
 # Correcting the user's marked visual breaks
 
+Historical review of the retired Cranamp-only transparency convention. Its magenta spectrum/sprite claims do not describe current rendering or exports. Use the [classic compatibility contract](classic-compatibility.md).
+
 The earlier continuity review missed the composition. It verified that new strokes survived source mapping, while a rectangular procedural quilt still replaced the illustrated bed, separate kitten crops remained visible, and the GPU spectrum covered the attic with a solid rectangle. Passing pixel-write tests could not justify those edges.
 
 The supplied annotation is preserved locally as `target/annotated-abrupt-review/user-markup.jpg`; its seven-layer project is `target/annotated-abrupt-before.cstudio`. [The native manifest](../../tools/skin-studio/annotated_abrupt_review.json) maps every marked boundary. Before/after editor boards, four-pixel halos and all four GPU states are in `target/annotated-abrupt-review/index.html`. All those crops were visually inspected.

@@ -17,7 +17,24 @@ fn every_bundled_skin_uses_classic_entries_and_loads() {
             path.display()
         );
         skin::load_skin(&bytes).expect("the player's own loader takes it");
+        let audit = skin::audit_classic_archive(&bytes).unwrap();
+        assert!(audit.exportable, "{}: {:#?}", path.display(), audit.errors);
+        assert_eq!(
+            audit.magenta_pixels,
+            0,
+            "{} retains obsolete magenta placeholders",
+            path.display()
+        );
+        let loaded = skin::load_skin(&bytes).unwrap();
+        assert!(loaded
+            .text
+            .pixels()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|p| p[3] == 255));
+        assert!(loaded.regions.portable());
         checked += 1;
     }
-    assert!(checked >= 6, "only {checked} skins were checked");
+    assert!(checked >= 18, "only {checked} skins were checked");
 }

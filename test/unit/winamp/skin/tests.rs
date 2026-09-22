@@ -3,7 +3,7 @@ use crate::winamp::cursors::SkinCursor;
 use cranpose_ui::PointerIcon;
 use std::io::{Cursor, Read, Write};
 #[test]
-fn bmp_sprite_key_becomes_gpu_alpha_but_neighboring_purple_stays_ink() {
+fn default_bmp_loader_preserves_magenta_and_neighboring_purple_as_opaque_ink() {
     let mut bytes = Cursor::new(Vec::new());
     let image =
         image::RgbImage::from_raw(3, 1, vec![255, 0, 255, 254, 0, 255, 128, 0, 128]).unwrap();
@@ -11,8 +11,44 @@ fn bmp_sprite_key_becomes_gpu_alpha_but_neighboring_purple_stays_ink() {
     let decoded = decode_bmp(bytes.get_ref()).unwrap();
     assert_eq!(
         decoded.pixels(),
-        &[0, 0, 0, 0, 254, 0, 255, 255, 128, 0, 128, 255]
+        &[255, 0, 255, 255, 254, 0, 255, 255, 128, 0, 128, 255]
     );
+}
+#[test]
+fn classic_bitmaps_keep_magenta_opaque_including_font_backgrounds() {
+    let mut bytes = Cursor::new(Vec::new());
+    image::RgbImage::from_raw(2, 1, vec![255, 0, 255, 17, 29, 43])
+        .unwrap()
+        .write_to(&mut bytes, image::ImageFormat::Bmp)
+        .unwrap();
+    let decoded = decode_bmp_with_mode(bytes.get_ref(), BitmapMode::Classic).unwrap();
+    assert_eq!(decoded.pixels(), &[255, 0, 255, 255, 17, 29, 43, 255]);
+    let mut palette = VisColor::default();
+    palette.0[0] = [255, 0, 255, 255];
+    assert_eq!(
+        BitmapMode::Classic.spectrum_background(palette),
+        [255, 0, 255, 255]
+    );
+    assert_eq!(palette.background(), [255, 0, 255, 255]);
+}
+#[test]
+fn classic_bitmap_copy_ignores_embedded_alpha() {
+    let mut bytes = Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(1, 1, image::Rgba([17, 29, 43, 0]))
+        .write_to(&mut bytes, image::ImageFormat::Bmp)
+        .unwrap();
+    let bitmap = decode_bmp_with_mode(bytes.get_ref(), BitmapMode::Classic).unwrap();
+    assert_eq!(bitmap.pixels(), &[17, 29, 43, 255]);
+}
+#[test]
+fn extended_number_atlas_takes_precedence_over_numbers_bmp() {
+    let mut bytes = Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(108, 13, image::Rgb([17, 29, 43]))
+        .write_to(&mut bytes, image::ImageFormat::Bmp)
+        .unwrap();
+    let skin = load_skin(&bundled_skin_plus(&[("nums_ex.bmp", bytes.into_inner())])).unwrap();
+    assert_eq!((skin.numbers.width(), skin.numbers.height()), (108, 13));
+    assert_eq!(&skin.numbers.pixels()[0..4], &[17, 29, 43, 255]);
 }
 #[test]
 fn normalize_name_extracts_file_name() {
@@ -65,11 +101,9 @@ fn load_skin_allows_missing_text_bitmap() {
     }
     let skin = load_skin(&output.into_inner()).expect("skin without text.bmp should load");
     assert_eq!(skin.text.width(), 155);
-    assert_eq!(skin.text.height(), 12);
-    assert_eq!(
-        skin.display_text_color,
-        default_display_text_color(skin.viscolor)
-    );
+    assert_eq!(skin.text.height(), 18);
+    let reference = load_skin(include_bytes!("../../../../assets/winamp.wsz")).unwrap();
+    assert_eq!(skin.text.pixels(), reference.text.pixels());
 }
 /// The bundled skin with extra entries written alongside it.
 fn bundled_skin_plus(extra: &[(&str, Vec<u8>)]) -> Vec<u8> {

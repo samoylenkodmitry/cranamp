@@ -97,7 +97,7 @@ sharing the pencil and the history. `← The whole skin` returns.
 
 | Sheet | Size | Sheet | Size |
 | --- | --- | --- | --- |
-| `main.bmp` | 275×115 | `balance.bmp` | 68×433 |
+| `main.bmp` | 275×116 | `balance.bmp` | 68×433 |
 | `titlebar.bmp` | 344×87 | `playpaus.bmp` | 42×9 |
 | `cbuttons.bmp` | 136×36 | `monoster.bmp` | 56×24 |
 | `posbar.bmp` | 307×10 | `numbers.bmp` | 99×13 |
@@ -105,11 +105,13 @@ sharing the pencil and the history. `← The whole skin` returns.
 | `volume.bmp` | 68×433 | `pledit.bmp` | 280×190 |
 | | | `text.bmp` | 155×18 |
 
-Plus `pledit.txt` and `viscolor.txt`. These are the classic skin sheets. Cranamp
-interprets opaque `#ff00ff` as a sprite hole and as a transparent VISCOLOR
-background in slot 0. This reveals painted artwork beneath live spectrum bars;
-other players' interpretation of the key is not verified. `studio_validate`
-reports export differences and transparency usage.
+Plus `pledit.txt`, `viscolor.txt` and optional `region.txt` window cutouts.
+BMP pixels and VISCOLOR slot 0 are opaque, including magenta. See
+[classic compatibility](classic-compatibility.md) for strict export checks,
+the 5×6 font builder and cross-player review. [Window transparency](transparency.md)
+explains automatic REGION.TXT generation from explicit masks.
+The [EQ workbench](equalizer-workbench.md) provides shared-frame editing,
+copy-to-all, mixed-level previews and reversible artwork-only EQ export.
 
 A skin also carries Windows `.cur` cursor files — `NORMAL.CUR`, `TITLEBAR.CUR`,
 `VOLBAR.CUR` and the rest of the classic set. They are drawn here like anything
@@ -120,7 +122,7 @@ line the moment the sheet is opened and repeated in draw results:
 
 | Sheet | Note |
 | --- | --- |
-| `text.bmp` | read for one colour, never drawn as artwork |
+| `text.bmp` | actual 5×6 bitmap glyphs, including opaque spacing cells |
 | `titlebar.bmp` | mostly shade-mode art Cranamp never draws |
 
 ## Cursors
@@ -291,7 +293,7 @@ both panels, and every drawing operation may override its own.
 
 | Field | Range | Panel control |
 | --- | --- | --- |
-| `color` | `#rrggbb`; opaque `#ff00ff` is a sprite hole; `transparent` erases the active layer | colour pills, HEX box, **Colour picker…** |
+| `color` | `#rrggbb`; magenta is opaque ink; `transparent` erases the active layer | colour pills, HEX box, **Colour picker…** |
 | `brush_size` | 1..32 | WIDTH |
 | `filled` | bool | **Fill shapes** |
 | `ramp_to`, `ramp_axis` | colour or null; `down`/`across` | GRADIENT |
@@ -507,7 +509,7 @@ behind the spectrum, or the box shows up in every player, this one included.
 
 ### studio_validate
 
-Whether the skin looks the same everywhere. It names three things:
+Whether the archive meets the classic export profile. It checks:
 
 | Divergence | Why |
 | --- | --- |
@@ -516,11 +518,11 @@ Whether the skin looks the same everywhere. It names three things:
 | a sheet smaller than its own sprites | part of a state falls outside it |
 | clear pixels a sprite reads | RGB BMP cannot retain alpha; unpainted base pixels export as black |
 
-`{"fix": true}` repairs all four. It drops the entries no player reads, grows
-and adds the sheets, and paints every clear pixel the colour the player already
-showed under it, so the skin keeps the face it had. Deliberate magenta sprite
-holes are preserved. Keyed skins keep `plays_the_same_elsewhere: false` because
-other players' key support is unverified. See [sprite transparency](transparency.md).
+`exportable` reports format validity, not visual parity in external players.
+The deprecated `{"fix":true}` refuses invalid documents without altering artwork.
+Resolve dimensions, incomplete cells, palette errors and ambiguous entries
+deliberately with the drawing tools. Magenta is opaque. Window cutouts use
+[REGION.TXT](transparency.md); see the [classic contract](classic-compatibility.md).
 
 ### PLEDIT.TXT
 
