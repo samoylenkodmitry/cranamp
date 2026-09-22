@@ -141,7 +141,7 @@ jobs:
         env:
           DIST_MIN_RUSTFLAGS: >-
             -Cpanic=immediate-abort -Zunstable-options
-            -Zlocation-detail=none -Zfmt-debug=none${{ matrix.extra_rustflags }}
+            -Zlocation-detail=none${{ matrix.extra_rustflags }}
         run: >
           RUSTFLAGS="$DIST_MIN_RUSTFLAGS"
           cargo build --profile dist-min

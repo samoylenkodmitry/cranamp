@@ -76,7 +76,11 @@ fn a_blob_backed_track_keeps_its_url_and_a_path_becomes_a_file_uri() {
     };
     assert_eq!(
         media_item(&local).expect("a local track has a source").uri,
-        "file:///music/track.mp3"
+        if cfg!(target_arch = "wasm32") {
+            "/music/track.mp3"
+        } else {
+            "file:///music/track.mp3"
+        }
     );
     let missing = Track {
         title: "Nothing".to_string(),
@@ -84,6 +88,18 @@ fn a_blob_backed_track_keeps_its_url_and_a_path_becomes_a_file_uri() {
         duration_seconds: None,
     };
     assert!(media_item(&missing).is_none());
+}
+#[test]
+fn browser_relative_media_stays_relative_to_the_document() {
+    let path = "demo-music/cranamp-demo-01-retro-tracker.mp3";
+    let track = super::track_from_title_path("Demo", path);
+    let uri = media_item(&track).expect("demo track source").uri;
+    if cfg!(target_arch = "wasm32") {
+        assert_eq!(uri, path);
+    } else {
+        assert!(uri.starts_with("file://"));
+        assert!(uri.ends_with(path));
+    }
 }
 #[test]
 fn a_centred_equalizer_slider_is_flat_and_the_ends_are_symmetric() {
