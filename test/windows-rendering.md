@@ -28,6 +28,19 @@ the default Catamp layout's position and requires the audio time to advance.
 The page must serve the bundled `demo-music/` directory. Set
 `CRANAMP_SHADER_TRACE=1` to save the GLSL submitted to WebGL in `events.json`.
 
+For Chrome, launch a separate desktop instance with
+`--remote-debugging-port=9223 --user-data-dir=C:\path\audit-chrome-profile`
+and forward port 9223 over SSH. The separate profile keeps the test isolated
+from the user's browsing session. Then run:
+
+```sh
+CRANAMP_CHECK_PLAYBACK=1 node test/windows-chrome.mjs http://127.0.0.1:8765/ /tmp/cranamp-chrome
+```
+
+The Chrome check saves console events and a screenshot, waits for renderer
+startup and animation frames, and optionally verifies playback. Serve the
+built web package at the supplied URL; its assets and demo music must be present.
+
 Windows 11 / RTX 2070 validation:
 
 - The published 0.1.72 executable failed the blank-window check.
@@ -36,6 +49,9 @@ Windows 11 / RTX 2070 validation:
 - Windows Firefox 143 rendered the fixed player and started a demo track in
   1.5 seconds. The track resolved to the page's HTTP origin, rather than
   `file:///demo-music/…`.
+- Windows Chrome 153 rendered the fixed player and started a demo track in
+  1.4 seconds. Both Chrome and Firefox stalled before renderer initialization
+  on the published site using Cranpose 0.1.140 during the same audit.
 
 The native release must preserve Debug formatting: Naga uses it to generate
 HLSL numeric literals. `test/release_workflow.mjs` guards the build flags.
