@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Executable,
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
-    [switch]$Schedule
+    [switch]$Schedule,
+    [switch]$ConsoleOnly
 )
 $ErrorActionPreference = 'Stop'
 $taskName = 'CranampShellAudit'
@@ -11,6 +12,7 @@ $result = Join-Path $outputPath 'result.txt'
 Remove-Item $result, (Join-Path $outputPath 'failure.txt') -ErrorAction SilentlyContinue
 if ($Schedule) {
     $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Executable "{1}" -OutputDirectory "{2}"' -f $PSCommandPath, $Executable, $outputPath
+    if ($ConsoleOnly) { $arguments += ' -ConsoleOnly' }
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
@@ -101,14 +103,16 @@ public static class CranampShell {
     Write-Output ('PE subsystem: {0}' -f $subsystem)
     if ($subsystem -ne 2) { throw ('The executable is a console program (subsystem {0}), so Windows opens a terminal beside it.' -f $subsystem) }
 
-    $description = (Get-Item $Executable).VersionInfo.FileDescription
-    Write-Output ('File description: {0}' -f $description)
-    if ($description -ne 'Cranamp') { throw 'The executable carries no Cranamp version resource.' }
+    if (-not $ConsoleOnly) {
+        $description = (Get-Item $Executable).VersionInfo.FileDescription
+        Write-Output ('File description: {0}' -f $description)
+        if ($description -ne 'Cranamp') { throw 'The executable carries no Cranamp version resource.' }
 
-    $icons = [CranampShell]::ExtractIconEx($Executable, -1, $null, $null, 0)
-    Write-Output ('Icons in the executable: {0}' -f $icons)
-    if ($icons -lt 1) { throw 'The executable carries no icon for Explorer and shortcuts.' }
-    [Drawing.Icon]::ExtractAssociatedIcon($Executable).ToBitmap().Save((Join-Path $outputPath 'exe-icon.png'))
+        $icons = [CranampShell]::ExtractIconEx($Executable, -1, $null, $null, 0)
+        Write-Output ('Icons in the executable: {0}' -f $icons)
+        if ($icons -lt 1) { throw 'The executable carries no icon for Explorer and shortcuts.' }
+        [Drawing.Icon]::ExtractAssociatedIcon($Executable).ToBitmap().Save((Join-Path $outputPath 'exe-icon.png'))
+    }
 
     $consoles = [CranampShell]::ConsoleWindowsNow()
     $running = [CranampShell]::ProcessesNow()
@@ -118,23 +122,25 @@ public static class CranampShell {
     $opened | ForEach-Object { Write-Output ('Console window opened at {0}' -f $_) }
     $application.Refresh()
     if ($application.HasExited) { throw ('Application exited: {0}' -f $application.ExitCode) }
-    if ($opened.Count -gt 0) { throw ('{0} console window(s) opened while the player started.' -f $opened.Count) }
+    if ($opened.Count -gt 0) { throw ('{0} console window(s) opened while the application started.' -f $opened.Count) }
 
     $windows = [CranampShell]::TaskbarWindows([uint32]$application.Id)
     Write-Output ('Visible windows: {0}' -f $windows.Count)
-    if ($windows.Count -lt 1) { throw 'The player opened no visible window.' }
+    if ($windows.Count -lt 1) { throw 'The application opened no visible window.' }
     foreach ($window in $windows) {
         $taskbar = [CranampShell]::SendMessage($window, 0x7F, [IntPtr]1, [IntPtr]::Zero)
         $titleBar = [CranampShell]::SendMessage($window, 0x7F, [IntPtr]0, [IntPtr]::Zero)
         Write-Output ('Window {0} ({1}): taskbar icon {2}, title-bar icon {3}' -f $window, [CranampShell]::Describe($window), $taskbar, $titleBar)
-        if ($taskbar -eq [IntPtr]::Zero -or $titleBar -eq [IntPtr]::Zero) { throw ('Window {0} has no icon of its own.' -f $window) }
+        if (-not $ConsoleOnly -and ($taskbar -eq [IntPtr]::Zero -or $titleBar -eq [IntPtr]::Zero)) { throw ('Window {0} has no icon of its own.' -f $window) }
     }
-    $taskbar = [CranampShell]::SendMessage($windows[0], 0x7F, [IntPtr]1, [IntPtr]::Zero)
-    $icon = [Drawing.Icon]::FromHandle($taskbar).ToBitmap()
-    $icon.Save((Join-Path $outputPath 'window-icon.png'))
-    $plate = $icon.GetPixel([int]($icon.Width * 0.06), [int]($icon.Height * 0.16))
-    Write-Output ('Taskbar icon plate: R {0} G {1} B {2}' -f $plate.R, $plate.G, $plate.B)
-    if ($plate.B -le $plate.R + 20) { throw 'The taskbar icon has its red and blue swapped; the teal plate came out brown.' }
+    if (-not $ConsoleOnly) {
+        $taskbar = [CranampShell]::SendMessage($windows[0], 0x7F, [IntPtr]1, [IntPtr]::Zero)
+        $icon = [Drawing.Icon]::FromHandle($taskbar).ToBitmap()
+        $icon.Save((Join-Path $outputPath 'window-icon.png'))
+        $plate = $icon.GetPixel([int]($icon.Width * 0.06), [int]($icon.Height * 0.16))
+        Write-Output ('Taskbar icon plate: R {0} G {1} B {2}' -f $plate.R, $plate.G, $plate.B)
+        if ($plate.B -le $plate.R + 20) { throw 'The taskbar icon has its red and blue swapped; the teal plate came out brown.' }
+    }
     'PASS' | Set-Content $result
 } catch {
     $_ | Out-String | Set-Content (Join-Path $outputPath 'failure.txt')
