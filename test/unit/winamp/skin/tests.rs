@@ -69,18 +69,63 @@ fn load_bundled_skin_dimensions_match_classic_template() {
     assert_eq!(skin.text.width(), 155);
     assert_eq!(skin.text.height(), 18);
 }
+/// The classic skin with its windowshade strip painted over in one colour,
+/// as a skin drawn before the rolled-up window was looks.
+fn classic_skin_with_a_blank_strip() -> Vec<u8> {
+    let mut source =
+        zip::ZipArchive::new(Cursor::new(include_bytes!("../../../../assets/winamp.wsz")))
+            .expect("bundled skin should be a zip");
+    let mut output = Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut output);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for index in 0..source.len() {
+            let mut file = source.by_index(index).expect("zip entry");
+            let name = file.name().to_string();
+            let mut data = Vec::new();
+            file.read_to_end(&mut data).expect("zip entry bytes");
+            if normalize_name(&name) == "titlebar.bmp" {
+                let mut titlebar = image::load_from_memory(&data).expect("bmp").to_rgb8();
+                for y in 29..43 {
+                    for x in 27..302 {
+                        titlebar.put_pixel(x, y, image::Rgb([0, 0, 0]));
+                    }
+                }
+                let mut bytes = Cursor::new(Vec::new());
+                titlebar
+                    .write_to(&mut bytes, image::ImageFormat::Bmp)
+                    .expect("bmp encodes");
+                data = bytes.into_inner();
+            }
+            writer.start_file(name, options).expect("zip entry");
+            writer.write_all(&data).expect("zip entry bytes");
+        }
+        writer.finish().expect("zip should finish");
+    }
+    output.into_inner()
+}
 #[test]
 fn a_skin_without_windowshade_art_rolls_up_in_the_classic_strip() {
     let classic = load_skin(include_bytes!("../../../../assets/winamp.wsz")).unwrap();
     assert!(!shade_strip_is_blank(&classic.titlebar));
     assert_eq!(classic.shade_titlebar.pixels(), classic.titlebar.pixels());
-    let catamp = load_skin(include_bytes!(
-        "../../../../assets/skins/Catamp Silverplay.wsz"
-    ))
-    .unwrap();
-    assert!(shade_strip_is_blank(&catamp.titlebar));
-    assert_eq!(catamp.shade_titlebar.pixels(), classic.titlebar.pixels());
-    assert_eq!(catamp.shade_text.pixels(), classic.text.pixels());
+    let blank = load_skin(&classic_skin_with_a_blank_strip()).unwrap();
+    assert!(shade_strip_is_blank(&blank.titlebar));
+    assert_eq!(blank.shade_titlebar.pixels(), classic.titlebar.pixels());
+    assert_eq!(blank.shade_text.pixels(), classic.text.pixels());
+}
+#[test]
+fn every_bundled_skin_draws_its_own_windowshade_strip() {
+    for skin in crate::winamp::BUNDLED_SKINS {
+        let loaded = load_skin(skin.bytes).unwrap();
+        assert!(
+            !shade_strip_is_blank(&loaded.titlebar),
+            "{} rolls up into the classic strip",
+            skin.id
+        );
+        assert_eq!(loaded.shade_titlebar.pixels(), loaded.titlebar.pixels());
+    }
 }
 #[test]
 fn load_skin_allows_missing_text_bitmap() {
