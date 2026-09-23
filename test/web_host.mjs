@@ -7,7 +7,7 @@ const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
   .replace(/import init, \{[^}]*\} from .*?;/, '');
 
-async function host({ supported = true, startFails = null } = {}) {
+async function host({ supported = true, startFails = null, serviceWorker = null } = {}) {
   const events = () => ({
     handlers: new Map(),
     addEventListener(name, handler) {
@@ -51,7 +51,7 @@ async function host({ supported = true, startFails = null } = {}) {
   }
   await runInNewContext(`(async () => {${script}})()`, {
     window: win, document: doc, console: { ...console, error() {}, warn() {} }, Event,
-    navigator: { gpu: {} },
+    navigator: serviceWorker ? { gpu: {}, serviceWorker } : { gpu: {} },
     fetch: async () => ({ ok: true, headers: { get: () => null }, body: null }),
     init: async () => { if (startFails) throw new Error(startFails); },
     run_app: async () => {},
@@ -96,4 +96,12 @@ test('a player that cannot start says why and offers a reload', async () => {
   const h = await host({ startFails: 'the GPU was lost' });
   assert.equal(h.doc.body.dataset.phase, 'error');
   assert.match(h.boot.error.textContent, /the GPU was lost/);
+});
+
+test('a running player registers the service worker that keeps it offline', async () => {
+  const registered = [];
+  const serviceWorker = { register: async (url) => { registered.push(url); } };
+  const h = await host({ serviceWorker });
+  assert.equal(h.doc.body.dataset.phase, 'running');
+  assert.equal(JSON.stringify(registered), JSON.stringify(['./sw.js']));
 });

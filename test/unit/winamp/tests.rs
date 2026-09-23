@@ -368,6 +368,13 @@ fn time_digits_are_mapped_correctly() {
     assert_eq!(time_digits(65.0), [0, 1, 0, 5]);
     assert_eq!(time_digits(-1.0), [0, 0, 0, 0]);
 }
+#[test]
+fn the_rolled_up_time_sits_around_the_strips_colon() {
+    assert_eq!(
+        shade_time_glyphs(754.0),
+        [(7.0, '1'), (12.0, '2'), (20.0, '3'), (25.0, '4')]
+    );
+}
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn sanitize_skin_file_name_strips_dirs_and_forces_extension() {
@@ -607,6 +614,7 @@ fn player_state_config_round_trips_settings_and_playlist() {
         repeat: true,
         eq_visible: false,
         playlist_visible: false,
+        main_shaded: true,
         eq_enabled: false,
         eq_auto: true,
         eq_values,

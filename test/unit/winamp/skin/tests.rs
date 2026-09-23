@@ -70,6 +70,19 @@ fn load_bundled_skin_dimensions_match_classic_template() {
     assert_eq!(skin.text.height(), 18);
 }
 #[test]
+fn a_skin_without_windowshade_art_rolls_up_in_the_classic_strip() {
+    let classic = load_skin(include_bytes!("../../../../assets/winamp.wsz")).unwrap();
+    assert!(!shade_strip_is_blank(&classic.titlebar));
+    assert_eq!(classic.shade_titlebar.pixels(), classic.titlebar.pixels());
+    let catamp = load_skin(include_bytes!(
+        "../../../../assets/skins/Catamp Silverplay.wsz"
+    ))
+    .unwrap();
+    assert!(shade_strip_is_blank(&catamp.titlebar));
+    assert_eq!(catamp.shade_titlebar.pixels(), classic.titlebar.pixels());
+    assert_eq!(catamp.shade_text.pixels(), classic.text.pixels());
+}
+#[test]
 fn load_skin_allows_missing_text_bitmap() {
     let mut source =
         zip::ZipArchive::new(Cursor::new(include_bytes!("../../../../assets/winamp.wsz")))

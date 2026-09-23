@@ -60,12 +60,28 @@ pub(crate) fn snapped_origin(proposed: Rect, others: &[Rect], canvas: Option<Siz
 /// The windows that travel with window `lead`: every window that touches it,
 /// and every window touching one of those, edge to edge.
 pub(crate) fn attached_to(lead: usize, windows: &[Rect]) -> Vec<usize> {
+    connected(lead, windows, |_| true)
+}
+
+/// The windows hanging under window `lead`: those joined to it through
+/// windows whose tops are all at or below its bottom edge, which move with
+/// that edge when the window changes height.
+pub(crate) fn hanging_below(lead: usize, windows: &[Rect]) -> Vec<usize> {
+    let bottom = windows[lead].y + windows[lead].height;
+    connected(lead, windows, |index| {
+        windows[index].y >= bottom - TOUCH_TOLERANCE
+    })
+}
+
+/// The windows joined to `lead` edge to edge, through windows `admit` lets
+/// in.
+fn connected(lead: usize, windows: &[Rect], admit: impl Fn(usize) -> bool) -> Vec<usize> {
     let mut group = vec![lead];
     let mut next = 0;
     while next < group.len() {
         let current = windows[group[next]];
         for (index, window) in windows.iter().enumerate() {
-            if !group.contains(&index) && touching(current, *window) {
+            if !group.contains(&index) && admit(index) && touching(current, *window) {
                 group.push(index);
             }
         }
@@ -85,6 +101,81 @@ pub(crate) fn touching(a: Rect, b: Rect) -> bool {
     let stacked = (near(a.y + a.height, b.y) || near(b.y + b.height, a.y))
         && spans_overlap(a.x, a.width, b.x, b.width, 0.0);
     side_by_side || stacked
+}
+
+/// Where each window goes so that every one is inside `canvas`: each group of
+/// windows touching one another moves as a whole, by the least that brings
+/// the group in, so a docked stack stays docked. A group larger than the
+/// canvas keeps its top left corner on screen.
+pub(crate) fn kept_inside(windows: &[Rect], canvas: Size) -> Vec<Point> {
+    let mut origins: Vec<Point> = windows
+        .iter()
+        .map(|rect| Point::new(rect.x, rect.y))
+        .collect();
+    let mut placed = vec![false; windows.len()];
+    for lead in 0..windows.len() {
+        if placed[lead] {
+            continue;
+        }
+        let mut group = attached_to(lead, windows);
+        group.push(lead);
+        let left = group
+            .iter()
+            .map(|index| windows[*index].x)
+            .fold(f32::INFINITY, f32::min);
+        let top = group
+            .iter()
+            .map(|index| windows[*index].y)
+            .fold(f32::INFINITY, f32::min);
+        let right = group
+            .iter()
+            .map(|index| windows[*index].x + windows[*index].width)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let bottom = group
+            .iter()
+            .map(|index| windows[*index].y + windows[*index].height)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let dx = shift_into(left, right, canvas.width);
+        let dy = shift_into(top, bottom, canvas.height);
+        for index in group {
+            placed[index] = true;
+            origins[index] = Point::new(windows[index].x + dx, windows[index].y + dy);
+        }
+    }
+    origins
+}
+
+fn shift_into(start: f32, end: f32, extent: f32) -> f32 {
+    if end > extent {
+        (extent - end).max(-start)
+    } else if start < 0.0 {
+        -start
+    } else {
+        0.0
+    }
+}
+
+/// The windows' places as the text the preferences keep.
+pub(crate) fn encode_positions(positions: &[Point]) -> String {
+    positions
+        .iter()
+        .map(|point| format!("{},{}", point.x, point.y))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// The windows' places read back from [`encode_positions`], or nothing when
+/// the text is not three places.
+pub(crate) fn decode_positions(text: &str) -> Option<[Point; 3]> {
+    let points: Vec<Point> = text
+        .split(';')
+        .map(|pair| {
+            let (x, y) = pair.split_once(',')?;
+            let (x, y) = (x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?);
+            (x.is_finite() && y.is_finite()).then(|| Point::new(x, y))
+        })
+        .collect::<Option<_>>()?;
+    points.try_into().ok()
 }
 
 fn spans_overlap(start: f32, length: f32, other_start: f32, other_length: f32, slack: f32) -> bool {

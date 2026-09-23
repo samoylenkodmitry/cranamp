@@ -6,6 +6,8 @@
   <title>Cranamp</title>
   <link rel="icon" type="image/png" sizes="64x64" href="favicon.png" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0d2029" />
   <style>
     :root {
       color-scheme: dark;
@@ -473,6 +475,11 @@
       // shown, so the faded overlay is removed on a timer, not on its
       // transitionend.
       window.setTimeout(() => document.querySelector(".boot")?.remove(), 400);
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker
+          .register("./sw.js")
+          .catch((error) => console.debug("Cranamp works online only here", error));
+      }
       enablePiPButton();
     } catch (error) {
       failBoot(error);

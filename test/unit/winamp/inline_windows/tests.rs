@@ -82,6 +82,19 @@ fn windows_stacked_under_the_main_window_travel_with_it() {
 }
 
 #[test]
+fn the_windows_under_a_window_follow_its_bottom_edge() {
+    let equalizer = rect(26.0, 138.0, 275.0, 116.0);
+    let beside = rect(301.0, 22.0, 275.0, 116.0);
+    let playlist = rect(26.0, 254.0, 275.0, 261.0);
+    let under_beside = rect(400.0, 138.0, 275.0, 116.0);
+    assert_eq!(
+        hanging_below(0, &[MAIN, equalizer, beside, playlist, under_beside]),
+        vec![1, 3],
+        "the window beside the main window, and the one under it, keep their places"
+    );
+}
+
+#[test]
 fn a_window_set_apart_stays_behind() {
     let equalizer = rect(26.0, 138.0, 275.0, 116.0);
     let playlist = rect(500.0, 300.0, 275.0, 261.0);
@@ -97,4 +110,59 @@ fn windows_only_touching_at_a_corner_are_not_attached() {
 #[test]
 fn a_window_against_the_side_is_attached() {
     assert!(touching(MAIN, rect(301.0, 60.0, 275.0, 116.0)));
+}
+
+#[test]
+fn a_docked_stack_the_page_shrank_past_moves_back_in_as_one() {
+    let equalizer = rect(700.0, 616.0, 275.0, 116.0);
+    let main = rect(700.0, 500.0, 275.0, 116.0);
+    let origins = kept_inside(&[main, equalizer], Size::new(800.0, 600.0));
+    assert_eq!(
+        origins,
+        vec![Point::new(525.0, 368.0), Point::new(525.0, 484.0)]
+    );
+}
+
+#[test]
+fn windows_already_inside_stay_where_they_are() {
+    let origins = kept_inside(
+        &[MAIN, rect(400.0, 300.0, 275.0, 261.0)],
+        Size::new(1200.0, 900.0),
+    );
+    assert_eq!(
+        origins,
+        vec![Point::new(26.0, 22.0), Point::new(400.0, 300.0)]
+    );
+}
+
+#[test]
+fn a_window_set_apart_is_brought_in_on_its_own() {
+    let apart = rect(1100.0, 22.0, 275.0, 116.0);
+    let origins = kept_inside(&[MAIN, apart], Size::new(1000.0, 800.0));
+    assert_eq!(
+        origins,
+        vec![Point::new(26.0, 22.0), Point::new(725.0, 22.0)]
+    );
+}
+
+#[test]
+fn a_group_larger_than_the_canvas_keeps_its_top_left_corner_on_screen() {
+    let origins = kept_inside(&[rect(-40.0, -10.0, 275.0, 493.0)], Size::new(200.0, 300.0));
+    assert_eq!(origins, vec![Point::new(0.0, 0.0)]);
+}
+
+#[test]
+fn positions_survive_the_trip_through_the_preferences() {
+    let positions = [
+        Point::new(26.0, 22.0),
+        Point::new(301.5, 22.0),
+        Point::new(26.0, 254.0),
+    ];
+    assert_eq!(
+        decode_positions(&encode_positions(&positions)),
+        Some(positions)
+    );
+    assert_eq!(decode_positions("1,2;3,4"), None);
+    assert_eq!(decode_positions("1,2;3,x;5,6"), None);
+    assert_eq!(decode_positions("NaN,2;3,4;5,6"), None);
 }
