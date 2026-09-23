@@ -141,6 +141,14 @@ button is clicked, so the art lines up with what the player does. A skin whose
 strip is one flat colour rolls up into the classic skin's strip and font
 instead, the way Winamp filled what a skin left out.
 
+Every bundled Catamp skin draws its own strip.
+`node tools/skin-studio/windowshade.mjs <skin> [--save]` redraws one through
+the running Studio's pen on a layer of its own: the title bar's art stays,
+whatever would sit under the clock moves aside, the name is lifted out of the
+art and set down on the left, and the time and transport sit on insets in the
+font's own colours. The five rolled-up cursors are the skin's own full-window
+ones for the same jobs.
+
 ## Cursors
 
 A classic skin names a pointer for each region of the player: the plain arrow
