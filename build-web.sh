@@ -19,8 +19,17 @@ rm -rf pkg dist
   --features web,renderer-wgpu
 
 mkdir -p dist
-cp index.html dist/index.html
+# The page asks for this build's player by a name of its own, and the service
+# worker keeps it under that name, so a page never runs with a player an
+# earlier build left in the cache.
+build="$(cat pkg/cranamp_bg.wasm pkg/cranamp.js | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-12)"
+versioned="s#\./pkg/cranamp\.js\"#./pkg/cranamp.js?v=${build}\"#; s#\./pkg/cranamp_bg\.wasm\"#./pkg/cranamp_bg.wasm?v=${build}\"#"
+sed "$versioned" index.html > dist/index.html
 cp assets/icon/favicon.png assets/icon/apple-touch-icon.png dist/
+cp assets/icon/icon-192.png assets/icon/icon-512.png assets/icon/icon-maskable-512.png dist/
+cp manifest.webmanifest dist/manifest.webmanifest
+version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+sed "$versioned; s/__CRANAMP_CACHE__/cranamp-${version}-${build}/" sw.js > dist/sw.js
 cp -R pkg dist/pkg
 mkdir -p dist/demo-music
 cp assets/demo-music/generated/*.mp3 dist/demo-music/

@@ -222,6 +222,9 @@ def main():
     print(icns.relative_to(ROOT))
 
     write(render(64, "plate"), ICON_DIR / "favicon.png")
+    write(render(192, "plate"), ICON_DIR / "icon-192.png")
+    write(render(512, "plate"), ICON_DIR / "icon-512.png")
+    write(render(512, "full-bleed").convert("RGB"), ICON_DIR / "icon-maskable-512.png")
     write(render(180, "full-bleed").convert("RGB"), ICON_DIR / "apple-touch-icon.png")
 
     write(render(1024, "full-bleed").convert("RGB"), IOS_DIR / "AppIcon-1024.png")

@@ -105,6 +105,23 @@ pub const POS_OPTIONS_BUTTON: (f32, f32) = (6.0, 3.0);
 pub const POS_MINIMIZE_BUTTON: (f32, f32) = (244.0, 3.0);
 pub const POS_SHADE_BUTTON: (f32, f32) = (254.0, 3.0);
 pub const POS_CLOSE_BUTTON: (f32, f32) = (264.0, 3.0);
+/// The main window rolled up, Winamp's windowshade mode: its strip in
+/// TITLEBAR.BMP draws the mini transport and the colon of the time.
+pub const MAIN_SHADE_HEIGHT: f32 = 14.0;
+pub const MAIN_SHADE_BAR_SELECTED: SpriteRect = (27.0, 29.0, 275.0, 14.0);
+pub const MAIN_SHADE_DRAG_HIT_AREA: SpriteRect = (16.0, 0.0, 153.0, 14.0);
+pub const MAIN_UNSHADE_BUTTON: SpriteRect = (0.0, 27.0, 9.0, 9.0);
+pub const MAIN_UNSHADE_BUTTON_SELECTED: SpriteRect = (9.0, 27.0, 9.0, 9.0);
+pub const SHADE_POSBAR_BG: SpriteRect = (0.0, 36.0, 17.0, 7.0);
+pub const SHADE_POSBAR_THUMB: SpriteRect = (20.0, 36.0, 3.0, 7.0);
+pub const POS_SHADE_POSBAR: (f32, f32) = (226.0, 4.0);
+pub const POS_SHADE_TIME: (f32, f32) = (125.0, 4.0);
+pub const SHADE_PREVIOUS_HIT_AREA: SpriteRect = (169.0, 2.0, 8.0, 10.0);
+pub const SHADE_PLAY_HIT_AREA: SpriteRect = (177.0, 2.0, 10.0, 10.0);
+pub const SHADE_PAUSE_HIT_AREA: SpriteRect = (187.0, 2.0, 10.0, 10.0);
+pub const SHADE_STOP_HIT_AREA: SpriteRect = (197.0, 2.0, 9.0, 10.0);
+pub const SHADE_NEXT_HIT_AREA: SpriteRect = (206.0, 2.0, 8.0, 10.0);
+pub const SHADE_EJECT_HIT_AREA: SpriteRect = (216.0, 2.0, 9.0, 10.0);
 pub const PANEL_WINDOW: SpriteRect = (0.0, 0.0, 275.0, 116.0);
 pub const EQ_WIDTH: f32 = 275.0;
 pub const EQ_HEIGHT: f32 = 116.0;

@@ -6,6 +6,7 @@ mod browser_skins;
 pub mod cursors;
 mod eq_graph;
 mod inline_windows;
+mod keys;
 mod pixel_grid;
 mod pixel_text;
 mod region_clip;
@@ -111,6 +112,7 @@ struct WinampState {
     eq_preset_menu_open: bool,
     settings_open: bool,
     studio_open: bool,
+    main_shaded: bool,
     pending_resume: Option<(usize, f32)>,
     eq_values: [f32; 11],
     skin_path: Option<String>,
@@ -154,6 +156,7 @@ impl PartialEq for WinampState {
             && self.eq_preset_menu_open == other.eq_preset_menu_open
             && self.settings_open == other.settings_open
             && self.studio_open == other.studio_open
+            && self.main_shaded == other.main_shaded
             && self.pending_resume == other.pending_resume
             && self.eq_values == other.eq_values
             && self.skin_path == other.skin_path
@@ -208,6 +211,7 @@ impl Default for WinampState {
             eq_preset_menu_open: false,
             settings_open: false,
             studio_open: false,
+            main_shaded: false,
             pending_resume: None,
             eq_values: DEFAULT_EQ_VALUES,
             skin_path: None,
@@ -596,7 +600,36 @@ struct InlineDragSession {
     grab: Point,
     followers: Vec<(InlinePane, Point)>,
 }
+/// Where the preferences keep the places of the windows in a shared canvas.
+const INLINE_LAYOUT_KEY: &str = "cranamp.inline-windows";
 impl WinampInlineWindowStates {
+    /// The windows where they were last put down, or stacked from the top
+    /// left corner the first time.
+    fn saved_or_stacked() -> Self {
+        let [main, equalizer, playlist] = cranpose_services::preferences()
+            .get(INLINE_LAYOUT_KEY)
+            .and_then(|text| inline_windows::decode_positions(&text))
+            .unwrap_or([
+                Point::new(26.0, 22.0),
+                Point::new(26.0, 22.0 + MAIN_HEIGHT),
+                Point::new(26.0, 22.0 + MAIN_HEIGHT + EQ_HEIGHT),
+            ]);
+        Self {
+            main: cranpose_core::mutableStateOf(main),
+            equalizer: cranpose_core::mutableStateOf(equalizer),
+            playlist: cranpose_core::mutableStateOf(playlist),
+        }
+    }
+    fn save(&self) {
+        let text = inline_windows::encode_positions(&[
+            self.main.get_non_reactive(),
+            self.equalizer.get_non_reactive(),
+            self.playlist.get_non_reactive(),
+        ]);
+        if let Err(error) = cranpose_services::preferences().set(INLINE_LAYOUT_KEY, &text) {
+            log::debug!("the window layout was not saved: {error:?}");
+        }
+    }
     fn position(&self, pane: InlinePane) -> MutableState<Point> {
         match pane {
             InlinePane::Main => self.main,
@@ -619,7 +652,11 @@ impl WinampInlineWindowStates {
                 },
             )
         };
-        let mut windows = vec![rect(InlinePane::Main, MAIN_WIDTH, MAIN_HEIGHT)];
+        let mut windows = vec![rect(
+            InlinePane::Main,
+            MAIN_WIDTH,
+            main_height(snapshot.main_shaded),
+        )];
         if snapshot.eq_visible {
             windows.push(rect(InlinePane::Equalizer, EQ_WIDTH, EQ_HEIGHT));
         }
@@ -627,6 +664,19 @@ impl WinampInlineWindowStates {
             windows.push(rect(InlinePane::Playlist, PLAYLIST_WIDTH, PLAYLIST_HEIGHT));
         }
         windows
+    }
+    /// Moves the windows hanging under the main window by as much as it
+    /// grows or shrinks to `height`, and keeps the places.
+    fn follow_main_height(&self, snapshot: &WinampState, height: f32) {
+        let windows = self.visible(snapshot);
+        let rects: Vec<Rect> = windows.iter().map(|(_, rect)| *rect).collect();
+        let scale = ui_scale();
+        let delta = scaled(height, scale) - rects[0].height;
+        for index in inline_windows::hanging_below(0, &rects) {
+            let (pane, rect) = windows[index];
+            self.position(pane).set(Point::new(rect.x, rect.y + delta));
+        }
+        self.save();
     }
 }
 impl InlineDrag {
@@ -688,6 +738,28 @@ impl InlineDrag {
         }
     }
 }
+/// Brings any window the page left outside its canvas back in, whenever the
+/// canvas changes size or a window is shown.
+#[composable]
+fn InlineWindowsKeptInside(windows: WinampInlineWindowStates, player: MutableState<WinampState>) {
+    let surface = cranpose_services::rememberHostSurfaceSize().get();
+    let snapshot = player.get();
+    cranpose_core::SideEffect(move || {
+        let Some(canvas) = inline_canvas_size().filter(|_| surface.width > 0.0) else {
+            return;
+        };
+        let visible = windows.visible(&snapshot);
+        let rects: Vec<Rect> = visible.iter().map(|(_, rect)| *rect).collect();
+        for ((pane, rect), origin) in visible
+            .iter()
+            .zip(inline_windows::kept_inside(&rects, canvas))
+        {
+            if origin != Point::new(rect.x, rect.y) {
+                windows.position(*pane).set(origin);
+            }
+        }
+    });
+}
 /// The canvas the windows share, where the platform reports one.
 fn inline_canvas_size() -> Option<Size> {
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -722,14 +794,7 @@ pub(crate) fn remember_winamp_tab_state() -> WinampTabState {
     let tab_state = cranpose_core::remember(|| WinampTabState {
         player: cranpose_core::mutableStateOf(initial_winamp_state()),
         detached: cranpose_core::mutableStateOf(native_winamp_windows_available()),
-        inline_windows: WinampInlineWindowStates {
-            main: cranpose_core::mutableStateOf(Point::new(26.0, 22.0)),
-            equalizer: cranpose_core::mutableStateOf(Point::new(26.0, 22.0 + MAIN_HEIGHT)),
-            playlist: cranpose_core::mutableStateOf(Point::new(
-                26.0,
-                22.0 + MAIN_HEIGHT + EQ_HEIGHT,
-            )),
-        },
+        inline_windows: WinampInlineWindowStates::saved_or_stacked(),
         peer_windows: WinampPeerWindowStates {
             main: WindowState::new(MAIN_WIDTH, MAIN_HEIGHT),
             equalizer: WindowState::new(EQ_WIDTH, EQ_HEIGHT),
@@ -1136,6 +1201,7 @@ fn WinampRuntimeEffects(
     skin_state: WinampSkinState,
 ) {
     PlaybackProgressEffect(state);
+    WinampKeyboard(state);
     PlaylistDurationHydrationEffect(state);
     DocumentPickerEffect(state);
     CranposePickerEffect(state);
@@ -2108,7 +2174,7 @@ fn floating_surface_size(floating: bool, snapshot: &WinampState) -> Option<Size>
     } else {
         Some(Size::new(
             MAIN_WIDTH,
-            MAIN_HEIGHT
+            main_height(snapshot.main_shaded)
                 + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 }
                 + if snapshot.playlist_visible {
                     PLAYLIST_HEIGHT
@@ -2223,6 +2289,7 @@ fn WinampInlineStage(
             .rounded_corners(8.0),
         BoxSpec::default(),
         move || {
+            InlineWindowsKeptInside(windows, state);
             let drag = |pane| {
                 WinampDragTarget::Inline(InlineDrag {
                     pane,
@@ -2269,7 +2336,7 @@ fn WinampStackedStage(
     let scale = layout.scale;
     let mut y = 0.0;
     let main_y = y;
-    y += MAIN_HEIGHT;
+    y += main_height(snapshot.main_shaded);
     let equalizer_y = y;
     if snapshot.eq_visible {
         y += EQ_HEIGHT;
@@ -2346,7 +2413,8 @@ fn resizable_stacked_layout(
     } else {
         fallback_scale
     };
-    let base_height = MAIN_HEIGHT + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
+    let base_height =
+        main_height(snapshot.main_shaded) + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
     let content_top_inset = if available_height.is_finite() && available_height > 0.0 {
         content_top_inset.clamp(0.0, available_height)
     } else {
@@ -2408,7 +2476,8 @@ fn fullscreen_stacked_layout(
     snapshot: &WinampState,
     fallback_scale: f32,
 ) -> StackedLayout {
-    let base_height = MAIN_HEIGHT + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
+    let base_height =
+        main_height(snapshot.main_shaded) + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
     let width_scale = if available_width.is_finite() && available_width > 0.0 {
         available_width / MAIN_WIDTH
     } else {
@@ -2463,7 +2532,7 @@ fn web_current_surface_size() -> Option<Size> {
 }
 #[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 fn stacked_skin_height(snapshot: &WinampState, playlist_height: f32) -> f32 {
-    MAIN_HEIGHT
+    main_height(snapshot.main_shaded)
         + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 }
         + if snapshot.playlist_visible {
             playlist_height
@@ -2523,6 +2592,7 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
     let held = dock.get();
     let eq_shown = snapshot.eq_visible;
     let playlist_shown = snapshot.playlist_visible;
+    let shaded = snapshot.main_shaded;
     let eq_docked = eq_shown && held.docked(WinampPane::Equalizer);
     let playlist_docked = playlist_shown && held.docked(WinampPane::Playlist);
     let playlist_height = peer_windows
@@ -2530,7 +2600,7 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
         .size()
         .height
         .max(playlist_min_height());
-    let stack_height = MAIN_HEIGHT
+    let stack_height = main_height(shaded)
         + if eq_docked { EQ_HEIGHT } else { 0.0 }
         + if playlist_docked {
             playlist_height
@@ -2566,7 +2636,7 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
                 // the node keeps its state and its effects either way. The
                 // pixel grid starts where the pane does, so the seam between
                 // two panes lands on one physical pixel.
-                let offset = Point::new(0.0, MAIN_HEIGHT);
+                let offset = Point::new(0.0, main_height(shaded));
                 let eq_skin = skin.clone();
                 Box(
                     if eq_docked {
@@ -2608,7 +2678,10 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
                 );
             }
             if playlist_shown {
-                let offset = Point::new(0.0, MAIN_HEIGHT + if eq_docked { EQ_HEIGHT } else { 0.0 });
+                let offset = Point::new(
+                    0.0,
+                    main_height(shaded) + if eq_docked { EQ_HEIGHT } else { 0.0 },
+                );
                 let pl_skin = skin.clone();
                 Box(
                     if playlist_docked {
@@ -2738,509 +2811,685 @@ fn MainWindow(
     close_action: WinampCloseAction,
     scale: f32,
 ) {
-    let snapshot = state.get();
+    let shaded = state.get().main_shaded;
+    let region = if shaded {
+        Modifier::empty()
+    } else {
+        region_clip::modifier(&skin.regions, "Normal", scale)
+    };
     Box(
-        winamp_window_modifier(MAIN_WIDTH, MAIN_HEIGHT, scale, drag_target)
-            .then(region_clip::modifier(&skin.regions, "Normal", scale)),
+        winamp_window_modifier(MAIN_WIDTH, main_height(shaded), scale, drag_target).then(region),
         BoxSpec::default(),
         move || {
-            Sprite(skin.main.clone(), MAIN_WINDOW, 0.0, 0.0, scale);
-            Sprite(
-                skin.titlebar.clone(),
-                MAIN_TITLE_BAR_SELECTED,
-                0.0,
-                0.0,
-                scale,
-            );
-            CursorRegions(
-                skin.cursors.clone(),
-                main_window_cursor_areas().to_vec(),
-                scale,
-            );
-            WindowDragHandle(drag_target, MAIN_TITLE_DRAG_HIT_AREA, scale);
-            {
-                let state_click = state;
-                let skin_click = skin_state;
-                PressableSprite(
-                    skin.titlebar.clone(),
-                    MAIN_OPTIONS_BUTTON,
-                    MAIN_OPTIONS_BUTTON_SELECTED,
-                    POS_OPTIONS_BUTTON.0,
-                    POS_OPTIONS_BUTTON.1,
-                    scale,
-                    move || {
-                        open_skin_file(state_click, skin_click);
-                    },
-                );
-            }
-            {
-                let state_click = state;
-                PressableSprite(
-                    skin.titlebar.clone(),
-                    MAIN_MINIMIZE_BUTTON,
-                    MAIN_MINIMIZE_BUTTON_SELECTED,
-                    POS_MINIMIZE_BUTTON.0,
-                    POS_MINIMIZE_BUTTON.1,
-                    scale,
-                    move || {
-                        state_click.update(|s| s.status = "Minimize".to_string());
-                    },
-                );
-            }
-            {
-                let state_click = state;
-                PressableSprite(
-                    skin.titlebar.clone(),
-                    MAIN_SHADE_BUTTON,
-                    MAIN_SHADE_BUTTON_SELECTED,
-                    POS_SHADE_BUTTON.0,
-                    POS_SHADE_BUTTON.1,
-                    scale,
-                    move || {
-                        state_click.update(|s| s.status = "Shade".to_string());
-                    },
-                );
-            }
-            {
-                let state_click = state;
-                PressableSprite(
-                    skin.titlebar.clone(),
-                    MAIN_CLOSE_BUTTON,
-                    MAIN_CLOSE_BUTTON_SELECTED,
-                    POS_CLOSE_BUTTON.0,
-                    POS_CLOSE_BUTTON.1,
-                    scale,
-                    move || {
-                        state_click.update(|s| match close_action {
-                            WinampCloseAction::SetStatus => {
-                                s.status = "Close".to_string();
-                            }
-                            WinampCloseAction::CloseApp => {
-                                s.closed = true;
-                                s.status = "Closed".to_string();
-                            }
-                        });
-                    },
-                );
-            }
-            let status_sprite = match snapshot.playback {
-                PlaybackState::Stopped => STATUS_STOPPED,
-                PlaybackState::Playing => STATUS_PLAYING,
-                PlaybackState::Paused => STATUS_PAUSED,
-            };
-            Sprite(
-                skin.playpaus.clone(),
-                status_sprite,
-                POS_STATUS.0,
-                POS_STATUS.1,
-                scale,
-            );
-            if snapshot.playback != PlaybackState::Stopped {
-                Visualizer(
-                    snapshot.playback == PlaybackState::Playing,
-                    skin.viscolor,
-                    skin.bitmap_mode,
+            if shaded {
+                MainShadeStrip(
+                    skin.clone(),
+                    state,
+                    skin_state,
+                    drag_target,
+                    close_action,
                     scale,
                 );
-            }
-            if snapshot.playback != PlaybackState::Stopped {
-                for (i, digit) in time_digits(snapshot.elapsed_seconds).iter().enumerate() {
-                    let pos = POS_TIME_DIGITS[i];
-                    Sprite(
-                        skin.numbers.clone(),
-                        digit_rect(*digit),
-                        pos.0,
-                        pos.1,
-                        scale,
-                    );
-                }
-            }
-            let title = main_display_title(&snapshot);
-            let title_description = title.clone();
-            let title_scroll = cranpose_core::rememberMutableStateOf(|| 0.0f32);
-            let scrolled_title = cranpose_core::rememberMutableStateOf(String::new);
-            if scrolled_title.get_non_reactive() != title_description {
-                scrolled_title.set(title_description.clone());
-                title_scroll.set(0.0);
-            }
-            let title_phase = snapshot.title_marquee_phase + title_scroll.get();
-            let title = track_text_window(
-                title,
-                snapshot.playback == PlaybackState::Playing,
-                title_phase,
-            );
-            BitmapWinampText(
-                skin.text.clone(),
-                title,
-                title_description,
-                SystemTextBox {
-                    x: POS_MAIN_TRACK_TEXT.0,
-                    y: POS_MAIN_TRACK_TEXT.1,
-                    width: MAIN_TRACK_TEXT_WIDTH,
-                    height: bitmap_font::HEIGHT as f32,
-                    scale,
-                },
-            );
-            SongTitleScroll(
-                ControlRect::new(
-                    POS_MAIN_TRACK_TEXT.0,
-                    POS_MAIN_TRACK_TEXT.1,
-                    MAIN_TRACK_TEXT_WIDTH,
-                    WINAMP_SYSTEM_LINE_HEIGHT,
-                    scale,
-                ),
-                title_scroll,
-                state,
-            );
-            // The media service does not expose bitrate/sample rate; leave them blank.
-            Sprite(
-                skin.monoster.clone(),
-                MONO_OFF,
-                POS_MONO.0,
-                POS_MONO.1,
-                scale,
-            );
-            Sprite(
-                skin.monoster.clone(),
-                if snapshot.current_index.is_some() {
-                    STEREO_ON
-                } else {
-                    STEREO_OFF
-                },
-                POS_STEREO.0,
-                POS_STEREO.1,
-                scale,
-            );
-            Sprite(
-                skin.posbar.clone(),
-                POSBAR_BG,
-                POS_POSBAR.0,
-                POS_POSBAR.1,
-                scale,
-            );
-            let posbar_pressed = cranpose_core::rememberMutableStateOf(|| false);
-            let position_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
-            let display_position = position_drag.get().unwrap_or(snapshot.position);
-            let position_thumb_x = slider_thumb_x(display_position, POSBAR_BG.2, POSBAR_THUMB.2);
-            let posbar_thumb_sprite = if posbar_pressed.get() {
-                POSBAR_THUMB_ACTIVE
             } else {
-                POSBAR_THUMB
-            };
-            Sprite(
-                skin.posbar.clone(),
-                posbar_thumb_sprite,
-                POS_POSBAR.0 + position_thumb_x,
-                POS_POSBAR.1,
-                scale,
-            );
-            {
-                let position_drag_change = position_drag;
-                let position_drag_commit = position_drag;
-                let snapshot_duration = snapshot.duration_seconds;
-                DragSlider(
-                    ControlRect::new(POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3, scale),
-                    display_position,
-                    POSBAR_THUMB.2,
-                    move |fraction| {
-                        position_drag_change.set(Some(fraction));
-                    },
-                    move |dragging| {
-                        posbar_pressed.set(dragging);
-                        if !dragging {
-                            let Some(fraction) = position_drag_commit.get_non_reactive() else {
-                                return;
-                            };
-                            position_drag_commit.set(None);
-                            state.update(|s| {
-                                s.position = fraction;
-                                if let Some(duration) = s.duration_seconds.or(snapshot_duration) {
-                                    s.elapsed_seconds = duration * fraction.clamp(0.0, 1.0);
-                                }
-                            });
-                            if let Err(error) = audio::seek_fraction(fraction) {
-                                state.update(|s| s.status = error);
-                            }
-                        }
-                    },
-                );
-            }
-            TransportButtons(skin.cbuttons.clone(), state, scale);
-            let volume_pressed = cranpose_core::rememberMutableStateOf(|| false);
-            let volume_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
-            let display_volume = volume_drag.get().unwrap_or(snapshot.volume);
-            let vol_frame = slider_frame(display_volume, VOLUME_FRAMES);
-            Sprite(
-                skin.volume.clone(),
-                (
-                    0.0,
-                    vol_frame as f32 * VOLUME_BG_STRIDE,
-                    VOLUME_BG_WIDTH,
-                    VOLUME_BG_HEIGHT,
-                ),
-                POS_VOLUME.0,
-                POS_VOLUME.1,
-                scale,
-            );
-            let volume_thumb_x = slider_thumb_x(display_volume, VOLUME_BG_WIDTH, VOLUME_THUMB.2);
-            let volume_thumb_sprite = if volume_pressed.get() {
-                VOLUME_THUMB_ACTIVE
-            } else {
-                VOLUME_THUMB
-            };
-            Sprite(
-                skin.volume.clone(),
-                volume_thumb_sprite,
-                POS_VOLUME.0 + volume_thumb_x,
-                POS_VOLUME.1 + 1.0,
-                scale,
-            );
-            {
-                let volume_drag_change = volume_drag;
-                let volume_drag_commit = volume_drag;
-                DragSlider(
-                    ControlRect::new(
-                        POS_VOLUME.0,
-                        POS_VOLUME.1,
-                        VOLUME_BG_WIDTH,
-                        VOLUME_BG_HEIGHT,
-                        scale,
-                    ),
-                    display_volume,
-                    VOLUME_THUMB.2,
-                    move |fraction| {
-                        volume_drag_change.set(Some(fraction));
-                        if let Err(error) = audio::set_volume(fraction) {
-                            state.update(|s| s.status = error);
-                        }
-                    },
-                    move |dragging| {
-                        volume_pressed.set(dragging);
-                        if !dragging {
-                            let Some(fraction) = volume_drag_commit.get_non_reactive() else {
-                                return;
-                            };
-                            volume_drag_commit.set(None);
-                            state.update(|s| {
-                                s.volume = fraction;
-                            });
-                        }
-                    },
-                );
-            }
-            let balance_pressed = cranpose_core::rememberMutableStateOf(|| false);
-            let balance_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
-            let display_balance = balance_drag.get().unwrap_or(snapshot.balance);
-            let bal_frame = slider_frame(display_balance, BALANCE_FRAMES);
-            Sprite(
-                skin.balance.clone(),
-                (
-                    BALANCE_BG_X,
-                    bal_frame as f32 * BALANCE_BG_STRIDE,
-                    BALANCE_BG_WIDTH,
-                    BALANCE_BG_HEIGHT,
-                ),
-                POS_BALANCE.0,
-                POS_BALANCE.1,
-                scale,
-            );
-            let balance_thumb_x =
-                slider_thumb_x(display_balance, BALANCE_BG_WIDTH, BALANCE_THUMB.2);
-            let balance_thumb_sprite = if balance_pressed.get() {
-                BALANCE_THUMB_ACTIVE
-            } else {
-                BALANCE_THUMB
-            };
-            Sprite(
-                skin.balance.clone(),
-                balance_thumb_sprite,
-                POS_BALANCE.0 + balance_thumb_x,
-                POS_BALANCE.1 + 1.0,
-                scale,
-            );
-            {
-                let balance_drag_change = balance_drag;
-                let balance_drag_commit = balance_drag;
-                DragSlider(
-                    ControlRect::new(
-                        POS_BALANCE.0,
-                        POS_BALANCE.1,
-                        BALANCE_BG_WIDTH,
-                        BALANCE_BG_HEIGHT,
-                        scale,
-                    ),
-                    display_balance,
-                    BALANCE_THUMB.2,
-                    move |fraction| {
-                        balance_drag_change.set(Some(fraction));
-                    },
-                    move |dragging| {
-                        balance_pressed.set(dragging);
-                        if !dragging {
-                            let Some(fraction) = balance_drag_commit.get_non_reactive() else {
-                                return;
-                            };
-                            balance_drag_commit.set(None);
-                            state.update(|s| s.balance = fraction);
-                        }
-                    },
-                );
-            }
-            let shuffle_normal = if snapshot.shuffle {
-                SHUFFLE_ON
-            } else {
-                SHUFFLE_OFF
-            };
-            let shuffle_pressed = if snapshot.shuffle {
-                SHUFFLE_ON_ACTIVE
-            } else {
-                SHUFFLE_OFF_ACTIVE
-            };
-            {
-                let state_click = state;
-                PressableSprite(
-                    skin.shufrep.clone(),
-                    shuffle_normal,
-                    shuffle_pressed,
-                    POS_SHUFFLE.0,
-                    POS_SHUFFLE.1,
+                MainWindowFace(
+                    skin.clone(),
+                    state,
+                    skin_state,
+                    drag_target,
+                    close_action,
                     scale,
-                    move || {
-                        state_click.update(|s| {
-                            s.shuffle = !s.shuffle;
-                            if s.shuffle {
-                                refresh_shuffle_order(s);
-                            } else {
-                                s.shuffle_order.clear();
-                            }
-                            s.status = if s.shuffle {
-                                "Shuffle On".to_string()
-                            } else {
-                                "Shuffle Off".to_string()
-                            };
-                        });
-                    },
                 );
             }
-            let repeat_normal = if snapshot.repeat {
-                REPEAT_ON
-            } else {
-                REPEAT_OFF
-            };
-            let repeat_pressed = if snapshot.repeat {
-                REPEAT_ON_ACTIVE
-            } else {
-                REPEAT_OFF_ACTIVE
-            };
-            {
-                let state_click = state;
-                PressableSprite(
-                    skin.shufrep.clone(),
-                    repeat_normal,
-                    repeat_pressed,
-                    POS_REPEAT.0,
-                    POS_REPEAT.1,
-                    scale,
-                    move || {
-                        state_click.update(|s| {
-                            s.repeat = !s.repeat;
-                            s.status = if s.repeat {
-                                "Repeat On".to_string()
-                            } else {
-                                "Repeat Off".to_string()
-                            };
-                        });
-                    },
-                );
-            }
-            let eq_normal = if snapshot.eq_visible {
-                EQ_BUTTON_ON
-            } else {
-                EQ_BUTTON_OFF
-            };
-            let eq_pressed = if snapshot.eq_visible {
-                EQ_BUTTON_ON_ACTIVE
-            } else {
-                EQ_BUTTON_OFF_ACTIVE
-            };
-            {
-                let state_click = state;
-                PressableSprite(
-                    skin.shufrep.clone(),
-                    eq_normal,
-                    eq_pressed,
-                    POS_EQ_BUTTON.0,
-                    POS_EQ_BUTTON.1,
-                    scale,
-                    move || {
-                        state_click.update(|s| {
-                            s.eq_visible = !s.eq_visible;
-                            if !s.eq_visible {
-                                s.eq_preset_menu_open = false;
-                            }
-                            s.status = if s.eq_visible {
-                                "Equalizer Shown".to_string()
-                            } else {
-                                "Equalizer Hidden".to_string()
-                            };
-                        });
-                    },
-                );
-            }
-            let pl_normal = if snapshot.playlist_visible {
-                PL_BUTTON_ON
-            } else {
-                PL_BUTTON_OFF
-            };
-            let pl_pressed = if snapshot.playlist_visible {
-                PL_BUTTON_ON_ACTIVE
-            } else {
-                PL_BUTTON_OFF_ACTIVE
-            };
-            {
-                let state_click = state;
-                PressableSprite(
-                    skin.shufrep.clone(),
-                    pl_normal,
-                    pl_pressed,
-                    POS_PL_BUTTON.0,
-                    POS_PL_BUTTON.1,
-                    scale,
-                    move || {
-                        state_click.update(|s| {
-                            s.playlist_visible = !s.playlist_visible;
-                            s.status = if s.playlist_visible {
-                                "Playlist Shown".to_string()
-                            } else {
-                                "Playlist Hidden".to_string()
-                            };
-                        });
-                    },
-                );
-            }
-            {
-                let state_click = state;
-                ClickTarget(
-                    MAIN_SKIN_CHOOSER_HIT_AREA.0,
-                    MAIN_SKIN_CHOOSER_HIT_AREA.1,
-                    MAIN_SKIN_CHOOSER_HIT_AREA.2,
-                    MAIN_SKIN_CHOOSER_HIT_AREA.3,
-                    scale,
-                    move || {
-                        state_click.update(|s| {
-                            s.settings_open = !s.settings_open;
-                            s.status = if s.settings_open {
-                                "Settings".to_string()
-                            } else {
-                                "Settings Closed".to_string()
-                            };
-                        });
-                    },
-                );
-            }
-            region_clip::HoleInputShields(skin.regions.clone(), "Normal", scale);
         },
     );
+}
+/// The main window's height: the full face, or the title bar alone when it is
+/// rolled up.
+fn main_height(shaded: bool) -> f32 {
+    if shaded {
+        MAIN_SHADE_HEIGHT
+    } else {
+        MAIN_HEIGHT
+    }
+}
+#[composable]
+fn MainWindowFace(
+    skin: WinampSkin,
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    drag_target: WinampDragTarget,
+    close_action: WinampCloseAction,
+    scale: f32,
+) {
+    let snapshot = state.get();
+    Sprite(skin.main.clone(), MAIN_WINDOW, 0.0, 0.0, scale);
+    Sprite(
+        skin.titlebar.clone(),
+        MAIN_TITLE_BAR_SELECTED,
+        0.0,
+        0.0,
+        scale,
+    );
+    CursorRegions(
+        skin.cursors.clone(),
+        main_window_cursor_areas().to_vec(),
+        scale,
+    );
+    WindowDragHandle(drag_target, MAIN_TITLE_DRAG_HIT_AREA, scale);
+    MainTitleButtons(
+        skin.titlebar.clone(),
+        state,
+        skin_state,
+        drag_target,
+        close_action,
+        scale,
+    );
+    let status_sprite = match snapshot.playback {
+        PlaybackState::Stopped => STATUS_STOPPED,
+        PlaybackState::Playing => STATUS_PLAYING,
+        PlaybackState::Paused => STATUS_PAUSED,
+    };
+    Sprite(
+        skin.playpaus.clone(),
+        status_sprite,
+        POS_STATUS.0,
+        POS_STATUS.1,
+        scale,
+    );
+    if snapshot.playback != PlaybackState::Stopped {
+        Visualizer(
+            snapshot.playback == PlaybackState::Playing,
+            skin.viscolor,
+            skin.bitmap_mode,
+            scale,
+        );
+    }
+    if snapshot.playback != PlaybackState::Stopped {
+        for (i, digit) in time_digits(snapshot.elapsed_seconds).iter().enumerate() {
+            let pos = POS_TIME_DIGITS[i];
+            Sprite(
+                skin.numbers.clone(),
+                digit_rect(*digit),
+                pos.0,
+                pos.1,
+                scale,
+            );
+        }
+    }
+    let title = main_display_title(&snapshot);
+    let title_description = title.clone();
+    let title_scroll = cranpose_core::rememberMutableStateOf(|| 0.0f32);
+    let scrolled_title = cranpose_core::rememberMutableStateOf(String::new);
+    if scrolled_title.get_non_reactive() != title_description {
+        scrolled_title.set(title_description.clone());
+        title_scroll.set(0.0);
+    }
+    let title_phase = snapshot.title_marquee_phase + title_scroll.get();
+    let title = track_text_window(
+        title,
+        snapshot.playback == PlaybackState::Playing,
+        title_phase,
+    );
+    BitmapWinampText(
+        skin.text.clone(),
+        title,
+        title_description,
+        SystemTextBox {
+            x: POS_MAIN_TRACK_TEXT.0,
+            y: POS_MAIN_TRACK_TEXT.1,
+            width: MAIN_TRACK_TEXT_WIDTH,
+            height: bitmap_font::HEIGHT as f32,
+            scale,
+        },
+    );
+    SongTitleScroll(
+        ControlRect::new(
+            POS_MAIN_TRACK_TEXT.0,
+            POS_MAIN_TRACK_TEXT.1,
+            MAIN_TRACK_TEXT_WIDTH,
+            WINAMP_SYSTEM_LINE_HEIGHT,
+            scale,
+        ),
+        title_scroll,
+        state,
+    );
+    // The media service does not expose bitrate/sample rate; leave them blank.
+    Sprite(
+        skin.monoster.clone(),
+        MONO_OFF,
+        POS_MONO.0,
+        POS_MONO.1,
+        scale,
+    );
+    Sprite(
+        skin.monoster.clone(),
+        if snapshot.current_index.is_some() {
+            STEREO_ON
+        } else {
+            STEREO_OFF
+        },
+        POS_STEREO.0,
+        POS_STEREO.1,
+        scale,
+    );
+    Sprite(
+        skin.posbar.clone(),
+        POSBAR_BG,
+        POS_POSBAR.0,
+        POS_POSBAR.1,
+        scale,
+    );
+    let posbar_pressed = cranpose_core::rememberMutableStateOf(|| false);
+    let position_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
+    let display_position = position_drag.get().unwrap_or(snapshot.position);
+    let position_thumb_x = slider_thumb_x(display_position, POSBAR_BG.2, POSBAR_THUMB.2);
+    let posbar_thumb_sprite = if posbar_pressed.get() {
+        POSBAR_THUMB_ACTIVE
+    } else {
+        POSBAR_THUMB
+    };
+    Sprite(
+        skin.posbar.clone(),
+        posbar_thumb_sprite,
+        POS_POSBAR.0 + position_thumb_x,
+        POS_POSBAR.1,
+        scale,
+    );
+    {
+        let position_drag_change = position_drag;
+        let position_drag_commit = position_drag;
+        let snapshot_duration = snapshot.duration_seconds;
+        DragSlider(
+            ControlRect::new(POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3, scale),
+            display_position,
+            POSBAR_THUMB.2,
+            move |fraction| {
+                position_drag_change.set(Some(fraction));
+            },
+            move |dragging| {
+                posbar_pressed.set(dragging);
+                if !dragging {
+                    let Some(fraction) = position_drag_commit.get_non_reactive() else {
+                        return;
+                    };
+                    position_drag_commit.set(None);
+                    commit_seek(state, fraction, snapshot_duration);
+                }
+            },
+        );
+    }
+    TransportButtons(skin.cbuttons.clone(), state, scale);
+    let volume_pressed = cranpose_core::rememberMutableStateOf(|| false);
+    let volume_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
+    let display_volume = volume_drag.get().unwrap_or(snapshot.volume);
+    let vol_frame = slider_frame(display_volume, VOLUME_FRAMES);
+    Sprite(
+        skin.volume.clone(),
+        (
+            0.0,
+            vol_frame as f32 * VOLUME_BG_STRIDE,
+            VOLUME_BG_WIDTH,
+            VOLUME_BG_HEIGHT,
+        ),
+        POS_VOLUME.0,
+        POS_VOLUME.1,
+        scale,
+    );
+    let volume_thumb_x = slider_thumb_x(display_volume, VOLUME_BG_WIDTH, VOLUME_THUMB.2);
+    let volume_thumb_sprite = if volume_pressed.get() {
+        VOLUME_THUMB_ACTIVE
+    } else {
+        VOLUME_THUMB
+    };
+    Sprite(
+        skin.volume.clone(),
+        volume_thumb_sprite,
+        POS_VOLUME.0 + volume_thumb_x,
+        POS_VOLUME.1 + 1.0,
+        scale,
+    );
+    {
+        let volume_drag_change = volume_drag;
+        let volume_drag_commit = volume_drag;
+        DragSlider(
+            ControlRect::new(
+                POS_VOLUME.0,
+                POS_VOLUME.1,
+                VOLUME_BG_WIDTH,
+                VOLUME_BG_HEIGHT,
+                scale,
+            ),
+            display_volume,
+            VOLUME_THUMB.2,
+            move |fraction| {
+                volume_drag_change.set(Some(fraction));
+                if let Err(error) = audio::set_volume(fraction) {
+                    state.update(|s| s.status = error);
+                }
+            },
+            move |dragging| {
+                volume_pressed.set(dragging);
+                if !dragging {
+                    let Some(fraction) = volume_drag_commit.get_non_reactive() else {
+                        return;
+                    };
+                    volume_drag_commit.set(None);
+                    state.update(|s| {
+                        s.volume = fraction;
+                    });
+                }
+            },
+        );
+    }
+    let balance_pressed = cranpose_core::rememberMutableStateOf(|| false);
+    let balance_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
+    let display_balance = balance_drag.get().unwrap_or(snapshot.balance);
+    let bal_frame = slider_frame(display_balance, BALANCE_FRAMES);
+    Sprite(
+        skin.balance.clone(),
+        (
+            BALANCE_BG_X,
+            bal_frame as f32 * BALANCE_BG_STRIDE,
+            BALANCE_BG_WIDTH,
+            BALANCE_BG_HEIGHT,
+        ),
+        POS_BALANCE.0,
+        POS_BALANCE.1,
+        scale,
+    );
+    let balance_thumb_x = slider_thumb_x(display_balance, BALANCE_BG_WIDTH, BALANCE_THUMB.2);
+    let balance_thumb_sprite = if balance_pressed.get() {
+        BALANCE_THUMB_ACTIVE
+    } else {
+        BALANCE_THUMB
+    };
+    Sprite(
+        skin.balance.clone(),
+        balance_thumb_sprite,
+        POS_BALANCE.0 + balance_thumb_x,
+        POS_BALANCE.1 + 1.0,
+        scale,
+    );
+    {
+        let balance_drag_change = balance_drag;
+        let balance_drag_commit = balance_drag;
+        DragSlider(
+            ControlRect::new(
+                POS_BALANCE.0,
+                POS_BALANCE.1,
+                BALANCE_BG_WIDTH,
+                BALANCE_BG_HEIGHT,
+                scale,
+            ),
+            display_balance,
+            BALANCE_THUMB.2,
+            move |fraction| {
+                balance_drag_change.set(Some(fraction));
+            },
+            move |dragging| {
+                balance_pressed.set(dragging);
+                if !dragging {
+                    let Some(fraction) = balance_drag_commit.get_non_reactive() else {
+                        return;
+                    };
+                    balance_drag_commit.set(None);
+                    state.update(|s| s.balance = fraction);
+                }
+            },
+        );
+    }
+    let shuffle_normal = if snapshot.shuffle {
+        SHUFFLE_ON
+    } else {
+        SHUFFLE_OFF
+    };
+    let shuffle_pressed = if snapshot.shuffle {
+        SHUFFLE_ON_ACTIVE
+    } else {
+        SHUFFLE_OFF_ACTIVE
+    };
+    {
+        let state_click = state;
+        PressableSprite(
+            skin.shufrep.clone(),
+            shuffle_normal,
+            shuffle_pressed,
+            POS_SHUFFLE.0,
+            POS_SHUFFLE.1,
+            scale,
+            move || {
+                state_click.update(|s| {
+                    s.shuffle = !s.shuffle;
+                    if s.shuffle {
+                        refresh_shuffle_order(s);
+                    } else {
+                        s.shuffle_order.clear();
+                    }
+                    s.status = if s.shuffle {
+                        "Shuffle On".to_string()
+                    } else {
+                        "Shuffle Off".to_string()
+                    };
+                });
+            },
+        );
+    }
+    let repeat_normal = if snapshot.repeat {
+        REPEAT_ON
+    } else {
+        REPEAT_OFF
+    };
+    let repeat_pressed = if snapshot.repeat {
+        REPEAT_ON_ACTIVE
+    } else {
+        REPEAT_OFF_ACTIVE
+    };
+    {
+        let state_click = state;
+        PressableSprite(
+            skin.shufrep.clone(),
+            repeat_normal,
+            repeat_pressed,
+            POS_REPEAT.0,
+            POS_REPEAT.1,
+            scale,
+            move || {
+                state_click.update(|s| {
+                    s.repeat = !s.repeat;
+                    s.status = if s.repeat {
+                        "Repeat On".to_string()
+                    } else {
+                        "Repeat Off".to_string()
+                    };
+                });
+            },
+        );
+    }
+    let eq_normal = if snapshot.eq_visible {
+        EQ_BUTTON_ON
+    } else {
+        EQ_BUTTON_OFF
+    };
+    let eq_pressed = if snapshot.eq_visible {
+        EQ_BUTTON_ON_ACTIVE
+    } else {
+        EQ_BUTTON_OFF_ACTIVE
+    };
+    {
+        let state_click = state;
+        PressableSprite(
+            skin.shufrep.clone(),
+            eq_normal,
+            eq_pressed,
+            POS_EQ_BUTTON.0,
+            POS_EQ_BUTTON.1,
+            scale,
+            move || {
+                state_click.update(|s| {
+                    s.eq_visible = !s.eq_visible;
+                    if !s.eq_visible {
+                        s.eq_preset_menu_open = false;
+                    }
+                    s.status = if s.eq_visible {
+                        "Equalizer Shown".to_string()
+                    } else {
+                        "Equalizer Hidden".to_string()
+                    };
+                });
+            },
+        );
+    }
+    let pl_normal = if snapshot.playlist_visible {
+        PL_BUTTON_ON
+    } else {
+        PL_BUTTON_OFF
+    };
+    let pl_pressed = if snapshot.playlist_visible {
+        PL_BUTTON_ON_ACTIVE
+    } else {
+        PL_BUTTON_OFF_ACTIVE
+    };
+    {
+        let state_click = state;
+        PressableSprite(
+            skin.shufrep.clone(),
+            pl_normal,
+            pl_pressed,
+            POS_PL_BUTTON.0,
+            POS_PL_BUTTON.1,
+            scale,
+            move || {
+                state_click.update(|s| {
+                    s.playlist_visible = !s.playlist_visible;
+                    s.status = if s.playlist_visible {
+                        "Playlist Shown".to_string()
+                    } else {
+                        "Playlist Hidden".to_string()
+                    };
+                });
+            },
+        );
+    }
+    {
+        let state_click = state;
+        ClickTarget(
+            MAIN_SKIN_CHOOSER_HIT_AREA.0,
+            MAIN_SKIN_CHOOSER_HIT_AREA.1,
+            MAIN_SKIN_CHOOSER_HIT_AREA.2,
+            MAIN_SKIN_CHOOSER_HIT_AREA.3,
+            scale,
+            move || {
+                state_click.update(|s| {
+                    s.settings_open = !s.settings_open;
+                    s.status = if s.settings_open {
+                        "Settings".to_string()
+                    } else {
+                        "Settings Closed".to_string()
+                    };
+                });
+            },
+        );
+    }
+    region_clip::HoleInputShields(skin.regions.clone(), "Normal", scale);
+}
+/// Moves the song to `fraction` of its length, the time shown with it.
+fn commit_seek(state: MutableState<WinampState>, fraction: f32, duration: Option<f32>) {
+    state.update(|s| {
+        s.position = fraction;
+        if let Some(duration) = s.duration_seconds.or(duration) {
+            s.elapsed_seconds = duration * fraction.clamp(0.0, 1.0);
+        }
+    });
+    if let Err(error) = audio::seek_fraction(fraction) {
+        state.update(|s| s.status = error);
+    }
+}
+/// The buttons at the two ends of the main window's title bar, which stay
+/// where they are when the window is rolled up.
+#[composable]
+fn MainTitleButtons(
+    titlebar: ImageBitmap,
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    drag_target: WinampDragTarget,
+    close_action: WinampCloseAction,
+    scale: f32,
+) {
+    let shaded = state.get().main_shaded;
+    PressableSprite(
+        titlebar.clone(),
+        MAIN_OPTIONS_BUTTON,
+        MAIN_OPTIONS_BUTTON_SELECTED,
+        POS_OPTIONS_BUTTON.0,
+        POS_OPTIONS_BUTTON.1,
+        scale,
+        move || open_skin_file(state, skin_state),
+    );
+    PressableSprite(
+        titlebar.clone(),
+        MAIN_MINIMIZE_BUTTON,
+        MAIN_MINIMIZE_BUTTON_SELECTED,
+        POS_MINIMIZE_BUTTON.0,
+        POS_MINIMIZE_BUTTON.1,
+        scale,
+        move || state.update(|s| s.status = "Minimize".to_string()),
+    );
+    let (shade, shade_pressed) = if shaded {
+        (MAIN_UNSHADE_BUTTON, MAIN_UNSHADE_BUTTON_SELECTED)
+    } else {
+        (MAIN_SHADE_BUTTON, MAIN_SHADE_BUTTON_SELECTED)
+    };
+    PressableSprite(
+        titlebar.clone(),
+        shade,
+        shade_pressed,
+        POS_SHADE_BUTTON.0,
+        POS_SHADE_BUTTON.1,
+        scale,
+        move || toggle_main_shade(state, drag_target),
+    );
+    PressableSprite(
+        titlebar,
+        MAIN_CLOSE_BUTTON,
+        MAIN_CLOSE_BUTTON_SELECTED,
+        POS_CLOSE_BUTTON.0,
+        POS_CLOSE_BUTTON.1,
+        scale,
+        move || {
+            state.update(|s| match close_action {
+                WinampCloseAction::SetStatus => {
+                    s.status = "Close".to_string();
+                }
+                WinampCloseAction::CloseApp => {
+                    s.closed = true;
+                    s.status = "Closed".to_string();
+                }
+            });
+        },
+    );
+}
+/// Rolls the main window up into its title bar, or back down. In a shared
+/// canvas the windows hanging under it follow its bottom edge, so a docked
+/// stack stays docked; the desktop's stack is sized from the state.
+fn toggle_main_shade(state: MutableState<WinampState>, drag_target: WinampDragTarget) {
+    let snapshot = state.get_non_reactive();
+    if let WinampDragTarget::Inline(drag) = drag_target {
+        drag.windows
+            .follow_main_height(&snapshot, main_height(!snapshot.main_shaded));
+    }
+    state.update(|s| s.main_shaded = !s.main_shaded);
+}
+/// The mini transport drawn into the rolled-up title bar, with what each
+/// part of it does.
+type PlayerAction = fn(MutableState<WinampState>);
+const SHADE_TRANSPORT: [(SpriteRect, PlayerAction); 6] = [
+    (SHADE_PREVIOUS_HIT_AREA, previous_track),
+    (SHADE_PLAY_HIT_AREA, play_or_resume),
+    (SHADE_PAUSE_HIT_AREA, pause_playback),
+    (SHADE_STOP_HIT_AREA, stop_playback),
+    (SHADE_NEXT_HIT_AREA, next_track),
+    (SHADE_EJECT_HIT_AREA, open_audio_files),
+];
+/// The main window rolled up into its title bar, Winamp's windowshade mode:
+/// the skin's strip, which draws the mini transport itself, with the song's
+/// time and a small position bar on it.
+#[composable]
+fn MainShadeStrip(
+    skin: WinampSkin,
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    drag_target: WinampDragTarget,
+    close_action: WinampCloseAction,
+    scale: f32,
+) {
+    let snapshot = state.get();
+    Sprite(
+        skin.shade_titlebar.clone(),
+        MAIN_SHADE_BAR_SELECTED,
+        0.0,
+        0.0,
+        scale,
+    );
+    WindowDragHandle(drag_target, MAIN_SHADE_DRAG_HIT_AREA, scale);
+    MainTitleButtons(
+        skin.shade_titlebar.clone(),
+        state,
+        skin_state,
+        drag_target,
+        close_action,
+        scale,
+    );
+    if snapshot.playback != PlaybackState::Stopped {
+        for (x, glyph) in shade_time_glyphs(snapshot.elapsed_seconds) {
+            let (source_x, source_y) = bitmap_font::source(glyph);
+            Sprite(
+                skin.shade_text.clone(),
+                (
+                    source_x as f32,
+                    source_y as f32,
+                    bitmap_font::WIDTH as f32,
+                    bitmap_font::HEIGHT as f32,
+                ),
+                POS_SHADE_TIME.0 + x,
+                POS_SHADE_TIME.1,
+                scale,
+            );
+        }
+    }
+    for (area, action) in SHADE_TRANSPORT {
+        ClickTarget(area.0, area.1, area.2, area.3, scale, move || action(state));
+    }
+    Sprite(
+        skin.shade_titlebar.clone(),
+        SHADE_POSBAR_BG,
+        POS_SHADE_POSBAR.0,
+        POS_SHADE_POSBAR.1,
+        scale,
+    );
+    let position_drag = cranpose_core::rememberMutableStateOf(|| None::<f32>);
+    let display_position = position_drag.get().unwrap_or(snapshot.position);
+    Sprite(
+        skin.shade_titlebar.clone(),
+        SHADE_POSBAR_THUMB,
+        POS_SHADE_POSBAR.0
+            + slider_thumb_x(display_position, SHADE_POSBAR_BG.2, SHADE_POSBAR_THUMB.2),
+        POS_SHADE_POSBAR.1,
+        scale,
+    );
+    let duration = snapshot.duration_seconds;
+    DragSlider(
+        ControlRect::new(
+            POS_SHADE_POSBAR.0,
+            POS_SHADE_POSBAR.1,
+            SHADE_POSBAR_BG.2,
+            SHADE_POSBAR_BG.3,
+            scale,
+        ),
+        display_position,
+        SHADE_POSBAR_THUMB.2,
+        move |fraction| position_drag.set(Some(fraction)),
+        move |dragging| {
+            if dragging {
+                return;
+            }
+            if let Some(fraction) = position_drag.get_non_reactive() {
+                position_drag.set(None);
+                commit_seek(state, fraction, duration);
+            }
+        },
+    );
+}
+/// The rolled-up title bar's time, each character with its offset: minutes
+/// and seconds in the text font, around the colon the strip's artwork has.
+fn shade_time_glyphs(elapsed_seconds: f32) -> [(f32, char); 4] {
+    let [minute_tens, minute_ones, second_tens, second_ones] =
+        time_digits(elapsed_seconds).map(|digit| char::from(b'0' + digit));
+    [
+        (7.0, minute_tens),
+        (12.0, minute_ones),
+        (20.0, second_tens),
+        (25.0, second_ones),
+    ]
 }
 #[composable]
 fn EqualizerWindow(
@@ -6253,6 +6502,9 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
                                             }
                                         }
                                         PointerEventKind::Up | PointerEventKind::Cancel => {
+                                            if session.get().is_some() {
+                                                drag.windows.save();
+                                            }
                                             session.set(None);
                                         }
                                         PointerEventKind::Scroll
@@ -7570,6 +7822,54 @@ fn next_shuffle_seed(seed: u64) -> u64 {
 fn random_shuffle_seed() -> u64 {
     getrandom::u64().unwrap_or(0x9e37_79b9_7f4a_7c15)
 }
+/// Winamp's keys, anywhere in the player, while Skin Studio does not hold the
+/// keyboard.
+#[composable]
+fn WinampKeyboard(state: MutableState<WinampState>) {
+    cranpose_ui::UnhandledKeyEvents(move |event| {
+        let Some(key) = keys::winamp_key(event) else {
+            return false;
+        };
+        if state.get_non_reactive().studio_open {
+            return false;
+        }
+        press_winamp_key(state, key);
+        true
+    });
+}
+fn press_winamp_key(state: MutableState<WinampState>, key: keys::WinampKey) {
+    use keys::WinampKey;
+    match key {
+        WinampKey::Previous => previous_track(state),
+        WinampKey::Play => play_or_resume(state),
+        WinampKey::Pause if state.get_non_reactive().playback == PlaybackState::Paused => {
+            play_or_resume(state)
+        }
+        WinampKey::Pause => pause_playback(state),
+        WinampKey::Stop => stop_playback(state),
+        WinampKey::Next => next_track(state),
+        WinampKey::SeekBack => seek_by(state, -keys::SEEK_STEP_SECONDS),
+        WinampKey::SeekForward => seek_by(state, keys::SEEK_STEP_SECONDS),
+        WinampKey::VolumeUp => state.update(|s| s.volume = clamp01(s.volume + keys::VOLUME_STEP)),
+        WinampKey::VolumeDown => state.update(|s| s.volume = clamp01(s.volume - keys::VOLUME_STEP)),
+        WinampKey::OpenFiles => request_pick(state, false, false),
+    }
+}
+fn seek_by(state: MutableState<WinampState>, seconds: f32) {
+    let snapshot = state.get_non_reactive();
+    let Some((elapsed, fraction)) =
+        keys::seek_target(snapshot.elapsed_seconds, snapshot.duration_seconds, seconds)
+    else {
+        return;
+    };
+    match audio::seek_fraction(fraction) {
+        Ok(()) => state.update(|s| {
+            s.position = fraction;
+            s.elapsed_seconds = elapsed;
+        }),
+        Err(error) => state.update(|s| s.status = error),
+    }
+}
 fn play_or_resume(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
     if snapshot.playback == PlaybackState::Paused {
@@ -8034,6 +8334,7 @@ struct SavedPlayerState {
     repeat: bool,
     eq_visible: bool,
     playlist_visible: bool,
+    main_shaded: bool,
     eq_enabled: bool,
     eq_auto: bool,
     eq_values: [f32; 11],
@@ -8050,6 +8351,7 @@ struct SavedPlayerStateKey {
     repeat: bool,
     eq_visible: bool,
     playlist_visible: bool,
+    main_shaded: bool,
     eq_enabled: bool,
     eq_auto: bool,
     eq_values: [f32; 11],
@@ -8068,6 +8370,7 @@ impl SavedPlayerStateKey {
             repeat: state.repeat,
             eq_visible: state.eq_visible,
             playlist_visible: state.playlist_visible,
+            main_shaded: state.main_shaded,
             eq_enabled: state.eq_enabled,
             eq_auto: state.eq_auto,
             eq_values: state.eq_values.map(clamp01),
@@ -8108,6 +8411,7 @@ impl SavedPlayerState {
             repeat: state.repeat,
             eq_visible: state.eq_visible,
             playlist_visible: state.playlist_visible,
+            main_shaded: state.main_shaded,
             eq_enabled: state.eq_enabled,
             eq_auto: state.eq_auto,
             eq_values: state.eq_values.map(clamp01),
@@ -8126,6 +8430,7 @@ fn restore_saved_player_state(saved: SavedPlayerState) -> WinampState {
         repeat: saved.repeat,
         eq_visible: saved.eq_visible,
         playlist_visible: saved.playlist_visible,
+        main_shaded: saved.main_shaded,
         eq_enabled: saved.eq_enabled,
         eq_auto: saved.eq_auto,
         eq_values: saved.eq_values.map(clamp01),
@@ -8199,6 +8504,7 @@ fn serialize_player_state(config: &SavedPlayerState) -> String {
         format!("repeat={}", bool_value(config.repeat)),
         format!("eq_visible={}", bool_value(config.eq_visible)),
         format!("playlist_visible={}", bool_value(config.playlist_visible)),
+        format!("main_shaded={}", bool_value(config.main_shaded)),
         format!("eq_enabled={}", bool_value(config.eq_enabled)),
         format!("eq_auto={}", bool_value(config.eq_auto)),
         format!("playlist_scroll={:.6}", clamp01(config.playlist_scroll)),
@@ -8262,6 +8568,7 @@ fn apply_player_state_value(config: &mut SavedPlayerState, key: &str, value: &st
         "repeat" => update_bool(&mut config.repeat, value),
         "eq_visible" => update_bool(&mut config.eq_visible, value),
         "playlist_visible" => update_bool(&mut config.playlist_visible, value),
+        "main_shaded" => update_bool(&mut config.main_shaded, value),
         "eq_enabled" => update_bool(&mut config.eq_enabled, value),
         "eq_auto" => update_bool(&mut config.eq_auto, value),
         "playlist_scroll" => update_f32(&mut config.playlist_scroll, value),

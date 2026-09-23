@@ -34,6 +34,11 @@ pub struct WinampSkin {
     pub eqmain: ImageBitmap,
     pub pledit: ImageBitmap,
     pub text: ImageBitmap,
+    /// Where the rolled-up main window is drawn from: the skin's own
+    /// TITLEBAR.BMP and font, or the classic skin's when the skin left the
+    /// windowshade strip blank, the way Winamp filled what a skin lacked.
+    pub shade_titlebar: ImageBitmap,
+    pub shade_text: ImageBitmap,
     pub display_text_color: [u8; 4],
     pub palette: SkinPalette,
     pub viscolor: VisColor,
@@ -135,6 +140,12 @@ pub fn load_skin_with_mode(wsz_bytes: &[u8], mode: BitmapMode) -> Result<WinampS
     let display_text_color =
         sample_text_bitmap_color(&text).unwrap_or_else(|| default_display_text_color(viscolor));
     let cursors = cursors::load_cursors(&files);
+    let titlebar = decode("titlebar.bmp")?;
+    let (shade_titlebar, shade_text) = if shade_strip_is_blank(&titlebar) {
+        (classic_bitmap("titlebar.bmp"), classic_bitmap("text.bmp"))
+    } else {
+        (titlebar.clone(), text.clone())
+    };
     Ok(WinampSkin {
         regions: files
             .get("region.txt")
@@ -143,7 +154,7 @@ pub fn load_skin_with_mode(wsz_bytes: &[u8], mode: BitmapMode) -> Result<WinampS
             .unwrap_or_default(),
         bitmap_mode: mode,
         main: decode("main.bmp")?,
-        titlebar: decode("titlebar.bmp")?,
+        titlebar,
         cbuttons: decode("cbuttons.bmp")?,
         posbar: decode("posbar.bmp")?,
         shufrep: decode("shufrep.bmp")?,
@@ -159,6 +170,8 @@ pub fn load_skin_with_mode(wsz_bytes: &[u8], mode: BitmapMode) -> Result<WinampS
         eqmain: decode("eqmain.bmp")?,
         pledit: decode("pledit.bmp")?,
         text,
+        shade_titlebar,
+        shade_text,
         display_text_color,
         palette,
         viscolor,
@@ -166,15 +179,36 @@ pub fn load_skin_with_mode(wsz_bytes: &[u8], mode: BitmapMode) -> Result<WinampS
     })
 }
 fn default_text_bitmap() -> ImageBitmap {
+    classic_bitmap("text.bmp")
+}
+/// One bitmap of the classic skin bundled with the player.
+fn classic_bitmap(name: &str) -> ImageBitmap {
     let mut archive = zip::ZipArchive::new(Cursor::new(include_bytes!("../../assets/winamp.wsz")))
         .expect("bundled classic skin");
     let mut bytes = Vec::new();
     archive
-        .by_name("text.bmp")
-        .expect("bundled text.bmp")
+        .by_name(name)
+        .unwrap_or_else(|_| panic!("bundled {name}"))
         .read_to_end(&mut bytes)
-        .expect("bundled font bytes");
-    decode_bmp(&bytes).expect("bundled classic font")
+        .expect("bundled bitmap bytes");
+    decode_bmp(&bytes).unwrap_or_else(|_| panic!("bundled classic {name}"))
+}
+/// The windowshade strip in TITLEBAR.BMP, the rolled-up main window.
+const SHADE_STRIP: [u32; 4] = [27, 29, 275, 14];
+/// Whether a skin drew no windowshade strip: the part of TITLEBAR.BMP that
+/// holds it is one flat colour, or the bitmap stops short of it.
+pub(crate) fn shade_strip_is_blank(titlebar: &ImageBitmap) -> bool {
+    let [x, y, width, height] = SHADE_STRIP;
+    if titlebar.width() < x + width || titlebar.height() < y + height {
+        return true;
+    }
+    let stride = titlebar.width() as usize * 4;
+    let pixel = |column: u32, row: u32| {
+        let start = row as usize * stride + column as usize * 4;
+        &titlebar.pixels()[start..start + 3]
+    };
+    let first = pixel(x, y);
+    (y..y + height).all(|row| (x..x + width).all(|column| pixel(column, row) == first))
 }
 fn default_display_text_color(viscolor: VisColor) -> [u8; 4] {
     viscolor
