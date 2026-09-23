@@ -63,6 +63,49 @@ fn document_with_a_cursor() -> Document {
     Document::open(&output.into_inner(), None).unwrap()
 }
 
+/// The rolled-up player is drawn from TITLEBAR.BMP, so painting its panel
+/// paints the cells the player reads, and the sheet no longer reports them
+/// as art nothing shows.
+#[test]
+fn the_rolled_up_player_paints_the_title_bar_cells_the_player_reads() {
+    let mut document = document();
+    document.state(json!({"panel": "shade"})).unwrap();
+    assert_eq!(document.canvas_size(), (275, 14));
+    let layers = document.layers();
+    let strip = layers.iter().find(|layer| layer.id == "title").unwrap();
+    assert_eq!(strip.sheet, "titlebar.bmp");
+    assert_eq!(strip.variants, vec![[27, 29, 275, 14], [27, 42, 275, 14]]);
+    let unroll = layers.iter().find(|layer| layer.id == "unshade").unwrap();
+    assert_eq!(unroll.destination, [254, 3, 9, 9]);
+
+    let guides = document.guides();
+    assert!(guides.iter().any(|g| g.runtime && g.label == "TIME"));
+    assert!(guides
+        .iter()
+        .any(|g| g.hit && g.label == "PLAY" && g.rect == [177, 2, 10, 10]));
+
+    let gaps = document.sheet_gaps("titlebar.bmp").unwrap();
+    for gap in gaps["gaps"].as_array().unwrap() {
+        let [x, y, w, h]: [u32; 4] = serde_json::from_value(gap.clone()).unwrap();
+        let clear_of_strip = x + w <= 27 || x >= 302 || y + h <= 29 || y >= 56;
+        assert!(clear_of_strip, "{gap} is in the rolled-up strip");
+    }
+}
+
+/// A cursor's file name says little about where it shows, so its guide
+/// names the region as well.
+#[test]
+fn a_cursor_names_the_region_it_is_for() {
+    let mut document = document_with_a_cursor();
+    document.state(json!({"panel": "cursors"})).unwrap();
+    let guide = document
+        .guides()
+        .into_iter()
+        .find(|guide| guide.sheet == "normal.cur")
+        .unwrap();
+    assert_eq!(guide.label, "normal · Main window");
+}
+
 /// A cursor arrives as an ordinary sheet, so every tool in the editor draws
 /// on it, and it leaves as a cursor again rather than as a bitmap.
 #[test]

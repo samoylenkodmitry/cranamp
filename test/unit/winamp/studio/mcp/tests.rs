@@ -407,7 +407,10 @@ fn generated_paws_sample_the_visible_paint_planes() {
         serde_json::from_str(response["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(report["palette"]["body"], "#ffdd99");
     assert_eq!(report["palette"]["ink"], "#112233");
-    assert_eq!(report["drawn"].as_array().unwrap().len(), 18);
+    assert_eq!(
+        report["drawn"].as_array().unwrap().len(),
+        crate::winamp::cursors::SkinCursor::COUNT
+    );
 }
 
 #[test]

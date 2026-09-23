@@ -292,6 +292,42 @@ fn load_cursors_reads_the_regions_the_archive_names() {
     assert!(cursors.get(SkinCursor::PlaylistResize).is_none());
 }
 
+fn size_of(cursors: &SkinCursors, region: SkinCursor) -> Option<(u32, u32)> {
+    match cursors.get(region)? {
+        PointerIcon::Custom(icon) => Some((icon.image().width(), icon.image().height())),
+        _ => None,
+    }
+}
+
+#[test]
+fn the_rolled_up_window_borrows_the_full_windows_cursors_until_it_has_its_own() {
+    let mut files = HashMap::new();
+    for region in [SkinCursor::MainClose, SkinCursor::PositionBar] {
+        files.insert(
+            region.file_name().to_string(),
+            cursor_file(&[monochrome_2x2()]),
+        );
+    }
+    files.insert(
+        SkinCursor::ShadePositionBar.file_name().to_string(),
+        cursor_file(&[bgra_2x1([[1, 2, 3, 255], [4, 5, 6, 255]], 0)]),
+    );
+
+    let cursors = load_cursors(&files);
+
+    assert_eq!(size_of(&cursors, SkinCursor::ShadeClose), Some((2, 2)));
+    assert_eq!(
+        size_of(&cursors, SkinCursor::ShadePositionBar),
+        Some((2, 1)),
+        "a skin's own rolled-up cursor wins over the one it would borrow"
+    );
+    assert!(
+        cursors.get(SkinCursor::ShadeMinimize).is_none(),
+        "nothing to borrow leaves the platform's pointer"
+    );
+    assert_eq!(cursors.len(), 4);
+}
+
 #[test]
 fn a_malformed_cursor_costs_only_its_own_region() {
     let mut files = HashMap::new();

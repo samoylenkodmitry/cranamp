@@ -16,9 +16,9 @@ use cranpose_ui::{CustomPointerIcon, ImageBitmap, PointerIcon};
 
 /// The parts of the player a classic skin can name a cursor for.
 ///
-/// Winamp's set also covers windowshade mode and the playlist's own title-bar
-/// buttons, neither of which Cranamp draws; those files stay in the archive
-/// unread until there is a region to put them on.
+/// Winamp's set also covers the playlist's own title-bar buttons and its
+/// rolled-up window, which Cranamp does not draw; those files stay in the
+/// archive unread until there is a region to put them on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SkinCursor {
     /// `NORMAL.CUR` — anywhere on the main window with nothing more specific.
@@ -59,6 +59,16 @@ pub enum SkinCursor {
     PlaylistScrollBar,
     /// `PSIZE.CUR` — the playlist's resize corner.
     PlaylistResize,
+    /// `WSNORMAL.CUR` — the main window rolled up into its title bar.
+    ShadeWindow,
+    /// `WSMIN.CUR` — the rolled-up window's minimize button.
+    ShadeMinimize,
+    /// `WSWINBUT.CUR` — the rolled-up window's button that unrolls it.
+    ShadeWindowshade,
+    /// `WSCLOSE.CUR` — the rolled-up window's close button.
+    ShadeClose,
+    /// `WSPOSBAR.CUR` — the rolled-up window's small seek bar.
+    ShadePositionBar,
 }
 
 impl SkinCursor {
@@ -67,7 +77,7 @@ impl SkinCursor {
     /// The names are the ones Winamp has used since 2.x; the lookup is by
     /// lower-cased file name, so an archive that shouts `NORMAL.CUR` and one
     /// that whispers `cursors/normal.cur` both land here.
-    const FILES: [(Self, &'static str); 18] = [
+    const FILES: [(Self, &'static str); 23] = [
         (Self::MainWindow, "normal.cur"),
         (Self::MainTitleBar, "titlebar.cur"),
         (Self::MainMenu, "mainmenu.cur"),
@@ -86,6 +96,11 @@ impl SkinCursor {
         (Self::PlaylistClose, "pclose.cur"),
         (Self::PlaylistScrollBar, "pvscroll.cur"),
         (Self::PlaylistResize, "psize.cur"),
+        (Self::ShadeWindow, "wsnormal.cur"),
+        (Self::ShadeMinimize, "wsmin.cur"),
+        (Self::ShadeWindowshade, "wswinbut.cur"),
+        (Self::ShadeClose, "wsclose.cur"),
+        (Self::ShadePositionBar, "wsposbar.cur"),
     ];
 
     /// How many regions a skin can name a cursor for.
@@ -93,7 +108,8 @@ impl SkinCursor {
 
     /// Every region paired with its archive entry, in the order an editor
     /// should lay them out: the main window, then the equalizer, then the
-    /// playlist, each from its most general region to its most specific.
+    /// playlist, then the rolled-up main window, each from its most general
+    /// region to its most specific.
     pub const fn files() -> [(Self, &'static str); Self::COUNT] {
         Self::FILES
     }
@@ -105,13 +121,56 @@ impl SkinCursor {
             .find_map(|(cursor, name)| (*cursor == self).then_some(*name))
             .expect("every region names a file")
     }
+
+    /// What the region is, in the words an editor shows beside its cursor.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MainWindow => "Main window",
+            Self::MainTitleBar => "Title bar",
+            Self::MainMenu => "Options button",
+            Self::MainMinimize => "Minimize",
+            Self::MainWindowshade => "Roll up",
+            Self::MainClose => "Close",
+            Self::SongName => "Song title",
+            Self::PositionBar => "Seek bar",
+            Self::VolumeBalance => "Volume and balance",
+            Self::EqualizerWindow => "Equalizer",
+            Self::EqualizerTitleBar => "EQ title bar",
+            Self::EqualizerClose => "EQ close",
+            Self::EqualizerSlider => "EQ sliders",
+            Self::PlaylistWindow => "Playlist",
+            Self::PlaylistTitleBar => "Playlist title bar",
+            Self::PlaylistClose => "Playlist close",
+            Self::PlaylistScrollBar => "Playlist scroll bar",
+            Self::PlaylistResize => "Playlist resize",
+            Self::ShadeWindow => "Rolled up",
+            Self::ShadeMinimize => "Rolled-up minimize",
+            Self::ShadeWindowshade => "Unroll",
+            Self::ShadeClose => "Rolled-up close",
+            Self::ShadePositionBar => "Rolled-up seek bar",
+        }
+    }
+
+    /// The region whose cursor stands in when a skin drew none for this one.
+    /// Most skins predate the rolled-up window's own set, and its parts do
+    /// what the full window's do.
+    pub fn stand_in(self) -> Option<Self> {
+        match self {
+            Self::ShadeWindow => Some(Self::MainTitleBar),
+            Self::ShadeMinimize => Some(Self::MainMinimize),
+            Self::ShadeWindowshade => Some(Self::MainWindowshade),
+            Self::ShadeClose => Some(Self::MainClose),
+            Self::ShadePositionBar => Some(Self::PositionBar),
+            _ => None,
+        }
+    }
 }
 
 /// Every cursor file name a classic player reads.
 ///
-/// This is wider than [`SkinCursor`]: Winamp also swaps the pointer in
-/// windowshade mode and over the playlist's own title-bar buttons, which
-/// Cranamp does not draw. A skin carrying one of those files is still carrying
+/// This is wider than [`SkinCursor`]: Winamp also swaps the pointer over the
+/// playlist's own title-bar buttons and its rolled-up window, which Cranamp
+/// does not draw. A skin carrying one of those files is still carrying
 /// something a player uses, so the portability check must not offer to drop it.
 pub const CLASSIC_CURSORS: [&str; 28] = [
     "close.cur",
@@ -185,6 +244,15 @@ pub(super) fn load_cursors(files: &HashMap<String, Vec<u8>>) -> SkinCursors {
                 icons.insert(region, PointerIcon::Custom(icon));
             }
             Err(error) => log::warn!("skin cursor {name} could not be decoded: {error:#}"),
+        }
+    }
+    for (region, _) in SkinCursor::FILES {
+        if let Some(icon) = region
+            .stand_in()
+            .filter(|_| !icons.contains_key(&region))
+            .and_then(|stand_in| icons.get(&stand_in).cloned())
+        {
+            icons.insert(region, icon);
         }
     }
     SkinCursors { icons }

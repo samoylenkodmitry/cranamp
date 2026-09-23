@@ -3410,6 +3410,7 @@ fn MainShadeStrip(
         0.0,
         scale,
     );
+    CursorRegions(skin.cursors.clone(), shade_cursor_areas().to_vec(), scale);
     WindowDragHandle(drag_target, MAIN_SHADE_DRAG_HIT_AREA, scale);
     MainTitleButtons(
         skin.shade_titlebar.clone(),
@@ -6183,6 +6184,37 @@ fn main_window_cursor_areas() -> [(SkinCursor, SpriteRect); 10] {
                 BALANCE_BG_WIDTH,
                 BALANCE_BG_HEIGHT,
             ),
+        ),
+    ]
+}
+
+/// The rolled-up main window's cursor regions: the strip, then the buttons
+/// and the small seek bar on it.
+fn shade_cursor_areas() -> [(SkinCursor, SpriteRect); 6] {
+    [
+        (
+            SkinCursor::ShadeWindow,
+            (0.0, 0.0, MAIN_WIDTH, MAIN_SHADE_HEIGHT),
+        ),
+        (
+            SkinCursor::MainMenu,
+            button_area(POS_OPTIONS_BUTTON, MAIN_OPTIONS_BUTTON),
+        ),
+        (
+            SkinCursor::ShadeMinimize,
+            button_area(POS_MINIMIZE_BUTTON, MAIN_MINIMIZE_BUTTON),
+        ),
+        (
+            SkinCursor::ShadeWindowshade,
+            button_area(POS_SHADE_BUTTON, MAIN_UNSHADE_BUTTON),
+        ),
+        (
+            SkinCursor::ShadeClose,
+            button_area(POS_CLOSE_BUTTON, MAIN_CLOSE_BUTTON),
+        ),
+        (
+            SkinCursor::ShadePositionBar,
+            button_area(POS_SHADE_POSBAR, SHADE_POSBAR_BG),
         ),
     ]
 }

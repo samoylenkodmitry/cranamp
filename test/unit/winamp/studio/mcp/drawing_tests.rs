@@ -455,6 +455,22 @@ fn studio_cursors_draws_a_set_and_opens_it_on_the_canvas() {
 }
 
 #[test]
+fn a_surface_puts_the_rolled_up_player_on_the_canvas_and_back() {
+    let document = Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None);
+    let shared = SharedDocument(Arc::new(Mutex::new(document.unwrap())));
+    result(&shared, "studio_canvas", json!({"surface": "shade"}));
+    let status = result(&shared, "studio_status", json!({}));
+    assert_eq!(status["view"]["panel"], json!("shade"), "{status}");
+    assert_eq!(status["canvas"], json!([275, 14]), "{status}");
+    let targets = result(&shared, "studio_targets", json!({"id": "unshade"}));
+    assert!(format!("{targets}").contains("titlebar.bmp"), "{targets}");
+
+    result(&shared, "studio_canvas", json!({"zoom": 2}));
+    let status = result(&shared, "studio_status", json!({}));
+    assert_eq!(status["view"]["panel"], json!("canvas"), "{status}");
+}
+
+#[test]
 fn a_drawn_cursor_leaves_the_skin_as_a_cursor_a_player_can_read() {
     let shared = blank();
     result(&shared, "studio_cursors", json!({"action":"draw"}));

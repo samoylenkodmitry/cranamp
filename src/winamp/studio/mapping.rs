@@ -28,6 +28,26 @@ impl Layer {
         self.source[2..] != self.destination[2..]
     }
 }
+/// Where the rolled-up window writes the song's time in the text font, over
+/// the strip's artwork.
+pub const SHADE_TIME: [u32; 4] = [POS_SHADE_TIME.0 as u32 + 7, POS_SHADE_TIME.1 as u32, 23, 6];
+
+/// The mini transport the rolled-up strip's artwork draws, with the areas the
+/// player answers clicks in.
+pub fn shade_transport() -> Vec<(&'static str, [u32; 4])> {
+    [
+        ("PREV", SHADE_PREVIOUS_HIT_AREA),
+        ("PLAY", SHADE_PLAY_HIT_AREA),
+        ("PAUSE", SHADE_PAUSE_HIT_AREA),
+        ("STOP", SHADE_STOP_HIT_AREA),
+        ("NEXT", SHADE_NEXT_HIT_AREA),
+        ("EJECT", SHADE_EJECT_HIT_AREA),
+    ]
+    .into_iter()
+    .map(|(name, area)| (name, rect(area)))
+    .collect()
+}
+
 pub const CURSOR_COLUMNS: u32 = 6;
 
 pub const CURSOR_CELL: u32 = 40;
@@ -52,6 +72,7 @@ fn cursor_panel_size() -> (u32, u32) {
 pub fn size(panel: &str) -> (u32, u32) {
     match panel {
         "playlist" => (275, 261),
+        "shade" => (275, MAIN_SHADE_HEIGHT as u32),
         "cursors" => cursor_panel_size(),
         _ => (275, 116),
     }
@@ -330,6 +351,73 @@ pub fn layers(v: &View) -> Vec<Layer> {
                 active * 2 + p,
                 242,
                 58,
+                None,
+            );
+        }
+        "shade" => {
+            add(
+                "title",
+                "titlebar",
+                vec![MAIN_SHADE_BAR_SELECTED, MAIN_SHADE_BAR],
+                usize::from(!v.active),
+                0,
+                0,
+                None,
+            );
+            for (id, a, b, pos) in [
+                (
+                    "options",
+                    MAIN_OPTIONS_BUTTON,
+                    MAIN_OPTIONS_BUTTON_SELECTED,
+                    POS_OPTIONS_BUTTON,
+                ),
+                (
+                    "minimize",
+                    MAIN_MINIMIZE_BUTTON,
+                    MAIN_MINIMIZE_BUTTON_SELECTED,
+                    POS_MINIMIZE_BUTTON,
+                ),
+                (
+                    "unshade",
+                    MAIN_UNSHADE_BUTTON,
+                    MAIN_UNSHADE_BUTTON_SELECTED,
+                    POS_SHADE_BUTTON,
+                ),
+                (
+                    "close",
+                    MAIN_CLOSE_BUTTON,
+                    MAIN_CLOSE_BUTTON_SELECTED,
+                    POS_CLOSE_BUTTON,
+                ),
+            ] {
+                add(
+                    id,
+                    "titlebar",
+                    vec![a, b],
+                    p,
+                    pos.0 as u32,
+                    pos.1 as u32,
+                    None,
+                );
+            }
+            let (track_x, track_y) = (POS_SHADE_POSBAR.0 as u32, POS_SHADE_POSBAR.1 as u32);
+            add(
+                "position.track",
+                "titlebar",
+                vec![SHADE_POSBAR_BG],
+                0,
+                track_x,
+                track_y,
+                None,
+            );
+            let travel = SHADE_POSBAR_BG.2 - SHADE_POSBAR_THUMB.2;
+            add(
+                "position.thumb",
+                "titlebar",
+                vec![SHADE_POSBAR_THUMB],
+                0,
+                track_x + (travel * v.position as f32 / 27.).round() as u32,
+                track_y,
                 None,
             );
         }

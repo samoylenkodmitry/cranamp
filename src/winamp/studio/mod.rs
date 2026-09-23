@@ -854,6 +854,14 @@ fn state(shared: &SharedDocument, patch: serde_json::Value) {
         ALERT_REVISION.store(d.revision, Ordering::Release);
     }
 }
+/// Puts a surface that is not a window of the whole skin on the canvas, the
+/// cursor set or the rolled-up main window.
+fn open_surface(shared: &SharedDocument, surface: &str) {
+    state(
+        shared,
+        json!({"panel": surface, "layer": "auto", "zoom": 2, "presentation": false}),
+    );
+}
 pub use skin_studio::SkinStudio;
 #[composable]
 fn BrushChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {

@@ -206,16 +206,21 @@ impl Shape {
             | SkinCursor::PlaylistWindow
             | SkinCursor::MainMenu
             | SkinCursor::MainMinimize
-            | SkinCursor::MainWindowshade => Self::Arrow,
-            SkinCursor::MainClose | SkinCursor::EqualizerClose | SkinCursor::PlaylistClose => {
-                Self::Danger
-            }
+            | SkinCursor::MainWindowshade
+            | SkinCursor::ShadeMinimize
+            | SkinCursor::ShadeWindowshade => Self::Arrow,
+            SkinCursor::MainClose
+            | SkinCursor::EqualizerClose
+            | SkinCursor::PlaylistClose
+            | SkinCursor::ShadeClose => Self::Danger,
             SkinCursor::MainTitleBar
             | SkinCursor::EqualizerTitleBar
-            | SkinCursor::PlaylistTitleBar => Self::Move,
-            SkinCursor::SongName | SkinCursor::VolumeBalance | SkinCursor::PositionBar => {
-                Self::SlideX
-            }
+            | SkinCursor::PlaylistTitleBar
+            | SkinCursor::ShadeWindow => Self::Move,
+            SkinCursor::SongName
+            | SkinCursor::VolumeBalance
+            | SkinCursor::PositionBar
+            | SkinCursor::ShadePositionBar => Self::SlideX,
             SkinCursor::EqualizerSlider | SkinCursor::PlaylistScrollBar => Self::SlideY,
             SkinCursor::PlaylistResize => Self::Resize,
         }

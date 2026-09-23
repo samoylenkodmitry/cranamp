@@ -117,6 +117,19 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
             })
             .collect()
     };
+    // The surfaces that are not windows of the whole skin, one click away
+    // rather than at the top of the atlas list.
+    let surface_buttons: Vec<(f32, f32, &'static str, &'static str, f32)> = if drawing {
+        [("cursors", "Cursors", 92.), ("shade", "Windowshade", 118.)]
+            .into_iter()
+            .map(|(surface, label, width)| {
+                let (x, y) = panels.take(width);
+                (x, y, surface, label, width)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let live_extra = live.get().then(|| (panels.take(130.), panels.take(160.)));
     let mut footer = Rows::new(24., 0., scene.width - 12.);
     let state_at = footer.take_gap(198., 8.);
@@ -341,13 +354,25 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let py = pan_value[1].clamp(0, pan_max[1]) as f32 * zoom;
     let ox = ((canvas_w - SCROLLBAR - viewport_w as f32 * zoom) / 2.).max(0.) - px;
     let oy = ((canvas_h - SCROLLBAR - viewport_h as f32 * zoom) / 2.).max(0.) - py;
-    let guide_rects = Rc::new(if view.guides && drawing {
+    // The cursor grid and the rolled-up strip say what is under the pointer
+    // even with guides off: their cells are not otherwise recognisable.
+    let hinted = view.guides || matches!(view.panel.as_str(), "cursors" | "shade");
+    let guide_rects = Rc::new(if hinted && drawing {
         shared
             .lock()
             .unwrap()
             .guides()
             .into_iter()
-            .map(|g| (g.id, g.rect))
+            // A cursor's file name says little about where it shows, so its
+            // hint names the region too.
+            .map(|g| {
+                let name = if g.sheet.ends_with(".cur") {
+                    g.label
+                } else {
+                    g.id
+                };
+                (name, g.rect)
+            })
             .collect::<Vec<_>>()
     } else {
         Vec::new()
@@ -755,6 +780,22 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         },
                     );
                 }
+                for (x, y, surface, label, width) in surface_buttons.iter().copied() {
+                    let d = document.clone();
+                    Panel(
+                        label.to_string(),
+                        x,
+                        y,
+                        width,
+                        view.panel == surface,
+                        move || {
+                            open_surface(&d, surface);
+                            live.set(false);
+                            review.set(false);
+                            pan.set([0, 0]);
+                        },
+                    );
+                }
                 if let Some((presentation_at, playlist_at)) = live_extra {
                     let d = document.clone();
                     Action(
@@ -1044,6 +1085,13 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
             let canvas_bitmap = bitmap.clone();
             let canvas_panel = panel.clone();
             let canvas_guides = guide_rects.clone();
+            // Away from the canvas's own buttons, which sit at the bottom of
+            // every surface but the skin.
+            let hint_at = if panel == "canvas" {
+                (8., canvas_h - 24.)
+            } else {
+                (8., 8.)
+            };
             let nav_doc = document.clone();
             Box(
                 Modifier::empty()
@@ -1459,14 +1507,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                             );
                         }
                         if !review.get() {
-                            GuideHint(
-                                hover,
-                                canvas_guides.clone(),
-                                zoom,
-                                ox,
-                                oy,
-                                (8., canvas_h - 24.),
-                            );
+                            GuideHint(hover, canvas_guides.clone(), zoom, ox, oy, hint_at);
                             BrushCursor(hover, zoom, view.brush_size, ox, oy);
                         }
                     }
@@ -1487,6 +1528,27 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         pan.set([0, 0]);
                     },
                 );
+            }
+            if panel == "cursors" && drawing {
+                // A region with no cursor has no cell to paint, so the way to
+                // one sits where the empty cells are.
+                let report = document.lock().unwrap().cursors_report();
+                let missing =
+                    report["of"].as_u64().unwrap_or(0) - report["drawn"].as_u64().unwrap_or(0);
+                if missing > 0 {
+                    let d = document.clone();
+                    Action(
+                        format!("Draw the {missing} missing"),
+                        canvas_x + 166.,
+                        canvas_y + canvas_h - 40.,
+                        170.,
+                        move || {
+                            let mut doc = d.lock().unwrap();
+                            let _ = doc.draw_cursors(&[], None, false, "editor");
+                            doc.revision += 1;
+                        },
+                    );
+                }
             }
             let footer_top = scene.footer_top();
             Label(
@@ -1768,10 +1830,26 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                     },
                                 );
                             }
+                            {
+                                let target = d.clone();
+                                ListChoice(
+                                    "The rolled-up player      275 × 14".into(),
+                                    12.,
+                                    122.,
+                                    drawer_w - 24.,
+                                    current_panel == "shade",
+                                    move || {
+                                        open_surface(&target, "shade");
+                                        live.set(false);
+                                        review.set(false);
+                                        pan.set([0, 0]);
+                                    },
+                                );
+                            }
                             let report = d.lock().unwrap().cursors_report();
                             let drawn = report["drawn"].as_u64().unwrap_or(0);
                             let of = report["of"].as_u64().unwrap_or(0);
-                            let mut row = 122.;
+                            let mut row = 160.;
                             {
                                 let target = d.clone();
                                 ListChoice(
