@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Runs test/windows-shell.ps1 on a Windows desktop reached over SSH.
 #
-#   test/windows-shell.sh <cranamp.exe> <out-dir> [ssh-host]
+#   test/windows-shell.sh <cranamp.exe> <out-dir> [ssh-host] [--console-only]
+#
+# --console-only checks any Cranpose application's executable: it must be a GUI
+# program and open no console window while it starts, and the Cranamp icon and
+# version resource are not required.
 #
 # Copies the executable and the check into ~/cranamp-shell-audit on the host,
 # starts the check in the signed-in desktop session, waits for its verdict and
@@ -16,13 +20,16 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exe="${1:?usage: windows-shell.sh <cranamp.exe> <out-dir> [ssh-host]}"
 out="${2:?usage: windows-shell.sh <cranamp.exe> <out-dir> [ssh-host]}"
 host="${3:-win}"
+mode=""
+[ "${4:-}" = "--console-only" ] && mode=" -ConsoleOnly"
+name="$(basename "$exe")"
 remote="cranamp-shell-audit"
 mkdir -p "$out"
 
 ssh "$host" "New-Item -ItemType Directory -Force -Path $remote | Out-Null"
-scp -q "$exe" "$host:$remote/cranamp.exe"
+scp -q "$exe" "$host:$remote/$name"
 scp -q "$here/windows-shell.ps1" "$host:$remote/windows-shell.ps1"
-ssh "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File $remote\\windows-shell.ps1 -Executable \$HOME\\$remote\\cranamp.exe -OutputDirectory \$HOME\\$remote\\out -Schedule"
+ssh "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File $remote\\windows-shell.ps1 -Executable \$HOME\\$remote\\$name -OutputDirectory \$HOME\\$remote\\out -Schedule$mode"
 
 verdict=""
 sleep 14
@@ -42,7 +49,8 @@ grep -E '^(PE subsystem|File description|Icons in|Process started|Console window
 [ -f "$out/failure.txt" ] && sed -n '1,3p' "$out/failure.txt"
 
 case "$verdict" in
-    PASS) echo "PASS: no terminal, and the executable and every window carry the icon" ;;
+    PASS) [ -n "$mode" ] && echo "PASS: a GUI program, and no console window opened while it started" \
+        || echo "PASS: no terminal, and the executable and every window carry the icon" ;;
     FAIL) echo "FAIL: see $out/failure.txt"; exit 1 ;;
     *) echo "FAIL: the check did not finish on $host"; exit 1 ;;
 esac
