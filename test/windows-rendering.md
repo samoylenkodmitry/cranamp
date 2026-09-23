@@ -55,3 +55,31 @@ Windows 11 / RTX 2070 validation:
 
 The native release must preserve Debug formatting: Naga uses it to generate
 HLSL numeric literals. `test/release_workflow.mjs` guards the build flags.
+
+## Resize wobble
+
+`test/windows-resize-jitter.ps1` drags the playlist's corner down with real
+mouse input and captures the player three times per step, keeping the
+captures in memory until the drag ends. `-TearOff` first pulls the playlist
+out of the stack, so the system resizes the playlist's own window. The
+docked stack is resized by the player instead. Copy the frames back and
+count the frames whose still band changed:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File test/windows-resize-jitter.ps1 -Executable C:\path\cranamp.exe -OutputDirectory C:\path\jitter -TearOff -Steps 60 -StepPixels 2 -Schedule
+```
+
+```sh
+python3 test/windows_resize_jitter.py /path/to/jitter --still 100
+```
+
+Use `--still 100` for a torn-off playlist: its title bar and first rows. The
+default, 232, covers the main window and equalizer above a docked playlist.
+The probe kills the player when it ends, so the saved layout is left as it
+was.
+
+Windows 11 / RTX 2070, DX12: with a swapchain made from the window's HWND,
+Windows stretched the last frame to the growing window in 4 of 7 torn-off
+drags. The still rows blurred and moved by up to a pixel. Cranpose 0.1.158
+presents through DirectComposition, and no drag of 6 showed a stretched
+frame.
