@@ -5,7 +5,7 @@ pub mod audio;
 mod fonts;
 mod sync;
 pub mod winamp;
-use cranpose::AppLauncher;
+use cranpose::{AppLauncher, CustomCursorSize};
 cranpose::app_capabilities!();
 const TITLE: &str = "Cranamp";
 const APPLICATION_ID: &str = "com.cranamp.app";
@@ -17,11 +17,14 @@ fn launcher() -> AppLauncher {
         .with_fonts(fonts::APP_FONTS)
 }
 fn desktop_launcher() -> AppLauncher {
+    // A skin's cursors are pixel art drawn at an exact size; enlarged with the
+    // system pointer they turn into smeared blocks.
+    let launcher = launcher().with_custom_cursor_size(CustomCursorSize::AsDrawn);
     match app_icon::window_icon() {
-        Ok(icon) => launcher().with_window_icon(icon),
+        Ok(icon) => launcher.with_window_icon(icon),
         Err(error) => {
             log::warn!("Cranamp's window icon did not decode: {error:#}");
-            launcher()
+            launcher
         }
     }
 }
