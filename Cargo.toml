@@ -106,12 +106,12 @@ anyhow = "1.0"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-cranpose = { version = "0.1.157", default-features = false, git = "https://github.com/samoylenkodmitry/Cranpose", rev = "b7ce605c9f1f86a1474d51364637cb1fa3d6b091" }
-cranpose-core = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "b7ce605c9f1f86a1474d51364637cb1fa3d6b091", version = "0.1.157" }
-cranpose-foundation = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "b7ce605c9f1f86a1474d51364637cb1fa3d6b091", version = "0.1.157" }
-cranpose-services = { version = "0.1.157", default-features = false, git = "https://github.com/samoylenkodmitry/Cranpose", rev = "b7ce605c9f1f86a1474d51364637cb1fa3d6b091" }
-cranpose-ui = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "b7ce605c9f1f86a1474d51364637cb1fa3d6b091", version = "0.1.157" }
-cranpose-ui-graphics = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "b7ce605c9f1f86a1474d51364637cb1fa3d6b091", version = "0.1.157" }
+cranpose = { version = "0.1.158", default-features = false, git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6a0897933abc3e352f78b08f2c481b7502832b9" }
+cranpose-core = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6a0897933abc3e352f78b08f2c481b7502832b9", version = "0.1.158" }
+cranpose-foundation = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6a0897933abc3e352f78b08f2c481b7502832b9", version = "0.1.158" }
+cranpose-services = { version = "0.1.158", default-features = false, git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6a0897933abc3e352f78b08f2c481b7502832b9" }
+cranpose-ui = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6a0897933abc3e352f78b08f2c481b7502832b9", version = "0.1.158" }
+cranpose-ui-graphics = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6a0897933abc3e352f78b08f2c481b7502832b9", version = "0.1.158" }
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }
 log = "0.4"
@@ -129,8 +129,8 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 wasm-logger = { version = "0.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cranpose-app-shell = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "b7ce605c9f1f86a1474d51364637cb1fa3d6b091", version = "0.1.157" }
-cranpose-render-common = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "b7ce605c9f1f86a1474d51364637cb1fa3d6b091", version = "0.1.157" }
+cranpose-app-shell = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6a0897933abc3e352f78b08f2c481b7502832b9", version = "0.1.158" }
+cranpose-render-common = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6a0897933abc3e352f78b08f2c481b7502832b9", version = "0.1.158" }
 
 [profile.release]
 opt-level = 3
@@ -149,5 +149,5 @@ inherits = "release-small"
 panic = "abort"
 
 [build-dependencies]
-cranpose-capabilities = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "b7ce605c9f1f86a1474d51364637cb1fa3d6b091", version = "0.1.157" }
+cranpose-capabilities = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6a0897933abc3e352f78b08f2c481b7502832b9", version = "0.1.158" }
 embed-resource = "3.0.11"
