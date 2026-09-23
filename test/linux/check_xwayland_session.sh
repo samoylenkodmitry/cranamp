@@ -12,9 +12,9 @@
 # window, land in <out-dir>.
 #
 # Exits 1 when the player does not appear on the X display, when the hidden
-# host window is on screen, or when dragging the title bar does not move the
-# player. Linux only; needs an X display (Xvfb is enough), xdotool and
-# ImageMagick's `import`.
+# host window is on screen, when the player carries no icon for the panel, or
+# when dragging the title bar does not move the player. Linux only; needs an X
+# display (Xvfb is enough), xdotool, xprop and ImageMagick's `import`.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,7 +25,7 @@ mkdir -p "$out"
 
 [ -n "${DISPLAY:-}" ] || { echo "check_xwayland_session.sh: DISPLAY names no X display" >&2; exit 2; }
 [ -x "$binary" ] || { echo "check_xwayland_session.sh: no cranamp binary at $binary" >&2; exit 2; }
-for tool in xdotool import; do
+for tool in xdotool xprop import; do
     command -v "$tool" > /dev/null || { echo "check_xwayland_session.sh: needs $tool" >&2; exit 2; }
 done
 
@@ -54,6 +54,10 @@ picture before
 
 host="$(xdotool search --onlyvisible --name '^Cranamp$' || true)"
 [ -z "$host" ] || fail "the hidden host window is on screen as X11 window $host"
+
+icon="$(xprop -id "$player" _NET_WM_ICON | grep -o 'Icon ([0-9]* x [0-9]*)' | head -n 1 || true)"
+[ -n "$icon" ] || fail "the player window carries no _NET_WM_ICON, so panels show a generic icon"
+echo "the player carries a panel icon: $icon"
 
 start_x=$X start_y=$Y
 xdotool mousemove "$((X + grab))" "$((Y + grip))" mousedown 1

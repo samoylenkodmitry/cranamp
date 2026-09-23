@@ -20,6 +20,7 @@ rm -rf pkg dist
 
 mkdir -p dist
 cp index.html dist/index.html
+cp assets/icon/favicon.png assets/icon/apple-touch-icon.png dist/
 cp -R pkg dist/pkg
 mkdir -p dist/demo-music
 cp assets/demo-music/generated/*.mp3 dist/demo-music/

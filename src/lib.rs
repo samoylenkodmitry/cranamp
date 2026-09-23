@@ -1,5 +1,6 @@
 #![deny(unsafe_code)]
 #![recursion_limit = "256"]
+mod app_icon;
 pub mod audio;
 mod fonts;
 mod sync;
@@ -15,11 +16,20 @@ fn launcher() -> AppLauncher {
         .with_application_id(APPLICATION_ID)
         .with_fonts(fonts::APP_FONTS)
 }
+fn desktop_launcher() -> AppLauncher {
+    match app_icon::window_icon() {
+        Ok(icon) => launcher().with_window_icon(icon),
+        Err(error) => {
+            log::warn!("Cranamp's window icon did not decode: {error:#}");
+            launcher()
+        }
+    }
+}
 pub fn create_desktop_app() -> AppLauncher {
-    launcher().with_size(1, 1)
+    desktop_launcher().with_size(1, 1)
 }
 pub fn create_surface_app() -> AppLauncher {
-    launcher().with_size(900, 700)
+    desktop_launcher().with_size(900, 700)
 }
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub fn create_web_app() -> AppLauncher {
