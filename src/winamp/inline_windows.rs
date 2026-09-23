@@ -178,6 +178,32 @@ pub(crate) fn decode_positions(text: &str) -> Option<[Point; 3]> {
     points.try_into().ok()
 }
 
+/// The playlist's size as the text the preferences keep.
+pub(crate) fn encode_size(size: Size) -> String {
+    format!("{},{}", size.width, size.height)
+}
+
+/// The playlist's size read back from [`encode_size`], or nothing when the
+/// text is not a size.
+pub(crate) fn decode_size(text: &str) -> Option<Size> {
+    let (width, height) = text.split_once(',')?;
+    let (width, height) = (
+        width.trim().parse::<f32>().ok()?,
+        height.trim().parse::<f32>().ok()?,
+    );
+    (width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0)
+        .then(|| Size::new(width, height))
+}
+
+/// A window held at `held` and stretched from its corner by `travel`, never
+/// smaller than `minimum`.
+pub(crate) fn stretched(held: Size, travel: Point, minimum: Size) -> Size {
+    Size::new(
+        (held.width + travel.x).max(minimum.width),
+        (held.height + travel.y).max(minimum.height),
+    )
+}
+
 fn spans_overlap(start: f32, length: f32, other_start: f32, other_length: f32, slack: f32) -> bool {
     start < other_start + other_length + slack && other_start < start + length + slack
 }
