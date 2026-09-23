@@ -15,11 +15,12 @@ fn launcher() -> AppLauncher {
         .with_title(TITLE)
         .with_application_id(APPLICATION_ID)
         .with_fonts(fonts::APP_FONTS)
+        // A skin's cursors are pixel art drawn at an exact size; enlarged with
+        // the system pointer they turn into smeared blocks.
+        .with_custom_cursor_size(CustomCursorSize::AsDrawn)
 }
 fn desktop_launcher() -> AppLauncher {
-    // A skin's cursors are pixel art drawn at an exact size; enlarged with the
-    // system pointer they turn into smeared blocks.
-    let launcher = launcher().with_custom_cursor_size(CustomCursorSize::AsDrawn);
+    let launcher = launcher();
     match app_icon::window_icon() {
         Ok(icon) => launcher.with_window_icon(icon),
         Err(error) => {
