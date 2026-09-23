@@ -164,6 +164,7 @@ jobs:
             mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
             cp "${{ matrix.binary }}" "$app/Contents/MacOS/Cranamp"
             cp platform/macos/Info.plist "$app/Contents/Info.plist"
+            cp assets/icon/Cranamp.icns "$app/Contents/Resources/Cranamp.icns"
             if [ "${{ steps.devid.outputs.signed }}" = "true" ]; then
               security unlock-keychain -p "$CRANAMP_SIGN_KEYCHAIN_PASS" \
                 "$CRANAMP_SIGN_KEYCHAIN"

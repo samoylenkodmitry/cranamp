@@ -33,6 +33,21 @@ if [ ! -f "$USAGE" ]; then
 fi
 /usr/libexec/PlistBuddy -c "Merge $USAGE" "$APP/Info.plist" >/dev/null
 
+case "$TARGET" in
+  *-sim) ICON_PLATFORM="iphonesimulator" ;;
+  *) ICON_PLATFORM="iphoneos" ;;
+esac
+ICON_PLIST="$ROOT/target/$TARGET/$PROFILE/app-icon.plist"
+xcrun actool "$SCRIPT_DIR/Assets.xcassets" \
+  --compile "$APP" \
+  --platform "$ICON_PLATFORM" \
+  --minimum-deployment-target "$IPHONEOS_DEPLOYMENT_TARGET" \
+  --target-device iphone --target-device ipad \
+  --app-icon AppIcon \
+  --output-partial-info-plist "$ICON_PLIST" \
+  --output-format human-readable-text --notices --warnings --errors >&2
+/usr/libexec/PlistBuddy -c "Merge $ICON_PLIST" "$APP/Info.plist" >/dev/null
+
 build_version="$(xcrun vtool -show-build-version "$APP/$APP_NAME" 2>/dev/null || true)"
 case "$build_version" in
   *LC_BUILD_VERSION*) ;;
