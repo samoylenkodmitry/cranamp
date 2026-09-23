@@ -5,6 +5,7 @@ mod bitmap_font;
 mod browser_skins;
 pub mod cursors;
 mod eq_graph;
+mod inline_windows;
 mod pixel_grid;
 mod pixel_text;
 mod region_clip;
@@ -275,7 +276,7 @@ fn playlist_scroll_drag_active() -> bool {
 }
 #[derive(Clone, Copy, PartialEq)]
 enum WinampDragTarget {
-    Inline(MutableState<Point>),
+    Inline(InlineDrag),
     Fixed(Point),
     #[cfg(target_os = "android")]
     AndroidHost {
@@ -573,6 +574,131 @@ struct WinampInlineWindowStates {
     equalizer: MutableState<Point>,
     playlist: MutableState<Point>,
 }
+/// One of the player's windows drawn in a shared canvas.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InlinePane {
+    Main,
+    Equalizer,
+    Playlist,
+}
+/// A window of the shared canvas being dragged, with the others it lands on
+/// and carries along.
+#[derive(Clone, Copy, PartialEq)]
+struct InlineDrag {
+    pane: InlinePane,
+    windows: WinampInlineWindowStates,
+    player: MutableState<WinampState>,
+}
+/// What a drag in the shared canvas holds from the press to the release: where
+/// in the window it was taken, and the windows travelling with it.
+#[derive(Clone, Debug, PartialEq)]
+struct InlineDragSession {
+    grab: Point,
+    followers: Vec<(InlinePane, Point)>,
+}
+impl WinampInlineWindowStates {
+    fn position(&self, pane: InlinePane) -> MutableState<Point> {
+        match pane {
+            InlinePane::Main => self.main,
+            InlinePane::Equalizer => self.equalizer,
+            InlinePane::Playlist => self.playlist,
+        }
+    }
+    /// Each window on screen with the rectangle it covers.
+    fn visible(&self, snapshot: &WinampState) -> Vec<(InlinePane, Rect)> {
+        let scale = ui_scale();
+        let rect = |pane: InlinePane, width: f32, height: f32| {
+            let origin = self.position(pane).get_non_reactive();
+            (
+                pane,
+                Rect {
+                    x: origin.x,
+                    y: origin.y,
+                    width: scaled(width, scale),
+                    height: scaled(height, scale),
+                },
+            )
+        };
+        let mut windows = vec![rect(InlinePane::Main, MAIN_WIDTH, MAIN_HEIGHT)];
+        if snapshot.eq_visible {
+            windows.push(rect(InlinePane::Equalizer, EQ_WIDTH, EQ_HEIGHT));
+        }
+        if snapshot.playlist_visible {
+            windows.push(rect(InlinePane::Playlist, PLAYLIST_WIDTH, PLAYLIST_HEIGHT));
+        }
+        windows
+    }
+}
+impl InlineDrag {
+    fn position(&self) -> MutableState<Point> {
+        self.windows.position(self.pane)
+    }
+    /// Takes the window at `pointer`: the main window takes every window
+    /// attached to it, each at its offset from the main window.
+    fn press(&self, pointer: Point) -> InlineDragSession {
+        let origin = self.position().get_non_reactive();
+        let windows = self.windows.visible(&self.player.get_non_reactive());
+        let followers = match (
+            self.pane,
+            windows.iter().position(|(pane, _)| *pane == self.pane),
+        ) {
+            (InlinePane::Main, Some(lead)) => {
+                let rects: Vec<Rect> = windows.iter().map(|(_, rect)| *rect).collect();
+                inline_windows::attached_to(lead, &rects)
+                    .into_iter()
+                    .map(|index| {
+                        let (pane, rect) = windows[index];
+                        (pane, Point::new(rect.x - origin.x, rect.y - origin.y))
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        InlineDragSession {
+            grab: Point::new(pointer.x - origin.x, pointer.y - origin.y),
+            followers,
+        }
+    }
+    /// Moves the window under `pointer`, onto any edge it comes near, and the
+    /// windows it carries with it.
+    fn carry(&self, session: &InlineDragSession, pointer: Point) {
+        let windows = self.windows.visible(&self.player.get_non_reactive());
+        let Some((_, current)) = windows.iter().find(|(pane, _)| *pane == self.pane) else {
+            return;
+        };
+        let proposed = Rect {
+            x: pointer.x - session.grab.x,
+            y: pointer.y - session.grab.y,
+            ..*current
+        };
+        let others: Vec<Rect> = windows
+            .iter()
+            .filter(|(pane, _)| {
+                *pane != self.pane && !session.followers.iter().any(|(held, _)| held == pane)
+            })
+            .map(|(_, rect)| *rect)
+            .collect();
+        let origin = inline_windows::snapped_origin(proposed, &others, inline_canvas_size());
+        let origin = Point::new(snap_to_pixel(origin.x), snap_to_pixel(origin.y));
+        self.position().set(origin);
+        for (pane, offset) in &session.followers {
+            self.windows
+                .position(*pane)
+                .set(Point::new(origin.x + offset.x, origin.y + offset.y));
+        }
+    }
+}
+/// The canvas the windows share, where the platform reports one.
+fn inline_canvas_size() -> Option<Size> {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        web_current_surface_size()
+    }
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+    {
+        None
+    }
+}
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct WinampPeerWindowStates {
     main: WindowState,
@@ -598,8 +724,11 @@ pub(crate) fn remember_winamp_tab_state() -> WinampTabState {
         detached: cranpose_core::mutableStateOf(native_winamp_windows_available()),
         inline_windows: WinampInlineWindowStates {
             main: cranpose_core::mutableStateOf(Point::new(26.0, 22.0)),
-            equalizer: cranpose_core::mutableStateOf(Point::new(26.0, 142.0)),
-            playlist: cranpose_core::mutableStateOf(Point::new(26.0, 262.0)),
+            equalizer: cranpose_core::mutableStateOf(Point::new(26.0, 22.0 + MAIN_HEIGHT)),
+            playlist: cranpose_core::mutableStateOf(Point::new(
+                26.0,
+                22.0 + MAIN_HEIGHT + EQ_HEIGHT,
+            )),
         },
         peer_windows: WinampPeerWindowStates {
             main: WindowState::new(MAIN_WIDTH, MAIN_HEIGHT),
@@ -1788,29 +1917,30 @@ pub fn WinampStackedApp() {
             .clip_to_bounds()
             .background(Color(0.02, 0.02, 0.03, 1.0)),
         BoxSpec::default(),
-        move || {
-            let skin_for_stack = skin.clone();
-            let display_color = skin.display_text_color;
-            BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
-                let snapshot = tab_state.player.get();
-                let layout = stacked_layout(
-                    scope.max_width().0,
-                    scope.max_height().0,
-                    &snapshot,
-                    ui_scale(),
-                );
-                let drag = stacked_drag(layout, snapshot);
-                WinampStackedStage(
-                    skin_for_stack.clone(),
-                    tab_state.player,
-                    skin_state,
-                    layout,
-                    drag,
-                );
-                SettingsModal(tab_state.player, skin_state, display_color, ui_scale());
-            });
-        },
+        move || WinampStackedFill(skin.clone(), tab_state.player, skin_state),
     );
+}
+/// The player's windows stacked into one column that fills the surface it is
+/// given, with the settings sheet over them.
+#[composable]
+fn WinampStackedFill(
+    skin: WinampSkin,
+    player: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+) {
+    let display_color = skin.display_text_color;
+    BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
+        let snapshot = player.get();
+        let layout = stacked_layout(
+            scope.max_width().0,
+            scope.max_height().0,
+            &snapshot,
+            ui_scale(),
+        );
+        let drag = stacked_drag(layout, snapshot);
+        WinampStackedStage(skin.clone(), player, skin_state, layout, drag);
+        SettingsModal(player, skin_state, display_color, ui_scale());
+    });
 }
 #[cfg(target_os = "android")]
 fn stacked_layout(
@@ -1925,6 +2055,8 @@ pub fn WinampSurfaceApp() {
     let tab_state = remember_winamp_tab_state();
     let skin_state = remember_winamp_skin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
+    let floating = remember_floating_surface();
+    FloatingSurfaceSize(floating, tab_state.player);
     #[cfg(not(target_os = "ios"))]
     {
         WinampStudioSurface(tab_state.player, skin_state);
@@ -1946,15 +2078,98 @@ pub fn WinampSurfaceApp() {
             .background(Color(0.02, 0.02, 0.03, 1.0)),
         BoxSpec::default(),
         move || {
-            WinampInlineStage(
-                skin.clone(),
-                tab_state.player,
-                skin_state,
-                tab_state.inline_windows,
-                ui_scale(),
-            );
+            if floating {
+                WinampStackedFill(skin.clone(), tab_state.player, skin_state);
+            } else {
+                WinampInlineStage(
+                    skin.clone(),
+                    tab_state.player,
+                    skin_state,
+                    tab_state.inline_windows,
+                    ui_scale(),
+                );
+            }
         },
     );
+}
+/// The size a floating player window takes while Skin Studio is open in it.
+const FLOATING_STUDIO_SIZE: Size = Size {
+    width: 1100.0,
+    height: 760.0,
+};
+/// The size a floating player window asks for: the stacked player exactly,
+/// or room for Skin Studio while it is open. Nothing while the player is
+/// part of a page.
+fn floating_surface_size(floating: bool, snapshot: &WinampState) -> Option<Size> {
+    if !floating {
+        None
+    } else if snapshot.studio_open {
+        Some(FLOATING_STUDIO_SIZE)
+    } else {
+        Some(Size::new(
+            MAIN_WIDTH,
+            MAIN_HEIGHT
+                + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 }
+                + if snapshot.playlist_visible {
+                    PLAYLIST_HEIGHT
+                } else {
+                    0.0
+                },
+        ))
+    }
+}
+/// Asks the host for [`floating_surface_size`] whenever it changes.
+#[composable]
+fn FloatingSurfaceSize(floating: bool, player: MutableState<WinampState>) {
+    let snapshot = player.get();
+    let wanted = floating_surface_size(floating, &snapshot);
+    let open_size = floating_surface_size(true, &snapshot);
+    let asked = cranpose_core::remember(|| Rc::new(Cell::new(None::<Size>))).with(Rc::clone);
+    cranpose_core::SideEffect(move || {
+        if let Some(size) = open_size {
+            FLOATING_OPEN_SIZE.with(|cell| cell.set(size));
+        }
+        if asked.get() == wanted {
+            return;
+        }
+        asked.set(wanted);
+        if let Some(size) = wanted {
+            if let Err(error) =
+                cranpose_services::request_host_surface_size(size.width, size.height)
+            {
+                log::debug!("the floating player kept its size: {error:?}");
+            }
+        }
+    });
+}
+thread_local! {
+    static FLOATING_SURFACE: Cell<bool> = const { Cell::new(false) };
+    static FLOATING_SURFACE_STATE: Cell<Option<MutableState<bool>>> = const { Cell::new(None) };
+    static FLOATING_OPEN_SIZE: Cell<Size> = const {
+        Cell::new(Size {
+            width: MAIN_WIDTH,
+            height: MAIN_HEIGHT + EQ_HEIGHT + PLAYLIST_HEIGHT,
+        })
+    };
+}
+/// The size a floating window has to open at to hold the player as it is now,
+/// so the window is exact from the first frame.
+pub fn floating_open_size() -> Size {
+    FLOATING_OPEN_SIZE.with(Cell::get)
+}
+/// Tells the player whether its surface is a floating window of its own, such
+/// as a browser's picture-in-picture window, rather than part of a page.
+pub fn set_floating_surface(floating: bool) {
+    FLOATING_SURFACE.with(|cell| cell.set(floating));
+    if let Some(state) = FLOATING_SURFACE_STATE.with(Cell::get) {
+        state.set(floating);
+    }
+}
+#[composable]
+fn remember_floating_surface() -> bool {
+    let state = cranpose_core::rememberMutableStateOf(|| FLOATING_SURFACE.with(Cell::get));
+    FLOATING_SURFACE_STATE.with(|cell| cell.set(Some(state)));
+    state.get()
 }
 #[composable]
 fn WinampSkinError(error: String) {
@@ -2008,21 +2223,23 @@ fn WinampInlineStage(
             .rounded_corners(8.0),
         BoxSpec::default(),
         move || {
+            let drag = |pane| {
+                WinampDragTarget::Inline(InlineDrag {
+                    pane,
+                    windows,
+                    player: state,
+                })
+            };
             MainWindow(
                 skin.clone(),
                 state,
                 skin_state,
-                WinampDragTarget::Inline(windows.main),
+                drag(InlinePane::Main),
                 WinampCloseAction::SetStatus,
                 scale,
             );
             if state.get().eq_visible {
-                EqualizerWindow(
-                    skin.clone(),
-                    state,
-                    WinampDragTarget::Inline(windows.equalizer),
-                    scale,
-                );
+                EqualizerWindow(skin.clone(), state, drag(InlinePane::Equalizer), scale);
             }
             if state.get().playlist_visible {
                 PlaylistWindow(
@@ -2031,7 +2248,7 @@ fn WinampInlineStage(
                     skin.text.clone(),
                     skin.cursors.clone(),
                     state,
-                    WinampDragTarget::Inline(windows.playlist),
+                    drag(InlinePane::Playlist),
                     WinampWindowSize::Fixed(Size::new(PLAYLIST_WIDTH, PLAYLIST_HEIGHT)),
                     scale,
                 );
@@ -6011,8 +6228,8 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
         WinampDragTarget::Fixed(_) => {
             Box(modifier, BoxSpec::default(), || {});
         }
-        WinampDragTarget::Inline(window_position) => {
-            let drag_offset = cranpose_core::rememberMutableStateOf(|| None::<Point>);
+        WinampDragTarget::Inline(drag) => {
+            let session = cranpose_core::rememberMutableStateOf(|| None::<InlineDragSession>);
             Box(
                 modifier.pointer_input((), {
                     move |scope: PointerInputScope| async move {
@@ -6022,32 +6239,21 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
                                     let event = await_scope.await_pointer_event().await;
                                     match event.kind {
                                         PointerEventKind::Down => {
-                                            let current = window_position.get();
-                                            drag_offset.set(Some(Point::new(
-                                                event.global_position.x - current.x,
-                                                event.global_position.y - current.y,
-                                            )));
+                                            session.set(Some(drag.press(event.global_position)));
                                             event.consume();
                                         }
                                         PointerEventKind::Move => {
                                             if !event.buttons.contains(PointerButton::Primary) {
-                                                drag_offset.set(None);
+                                                session.set(None);
                                                 continue;
                                             }
-                                            if let Some(offset) = drag_offset.get() {
-                                                window_position.set(Point::new(
-                                                    snap_to_pixel(
-                                                        event.global_position.x - offset.x,
-                                                    ),
-                                                    snap_to_pixel(
-                                                        event.global_position.y - offset.y,
-                                                    ),
-                                                ));
+                                            if let Some(held) = session.get() {
+                                                drag.carry(&held, event.global_position);
                                                 event.consume();
                                             }
                                         }
                                         PointerEventKind::Up | PointerEventKind::Cancel => {
-                                            drag_offset.set(None);
+                                            session.set(None);
                                         }
                                         PointerEventKind::Scroll
                                         | PointerEventKind::RotaryScrollPre
@@ -8433,8 +8639,8 @@ fn winamp_window_modifier(
     let bounds = pixel_grid::rect(0., 0., width, height, scale);
     let modifier = Modifier::empty().size_points(bounds.width, bounds.height);
     match drag_target {
-        WinampDragTarget::Inline(position) => {
-            let position = position.get();
+        WinampDragTarget::Inline(drag) => {
+            let position = drag.position().get();
             modifier.offset(snap_to_pixel(position.x), snap_to_pixel(position.y))
         }
         WinampDragTarget::Fixed(position) => {

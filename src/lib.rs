@@ -67,6 +67,21 @@ pub fn web_init() {
     wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
     console_error_panic_hook::set_once();
 }
+/// Called by the page when it moves the player's canvas into a floating
+/// window of its own, and again when the canvas comes back to the page.
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[wasm_bindgen]
+pub fn set_floating(floating: bool) {
+    winamp::set_floating_surface(floating);
+}
+/// The width and height a floating window opens at to hold the player as it
+/// is now.
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[wasm_bindgen]
+pub fn floating_size() -> Vec<f32> {
+    let size = winamp::floating_open_size();
+    vec![size.width, size.height]
+}
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 #[wasm_bindgen]
 pub async fn run_app() -> Result<(), JsValue> {
