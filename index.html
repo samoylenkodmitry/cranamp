@@ -94,9 +94,142 @@
       height: 100%;
       background: #050608;
     }
+
+    /* What the page shows while the 12 MB player downloads and starts, and
+       the message if it cannot start. It fades once the first frame is up. */
+    .boot {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      display: grid;
+      place-items: center;
+      background: #050608;
+      transition: opacity 240ms ease-out, visibility 0s linear 240ms;
+    }
+
+    body[data-phase="running"] .boot {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    body:not([data-phase="running"]) .pip-button {
+      visibility: hidden;
+    }
+
+    .boot-card {
+      display: grid;
+      justify-items: center;
+      gap: 14px;
+      width: min(275px, calc(100vw - 32px));
+      text-align: center;
+    }
+
+    .boot-icon {
+      width: 88px;
+      height: 88px;
+      border-radius: 20px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+    }
+
+    .boot-title {
+      margin: 2px 0 0;
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #cfe7ee;
+    }
+
+    .boot-meter {
+      position: relative;
+      width: 100%;
+      height: 12px;
+      border: 1px solid #2c4a57;
+      background: #07131a;
+      box-shadow: inset 1px 1px 0 #02080b;
+      overflow: hidden;
+    }
+
+    .boot-fill {
+      position: absolute;
+      inset: 1px auto 1px 1px;
+      width: 0;
+      background: repeating-linear-gradient(90deg, #86f0ff 0 5px, transparent 5px 7px);
+      transition: width 160ms linear;
+    }
+
+    body[data-progress="unknown"] .boot-fill {
+      width: 36%;
+      animation: boot-sweep 1.1s ease-in-out infinite alternate;
+    }
+
+    .boot-status {
+      margin: 0;
+      min-height: 1.4em;
+      font-variant-numeric: tabular-nums;
+      color: #7fa3b1;
+    }
+
+    .boot-error {
+      display: none;
+      margin: 0;
+      color: #ff9b9b;
+    }
+
+    .boot-retry {
+      display: none;
+      padding: 6px 14px;
+      border: 1px solid #586372;
+      background: linear-gradient(#e7edf4, #8c9bad 50%, #d7e0ea);
+      color: #0d1620;
+      cursor: pointer;
+    }
+
+    body[data-phase="error"] .boot-meter,
+    body[data-phase="error"] .boot-status {
+      display: none;
+    }
+
+    body[data-phase="error"] .boot-error,
+    body[data-phase="error"] .boot-retry {
+      display: block;
+    }
+
+    @keyframes boot-sweep {
+      from {
+        transform: translateX(-10%);
+      }
+      to {
+        transform: translateX(190%);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .boot,
+      .boot-fill {
+        transition: none;
+      }
+
+      body[data-progress="unknown"] .boot-fill {
+        animation: none;
+        width: 100%;
+        opacity: 0.45;
+      }
+    }
   </style>
 </head>
-<body>
+<body data-phase="loading">
+  <div class="boot" role="status" aria-live="polite">
+    <div class="boot-card">
+      <img class="boot-icon" src="apple-touch-icon.png" alt="" width="88" height="88" />
+      <p class="boot-title">Cranamp</p>
+      <div class="boot-meter" aria-hidden="true"><div class="boot-fill"></div></div>
+      <p id="boot-status" class="boot-status">Loading the player&hellip;</p>
+      <p id="boot-error" class="boot-error" role="alert"></p>
+      <button id="boot-retry" class="boot-retry" type="button">Reload</button>
+    </div>
+  </div>
   <div class="stage">
     <button id="pip-button" class="pip-button" type="button" aria-label="Open floating Cranamp window" title="Open floating Cranamp window" disabled>
       <span class="pip-icon" aria-hidden="true"></span>
@@ -107,80 +240,18 @@
   </div>
 
   <script type="module">
-    import init, { run_app } from "./pkg/cranamp.js";
+    import init, { run_app, set_floating, floating_size } from "./pkg/cranamp.js";
 
-    /// The player's own size. It is the floating window's minimum, never the
-    /// embedded canvas' size -- embedded, the canvas is the whole viewport.
-    const DEFAULT_SURFACE_SIZE = { width: 275, height: 493 };
+    /// The floating window opens at the size the player reports for itself:
+    /// the stacked windows it shows, or room for Skin Studio. Later changes
+    /// are asked of Cranpose, which resizes the window on the next click in
+    /// it when the browser wants a gesture first.
     const host = document.getElementById("cranamp-host");
     const canvas = document.getElementById("cranamp-canvas");
     const pipButton = document.getElementById("pip-button");
     let pipWindow = null;
     let savedCanvasStyle = null;
-    let cranampSize = { ...DEFAULT_SURFACE_SIZE };
-    let lastPipWindowSize = null;
     let openingPiP = false;
-
-    function validSurfaceSize(size) {
-      const width = Number(size?.width);
-      const height = Number(size?.height);
-      if (!Number.isFinite(width) || !Number.isFinite(height)) {
-        return null;
-      }
-      return {
-        width: Math.max(1, Math.round(width)),
-        height: Math.max(1, Math.round(height)),
-      };
-    }
-
-    function sameSurfaceSize(a, b) {
-      return a?.width === b?.width && a?.height === b?.height;
-    }
-
-    function measuredCanvasSize() {
-      const rect = canvas.getBoundingClientRect();
-      return {
-        width: Math.max(1, Math.round(rect.width || canvas.clientWidth || cranampSize.width)),
-        height: Math.max(1, Math.round(rect.height || canvas.clientHeight || cranampSize.height)),
-      };
-    }
-
-    function applyCanvasSize(targetWindow = null, options = {}) {
-      const { resizeWindow = false } = options;
-      const { width, height } = cranampSize;
-
-      canvas.style.display = "block";
-      canvas.style.touchAction = "none";
-
-      if (!targetWindow || targetWindow.closed) {
-        // Embedded: fill the viewport and let Cranamp place its windows. The
-        // host element is sized by the stylesheet, not from the player size.
-        canvas.style.width = "100%";
-        canvas.style.height = "100%";
-        return;
-      }
-
-      const doc = targetWindow.document;
-      const floatingHost = doc.getElementById("cranamp-pip-host");
-      doc.documentElement.style.minWidth = `${DEFAULT_SURFACE_SIZE.width}px`;
-      doc.documentElement.style.minHeight = `${DEFAULT_SURFACE_SIZE.height}px`;
-      doc.body.style.minWidth = `${DEFAULT_SURFACE_SIZE.width}px`;
-      doc.body.style.minHeight = `${DEFAULT_SURFACE_SIZE.height}px`;
-      canvas.style.width = "100vw";
-      canvas.style.height = "100vh";
-      if (floatingHost) {
-        floatingHost.style.width = "100vw";
-        floatingHost.style.height = "100vh";
-      }
-      if (resizeWindow && !sameSurfaceSize(lastPipWindowSize, cranampSize)) {
-        lastPipWindowSize = { ...cranampSize };
-        try {
-          targetWindow.resizeTo(width, height);
-        } catch (error) {
-          console.debug("Floating Cranamp resize was ignored by the browser", error);
-        }
-      }
-    }
 
     function restoreCranampCanvas() {
       if (canvas.parentElement !== host) {
@@ -193,8 +264,7 @@
       }
       savedCanvasStyle = null;
       pipWindow = null;
-      lastPipWindowSize = null;
-      applyCanvasSize();
+      set_floating(false);
       enablePiPButton();
     }
 
@@ -209,6 +279,15 @@
         bubbles: true,
         cancelable: true,
       }));
+    }
+
+    /// The canvas fills the floating window, so a window the person resizes
+    /// by hand takes the canvas with it. A size the player asks for sets the
+    /// canvas' box and the window together; the resize that follows hands the
+    /// box back to the window.
+    function fillFloatingWindow() {
+      canvas.style.width = "100vw";
+      canvas.style.height = "100vh";
     }
 
     function moveCranampCanvasToPiP(targetWindow) {
@@ -226,39 +305,24 @@
             margin: 0;
             width: 100%;
             height: 100%;
-            min-width: ${DEFAULT_SURFACE_SIZE.width}px;
-            min-height: ${DEFAULT_SURFACE_SIZE.height}px;
             overflow: hidden;
-            background: #050608;
-          }
-
-          body {
-            display: grid;
-            place-items: start;
-          }
-
-          #cranamp-pip-host {
-            width: 100vw;
-            height: 100vh;
             background: #050608;
           }
 
           canvas {
             display: block;
-            width: 100vw;
-            height: 100vh;
-            background: #050608;
             touch-action: none;
           }
         </style>
       `;
-      doc.body.innerHTML = `<main id="cranamp-pip-host"></main>`;
+      doc.body.innerHTML = "";
 
       savedCanvasStyle = canvas.getAttribute("style");
-      doc.getElementById("cranamp-pip-host").appendChild(canvas);
-      lastPipWindowSize = null;
-      applyCanvasSize(targetWindow, { resizeWindow: true });
+      doc.body.appendChild(canvas);
+      fillFloatingWindow();
+      set_floating(true);
 
+      targetWindow.addEventListener("resize", fillFloatingWindow);
       doc.addEventListener("keydown", forwardKeyboardEvent);
       doc.addEventListener("keyup", forwardKeyboardEvent);
       targetWindow.addEventListener("pagehide", restoreCranampCanvas, { once: true });
@@ -268,33 +332,29 @@
       return "documentPictureInPicture" in window;
     }
 
-    async function openFloatingMiniPlayer(options = {}) {
-      const { suppressWarning = false } = options;
+    async function openFloatingMiniPlayer() {
       if (!supportsFloatingMiniPlayer() || openingPiP) {
-        return false;
+        return;
       }
       if (pipWindow && !pipWindow.closed) {
         pipWindow.focus();
-        return true;
+        return;
       }
 
       openingPiP = true;
       try {
+        const [width, height] = floating_size();
         pipWindow = await window.documentPictureInPicture.requestWindow({
-          width: cranampSize.width,
-          height: cranampSize.height,
+          width: Math.round(width),
+          height: Math.round(height),
         });
         pipButton.disabled = true;
         pipButton.title = "Cranamp is floating";
         moveCranampCanvasToPiP(pipWindow);
-        return true;
       } catch (error) {
         pipWindow = null;
         enablePiPButton();
-        if (!suppressWarning) {
-          console.warn("Floating Cranamp could not open", error);
-        }
-        return false;
+        console.warn("Floating Cranamp could not open", error);
       } finally {
         openingPiP = false;
       }
@@ -312,46 +372,6 @@
       pipButton.title = "Floating Cranamp is not supported by this browser";
     } else {
       pipButton.addEventListener("click", openFloatingMiniPlayer);
-    }
-
-    window.cranampApplySurfaceSize = (width, height) => {
-      const size = validSurfaceSize({ width, height });
-      if (!size) {
-        return;
-      }
-      const sizeChanged = !sameSurfaceSize(cranampSize, size);
-      cranampSize = size;
-      applyCanvasSize(pipWindow, { resizeWindow: sizeChanged });
-    };
-
-    window.cranampCurrentSurfaceSize = measuredCanvasSize;
-
-    // The renderer measures the canvas once at startup and then only when the
-    // page reports a resize. Give it the real box before it starts, and tell it
-    // whenever the box changes -- otherwise a canvas that grows from its
-    // intrinsic size to the viewport keeps rendering a small scene stretched
-    // across the whole page.
-    function syncSurfaceToBox() {
-      const { width, height } = measuredCanvasSize();
-      const ratio = window.devicePixelRatio || 1;
-      const buffer = {
-        width: Math.max(1, Math.round(width * ratio)),
-        height: Math.max(1, Math.round(height * ratio)),
-      };
-      if (canvas.width !== buffer.width || canvas.height !== buffer.height) {
-        canvas.width = buffer.width;
-        canvas.height = buffer.height;
-      }
-    }
-
-    applyCanvasSize();
-    syncSurfaceToBox();
-    window.setInterval(() => applyCanvasSize(pipWindow), 250);
-    if (typeof ResizeObserver === "function") {
-      new ResizeObserver(() => {
-        syncSurfaceToBox();
-        window.dispatchEvent(new Event("resize"));
-      }).observe(host);
     }
 
     // Cranpose plays through a detached <audio> element that it wires into an
@@ -374,11 +394,89 @@
     };
     window.Audio.prototype = NativeAudio.prototype;
 
-    await init();
-    await run_app();
-    applyCanvasSize(pipWindow);
-    syncSurfaceToBox();
-    enablePiPButton();
+    const bootStatus = document.getElementById("boot-status");
+    const bootFill = document.querySelector(".boot-fill");
+
+    function megabytes(bytes) {
+      return (bytes / (1024 * 1024)).toFixed(1);
+    }
+
+    function showProgress(loaded, total) {
+      if (total > 0 && loaded <= total) {
+        document.body.dataset.progress = "known";
+        const fraction = loaded / total;
+        bootFill.style.width = `calc(${(fraction * 100).toFixed(1)}% - 2px)`;
+        bootStatus.textContent =
+          `Downloading ${megabytes(loaded)} of ${megabytes(total)} MB (${Math.floor(fraction * 100)}%)`;
+      } else {
+        document.body.dataset.progress = "unknown";
+        bootStatus.textContent = `Downloading ${megabytes(loaded)} MB`;
+      }
+    }
+
+    /// Streams the player's WebAssembly through a counter, so the page can say
+    /// how far the download is while the browser still compiles as it
+    /// arrives. A compressed response reports the compressed length, which
+    /// the decoded bytes overrun, so its total is treated as unknown.
+    async function fetchWithProgress(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`The player could not be downloaded (HTTP ${response.status}).`);
+      }
+      const encoding = response.headers.get("Content-Encoding");
+      const declared = Number(response.headers.get("Content-Length")) || 0;
+      const total = encoding && encoding !== "identity" ? 0 : declared;
+      showProgress(0, total);
+      if (!response.body) {
+        return response;
+      }
+      const reader = response.body.getReader();
+      let loaded = 0;
+      const counted = new ReadableStream({
+        async pull(controller) {
+          const { done, value } = await reader.read();
+          if (done) {
+            bootStatus.textContent = "Starting the player…";
+            controller.close();
+            return;
+          }
+          loaded += value.byteLength;
+          showProgress(loaded, total);
+          controller.enqueue(value);
+        },
+        cancel(reason) {
+          return reader.cancel(reason);
+        },
+      });
+      return new Response(counted, { headers: { "Content-Type": "application/wasm" } });
+    }
+
+    function failBoot(error) {
+      console.error(error);
+      document.body.dataset.phase = "error";
+      document.getElementById("boot-error").textContent =
+        `Cranamp couldn't start: ${error && error.message ? error.message : error}`;
+    }
+
+    document.getElementById("boot-retry").addEventListener("click", () => window.location.reload());
+
+    try {
+      const probe = document.createElement("canvas");
+      if (!("gpu" in navigator) && !probe.getContext("webgl2")) {
+        throw new Error("this browser has neither WebGPU nor WebGL2.");
+      }
+      await init({ module_or_path: fetchWithProgress("./pkg/cranamp_bg.wasm") });
+      bootStatus.textContent = "Starting the player…";
+      await run_app();
+      document.body.dataset.phase = "running";
+      // A page loaded in a background tab runs no transition until it is
+      // shown, so the faded overlay is removed on a timer, not on its
+      // transitionend.
+      window.setTimeout(() => document.querySelector(".boot")?.remove(), 400);
+      enablePiPButton();
+    } catch (error) {
+      failBoot(error);
+    }
   </script>
 </body>
 </html>
