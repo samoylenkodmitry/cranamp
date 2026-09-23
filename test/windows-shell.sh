@@ -25,6 +25,7 @@ scp -q "$here/windows-shell.ps1" "$host:$remote/windows-shell.ps1"
 ssh "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File $remote\\windows-shell.ps1 -Executable \$HOME\\$remote\\cranamp.exe -OutputDirectory \$HOME\\$remote\\out -Schedule"
 
 verdict=""
+sleep 14
 for _ in $(seq 1 30); do
     sleep 2
     verdict="$(ssh "$host" "Get-Content $remote\\out\\result.txt -ErrorAction SilentlyContinue" | tr -d '\r' || true)"
@@ -37,7 +38,7 @@ for file in audit.log failure.txt exe-icon.png window-icon.png; do
     rm -f "$out/$file"
     scp -q "$host:$remote/out/$file" "$out/$file" 2> /dev/null || true
 done
-grep -E '^(PE subsystem|File description|Icons in|Visible windows|Window |Taskbar icon)' "$out/audit.log" 2> /dev/null || true
+grep -E '^(PE subsystem|File description|Icons in|Process started|Console window|Visible windows|Window |Taskbar icon)' "$out/audit.log" 2> /dev/null || true
 [ -f "$out/failure.txt" ] && sed -n '1,3p' "$out/failure.txt"
 
 case "$verdict" in
