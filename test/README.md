@@ -6,6 +6,7 @@ All test code and fixtures live here.
 - `node --test test/web_host.mjs` checks the web host.
 - `python3 test/state_holder_gate.py` checks remembered state holders.
 - `test/macos/` contains the native docking and playlist-resize checks.
+- `test/linux/check_xwayland_session.sh <out-dir>` starts the player with a Wayland session's environment on an X display and checks that it runs on XWayland with a draggable title bar.
 - `test/ios/run-uitests.sh <device-udid>` runs the Xcode UI suite in `ios/`. Results are written under `target/`.
 - With Skin Studio running, `node test/skin-studio/midnight_snack.mjs` checks project/export GPU equality, exact spectrum/editor pixels, keyed preamp and all 28 EQ track frames, and continuous border/footer pixels at all 29 playlist tile phases. It also captures control states, slider endpoints and five playlist sizes.
 
