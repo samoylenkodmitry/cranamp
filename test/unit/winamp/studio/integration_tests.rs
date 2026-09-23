@@ -20,10 +20,15 @@ fn the_editor_opens_on_the_skin_the_player_wears() {
     assert!(!doc.view.presentation);
     assert!(doc.planes.is_empty(), "the skin, not a layered copy of it");
     let exported = entries(&doc.archive().unwrap());
+    let drawn_for = crate::winamp::cursors::SkinCursor::files()
+        .into_iter()
+        .filter(|(role, _)| role.stand_in().is_none())
+        .count();
     assert_eq!(
         exported.len(),
-        15 + crate::winamp::cursors::SkinCursor::COUNT,
-        "thirteen sheets, two text files, and one cursor per region"
+        15 + drawn_for,
+        "thirteen sheets, two text files, and one cursor per region of the full \
+         window; the rolled-up window's regions borrow theirs"
     );
     assert_eq!(exported, entries(super::super::BUNDLED_SKINS[0].bytes));
     super::super::bundled_skin().expect("Catamp must load in the player");

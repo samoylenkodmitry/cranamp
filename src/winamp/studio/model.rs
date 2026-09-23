@@ -891,13 +891,14 @@ impl Document {
             "main",
             "equalizer",
             "playlist",
+            "shade",
             "atlas",
             "canvas",
             "cursors",
         ]
         .contains(&view.panel.as_str())
         {
-            bail!("panel must be main, equalizer, playlist, atlas, canvas, or cursors");
+            bail!("panel must be main, equalizer, playlist, shade, atlas, canvas, or cursors");
         }
         if view.panel == "atlas" && !self.images.contains_key(&view.sheet) {
             bail!("Unknown atlas {}", view.sheet);
@@ -1058,9 +1059,14 @@ impl Document {
                  pixel, including the background. Classic players copy it opaquely.",
             ),
             "titlebar.bmp" => Some(
-                "Most of this sheet is classic shade-mode artwork Cranamp does \
-                 not draw. Only the two 275x14 title rows and the four 9x9 \
-                 window buttons are sampled; the rest is reported as unsampled.",
+                "The two 275x14 title rows and the 9x9 window buttons, then the \
+                 rolled-up player: its 275x14 strip at y 29 (unfocused at y 42, \
+                 one row shared), which draws the mini transport and the time's \
+                 colon itself, the unroll button at 0,27 and the 17x7 seek track \
+                 with its 3x7 thumb at 0,36. Paint it in the Windowshade panel. \
+                 A strip left one flat colour rolls up into the classic skin's. \
+                 The rest, the clutterbar and the easter-egg title rows, \
+                 Cranamp does not draw.",
             ),
             _ => None,
         }
@@ -1135,7 +1141,13 @@ impl Document {
         let mut view = self.view.clone();
         view.panel = "canvas".into();
         view.preview_playlist_height = 522;
-        for layer in self.layers_for(&view) {
+        let mut shade = self.view.clone();
+        shade.panel = "shade".into();
+        for layer in self
+            .layers_for(&view)
+            .into_iter()
+            .chain(self.layers_for(&shade))
+        {
             if layer.sheet != sheet {
                 continue;
             }
@@ -1228,7 +1240,7 @@ impl Document {
     }
     fn cursor_layers(&self) -> Vec<Layer> {
         let mut out = Vec::new();
-        for (index, (_, name)) in crate::winamp::cursors::SkinCursor::files()
+        for (index, (role, name)) in crate::winamp::cursors::SkinCursor::files()
             .into_iter()
             .enumerate()
         {
@@ -1244,7 +1256,7 @@ impl Document {
                 source: rect,
                 destination: [x, y, width, height],
                 variants: vec![rect],
-                labels: vec!["always".into()],
+                labels: vec![role.label().into()],
             });
         }
         out
@@ -3409,7 +3421,9 @@ impl Document {
         let atlas = self.view.panel == "atlas";
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
-        let panels: Vec<&str> = if atlas || self.view.panel == "canvas" {
+        let panels: Vec<&str> = if atlas {
+            vec!["main", "equalizer", "playlist", "shade"]
+        } else if self.view.panel == "canvas" {
             vec!["main", "equalizer", "playlist"]
         } else {
             vec![&self.view.panel]
@@ -3463,7 +3477,9 @@ impl Document {
                     };
                     let suffix = l.id.rsplit('.').next().unwrap_or(&l.id);
                     let label = match l.labels.get(i) {
-                        Some(what) if l.variants.len() > 1 => format!("{suffix} · {what}"),
+                        Some(what) if l.variants.len() > 1 || l.sheet.ends_with(".cur") => {
+                            format!("{suffix} · {what}")
+                        }
                         _ => suffix.to_string(),
                     };
                     out.push(Guide {
@@ -3503,14 +3519,16 @@ impl Document {
                         ("ELAPSED", [192, h - 14, 30, 8]),
                     ]
                 }
+                "shade" => vec![("TIME", mapping::SHADE_TIME)],
                 _ => vec![],
             };
             let sheet = match panel {
                 "main" => "main.bmp",
                 "equalizer" => "eqmain.bmp",
+                "shade" => "titlebar.bmp",
                 _ => "pledit.bmp",
             };
-            if atlas && (self.view.sheet != sheet || panel == "playlist") {
+            if atlas && (self.view.sheet != sheet || matches!(panel, "playlist" | "shade")) {
                 continue;
             }
             for (name, mut r) in reserved {
@@ -3549,6 +3567,7 @@ impl Document {
                         ("EJECT", [185, h - 13, 12, 8]),
                     ]
                 }
+                "shade" => mapping::shade_transport(),
                 _ => vec![],
             };
             for (name, mut r) in targets {
@@ -4036,8 +4055,12 @@ impl Document {
         Ok(output.into_inner())
     }
     pub fn undrawn_sprites(&self) -> Vec<String> {
+        self.undrawn_sprites_on("canvas")
+    }
+    /// The sprites of one surface with nothing painted in any of their cells.
+    pub fn undrawn_sprites_on(&self, panel: &str) -> Vec<String> {
         let mut view = self.view.clone();
-        view.panel = "canvas".into();
+        view.panel = panel.into();
         let composite = self.composite_images();
         let mut out = Vec::new();
         for layer in self.layers_for(&view) {

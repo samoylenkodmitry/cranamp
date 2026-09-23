@@ -123,21 +123,43 @@ line the moment the sheet is opened and repeated in draw results:
 | Sheet | Note |
 | --- | --- |
 | `text.bmp` | actual 5×6 bitmap glyphs, including opaque spacing cells |
-| `titlebar.bmp` | mostly shade-mode art Cranamp never draws |
+| `titlebar.bmp` | title rows, window buttons, and the rolled-up player's strip, unroll button and seek track; paint the last in the **Windowshade** panel |
+
+## Windowshade
+
+The main window's shade button rolls it up into a 275×14 strip, Winamp's
+windowshade mode. The strip is TITLEBAR.BMP's art at `27,29` (unfocused at
+`27,42`), and it draws the mini transport and the colon of the time itself; the
+player writes the minutes and seconds over it in TEXT.BMP's font and answers
+clicks on the transport. The unroll button is at `0,27`, the 17×7 seek track at
+`0,36` and its 3×7 thumb at `20,36`. The options, minimize and close buttons are
+the same cells as on the full title bar.
+
+The **Windowshade** button beside the drawers, or *The rolled-up player* in the
+atlases drawer, puts the strip on the canvas with those parts as its layers. Guides mark where the time is written and where each mini transport
+button is clicked, so the art lines up with what the player does. A skin whose
+strip is one flat colour rolls up into the classic skin's strip and font
+instead, the way Winamp filled what a skin left out.
 
 ## Cursors
 
 A classic skin names a pointer for each region of the player: the plain arrow
 over a window, the four-way arrow over a title bar that moves it, the sideways
 bar over the seek
-bar. There are eighteen regions, each one a `.cur` file, and a skin that ships
-none falls back to the desktop arrow — the one part of the window that would not
-belong to the skin.
+bar. There are twenty-three regions, each one a `.cur` file: eighteen for the
+full windows and five (`WSNORMAL`, `WSMIN`, `WSWINBUT`, `WSCLOSE`, `WSPOSBAR`)
+for the rolled-up main window. A skin that ships none falls back to the desktop
+arrow — the one part of the window that would not belong to the skin. A skin
+without the five rolled-up ones borrows the full window's title bar, minimize,
+shade, close and seek bar pointers for them.
 
 A cursor opens as an ordinary sheet, so every brush, layer, undo and colour
 operation in the editor works on it the way it works on `main.bmp`. The
-`cursors` panel lays all eighteen out as a grid; the atlases drawer lists each
-one by name, so a single pointer can be opened on its own and drawn at any zoom.
+**Cursors** button beside the drawers lays them all out as a grid, and hovering
+a cell with guides on names the region it serves. The atlases drawer also lists
+each one by name, so a single pointer can be opened on its own and drawn at any
+zoom. A region with no cursor yet has no cell to paint; **Draw the N it is
+missing** in the atlases drawer draws them in the skin's colours to start from.
 
 The one thing a cursor carries that a bitmap does not is its hotspot: the pixel
 it actually points at. An arrow points at its own tip, a slider at its middle.
@@ -147,7 +169,7 @@ The drawer's four **Aim** buttons move it a pixel at a time.
 
 | Call | What it does |
 | --- | --- |
-| `studio_cursors {}` | Lists the eighteen regions: which are drawn, their size and hotspot. |
+| `studio_cursors {}` | Lists the twenty-three regions: which are drawn, their size and hotspot. |
 | `studio_cursors {action: "draw"}` | Draws every missing cursor in the skin's own colours and opens them on the canvas. |
 | `studio_cursors {action: "draw", regions: ["posbar"], overwrite: true}` | Redraws named regions over artwork already there. |
 | `studio_cursors {action: "draw", style: "needle-bold"}` | Cuts the set to a named silhouette instead of the one the colours pick. |

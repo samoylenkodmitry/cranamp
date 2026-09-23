@@ -343,6 +343,7 @@ fn the_playlist_resize_cursor_covers_the_handle_that_resizes_it() {
 fn every_region_the_ui_draws_has_a_cursor_file_to_read() {
     let mut drawn: Vec<SkinCursor> = main_window_cursor_areas()
         .into_iter()
+        .chain(shade_cursor_areas())
         .chain(equalizer_cursor_areas())
         .chain(playlist_cursor_areas(PlaylistCursorLayout {
             width: PLAYLIST_WIDTH,

@@ -21,14 +21,14 @@ The [EQ workbench](equalizer-workbench.md) exposes the 28 shared track frames an
 1. Author continuous artwork in native joined coordinates. Use coverage and all source variants when a stroke crosses cells.
 2. Inspect editor studies with four pixels of context, all active/pressed states, and actual GPU output. Shared source cells cannot hold different pictures at different destinations. Use intentional track designs that remain correct at every position.
 3. Run studio_validate, export, reopen the WSZ and repeat the GPU check. Format validation is not visual approval.
-4. Compare in actual target players with the same scale, window focus, playback state, slider positions, playlist size, font settings and media. Verify shades in external players while Cranamp has no shade UI.
+4. Compare in actual target players with the same scale, window focus, playback state, slider positions, playlist size, font settings and media. Cranamp rolls up the main window; verify the equalizer's and playlist's shades in external players, which Cranamp does not draw.
 5. Keep evidence under a review directory. Record player/version and which states were checked. Do not report 'identical everywhere' based only on a source atlas or a structural test.
 
 A local Webamp harness is in test/skin-studio/classic-preview.html. Serve the repository on localhost and open that page; it loads Webamp 2.3.1 from the npm CDN and the local bundled WSZ files. Silent test media is generated locally. No artwork is uploaded. The region fixture button expects target/classic-migration/region-fixture.wsz from a Studio test export.
 
 ## Limits of visual identity
 
-Playlist rows use system fonts and can differ between operating systems. Spectrum bars, interpolation of the EQ curve, media metadata, focus and playback animations are runtime behavior rather than pixels encoded by the skin. Cranamp's current shade controls are not implemented. Native click-through and external Winamp/Audacious screenshots still require platform testing. Portable assets cannot eliminate these player differences by adding a configuration file.
+Playlist rows use system fonts and can differ between operating systems. Spectrum bars, interpolation of the EQ curve, media metadata, focus and playback animations are runtime behavior rather than pixels encoded by the skin. Cranamp draws the main window's shade, not the equalizer's or the playlist's. Native click-through and external Winamp/Audacious screenshots still require platform testing. Portable assets cannot eliminate these player differences by adding a configuration file.
 
 ## References
 

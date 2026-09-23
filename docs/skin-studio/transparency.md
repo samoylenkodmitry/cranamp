@@ -17,6 +17,6 @@ A window hole removes **all** content at that point, including text, controls an
 
 Editing-layer alpha still works. Erasing reveals lower paint; a missing stamp symbol skips paint. Layered projects retain source alpha. WSZ export requires complete opaque sampled cells and emits RGB BMPs. CUR cursor transparency is separate.
 
-The joined editor and full-height GPU player apply REGION.TXT. Native player surfaces allow alpha; the Studio presentation backdrop is black, so cutouts appear black there. Cranamp does not yet implement windowshade views: their regions are authored and preserved for external players, not previewed as functional shade windows. Invisible controls are shielded from activation; native OS click-through behavior is not certified.
+The joined editor and full-height GPU player apply REGION.TXT. Native player surfaces allow alpha; the Studio presentation backdrop is black, so cutouts appear black there. Cranamp rolls up the main window without applying the WindowShade region, and does not draw the equalizer's or the playlist's shade: those regions are authored and preserved for external players. Invisible controls are shielded from activation; native OS click-through behavior is not certified.
 
 See [classic compatibility](classic-compatibility.md) for export checks and cross-player verification limits.

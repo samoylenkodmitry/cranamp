@@ -109,6 +109,7 @@ pub const POS_CLOSE_BUTTON: (f32, f32) = (264.0, 3.0);
 /// TITLEBAR.BMP draws the mini transport and the colon of the time.
 pub const MAIN_SHADE_HEIGHT: f32 = 14.0;
 pub const MAIN_SHADE_BAR_SELECTED: SpriteRect = (27.0, 29.0, 275.0, 14.0);
+pub const MAIN_SHADE_BAR: SpriteRect = (27.0, 42.0, 275.0, 14.0);
 pub const MAIN_SHADE_DRAG_HIT_AREA: SpriteRect = (16.0, 0.0, 153.0, 14.0);
 pub const MAIN_UNSHADE_BUTTON: SpriteRect = (0.0, 27.0, 9.0, 9.0);
 pub const MAIN_UNSHADE_BUTTON_SELECTED: SpriteRect = (9.0, 27.0, 9.0, 9.0);
