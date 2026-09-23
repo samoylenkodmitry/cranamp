@@ -3730,29 +3730,9 @@ fn SettingsUpdateSection(_state: MutableState<WinampState>) {
 }
 #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
 fn open_releases_page() -> bool {
-    const URL: &str = "https://github.com/samoylenkodmitry/cranamp/releases";
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", URL])
-            .spawn()
-            .is_ok()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open").arg(URL).spawn().is_ok()
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(URL)
-            .spawn()
-            .is_ok()
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
-    {
-        false
-    }
+    cranpose_services::default_uri_handler()
+        .open_uri("https://github.com/samoylenkodmitry/cranamp/releases")
+        .is_ok()
 }
 #[composable]
 fn SettingsPanel(

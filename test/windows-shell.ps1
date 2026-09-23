@@ -48,6 +48,40 @@ public static class CranampShell {
         return string.Format("class '{0}' title '{1}' {2}x{3} at {4},{5}", name, text, rect.Right - rect.Left, rect.Bottom - rect.Top, rect.Left, rect.Top);
     }
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern uint ExtractIconEx(string file, int index, IntPtr[] large, IntPtr[] small, uint count);
+    static List<IntPtr> ConsoleWindows() {
+        var found = new List<IntPtr>();
+        EnumWindows((window, data) => {
+            var name = new System.Text.StringBuilder(256);
+            GetClassName(window, name, name.Capacity);
+            var kind = name.ToString();
+            if ((kind == "ConsoleWindowClass" || kind == "CASCADIA_HOSTING_WINDOW_CLASS") && IsWindowVisible(window)) { found.Add(window); }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+    public static HashSet<IntPtr> ConsoleWindowsNow() {
+        return new HashSet<IntPtr>(ConsoleWindows());
+    }
+    public static HashSet<int> ProcessesNow() {
+        var ids = new HashSet<int>();
+        foreach (var process in System.Diagnostics.Process.GetProcesses()) { ids.Add(process.Id); }
+        return ids;
+    }
+    public static List<string> Started = new List<string>();
+    public static List<string> ConsoleWindowsOpenedWithin(HashSet<IntPtr> before, HashSet<int> running, int milliseconds) {
+        var opened = new List<string>();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < milliseconds) {
+            foreach (var window in ConsoleWindows()) {
+                if (before.Add(window)) { opened.Add(string.Format("{0} ms: {1}", clock.ElapsedMilliseconds, Describe(window))); }
+            }
+            foreach (var process in System.Diagnostics.Process.GetProcesses()) {
+                if (running.Add(process.Id)) { Started.Add(string.Format("{0} ms: {1} (pid {2})", clock.ElapsedMilliseconds, process.ProcessName, process.Id)); }
+            }
+            System.Threading.Thread.Sleep(10);
+        }
+        return opened;
+    }
     public static List<IntPtr> TaskbarWindows(uint process) {
         var found = new List<IntPtr>();
         EnumWindows((window, data) => {
@@ -76,13 +110,15 @@ public static class CranampShell {
     if ($icons -lt 1) { throw 'The executable carries no icon for Explorer and shortcuts.' }
     [Drawing.Icon]::ExtractAssociatedIcon($Executable).ToBitmap().Save((Join-Path $outputPath 'exe-icon.png'))
 
+    $consoles = [CranampShell]::ConsoleWindowsNow()
+    $running = [CranampShell]::ProcessesNow()
     $application = Start-Process -FilePath $Executable -WorkingDirectory (Split-Path $Executable) -PassThru
-    Start-Sleep -Seconds 10
+    $opened = [CranampShell]::ConsoleWindowsOpenedWithin($consoles, $running, 10000)
+    [CranampShell]::Started | ForEach-Object { Write-Output ('Process started at {0}' -f $_) }
+    $opened | ForEach-Object { Write-Output ('Console window opened at {0}' -f $_) }
     $application.Refresh()
     if ($application.HasExited) { throw ('Application exited: {0}' -f $application.ExitCode) }
-    $terminals = Get-CimInstance Win32_Process -Filter ('ParentProcessId = {0}' -f $application.Id) |
-        Where-Object { $_.Name -in 'conhost.exe', 'OpenConsole.exe', 'WindowsTerminal.exe' }
-    if ($terminals) { throw ('A terminal opened beside the player: {0}' -f (($terminals | ForEach-Object Name) -join ', ')) }
+    if ($opened.Count -gt 0) { throw ('{0} console window(s) opened while the player started.' -f $opened.Count) }
 
     $windows = [CranampShell]::TaskbarWindows([uint32]$application.Id)
     Write-Output ('Visible windows: {0}' -f $windows.Count)
