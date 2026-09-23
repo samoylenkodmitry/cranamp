@@ -55,11 +55,9 @@ picture before
 host="$(xdotool search --onlyvisible --name '^Cranamp$' || true)"
 [ -z "$host" ] || fail "the hidden host window is on screen as X11 window $host"
 
-icon="$(xprop -id "$player" _NET_WM_ICON | head -c 80)"
-case "$icon" in
-    *"_NET_WM_ICON(CARDINAL) = "*) echo "the player carries an icon for the panel: ${icon%%,*}..." ;;
-    *) fail "the player window carries no _NET_WM_ICON, so panels show a generic icon" ;;
-esac
+icon="$(xprop -id "$player" _NET_WM_ICON | grep -o 'Icon ([0-9]* x [0-9]*)' | head -n 1 || true)"
+[ -n "$icon" ] || fail "the player window carries no _NET_WM_ICON, so panels show a generic icon"
+echo "the player carries a panel icon: $icon"
 
 start_x=$X start_y=$Y
 xdotool mousemove "$((X + grab))" "$((Y + grip))" mousedown 1
