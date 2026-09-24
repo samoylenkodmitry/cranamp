@@ -3,11 +3,11 @@
 #
 #   check_playlist_resize.sh <out-dir>
 #
-# A docked pane has no window of its own: the window around it belongs to the
-# stack, and that window is not resizable, so dragging its corner has to grow
-# the pane and let the stack's window follow. Undocked, the same corner is an
-# ordinary window resize the platform does. This checks both, and that the
-# height a pane was given survives being carried out and put back.
+# The playlist's corner resizes it the way Winamp's does, docked or not: from
+# 275x116 in whole steps of 25 across and 29 down, the step nearest the
+# pointer. Docked, the stack's window follows the pane, as wide as the widest
+# pane. This checks both, and that the size a pane was given survives being
+# carried out and put back.
 #
 # Exits 1 when a drag moved the corner and nothing followed it.
 # macOS only; needs `cliclick`.
@@ -24,7 +24,10 @@ status=0
 command -v cliclick > /dev/null || { echo "check_playlist_resize.sh: cliclick is required" >&2; exit 2; }
 
 main_height=116 eq_height=116 grab=110 grip=6 corner=8
-min_playlist=145
+min_playlist=116
+
+# The whole steps of $2 a drag of $1 comes to, rounded to the nearest.
+steps() { echo $(( ($1 >= 0 ? $1 + $2 / 2 : $1 - $2 / 2) / $2 * $2 )); }
 
 stack() { "$drag" oswindows cranamp | grep 'Cranamp Winamp$'; }
 torn() { "$drag" oswindows cranamp | grep -F 'Cranamp Winamp Playlist' || true; }
@@ -51,14 +54,14 @@ read -r x y w h _ <<< "$(stack)"
 "$drag" drag "$((x + w - corner)),$((y + h - corner))" "$((x + w - corner)),$((y + h - corner + 90))" 14 40 > /dev/null
 sleep 1
 read -r _ _ _ grown _ <<< "$(stack)"
-report "the docked playlist grew with the corner" "$((h + 90))" "$grown"
+report "the docked playlist grew by whole steps" "$((h + $(steps 90 29)))" "$grown"
 
 # And shrink it again.
 read -r x y w h _ <<< "$(stack)"
 "$drag" drag "$((x + w - corner)),$((y + h - corner))" "$((x + w - corner)),$((y + h - corner - 150))" 14 40 > /dev/null
 sleep 1
 read -r _ _ _ shrunk _ <<< "$(stack)"
-report "and shrank with it" "$((h - 150))" "$shrunk"
+report "and shrank by whole steps" "$((h + $(steps -150 29)))" "$shrunk"
 
 # The stack stops where the pane's own floor is.
 read -r x y w h _ <<< "$(stack)"
@@ -81,14 +84,15 @@ fi
     "$((px + pw - corner + 60)),$((py + ph - corner + 120))" 14 40 > /dev/null
 sleep 1
 read -r _ _ nw nh _ <<< "$(torn)"
-report "the torn playlist resized as a window" "$((pw + 60))x$((ph + 120))" "${nw}x${nh}"
+report "the torn playlist resized by whole steps" \
+    "$((pw + $(steps 60 25)))x$((ph + $(steps 120 29)))" "${nw}x${nh}"
 
-# Put it back: the stack owns the width, the pane keeps the height.
+# Put it back: the pane keeps its size, and the stack is as wide as it.
 read -r sx sy sw sh _ <<< "$(stack)"
 read -r px py pw ph _ <<< "$(torn)"
 "$drag" drag "$((px + grab)),$((py + grip))" "$((sx + grab)),$((sy + sh + grip))" 20 30 > /dev/null
 sleep 1
 read -r _ _ back_w back_h _ <<< "$(stack)"
-report "docking keeps the height it was given" "${sw}x$((sh + ph))" "${back_w}x${back_h}"
+report "docking keeps the size it was given" "$((pw > sw ? pw : sw))x$((sh + ph))" "${back_w}x${back_h}"
 
 exit $status

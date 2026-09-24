@@ -92,6 +92,35 @@ fn the_rolled_up_player_paints_the_title_bar_cells_the_player_reads() {
     }
 }
 
+/// Winamp tiles the footer and adds a visualizer panel as the playlist
+/// widens, and a playlist 275 wide shows neither. The footer surface lays the
+/// footer out at 325 and 400, so both are painted where they meet.
+#[test]
+fn the_footer_surface_shows_the_tile_and_the_visualizer_between_the_corners() {
+    let mut document = document();
+    document.state(json!({"panel": "footer"})).unwrap();
+    assert_eq!(document.canvas_size(), (400, 76));
+    let layers = document.layers();
+    let at = |id: &str| {
+        let layer = layers.iter().find(|layer| layer.id == id).unwrap();
+        (layer.variants[0], layer.destination)
+    };
+    assert_eq!(at("narrow.tile.1"), ([179, 0, 25, 38], [150, 0, 25, 38]));
+    assert_eq!(at("narrow.right"), ([126, 72, 150, 38], [175, 0, 150, 38]));
+    assert_eq!(at("wide.visualizer"), ([205, 0, 75, 38], [175, 38, 75, 38]));
+    assert_eq!(at("wide.right"), ([126, 72, 150, 38], [250, 38, 150, 38]));
+
+    let guides = document.guides();
+    assert!(guides
+        .iter()
+        .any(|g| g.hit && g.label == "LIST · 400" && g.rect == [353, 45, 28, 18]));
+    let mut ids: Vec<&str> = guides.iter().map(|g| g.id.as_str()).collect();
+    let count = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), count, "each footer row names its own guides");
+}
+
 /// A cursor's file name says little about where it shows, so its guide
 /// names the region as well.
 #[test]

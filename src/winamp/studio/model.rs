@@ -892,13 +892,16 @@ impl Document {
             "equalizer",
             "playlist",
             "shade",
+            "footer",
             "atlas",
             "canvas",
             "cursors",
         ]
         .contains(&view.panel.as_str())
         {
-            bail!("panel must be main, equalizer, playlist, shade, atlas, canvas, or cursors");
+            bail!(
+                "panel must be main, equalizer, playlist, shade, footer, atlas, canvas, or cursors"
+            );
         }
         if view.panel == "atlas" && !self.images.contains_key(&view.sheet) {
             bail!("Unknown atlas {}", view.sheet);
@@ -1143,10 +1146,13 @@ impl Document {
         view.preview_playlist_height = 522;
         let mut shade = self.view.clone();
         shade.panel = "shade".into();
+        let mut footer = self.view.clone();
+        footer.panel = "footer".into();
         for layer in self
             .layers_for(&view)
             .into_iter()
             .chain(self.layers_for(&shade))
+            .chain(self.layers_for(&footer))
         {
             if layer.sheet != sheet {
                 continue;
@@ -3422,7 +3428,7 @@ impl Document {
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
         let panels: Vec<&str> = if atlas {
-            vec!["main", "equalizer", "playlist", "shade"]
+            vec!["main", "equalizer", "playlist", "shade", "footer"]
         } else if self.view.panel == "canvas" {
             vec!["main", "equalizer", "playlist"]
         } else {
@@ -3528,7 +3534,9 @@ impl Document {
                 "shade" => "titlebar.bmp",
                 _ => "pledit.bmp",
             };
-            if atlas && (self.view.sheet != sheet || matches!(panel, "playlist" | "shade")) {
+            if atlas
+                && (self.view.sheet != sheet || matches!(panel, "playlist" | "shade" | "footer"))
+            {
                 continue;
             }
             for (name, mut r) in reserved {
@@ -3583,6 +3591,9 @@ impl Document {
                     runtime: false,
                     hit: true,
                 });
+            }
+            if panel == "footer" && !atlas {
+                out.extend(mapping::footer_guides());
             }
         }
         out

@@ -183,6 +183,7 @@ pub const PLAYLIST_LEFT_TILE: SpriteRect = (0.0, 42.0, 12.0, 29.0);
 pub const PLAYLIST_RIGHT_TILE: SpriteRect = (31.0, 42.0, 20.0, 29.0);
 pub const PLAYLIST_BOTTOM_LEFT_CORNER: SpriteRect = (0.0, 72.0, 125.0, 38.0);
 pub const PLAYLIST_BOTTOM_RIGHT_CORNER: SpriteRect = (126.0, 72.0, 150.0, 38.0);
+pub const PLAYLIST_BOTTOM_TILE: SpriteRect = (179.0, 0.0, 25.0, 38.0);
 pub const PLAYLIST_VISUALIZER_BG: SpriteRect = (205.0, 0.0, 75.0, 38.0);
 pub const PLAYLIST_SCROLL_HANDLE: SpriteRect = (52.0, 53.0, 8.0, 18.0);
 pub const PLAYLIST_SCROLL_HANDLE_SELECTED: SpriteRect = (61.0, 53.0, 8.0, 18.0);

@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
     [int]$Steps = 30,
     [int]$StepPixels = 4,
+    [int]$StepPixelsAcross = 0,
     [switch]$TearOff,
     [switch]$Schedule
 )
@@ -15,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $outputPath = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 if ($Schedule) {
-    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Executable "{1}" -OutputDirectory "{2}" -Steps {3} -StepPixels {4}' -f $PSCommandPath, $Executable, $outputPath, $Steps, $StepPixels
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Executable "{1}" -OutputDirectory "{2}" -Steps {3} -StepPixels {4} -StepPixelsAcross {5}' -f $PSCommandPath, $Executable, $outputPath, $Steps, $StepPixels, $StepPixelsAcross
     if ($TearOff) { $arguments += ' -TearOff' }
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
@@ -58,7 +59,7 @@ function Drag-Mouse([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
 # leave most of the frames between captures unseen.
 $captures = [Collections.Generic.List[object]]::new()
 function Save-Capture([Windows.Rect]$bounds, [int]$extraHeight, [string]$name) {
-    $bitmap = [Drawing.Bitmap]::new([int]$bounds.Width, [int]$bounds.Height + $extraHeight)
+    $bitmap = [Drawing.Bitmap]::new([int]$bounds.Width + $extraWidth, [int]$bounds.Height + $extraHeight)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     $graphics.CopyFromScreen([int]$bounds.X, [int]$bounds.Y, 0, 0, $bitmap.Size)
     $graphics.Dispose()
@@ -87,6 +88,7 @@ try {
     }
     $bounds = $window.Current.BoundingRectangle
     $extra = $Steps * $StepPixels + 8
+    $extraWidth = $Steps * $StepPixelsAcross + 8
     Save-Capture $bounds $extra 'frame-000.png'
     $x = [int]($bounds.X + $bounds.Width - 5)
     $y = [int]($bounds.Y + $bounds.Height - 5)
@@ -95,7 +97,7 @@ try {
     [JitterInput]::mouse_event([JitterInput]::LeftDown, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 100
     for ($step = 1; $step -le $Steps; $step++) {
-        [JitterInput]::SetCursorPos($x, $y + $step * $StepPixels) | Out-Null
+        [JitterInput]::SetCursorPos($x + $step * $StepPixelsAcross, $y + $step * $StepPixels) | Out-Null
         # Three looks per step: right away, and over the next two frames.
         foreach ($look in 'a', 'b', 'c') {
             Save-Capture $bounds $extra ('frame-{0:D3}{1}.png' -f $step, $look)
@@ -107,7 +109,7 @@ try {
     Save-Capture $bounds $extra 'frame-end.png'
     Write-Captures
     $after = $window.Current.BoundingRectangle
-    [pscustomobject]@{ Before = $bounds.ToString(); After = $after.ToString(); Steps = $Steps; StepPixels = $StepPixels } | ConvertTo-Json | Set-Content (Join-Path $outputPath 'bounds.json')
+    [pscustomobject]@{ Before = $bounds.ToString(); After = $after.ToString(); Steps = $Steps; StepPixels = $StepPixels; StepPixelsAcross = $StepPixelsAcross } | ConvertTo-Json | Set-Content (Join-Path $outputPath 'bounds.json')
     Write-Output ('Window {0} -> {1}' -f $bounds, $after)
 } catch {
     $_ | Out-String | Set-Content (Join-Path $outputPath 'failure.txt')

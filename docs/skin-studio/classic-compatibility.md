@@ -28,7 +28,11 @@ A local Webamp harness is in test/skin-studio/classic-preview.html. Serve the re
 
 ## Limits of visual identity
 
-Playlist rows use system fonts and can differ between operating systems. Spectrum bars, interpolation of the EQ curve, media metadata, focus and playback animations are runtime behavior rather than pixels encoded by the skin. Cranamp draws the main window's shade, not the equalizer's or the playlist's. Native click-through and external Winamp/Audacious screenshots still require platform testing. Portable assets cannot eliminate these player differences by adding a configuration file.
+The playlist takes Winamp's sizes, 275×116 and whole steps of 25 by 29, and
+tiles PLEDIT.BMP's footer cell at `179,0` between the corners, with the
+visualizer panel at `205,0` from 350 wide. A skin that leaves those cells
+blank shows blank footer bars in every wide playlist, in Winamp as in
+Cranamp. Playlist rows use system fonts and can differ between operating systems. Spectrum bars, interpolation of the EQ curve, media metadata, focus and playback animations are runtime behavior rather than pixels encoded by the skin. Cranamp draws the main window's shade, not the equalizer's or the playlist's. Native click-through and external Winamp/Audacious screenshots still require platform testing. Portable assets cannot eliminate these player differences by adding a configuration file.
 
 ## References
 

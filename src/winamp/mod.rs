@@ -9,6 +9,7 @@ mod inline_windows;
 mod keys;
 mod pixel_grid;
 mod pixel_text;
+mod playlist_size;
 mod region_clip;
 pub mod skin;
 mod sprites;
@@ -17,9 +18,7 @@ pub mod studio;
 use crate::audio::{self, Track};
 #[cfg(target_os = "android")]
 use cranpose::{rememberAndroidHostWindowState, AndroidHostWindowState};
-use cranpose::{
-    rememberWindowState, WindowConfig, WindowModifierExt, WindowResizeDirection, WindowState,
-};
+use cranpose::{rememberWindowState, WindowConfig, WindowModifierExt, WindowState};
 use cranpose_core::{self, MutableState};
 use cranpose_foundation::text::{TextFieldState, TextRange};
 use cranpose_foundation::{Modifiers, PointerButton};
@@ -622,12 +621,12 @@ impl WinampInlineWindowStates {
                 Point::new(26.0, 22.0 + MAIN_HEIGHT),
                 Point::new(26.0, 22.0 + MAIN_HEIGHT + EQ_HEIGHT),
             ]);
-        let playlist_size = cranpose_services::preferences()
-            .get(INLINE_PLAYLIST_SIZE_KEY)
-            .and_then(|text| inline_windows::decode_size(&text))
-            .map_or(PLAYLIST_HEIGHT, |size| size.height)
-            .max(playlist_min_height());
-        let playlist_size = Size::new(PLAYLIST_WIDTH, playlist_size);
+        let playlist_size = playlist_size::classic(
+            cranpose_services::preferences()
+                .get(INLINE_PLAYLIST_SIZE_KEY)
+                .and_then(|text| inline_windows::decode_size(&text))
+                .unwrap_or(Size::new(PLAYLIST_WIDTH, PLAYLIST_HEIGHT)),
+        );
         Self {
             main: cranpose_core::mutableStateOf(main),
             equalizer: cranpose_core::mutableStateOf(equalizer),
@@ -891,7 +890,6 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
                     },
                     close: WinampCloseAction::SetStatus,
                     scale,
-                    playlist_min_height: scaled(PLAYLIST_HEIGHT, scale),
                     dock,
                     snapshot: snapshot.clone(),
                 });
@@ -2589,7 +2587,6 @@ struct WinampWindowStackSpec {
     places: WinampWindowPlaces,
     close: WinampCloseAction,
     scale: f32,
-    playlist_min_height: f32,
     dock: MutableState<WinampDock>,
     snapshot: WinampState,
 }
@@ -2611,7 +2608,6 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
         places,
         close,
         scale,
-        playlist_min_height: playlist_window_min_height,
         dock,
         snapshot,
     } = spec;
@@ -2621,11 +2617,15 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
     let shaded = snapshot.main_shaded;
     let eq_docked = eq_shown && held.docked(WinampPane::Equalizer);
     let playlist_docked = playlist_shown && held.docked(WinampPane::Playlist);
-    let playlist_height = peer_windows
-        .playlist
-        .size()
-        .height
-        .max(playlist_min_height());
+    let playlist_size = playlist_size::classic(peer_windows.playlist.size());
+    let playlist_height = playlist_size.height;
+    // A docked playlist may be wider than the main window, as in Winamp; the
+    // stack's window takes the widest of its panes.
+    let stack_width = if playlist_docked {
+        playlist_size.width.max(MAIN_WIDTH)
+    } else {
+        MAIN_WIDTH
+    };
     let stack_height = main_height(shaded)
         + if eq_docked { EQ_HEIGHT } else { 0.0 }
         + if playlist_docked {
@@ -2633,10 +2633,10 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
         } else {
             0.0
         };
-    if peer_windows.main.size_non_reactive().height != stack_height {
+    if peer_windows.main.size_non_reactive() != Size::new(stack_width, stack_height) {
         peer_windows
             .main
-            .set_size(Size::new(MAIN_WIDTH, stack_height));
+            .set_size(Size::new(stack_width, stack_height));
     }
     let display_text_color = skin.display_text_color;
     Box(
@@ -2719,10 +2719,12 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
                                 initial_position: places.playlist,
                                 state: peer_windows.playlist,
                             })
-                            .with_resizable(true)
+                            // Only its corner resizes it, in Winamp's
+                            // steps; the system's frame would not keep to
+                            // them.
                             .with_min_size(
-                                scaled(PLAYLIST_WIDTH, scale),
-                                playlist_window_min_height,
+                                scaled(playlist_size::BASE_WIDTH, scale),
+                                scaled(playlist_size::BASE_HEIGHT, scale),
                             ),
                         )
                     },
@@ -2756,7 +2758,7 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
                                     },
                                     if playlist_docked {
                                         WinampWindowSize::Fixed(Size::new(
-                                            scaled(PLAYLIST_WIDTH, scale),
+                                            scaled(playlist_size.width, scale),
                                             scaled(playlist_height, scale),
                                         ))
                                     } else {
@@ -2823,7 +2825,6 @@ pub fn WinampStandaloneApp() {
         },
         close: WinampCloseAction::CloseApp,
         scale: ui_scale(),
-        playlist_min_height: playlist_min_height(),
         dock,
         snapshot,
     });
@@ -4427,8 +4428,9 @@ fn PlaylistWindow(
     let url_field = cranpose_core::remember(|| TextFieldState::new("")).with(|field| *field);
     let window_size = window_size.get();
     let skin_scale = scale.max(f32::EPSILON);
-    let width = (window_size.width / skin_scale).max(PLAYLIST_WIDTH);
-    let height = (window_size.height / skin_scale).max(playlist_min_height());
+    let width = (window_size.width / skin_scale).max(playlist_size::BASE_WIDTH);
+    let height = (window_size.height / skin_scale).max(playlist_size::BASE_HEIGHT);
+    let right_shift = playlist_size::right_corner_shift(width);
     let right_x = width - PLAYLIST_RIGHT_TILE.2;
     let bottom_y = height - PLAYLIST_BOTTOM_LEFT_CORNER.3;
     let list_width = (right_x - PLAYLIST_LIST_BG.0).max(1.0);
@@ -4504,13 +4506,32 @@ fn PlaylistWindow(
                 bottom_y - PLAYLIST_TOP_RIGHT_CORNER.3,
                 scale,
             );
-            StretchSprite(
+            // Winamp's footer: its corners at each end, the footer tile
+            // repeated between them, and the visualizer panel beside the
+            // right corner once there is room for it.
+            TiledSprite(
+                pledit.clone(),
+                PLAYLIST_BOTTOM_TILE,
+                playlist_size::FOOTER_LEFT_WIDTH,
+                bottom_y,
+                right_shift,
+                PLAYLIST_BOTTOM_TILE.3,
+                scale,
+            );
+            if let Some(visualizer_x) = playlist_size::visualizer_x(width) {
+                Sprite(
+                    pledit.clone(),
+                    PLAYLIST_VISUALIZER_BG,
+                    visualizer_x,
+                    bottom_y,
+                    scale,
+                );
+            }
+            Sprite(
                 pledit.clone(),
                 PLAYLIST_BOTTOM_LEFT_CORNER,
                 0.0,
                 bottom_y,
-                width - PLAYLIST_BOTTOM_RIGHT_CORNER.2,
-                PLAYLIST_BOTTOM_LEFT_CORNER.3,
                 scale,
             );
             Sprite(
@@ -4552,8 +4573,14 @@ fn PlaylistWindow(
                 list_height,
                 scale,
             );
-            PlaylistFooterReadouts(snapshot.clone(), bottom_y, scale, text_atlas.clone());
-            PlaylistFooterControls(state, bottom_y, scale);
+            PlaylistFooterReadouts(
+                snapshot.clone(),
+                bottom_y,
+                right_shift,
+                scale,
+                text_atlas.clone(),
+            );
+            PlaylistFooterControls(state, bottom_y, right_shift, scale);
             if snapshot.playlist_search_visible {
                 PlaylistSearchOverlay(
                     palette,
@@ -4583,13 +4610,14 @@ fn PlaylistWindow(
                 scale,
             );
             WindowDragHandle(drag_target, (0.0, 0.0, width, PLAYLIST_DRAG_AREA.3), scale);
-            WindowResizeHandle(
+            PlaylistResizeHandle(
                 drag_target,
-                WindowResizeDirection::SouthEast,
-                width - PLAYLIST_RESIZE_HANDLE,
-                height - PLAYLIST_RESIZE_HANDLE,
-                PLAYLIST_RESIZE_HANDLE,
-                PLAYLIST_RESIZE_HANDLE,
+                (
+                    width - PLAYLIST_RESIZE_HANDLE,
+                    height - PLAYLIST_RESIZE_HANDLE,
+                    PLAYLIST_RESIZE_HANDLE,
+                    PLAYLIST_RESIZE_HANDLE,
+                ),
                 scale,
             );
             PopupMenuDismissLayer(state);
@@ -4859,18 +4887,21 @@ fn PlaylistEntries(
 fn playlist_min_height() -> f32 {
     145.0
 }
-fn playlist_min_size() -> Size {
-    Size::new(PLAYLIST_WIDTH, playlist_min_height())
-}
 #[composable]
-fn PlaylistFooterReadouts(snapshot: WinampState, bottom_y: f32, scale: f32, atlas: ImageBitmap) {
+fn PlaylistFooterReadouts(
+    snapshot: WinampState,
+    bottom_y: f32,
+    right_shift: f32,
+    scale: f32,
+    atlas: ImageBitmap,
+) {
     let summary = playlist_footer_summary(&snapshot);
     BitmapWinampText(
         atlas.clone(),
         summary.clone(),
         summary,
         SystemTextBox {
-            x: 132.0,
+            x: 132.0 + right_shift,
             y: bottom_y + 10.0,
             width: 72.0,
             height: 6.0,
@@ -4884,7 +4915,7 @@ fn PlaylistFooterReadouts(snapshot: WinampState, bottom_y: f32, scale: f32, atla
         elapsed.clone(),
         elapsed,
         SystemTextBox {
-            x: 221.0 - width,
+            x: 221.0 + right_shift - width,
             y: bottom_y + 24.0,
             width,
             height: 6.0,
@@ -5079,7 +5110,15 @@ fn UrlInputOverlay(
     }
 }
 #[composable]
-fn PlaylistFooterControls(state: MutableState<WinampState>, bottom_y: f32, scale: f32) {
+fn PlaylistFooterControls(
+    state: MutableState<WinampState>,
+    bottom_y: f32,
+    right_shift: f32,
+    scale: f32,
+) {
+    // LIST and the little transport sit on the footer's right corner, which
+    // moves with the right edge; ADD to MISC sit on the left one.
+    let on_right = |area: SpriteRect| (area.0 + right_shift, area.1, area.2, area.3);
     {
         let menu_state = state;
         PlaylistFooterClickTarget(PLAYLIST_ADD_BUTTON_HIT_AREA, bottom_y, scale, move || {
@@ -5106,51 +5145,86 @@ fn PlaylistFooterControls(state: MutableState<WinampState>, bottom_y: f32, scale
     }
     {
         let menu_state = state;
-        PlaylistFooterClickTarget(PLAYLIST_LIST_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::List);
-        });
+        PlaylistFooterClickTarget(
+            on_right(PLAYLIST_LIST_BUTTON_HIT_AREA),
+            bottom_y,
+            scale,
+            move || {
+                toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::List);
+            },
+        );
     }
     {
         let state_click = state;
-        PlaylistFooterClickTarget(PLAYLIST_PREV_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            close_playlist_menu(state_click);
-            previous_track(state_click);
-        });
+        PlaylistFooterClickTarget(
+            on_right(PLAYLIST_PREV_BUTTON_HIT_AREA),
+            bottom_y,
+            scale,
+            move || {
+                close_playlist_menu(state_click);
+                previous_track(state_click);
+            },
+        );
     }
     {
         let state_click = state;
-        PlaylistFooterClickTarget(PLAYLIST_PLAY_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            close_playlist_menu(state_click);
-            play_or_resume(state_click);
-        });
+        PlaylistFooterClickTarget(
+            on_right(PLAYLIST_PLAY_BUTTON_HIT_AREA),
+            bottom_y,
+            scale,
+            move || {
+                close_playlist_menu(state_click);
+                play_or_resume(state_click);
+            },
+        );
     }
     {
         let state_click = state;
-        PlaylistFooterClickTarget(PLAYLIST_PAUSE_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            close_playlist_menu(state_click);
-            pause_playback(state_click);
-        });
+        PlaylistFooterClickTarget(
+            on_right(PLAYLIST_PAUSE_BUTTON_HIT_AREA),
+            bottom_y,
+            scale,
+            move || {
+                close_playlist_menu(state_click);
+                pause_playback(state_click);
+            },
+        );
     }
     {
         let state_click = state;
-        PlaylistFooterClickTarget(PLAYLIST_STOP_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            close_playlist_menu(state_click);
-            stop_playback(state_click);
-        });
+        PlaylistFooterClickTarget(
+            on_right(PLAYLIST_STOP_BUTTON_HIT_AREA),
+            bottom_y,
+            scale,
+            move || {
+                close_playlist_menu(state_click);
+                stop_playback(state_click);
+            },
+        );
     }
     {
         let state_click = state;
-        PlaylistFooterClickTarget(PLAYLIST_NEXT_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            close_playlist_menu(state_click);
-            next_track(state_click);
-        });
+        PlaylistFooterClickTarget(
+            on_right(PLAYLIST_NEXT_BUTTON_HIT_AREA),
+            bottom_y,
+            scale,
+            move || {
+                close_playlist_menu(state_click);
+                next_track(state_click);
+            },
+        );
     }
     {
         let state_click = state;
-        PlaylistFooterClickTarget(PLAYLIST_EJECT_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            close_playlist_menu(state_click);
-            open_audio_files(state_click);
-        });
+        PlaylistFooterClickTarget(
+            on_right(PLAYLIST_EJECT_BUTTON_HIT_AREA),
+            bottom_y,
+            scale,
+            move || {
+                close_playlist_menu(state_click);
+                open_audio_files(state_click);
+            },
+        );
     }
 }
 fn toggle_playlist_footer_menu(state: MutableState<WinampState>, menu: PlaylistFooterMenu) {
@@ -5484,7 +5558,9 @@ fn playlist_footer_menu_x(menu: PlaylistFooterMenu, window_width: f32, menu_widt
         PlaylistFooterMenu::Remove => PLAYLIST_REM_BUTTON_HIT_AREA.0,
         PlaylistFooterMenu::Select => PLAYLIST_SEL_BUTTON_HIT_AREA.0,
         PlaylistFooterMenu::Misc => PLAYLIST_MISC_BUTTON_HIT_AREA.0,
-        PlaylistFooterMenu::List => PLAYLIST_LIST_BUTTON_HIT_AREA.0,
+        PlaylistFooterMenu::List => {
+            PLAYLIST_LIST_BUTTON_HIT_AREA.0 + playlist_size::right_corner_shift(window_width)
+        }
     };
     button_x.clamp(4.0, (window_width - menu_width - 4.0).max(4.0))
 }
@@ -5949,33 +6025,6 @@ fn TiledSprite(
     for (cell, dx, dy) in native_sprite_tiles(source, width, height) {
         Sprite(image.clone(), cell, x + dx, y + dy, scale);
     }
-}
-#[composable]
-fn StretchSprite(
-    image: ImageBitmap,
-    source: SpriteRect,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    scale: f32,
-) {
-    let bounds = pixel_grid::rect(x, y, width.max(1.0), height.max(1.0), scale);
-    cranpose_ui::Image(
-        cranpose_ui::BitmapRegionPainter(
-            image,
-            to_rect(source),
-            cranpose_ui::ImageSampling::Nearest,
-        ),
-        None,
-        Modifier::empty()
-            .size_points(bounds.width, bounds.height)
-            .absolute_offset(bounds.x, bounds.y),
-        Alignment::TOP_START,
-        cranpose_ui::ContentScale::FillBounds,
-        1.0,
-        None,
-    );
 }
 #[composable]
 fn PressableSprite(
@@ -6599,133 +6648,98 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
         }
     }
 }
-#[composable]
-fn WindowResizeHandle(
-    drag_target: WinampDragTarget,
-    direction: WindowResizeDirection,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    scale: f32,
-) {
-    let modifier = Modifier::empty()
-        .size_points(scaled(width, scale), scaled(height, scale))
-        .absolute_offset(scaled(x, scale), scaled(y, scale));
-    match drag_target {
-        WinampDragTarget::Native | WinampDragTarget::Dockable { .. } => {
-            Box(
-                modifier.window_resize_area(direction),
-                BoxSpec::default(),
-                || {},
-            );
+/// Where the playlist's corner reads and writes the playlist's size, in skin
+/// pixels: the canvas's layout in a browser, the window state on a desktop.
+#[derive(Clone, Copy)]
+enum PlaylistSizeSource {
+    Inline(WinampInlineWindowStates),
+    Window(WindowState),
+}
+impl PlaylistSizeSource {
+    fn of(drag_target: WinampDragTarget) -> Option<Self> {
+        match drag_target {
+            WinampDragTarget::Inline(drag) => Some(Self::Inline(drag.windows)),
+            WinampDragTarget::Tearable { state, .. } | WinampDragTarget::Dockable { state, .. } => {
+                Some(Self::Window(state))
+            }
+            _ => None,
         }
-        // A pane docked in the stack has no window of its own to resize: the
-        // window around it belongs to the stack, and the platform would
-        // refuse in any case, because that window is not resizable. Dragging
-        // the corner grows the pane, and the stack's window follows the pane.
-        WinampDragTarget::Tearable {
-            state: pane_window, ..
-        } => {
-            let grabbed = cranpose_core::rememberMutableStateOf(|| None::<(f32, f32)>);
-            Box(
-                modifier.pointer_input((), move |scope: PointerInputScope| async move {
-                    scope
-                        .await_pointer_event_scope(|await_scope| async move {
-                            loop {
-                                let event = await_scope.await_pointer_event().await;
-                                match event.kind {
-                                    PointerEventKind::Down => {
-                                        grabbed.set(Some((
-                                            event.global_position.y,
-                                            pane_window.size_non_reactive().height,
-                                        )));
-                                        event.consume();
-                                    }
-                                    PointerEventKind::Move => {
-                                        let Some((grabbed_at, held)) = grabbed.get() else {
-                                            continue;
-                                        };
-                                        let grown =
-                                            held + (event.global_position.y - grabbed_at) / scale;
-                                        pane_window.set_size(Size::new(
-                                            pane_window.size_non_reactive().width,
-                                            grown.max(playlist_min_height()),
-                                        ));
-                                        event.consume();
-                                    }
-                                    PointerEventKind::Up | PointerEventKind::Cancel => {
-                                        grabbed.set(None);
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        })
-                        .await;
-                }),
-                BoxSpec::default(),
-                || {},
-            );
-        }
-        // Windows sharing one canvas have no window of their own either: the
-        // corner stretches the playlist down, and the layout keeps its size.
-        WinampDragTarget::Inline(drag) => {
-            let grabbed = cranpose_core::rememberMutableStateOf(|| None::<(Point, Size)>);
-            let size = drag.windows.playlist_size;
-            Box(
-                modifier.pointer_input((), move |scope: PointerInputScope| async move {
-                    scope
-                        .await_pointer_event_scope(|await_scope| async move {
-                            loop {
-                                let event = await_scope.await_pointer_event().await;
-                                match event.kind {
-                                    PointerEventKind::Down => {
-                                        grabbed.set(Some((
-                                            event.global_position,
-                                            size.get_non_reactive(),
-                                        )));
-                                        event.consume();
-                                    }
-                                    PointerEventKind::Move => {
-                                        let Some((grabbed_at, held)) = grabbed.get() else {
-                                            continue;
-                                        };
-                                        // Only taller: a wider footer tiles a
-                                        // strip of PLEDIT.BMP most skins leave
-                                        // unpainted, as a docked pane does.
-                                        let travel = Point::new(
-                                            0.0,
-                                            (event.global_position.y - grabbed_at.y) / scale,
-                                        );
-                                        let stretched = inline_windows::stretched(
-                                            held,
-                                            travel,
-                                            playlist_min_size(),
-                                        );
-                                        size.set(Size::new(
-                                            stretched.width.round(),
-                                            stretched.height.round(),
-                                        ));
-                                        event.consume();
-                                    }
-                                    PointerEventKind::Up | PointerEventKind::Cancel => {
-                                        if grabbed.get().is_some() {
-                                            grabbed.set(None);
-                                            drag.windows.save();
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        })
-                        .await;
-                }),
-                BoxSpec::default(),
-                || {},
-            );
-        }
-        _ => {}
     }
+    fn get(self) -> Size {
+        match self {
+            Self::Inline(windows) => windows.playlist_size.get_non_reactive(),
+            Self::Window(state) => state.size_non_reactive(),
+        }
+    }
+    fn set(self, size: Size) {
+        match self {
+            Self::Inline(windows) => windows.playlist_size.set(size),
+            Self::Window(state) => state.set_size(size),
+        }
+    }
+    /// The browser keeps its layout itself; a desktop window's size is kept
+    /// with the window's place.
+    fn keep(self) {
+        if let Self::Inline(windows) = self {
+            windows.save();
+        }
+    }
+}
+/// The playlist's corner, which stretches it the way Winamp's does: from the
+/// press, in whole steps of 25 across and 29 down. Winamp resized its skinned
+/// windows itself rather than through the system's frame, and so does this,
+/// docked, torn off or in a browser alike.
+#[composable]
+fn PlaylistResizeHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32) {
+    let Some(source) = PlaylistSizeSource::of(drag_target) else {
+        return;
+    };
+    let grabbed = cranpose_core::rememberMutableStateOf(|| None::<(Point, Size)>);
+    Box(
+        Modifier::empty()
+            .size_points(scaled(area.2, scale), scaled(area.3, scale))
+            .absolute_offset(scaled(area.0, scale), scaled(area.1, scale))
+            .pointer_input((), move |scope: PointerInputScope| async move {
+                scope
+                    .await_pointer_event_scope(|await_scope| async move {
+                        loop {
+                            let event = await_scope.await_pointer_event().await;
+                            match event.kind {
+                                PointerEventKind::Down => {
+                                    grabbed.set(Some((event.global_position, source.get())));
+                                    event.consume();
+                                }
+                                PointerEventKind::Move => {
+                                    let Some((grabbed_at, held)) = grabbed.get() else {
+                                        continue;
+                                    };
+                                    let size = playlist_size::stretched(
+                                        held,
+                                        Point::new(
+                                            (event.global_position.x - grabbed_at.x) / scale,
+                                            (event.global_position.y - grabbed_at.y) / scale,
+                                        ),
+                                    );
+                                    if size != source.get() {
+                                        source.set(size);
+                                    }
+                                    event.consume();
+                                }
+                                PointerEventKind::Up | PointerEventKind::Cancel => {
+                                    if grabbed.get().is_some() {
+                                        grabbed.set(None);
+                                        source.keep();
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    })
+                    .await;
+            }),
+        BoxSpec::default(),
+        || {},
+    );
 }
 #[composable]
 fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, scale: f32) {
@@ -8911,10 +8925,7 @@ fn apply_saved_window_config(
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn clamp_playlist_window_size(size: Size) -> Size {
-    Size::new(
-        size.width.max(PLAYLIST_WIDTH),
-        size.height.max(playlist_min_height()),
-    )
+    playlist_size::classic(size)
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn serialize_window_config(config: SavedWinampWindowConfig) -> String {

@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "cranamp"
-version = "0.1.82"
+version = "0.1.83"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

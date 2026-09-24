@@ -124,6 +124,7 @@ line the moment the sheet is opened and repeated in draw results:
 | --- | --- |
 | `text.bmp` | actual 5×6 bitmap glyphs, including opaque spacing cells |
 | `titlebar.bmp` | title rows, window buttons, and the rolled-up player's strip, unroll button and seek track; paint the last in the **Windowshade** panel |
+| `pledit.bmp` | the playlist, including the footer tile and visualizer panel a wider playlist shows; paint those in the **Footer** panel |
 
 ## Windowshade
 
@@ -148,6 +149,29 @@ whatever would sit under the clock moves aside, the name is lifted out of the
 art and set down on the left, and the time and transport sit on insets in the
 font's own colours. The five rolled-up cursors are the skin's own full-window
 ones for the same jobs.
+
+## Footer
+
+The playlist resizes the way Winamp's does: from 275×116, only in whole steps
+of 25 across and 29 down. Its footer is drawn from its own pieces. The 125-wide
+left corner (`0,72`) and the 150-wide right corner (`126,72`) sit at the ends.
+Between them PLEDIT.BMP's 25×38 footer tile at `179,0` repeats, once per step
+past 275. From 350 wide, the 75×38 visualizer panel at `205,0` stands just left
+of the right corner. LIST, the mini transport and the time readouts sit on the
+right corner and move with it; ADD to MISC stay on the left one.
+
+A playlist 275 wide shows neither cell, so the **Footer** button beside the
+drawers, or *The playlist footer* in the atlases drawer, lays the footer out
+twice. At 325 two tiles meet each other and both corners; at 400 the
+visualizer panel meets a tile and the right corner. That is every seam Winamp
+shows at any width. Guides mark each row's readouts and buttons.
+
+Every bundled Catamp skin draws both cells, except the default skin, which
+has Winamp's own. `node tools/skin-studio/footer.mjs <skin> [--save]` redraws
+one on a layer of its own. The ground continues what the corners already
+have: a column of the footer repeated, a plain colour under the top rails, or
+each row's own colours as speckle, with a two-pixel dither kept in step.
+Cranamp draws no mini visualizer, so its panel is more of the same ground.
 
 ## Cursors
 
