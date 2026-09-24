@@ -1815,12 +1815,8 @@ fn sync_try_apply_resume(state: MutableState<WinampState>, merged: &crate::sync:
 #[composable]
 fn SyncEffect(state: MutableState<WinampState>) {
     cranpose_core::remember(crate::sync::runtime::start_worker);
-    cranpose_core::LaunchedEffectAsync(0u8, move |_scope| {
-        Box::pin(async move {
-            if let Some(merged) = crate::sync::runtime::first_merged().wait().await {
-                sync_try_apply_resume(state, &merged);
-            }
-        })
+    cranpose_coroflow::CollectFlow((), crate::sync::runtime::first_merged(), move |merged| {
+        sync_try_apply_resume(state, &merged);
     });
     let folder =
         cranpose_services::rememberWritableFolderLauncher("cranamp.sync-folder", move |result| {
@@ -4031,23 +4027,14 @@ fn SettingsHeader(state: MutableState<WinampState>) {
     );
 }
 #[cfg(not(target_arch = "wasm32"))]
-const SYNC_PANEL_REFRESH: Duration = Duration::from_millis(1500);
 #[cfg(not(target_arch = "wasm32"))]
 #[composable]
 fn SettingsSyncSection(state: MutableState<WinampState>) {
-    let refresh = cranpose_core::rememberMutableStateOf(|| 0u64);
-    cranpose_core::LaunchedEffectAsync(0u8, move |_scope| {
-        Box::pin(async move {
-            cranpose_core::interval(SYNC_PANEL_REFRESH, move || {
-                refresh.update(|value| *value += 1);
-            })
-            .await;
-        })
-    });
-    let _ = refresh.get();
-    let status = crate::sync::runtime::status();
+    use cranpose_coroflow::StateFlowCollect;
+
+    let status = crate::sync::runtime::status_flow().collectAsState().get();
+    let merged = crate::sync::runtime::merged().collectAsState().get();
     let config = crate::sync::runtime::config_snapshot();
-    let merged = crate::sync::runtime::latest_merged();
     let enabled = config.as_ref().map(|c| c.enabled).unwrap_or(false);
     let folder = config.as_ref().and_then(|c| c.folder.clone());
     let own_id = config
