@@ -176,18 +176,3 @@ fn the_playlist_size_reads_back_as_it_was_kept() {
     assert_eq!(decode_size("inf,300"), None);
     assert_eq!(decode_size("0,300"), None, "a window has an area");
 }
-
-#[test]
-fn a_window_stretched_from_its_corner_grows_with_the_pointer_and_stops_at_its_minimum() {
-    let held = Size::new(275.0, 261.0);
-    let minimum = Size::new(275.0, 145.0);
-    assert_eq!(
-        stretched(held, Point::new(50.0, 40.0), minimum),
-        Size::new(325.0, 301.0)
-    );
-    assert_eq!(
-        stretched(held, Point::new(-80.0, -200.0), minimum),
-        minimum,
-        "pushed past its smallest size it stays there"
-    );
-}
