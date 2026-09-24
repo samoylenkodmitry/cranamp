@@ -3,9 +3,9 @@ use super::{
     merge, MergedSync, PlayCount, ResumePoint, SyncDocument, SyncTrack, TrackFingerprint,
     UnixSeconds,
 };
-use cranpose_services::{open_writable_folder, FolderError, Signal, WritableFolderStoreRef};
+use coroflow::{delay, CoroutineScope, Dispatchers, Flow, FlowExt, MutableStateFlow, StateFlow};
+use cranpose_services::{open_writable_folder, FolderError, WritableFolderStoreRef};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const FLUSH_INTERVAL_SECS: u64 = 12;
@@ -46,9 +46,10 @@ impl SyncStatus {
     }
 }
 static RUNTIME: Mutex<Option<SyncRuntime>> = Mutex::new(None);
-static LATEST_MERGED: Mutex<Option<MergedSync>> = Mutex::new(None);
-static WORKER_STARTED: AtomicBool = AtomicBool::new(false);
-static FIRST_MERGED: OnceLock<Signal<MergedSync>> = OnceLock::new();
+static MERGED: OnceLock<MutableStateFlow<Option<MergedSync>>> = OnceLock::new();
+/// The app-wide scope the sync worker runs in: Kotlin's application
+/// `CoroutineScope(SupervisorJob() + Dispatchers.IO)`.
+static WORKER: OnceLock<CoroutineScope> = OnceLock::new();
 const WORKER_INTERVAL: Duration = Duration::from_secs(5);
 fn now() -> UnixSeconds {
     SystemTime::now()
@@ -63,10 +64,20 @@ fn build_store(config: &SyncConfig) -> Option<SharedStore> {
     let folder = config.folder.as_deref()?;
     open_writable_folder(folder)
 }
+/// What the configuration and its folder allow before anything was written.
+fn configured_status(config: &SyncConfig, store: Option<&SharedStore>) -> SyncStatus {
+    if !config.enabled {
+        SyncStatus::Disabled
+    } else if store.is_none() {
+        SyncStatus::NotConfigured
+    } else {
+        SyncStatus::Active
+    }
+}
 struct SyncRuntime {
     config: SyncConfig,
     store: Option<SharedStore>,
-    status: SyncStatus,
+    status: MutableStateFlow<SyncStatus>,
     doc: SyncDocument,
     dirty: bool,
     last_flush: UnixSeconds,
@@ -78,13 +89,7 @@ impl SyncRuntime {
             config.device_label.clone(),
             config::current_platform().to_string(),
         );
-        let status = if !config.enabled {
-            SyncStatus::Disabled
-        } else if store.is_none() {
-            SyncStatus::NotConfigured
-        } else {
-            SyncStatus::Active
-        };
+        let status = MutableStateFlow::new(configured_status(&config, store.as_ref()));
         Self {
             config,
             store,
@@ -157,10 +162,10 @@ impl SyncRuntime {
             Ok(()) => {
                 self.dirty = false;
                 self.last_flush = now();
-                self.status = SyncStatus::Active;
+                self.status.set(SyncStatus::Active);
             }
-            Err(FolderError::ReadOnly) => self.status = SyncStatus::ReceiveOnly,
-            Err(other) => self.status = SyncStatus::Error(other.to_string()),
+            Err(FolderError::ReadOnly) => self.status.set(SyncStatus::ReceiveOnly),
+            Err(other) => self.status.set(SyncStatus::Error(other.to_string())),
         }
     }
     fn prepare_poll(&self) -> Option<(SharedStore, SyncDocument)> {
@@ -219,7 +224,12 @@ pub fn ensure_loaded() {
     with_runtime(|_| {});
 }
 pub fn status() -> SyncStatus {
-    with_runtime(|rt| rt.status.clone()).unwrap_or(SyncStatus::Disabled)
+    with_runtime(|rt| rt.status.value()).unwrap_or(SyncStatus::Disabled)
+}
+/// The sync status as it changes, for a screen to collect.
+pub fn status_flow() -> StateFlow<SyncStatus> {
+    with_runtime(|rt| rt.status.as_state_flow())
+        .unwrap_or_else(|| MutableStateFlow::new(SyncStatus::Disabled).as_state_flow())
 }
 pub fn config_snapshot() -> Option<SyncConfig> {
     with_runtime(|rt| rt.config.clone())
@@ -259,14 +269,14 @@ pub fn poll() -> Option<MergedSync> {
                 .collect();
             docs.push(own);
             with_runtime(|rt| {
-                if matches!(rt.status, SyncStatus::Error(_)) {
-                    rt.status = SyncStatus::Active;
+                if matches!(rt.status.value(), SyncStatus::Error(_)) {
+                    rt.status.set(SyncStatus::Active);
                 }
             });
             Some(merge(&docs))
         }
         Err(error) => {
-            with_runtime(|rt| rt.status = SyncStatus::Error(error.to_string()));
+            with_runtime(|rt| rt.status.set(SyncStatus::Error(error.to_string())));
             None
         }
     }
@@ -279,35 +289,40 @@ pub fn forget_device(device_id: &str) {
     }
     refresh_merged();
 }
+fn merged_state() -> &'static MutableStateFlow<Option<MergedSync>> {
+    MERGED.get_or_init(|| MutableStateFlow::new(None))
+}
+/// Every device's documents merged, `None` until a sync folder answers.
+pub fn merged() -> StateFlow<Option<MergedSync>> {
+    merged_state().as_state_flow()
+}
+/// The first merged view, once a sync folder answers.
+pub fn first_merged() -> impl Flow<Item = MergedSync> + Clone + 'static {
+    merged().filter_map(|merged| merged).take(1)
+}
 pub fn latest_merged() -> Option<MergedSync> {
-    LATEST_MERGED.lock().ok().and_then(|slot| slot.clone())
+    merged_state().value()
 }
 fn refresh_merged() {
     if let Some(merged) = poll() {
-        if let Ok(mut slot) = LATEST_MERGED.lock() {
-            *slot = Some(merged.clone());
-        }
-        first_merged().set(merged);
+        merged_state().set(Some(merged));
     }
 }
-pub fn first_merged() -> Signal<MergedSync> {
-    FIRST_MERGED.get_or_init(Signal::new).clone()
-}
+/// Starts the background sync once: flush what changed, read the other
+/// devices, and wait before the next round.
 pub fn start_worker() {
-    if WORKER_STARTED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    std::thread::Builder::new()
-        .name("cranamp-sync".to_string())
-        .spawn(|| {
+    WORKER.get_or_init(|| {
+        let scope = CoroutineScope::new(Dispatchers::io());
+        scope.launch(async {
             ensure_loaded();
             loop {
                 flush_if_due();
                 refresh_merged();
-                std::thread::sleep(WORKER_INTERVAL);
+                delay(WORKER_INTERVAL).await;
             }
-        })
-        .ok();
+        });
+        scope
+    });
 }
 fn reconfigure(mutate: impl FnOnce(&mut SyncConfig)) -> SyncStatus {
     let prepared = with_runtime(|rt| {
@@ -316,13 +331,8 @@ fn reconfigure(mutate: impl FnOnce(&mut SyncConfig)) -> SyncStatus {
         rt.store = build_store(&rt.config);
         rt.doc.device_label = rt.config.device_label.clone();
         rt.last_flush = 0;
-        rt.status = if !rt.config.enabled {
-            SyncStatus::Disabled
-        } else if rt.store.is_none() {
-            SyncStatus::NotConfigured
-        } else {
-            SyncStatus::Active
-        };
+        rt.status
+            .set(configured_status(&rt.config, rt.store.as_ref()));
         rt.store.clone()
     })
     .flatten();
@@ -330,8 +340,8 @@ fn reconfigure(mutate: impl FnOnce(&mut SyncConfig)) -> SyncStatus {
         seed_from_folder(&store);
         force_flush();
         refresh_merged();
-    } else if let Ok(mut slot) = LATEST_MERGED.lock() {
-        *slot = None;
+    } else {
+        merged_state().set(None);
     }
     status()
 }

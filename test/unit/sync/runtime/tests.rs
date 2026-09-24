@@ -165,7 +165,47 @@ fn read_only_store_degrades_to_receive_only() {
     let mut rt = runtime_with(store);
     rt.record_resume(TrackFingerprint::new("a.mp3", 10), "A".into(), 3.0);
     drive_flush(&mut rt, true);
-    assert_eq!(rt.status, SyncStatus::ReceiveOnly);
+    assert_eq!(rt.status.value(), SyncStatus::ReceiveOnly);
+}
+#[test]
+fn a_status_change_reaches_its_collectors() {
+    let scheduler = coroflow::TestScheduler::new();
+    let mut rt = runtime_with(MockStore::new(false));
+    let status = rt.status.as_state_flow();
+    let mut seen = scheduler.turbine(&status);
+    assert_eq!(seen.await_item(), SyncStatus::Active);
+    rt.record_play(TrackFingerprint::new("a.mp3", 10), "A".into());
+    drive_flush(&mut rt, true);
+    assert_eq!(seen.await_item(), SyncStatus::ReceiveOnly);
+}
+#[test]
+fn the_configured_status_follows_the_switch_and_the_folder() {
+    let store: SharedStore = MockStore::new(true);
+    let mut config = SyncConfig {
+        device_id: "self".to_string(),
+        device_label: "Me".to_string(),
+        enabled: false,
+        folder: None,
+    };
+    assert_eq!(
+        configured_status(&config, Some(&store)),
+        SyncStatus::Disabled
+    );
+    config.enabled = true;
+    assert_eq!(configured_status(&config, None), SyncStatus::NotConfigured);
+    assert_eq!(configured_status(&config, Some(&store)), SyncStatus::Active);
+}
+#[test]
+fn the_first_merged_view_waits_for_a_sync_folder() {
+    let scheduler = coroflow::TestScheduler::new();
+    let first = first_merged();
+    let mut seen = scheduler.turbine(&first);
+    seen.expect_no_events();
+    let merged = MergedSync::default();
+    merged_state().set(Some(merged.clone()));
+    assert_eq!(seen.await_item(), merged);
+    seen.await_complete();
+    assert_eq!(latest_merged(), Some(merged));
 }
 #[test]
 fn debounce_blocks_until_forced() {
