@@ -1199,7 +1199,13 @@ fn the_visualizer_paints_its_field_dots_and_bars_in_the_skins_colours() {
     let mut analyzer = vis::Analyzer::default();
     analyzer.advance(&[1.0; vis::BARS], 1);
     let background = [255, 0, 255, 255];
-    let rects = vis_rects(&analyzer.runs(), &viscolor, background, vis::WIDTH);
+    let rects = vis_rects(
+        &analyzer.runs(),
+        &viscolor,
+        background,
+        vis::Field::Full,
+        vis::WIDTH,
+    );
     assert_eq!(rects[0].1, background, "the field is the skin's background");
     assert_eq!(rects[0].0.width, 76.0);
     assert!(rects
@@ -1209,7 +1215,13 @@ fn the_visualizer_paints_its_field_dots_and_bars_in_the_skins_colours() {
         .iter()
         .any(|(rect, colour)| rect.y == 15.0 && rect.width == 3.0 && *colour == [17, 17, 17, 255]));
 
-    let mini = vis_rects(&analyzer.runs(), &viscolor, background, 72);
+    let mini = vis_rects(
+        &analyzer.runs(),
+        &viscolor,
+        background,
+        vis::Field::Full,
+        72,
+    );
     assert_eq!(mini[0].0.width, 72.0);
     assert!(
         mini.iter().all(|(rect, _)| rect.x + rect.width <= 72.0),

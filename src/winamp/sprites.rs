@@ -83,6 +83,8 @@ pub const POS_STATUS: (f32, f32) = (26.0, 28.0);
 pub const POS_TIME_DIGITS: [(f32, f32); 4] =
     [(48.0, 26.0), (60.0, 26.0), (78.0, 26.0), (90.0, 26.0)];
 pub const POS_VISUALIZER: (f32, f32) = (24.0, 43.0);
+/// Where the rolled-up main window draws its visualizer.
+pub const POS_SHADE_VISUALIZER: (f32, f32) = (79.0, 5.0);
 pub const VISUALIZER_WIDTH: f32 = 76.0;
 pub const VISUALIZER_HEIGHT: f32 = 16.0;
 pub const VISUALIZER_BARS: usize = 19;

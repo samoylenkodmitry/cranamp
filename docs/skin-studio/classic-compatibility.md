@@ -39,7 +39,10 @@ every other pixel of every other row. The analyzer's 19 bars are three pixels wi
 each row in its own colour from 2 at the top to 17 at the bottom, with peaks in 23.
 The oscilloscope uses 18 to 22 by distance from the middle row. The main window
 draws it at `24,43`. With the main window closed (Alt+W), the playlist draws it in
-the visualizer panel at `2,12`, 72 columns wide. It shows nothing while stopped, so
+the visualizer panel at `2,12`, 72 columns wide. Rolled up, the main window
+draws a 38x5 version at `79,5` in the strip: ten bars in colours 4, 8, 11, 14 and 17
+from the top, with no dots and no peaks, or the oscilloscope in colour 18. As in
+Winamp, it covers whatever the strip has there. It shows nothing while stopped, so
 the skin's own art is visible then. Interpolation of the EQ curve, media metadata,
 focus and playback animations are runtime behavior rather than pixels encoded by the skin. Cranamp draws the main window's shade, not the equalizer's or the playlist's. Native click-through and external Winamp/Audacious screenshots still require platform testing. Portable assets cannot eliminate these player differences by adding a configuration file.
 

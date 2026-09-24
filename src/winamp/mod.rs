@@ -3064,6 +3064,7 @@ fn MainWindowFace(
         skin.viscolor,
         skin.bitmap_mode.spectrum_background(skin.viscolor),
         POS_VISUALIZER,
+        vis::Field::Full,
         vis::WIDTH,
         scale,
     );
@@ -3600,6 +3601,15 @@ fn MainShadeStrip(
             );
         }
     }
+    ClassicVisualizer(
+        state,
+        skin.viscolor,
+        skin.bitmap_mode.spectrum_background(skin.viscolor),
+        POS_SHADE_VISUALIZER,
+        vis::Field::Shade,
+        vis::SHADE_WIDTH,
+        scale,
+    );
     for (area, action) in SHADE_TRANSPORT {
         ClickTarget(area.0, area.1, area.2, area.3, scale, move || action(state));
     }
@@ -4690,6 +4700,7 @@ fn PlaylistWindow(
                         panel_x + MINI_VISUALIZER_OFFSET.0,
                         bottom_y + MINI_VISUALIZER_OFFSET.1,
                     ),
+                    vis::Field::Full,
                     MINI_VISUALIZER_COLUMNS,
                     scale,
                 );
@@ -6020,6 +6031,7 @@ fn vis_rects(
     runs: &[(usize, usize, usize, u8)],
     viscolor: &VisColor,
     background: [u8; 4],
+    field: vis::Field,
     width: usize,
 ) -> Vec<(Rect, [u8; 4])> {
     let rect = |x: usize, y: usize, w: usize| Rect {
@@ -6033,16 +6045,18 @@ fn vis_rects(
             x: 0.0,
             y: 0.0,
             width: width as f32,
-            height: vis::HEIGHT as f32,
+            height: field.size().1 as f32,
         },
         background,
     )];
-    let dots = viscolor.0[usize::from(vis::DOTS)];
-    out.extend(
-        vis::dots()
-            .filter(|(x, _)| *x < width)
-            .map(|(x, y)| (rect(x, y, 1), dots)),
-    );
+    if field.dotted() {
+        let dots = viscolor.0[usize::from(vis::DOTS)];
+        out.extend(
+            vis::dots()
+                .filter(|(x, _)| *x < width)
+                .map(|(x, y)| (rect(x, y, 1), dots)),
+        );
+    }
     out.extend(
         runs.iter()
             .filter(|(x, ..)| *x < width)
@@ -6065,6 +6079,7 @@ fn ClassicVisualizer(
     viscolor: VisColor,
     background: [u8; 4],
     origin: (f32, f32),
+    field: vis::Field,
     width: usize,
     scale: f32,
 ) {
@@ -6083,9 +6098,11 @@ fn ClassicVisualizer(
                     vis::VisMode::Analyzer => {
                         let mut analyzer = analyzer.borrow_mut();
                         analyzer.advance(&audio::visualizer_bands(), VIS_FRAMES_PER_REFRESH);
-                        analyzer.runs()
+                        analyzer.runs_in(field)
                     }
-                    vis::VisMode::Oscilloscope => vis::oscilloscope_runs(&audio::visualizer_wave()),
+                    vis::VisMode::Oscilloscope => {
+                        vis::oscilloscope_runs(&audio::visualizer_wave(), field)
+                    }
                     vis::VisMode::Off => Vec::new(),
                 });
             })
@@ -6095,11 +6112,11 @@ fn ClassicVisualizer(
     let area = Modifier::empty()
         .size_points(
             scaled(width as f32, scale),
-            scaled(vis::HEIGHT as f32, scale),
+            scaled(field.size().1 as f32, scale),
         )
         .absolute_offset(scaled(origin.0, scale), scaled(origin.1, scale));
     if snapshot.playback != PlaybackState::Stopped && mode != vis::VisMode::Off {
-        let rects = vis_rects(&frame.get(), &viscolor, background, width);
+        let rects = vis_rects(&frame.get(), &viscolor, background, field, width);
         Canvas(area.clone(), move |scope| {
             for (rect, colour) in &rects {
                 scope.draw_rect_at(

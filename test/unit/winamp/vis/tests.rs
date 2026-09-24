@@ -65,23 +65,23 @@ fn the_bars_are_winamps_thick_bands() {
 
 #[test]
 fn the_oscilloscope_joins_its_columns_and_colours_rows_by_their_distance_from_the_middle() {
-    let flat = oscilloscope_runs(&[0.0; 576]);
+    let flat = oscilloscope_runs(&[0.0; 576], Field::Full);
     assert_eq!(flat.len(), 75, "a silent wave is one row across");
     assert!(flat.iter().all(|run| run.1 == 8 && run.3 == 19));
 
-    let edge = oscilloscope_runs(&[1.0; 576]);
+    let edge = oscilloscope_runs(&[1.0; 576], Field::Full);
     assert!(edge.iter().all(|run| run.1 == 0 && run.3 == 21));
 
     let mut wave = vec![1.0; 288];
     wave.extend(vec![-1.0; 288]);
-    let runs = oscilloscope_runs(&wave);
+    let runs = oscilloscope_runs(&wave, Field::Full);
     let jump: Vec<_> = runs.iter().filter(|run| run.0 == 38).collect();
     assert_eq!(
         jump.len(),
         HEIGHT,
         "a jump from top to bottom is drawn as a line"
     );
-    assert!(oscilloscope_runs(&[]).is_empty());
+    assert!(oscilloscope_runs(&[], Field::Full).is_empty());
 }
 
 #[test]
@@ -90,4 +90,33 @@ fn the_field_is_dotted_on_every_other_pixel_of_every_other_row() {
     assert_eq!(dots.len(), 38 * 8);
     assert_eq!(dots[0], (0, 1));
     assert!(dots.iter().all(|(x, y)| x % 2 == 0 && y % 2 == 1));
+}
+
+#[test]
+fn rolled_up_the_analyzer_is_ten_short_bars_without_peaks() {
+    let mut analyzer = Analyzer::default();
+    analyzer.advance(&[1.0; BARS], 1);
+    let runs = analyzer.runs_in(Field::Shade);
+    assert_eq!(
+        runs.len(),
+        10 * SHADE_HEIGHT,
+        "ten full bars five rows tall"
+    );
+    assert!(runs.iter().all(|run| run.3 != PEAK));
+    assert_eq!(runs[0], (0, 0, 3, 4), "the top row is colour 4");
+    assert_eq!(runs[4], (0, 4, 3, 17), "the bottom row colour 17");
+    assert!(
+        runs.iter().any(|run| run.0 == 36 && run.2 == 1),
+        "the last bar is one column, the 37th"
+    );
+    assert!(runs.iter().all(|run| run.0 + run.2 <= 37));
+    assert_eq!(Field::Shade.size(), (38, 5));
+    assert!(!Field::Shade.dotted());
+}
+
+#[test]
+fn rolled_up_the_oscilloscope_is_one_colour_across_the_strip() {
+    let runs = oscilloscope_runs(&[0.0; 576], Field::Shade);
+    assert_eq!(runs.len(), 38);
+    assert!(runs.iter().all(|run| run.1 == 2 && run.3 == 18));
 }
