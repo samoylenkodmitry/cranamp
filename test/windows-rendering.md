@@ -83,3 +83,18 @@ Windows stretched the last frame to the growing window in 4 of 7 torn-off
 drags. The still rows blurred and moved by up to a pixel. Cranpose 0.1.158
 presents through DirectComposition, and no drag of 6 showed a stretched
 frame.
+
+## Main window closed
+
+`test/windows-main-window.ps1` presses Alt+W in the player twice, with real
+key events. Before and after each press it records every process window's
+title, bounds and visibility, and the screen:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File test/windows-main-window.ps1 -Executable C:\path\cranamp.exe -OutputDirectory C:\path\main-window -Schedule
+```
+
+Closed, the stack's window is hidden, and the equalizer and playlist are
+windows of their own at the places they held in the stack. Opened again, the
+stack holds both. On Windows 11 the equalizer stayed at `140,236` and the
+playlist at `140,352` throughout.

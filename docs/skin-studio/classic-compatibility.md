@@ -32,7 +32,16 @@ The playlist takes Winamp's sizes, 275×116 and whole steps of 25 by 29, and
 tiles PLEDIT.BMP's footer cell at `179,0` between the corners, with the
 visualizer panel at `205,0` from 350 wide. A skin that leaves those cells
 blank shows blank footer bars in every wide playlist, in Winamp as in
-Cranamp. Playlist rows use system fonts and can differ between operating systems. Spectrum bars, interpolation of the EQ curve, media metadata, focus and playback animations are runtime behavior rather than pixels encoded by the skin. Cranamp draws the main window's shade, not the equalizer's or the playlist's. Native click-through and external Winamp/Audacious screenshots still require platform testing. Portable assets cannot eliminate these player differences by adding a configuration file.
+Cranamp. Playlist rows use system fonts and can differ between operating systems.
+
+The visualizer is Winamp's. The field is VISCOLOR colour 0, dotted with colour 1 on
+every other pixel of every other row. The analyzer's 19 bars are three pixels wide,
+each row in its own colour from 2 at the top to 17 at the bottom, with peaks in 23.
+The oscilloscope uses 18 to 22 by distance from the middle row. The main window
+draws it at `24,43`. With the main window closed (Alt+W), the playlist draws it in
+the visualizer panel at `2,12`, 72 columns wide. It shows nothing while stopped, so
+the skin's own art is visible then. Interpolation of the EQ curve, media metadata,
+focus and playback animations are runtime behavior rather than pixels encoded by the skin. Cranamp draws the main window's shade, not the equalizer's or the playlist's. Native click-through and external Winamp/Audacious screenshots still require platform testing. Portable assets cannot eliminate these player differences by adding a configuration file.
 
 ## References
 

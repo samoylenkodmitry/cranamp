@@ -18,9 +18,10 @@ A Winamp-style music player in Rust, powered by [Cranpose](https://github.com/sa
 - **Playlist tools** — Search, multi-select, sort, randomize and remove tracks.
 - **Playback** — Play, pause, stop, seek, skip, shuffle and repeat.
 - **Sound** — Volume, balance, ten-band equalizer, preamp and presets.
-- **Visualizer** — Live spectrum inside your skin.
+- **Visualizer** — Winamp's spectrum analyzer and oscilloscope in your skin's `VISCOLOR` colours; click it to switch between them and off.
+- **Winamp keys** — Z X C V B for the transport, the arrows to seek and set the volume, L to open files; Alt+W, Alt+E and Alt+G open and close the main window, the playlist and the equalizer.
 - **Resume** — Remember playlists, selected skins, volume and EQ settings.
-- **Desktop windows** — Move, resize, dock and detach the player panels.
+- **Desktop windows** — Move, dock and detach the player panels, and resize the playlist in Winamp's steps. With the main window closed the playlist shows the visualizer in its footer.
 - **Floating web player** — Open PiP explicitly in supported Chromium browsers.
 - **Sync** — Share listening progress and play counts through a chosen folder on native platforms.
 - **Android updates** — Check for and install new releases from Settings.

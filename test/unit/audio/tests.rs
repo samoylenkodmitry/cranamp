@@ -1,4 +1,6 @@
-use super::{compute_analyzer_bands, equalizer_value_gain_db, has_uri_scheme, media_item, Track};
+use super::{
+    compute_analyzer_bands, equalizer_value_gain_db, has_uri_scheme, media_item, mixed_down, Track,
+};
 #[test]
 fn extensions_include_common_winamp_formats() {
     let extensions = super::supported_audio_extensions();
@@ -108,4 +110,20 @@ fn a_centred_equalizer_slider_is_flat_and_the_ends_are_symmetric() {
     assert_eq!(equalizer_value_gain_db(0.0), -12.0);
     assert_eq!(equalizer_value_gain_db(2.0), 12.0);
     assert_eq!(equalizer_value_gain_db(-1.0), -12.0);
+}
+
+#[test]
+fn the_oscilloscope_hears_every_channel_at_once() {
+    let stereo = [1.0, -1.0, 0.5, 0.5, 0.25, -0.75];
+    assert_eq!(mixed_down(&stereo, 2, 576), vec![0.0, 0.5, -0.25]);
+    assert_eq!(
+        mixed_down(&stereo, 2, 2),
+        vec![0.0, 0.5],
+        "no more than asked for"
+    );
+    assert_eq!(
+        mixed_down(&[0.5, 0.25], 0, 576),
+        vec![0.5, 0.25],
+        "no channels reads as one"
+    );
 }
