@@ -120,13 +120,17 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     // The surfaces that are not windows of the whole skin, one click away
     // rather than at the top of the atlas list.
     let surface_buttons: Vec<(f32, f32, &'static str, &'static str, f32)> = if drawing {
-        [("cursors", "Cursors", 92.), ("shade", "Windowshade", 118.)]
-            .into_iter()
-            .map(|(surface, label, width)| {
-                let (x, y) = panels.take(width);
-                (x, y, surface, label, width)
-            })
-            .collect()
+        [
+            ("cursors", "Cursors", 92.),
+            ("shade", "Windowshade", 118.),
+            ("footer", "Footer", 84.),
+        ]
+        .into_iter()
+        .map(|(surface, label, width)| {
+            let (x, y) = panels.take(width);
+            (x, y, surface, label, width)
+        })
+        .collect()
     } else {
         Vec::new()
     };
@@ -356,7 +360,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let oy = ((canvas_h - SCROLLBAR - viewport_h as f32 * zoom) / 2.).max(0.) - py;
     // The cursor grid and the rolled-up strip say what is under the pointer
     // even with guides off: their cells are not otherwise recognisable.
-    let hinted = view.guides || matches!(view.panel.as_str(), "cursors" | "shade");
+    let hinted = view.guides || matches!(view.panel.as_str(), "cursors" | "shade" | "footer");
     let guide_rects = Rc::new(if hinted && drawing {
         shared
             .lock()
@@ -1846,10 +1850,26 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                                     },
                                 );
                             }
+                            {
+                                let target = d.clone();
+                                ListChoice(
+                                    "The playlist footer      325 and 400 wide".into(),
+                                    12.,
+                                    160.,
+                                    drawer_w - 24.,
+                                    current_panel == "footer",
+                                    move || {
+                                        open_surface(&target, "footer");
+                                        live.set(false);
+                                        review.set(false);
+                                        pan.set([0, 0]);
+                                    },
+                                );
+                            }
                             let report = d.lock().unwrap().cursors_report();
                             let drawn = report["drawn"].as_u64().unwrap_or(0);
                             let of = report["of"].as_u64().unwrap_or(0);
-                            let mut row = 160.;
+                            let mut row = 198.;
                             {
                                 let target = d.clone();
                                 ListChoice(

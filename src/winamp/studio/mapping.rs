@@ -69,10 +69,68 @@ fn cursor_panel_size() -> (u32, u32) {
     )
 }
 
+/// The playlist footers the footer surface shows, one row each: how wide the
+/// playlist is, and where its visualizer panel starts, if it has one. At 325
+/// two footer tiles meet each other and both corners; at 400 the visualizer
+/// panel meets a tile and the right corner. Between them every seam Winamp
+/// shows at any width is on the surface.
+pub const FOOTER_ROWS: [(u32, Option<u32>); 2] = [(325, None), (400, Some(175))];
+pub const FOOTER_HEIGHT: u32 = 38;
+
+/// What the player writes and where it listens on each footer row: the
+/// readouts and buttons of the left corner stay put, those of the right one
+/// move with the playlist's right edge.
+pub fn footer_guides() -> Vec<super::guides::Guide> {
+    let mut out = Vec::new();
+    for (row, (width, _)) in FOOTER_ROWS.into_iter().enumerate() {
+        let y = row as u32 * FOOTER_HEIGHT;
+        let shift = width - 275;
+        let runtime = [
+            ("TIME / TOTAL", [132 + shift, y + 10, 72, 8]),
+            ("ELAPSED", [192 + shift, y + 24, 30, 8]),
+        ];
+        let hits = [
+            ("ADD", [10, y + 7, 28, 18]),
+            ("REM", [39, y + 7, 28, 18]),
+            ("SEL", [69, y + 7, 28, 18]),
+            ("MISC", [99, y + 7, 36, 18]),
+            ("LIST", [228 + shift, y + 7, 28, 18]),
+            ("PREV", [139 + shift, y + 25, 8, 8]),
+            ("PLAY", [148 + shift, y + 25, 8, 8]),
+            ("PAUSE", [157 + shift, y + 25, 8, 8]),
+            ("STOP", [166 + shift, y + 25, 8, 8]),
+            ("NEXT", [175 + shift, y + 25, 8, 8]),
+            ("EJECT", [185 + shift, y + 25, 12, 8]),
+        ];
+        for (is_hit, (name, rect)) in runtime
+            .into_iter()
+            .map(|g| (false, g))
+            .chain(hits.into_iter().map(|g| (true, g)))
+        {
+            out.push(super::guides::Guide {
+                id: format!(
+                    "{}.footer.{width}.{name}",
+                    if is_hit { "hit" } else { "runtime" }
+                ),
+                label: format!("{name} · {width}"),
+                sheet: "pledit.bmp".into(),
+                rect,
+                source: rect,
+                variant: 0,
+                active: true,
+                runtime: !is_hit,
+                hit: is_hit,
+            });
+        }
+    }
+    out
+}
+
 pub fn size(panel: &str) -> (u32, u32) {
     match panel {
         "playlist" => (275, 261),
         "shade" => (275, MAIN_SHADE_HEIGHT as u32),
+        "footer" => (400, FOOTER_HEIGHT * FOOTER_ROWS.len() as u32),
         "cursors" => cursor_panel_size(),
         _ => (275, 116),
     }
@@ -353,6 +411,56 @@ pub fn layers(v: &View) -> Vec<Layer> {
                 58,
                 None,
             );
+        }
+        "footer" => {
+            for (row, (width, visualizer)) in FOOTER_ROWS.into_iter().enumerate() {
+                let y = row as u32 * FOOTER_HEIGHT;
+                let name = if visualizer.is_some() {
+                    "wide"
+                } else {
+                    "narrow"
+                };
+                for (i, x) in [125, 150].into_iter().enumerate() {
+                    add(
+                        &format!("{name}.tile.{i}"),
+                        "pledit",
+                        vec![PLAYLIST_BOTTOM_TILE],
+                        0,
+                        x,
+                        y,
+                        None,
+                    );
+                }
+                if let Some(x) = visualizer {
+                    add(
+                        &format!("{name}.visualizer"),
+                        "pledit",
+                        vec![PLAYLIST_VISUALIZER_BG],
+                        0,
+                        x,
+                        y,
+                        None,
+                    );
+                }
+                add(
+                    &format!("{name}.left"),
+                    "pledit",
+                    vec![PLAYLIST_BOTTOM_LEFT_CORNER],
+                    0,
+                    0,
+                    y,
+                    None,
+                );
+                add(
+                    &format!("{name}.right"),
+                    "pledit",
+                    vec![PLAYLIST_BOTTOM_RIGHT_CORNER],
+                    0,
+                    width - 150,
+                    y,
+                    None,
+                );
+            }
         }
         "shade" => {
             add(
