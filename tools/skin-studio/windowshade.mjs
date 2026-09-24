@@ -4,7 +4,13 @@
 // unfocused, the unroll button, the small seek track with its thumb, and the
 // five cursors the rolled-up window reads.
 //
-//   node tools/skin-studio/windowshade.mjs <skin>
+//   node tools/skin-studio/windowshade.mjs <skin> [--replace] [--save]
+//
+// The strip follows Winamp's layout. Winamp draws its visualizer at 79,5,
+// 38x5, over the art while music plays, so the name sits left of it and the
+// visualizer gets a slot of its own in the skin's visualizer background, the
+// way the time gets its window. --replace draws it again over a project that
+// already has a Windowshade layer.
 //
 // Everything is drawn through Studio's own pen, on a paint layer of its own,
 // from the skin's own pixels: the strip keeps the title bar's rim and corners
@@ -22,6 +28,8 @@ const HEIGHT = 14;
 
 // Where the player puts things on the strip; see src/winamp/sprites.rs.
 const TIME_WINDOW = [126, 3, 33, 8];
+// Framed like the time window around the visualizer's field at 79,5, 38x5.
+const VIS_SLOT = [78, 3, 40, 8];
 // The panel the mini transport sits on where the art behind it is busy.
 const TRANSPORT_PLATE = [167, 3, 58, 9];
 const COLON_X = 142;
@@ -81,10 +89,11 @@ function put(target, x, y, rows, colour) {
 // The strip from a title row: its rim and corners, a clean body, and the
 // window closed off underneath. `look` says which title columns are plain
 // glass and where the wordmark is.
-function strip(title, look, font) {
+function strip(title, look, font, visGround) {
   const out = look.plain == null ? artStrip(title, look) : glassStrip(title, look);
   const [tx, ty, tw, th] = TIME_WINDOW;
   inset(out, tx, ty, tw, th, look.outline, font.ground);
+  inset(out, ...VIS_SLOT, look.outline, visGround);
   out[5][COLON_X] = font.ink;
   out[7][COLON_X] = font.ink;
   if (look.plate) inset(out, ...TRANSPORT_PLATE, look.outline, font.ground);
@@ -229,7 +238,9 @@ export async function windowshade(look) {
   const digit = await lift('text.bmp', [0, 6, 5, 6]);
   const font = { ground: digit[5][0], ink: digit.flat().find(colour => colour !== digit[5][0]) };
 
-  const focused = strip(title, look, font);
+  const options = await call('studio_options', {});
+  const visGround = options.visualizer_colors?.[0] ?? font.ground;
+  const focused = strip(title, look, font, visGround);
   // Unfocused, the title's own dimming carries over colour for colour.
   const dim = new Map();
   title.forEach((row, y) => row.forEach((colour, x) => {
@@ -282,8 +293,8 @@ export const SILVERPLAY = {
     return [...left, ...right];
   },
   ornament: out => {
-    for (let x = 48; x <= 111; x++) out[8][x] = '#32627b';
-    put(out, 114, 6, ['..#..', '.###.', '#####', '.###.', '..#..'], '#508ea3');
+    for (let x = 48; x <= 68; x++) out[8][x] = '#32627b';
+    put(out, 70, 6, ['..#..', '.###.', '#####', '.###.', '..#..'], '#508ea3');
   },
 };
 
@@ -296,25 +307,28 @@ export const SKINS = {
     { outline: '#9281ab', icon: '#f6efd6', slotLight: '#3d3158', thumbEdge: '#9281ab', thumbBody: '#e2d9be', thumbLight: '#f6efd6', plate: true },
     {
       project: 'Catamp Feral Night',
-      fill: [[126, 244, 172, 244]],
-      move: [{ rect: [137, 0, 35, 14], to: [90, 0], inks: ['#f6efd6', '#e2d9be', '#8d7f83', '#4d3d67', '#4f3c72'] }],
+      fill: [[78, 244, 172, 244]],
+      move: [{ rect: [137, 0, 35, 14], to: [41, 0], inks: ['#f6efd6', '#e2d9be', '#8d7f83', '#4d3d67', '#4f3c72'] }],
     }),
   'cat-scan': artLook(
     { outline: '#93ab9d', icon: '#c3d8c8', slotLight: '#2f3b3d', thumbEdge: '#93ab9d', thumbBody: '#c3d8c8', thumbLight: '#e3f2e6', plate: true },
     {
       project: 'Catamp Cat Scan',
-      fill: [[98, 126, 99, 107], [126, 244, 240, 262]],
+      // The display keeps the skin's name and its end cap, left of the
+      // visualizer.
+      fill: [[73, 244, 240, 262]],
       move: [
-        { rect: [211, 0, 14, 14], to: [100, 0] },
-        { rect: [232, 0, 8, 14], to: [118, 0] },
+        { rect: [53, 0, 45, 14], to: [20, 0] },
+        { rect: [232, 0, 8, 14], to: [65, 0] },
       ],
     }),
   seance: artLook(
     { outline: '#e8d3ae', icon: '#e8d3ae', slotLight: '#3a262c', thumbEdge: '#9d95ad', thumbBody: '#e8d3ae', thumbLight: '#efd481', plate: true },
     {
       project: 'Catamp Seance',
-      heal: [{ rect: [95, 3, 85, 11], inks: ['#e8d3ae', '#9d95ad', '#585069'] }],
-      move: [{ rect: [141, 4, 35, 7], to: [76, 4], inks: ['#e8d3ae'] }],
+      // Two candles stay; the third gives way to the name.
+      fill: [[40, 180, 55, 70]],
+      move: [{ rect: [141, 4, 35, 7], to: [41, 4], inks: ['#e8d3ae'] }],
     }),
   salvage: artLook(
     { outline: '#2a382c', icon: '#dcefeb', slotLight: '#3c3a2b', thumbEdge: '#6e694d', thumbBody: '#cee5c6', thumbLight: '#dcefeb', plate: true },
@@ -323,25 +337,29 @@ export const SKINS = {
       // The letters cast a shadow in the grass's own green, so the old name
       // is refilled from the grunge beside it rather than healed.
       fill: [[86, 182, 188, 238]],
-      move: [{ rect: [138, 3, 41, 8], to: [50, 3], inks: ['#dcefeb', '#2a382c'] }],
+      move: [{ rect: [138, 3, 41, 8], to: [30, 3], inks: ['#dcefeb', '#2a382c'] }],
     }),
   freefall: artLook(
     { outline: '#0b1120', icon: '#cdf3ff', slotLight: '#44598a', thumbEdge: '#44598a', thumbBody: '#6d84bd', thumbLight: '#cdf3ff', plate: false },
     {
       project: 'Catamp Freefall',
+      // The name takes the place of the falling marks.
+      fill: [[40, 78, 20, 40]],
       heal: [{ rect: [94, 4, 78, 7], inks: ['#cdf3ff'] }],
-      move: [{ rect: [131, 5, 39, 5], to: [80, 5], inks: ['#cdf3ff'] }],
+      move: [{ rect: [131, 5, 39, 5], to: [37, 5], inks: ['#cdf3ff'] }],
     }),
   catnip: artLook(
     { outline: '#493448', icon: '#493448', slotLight: '#e58b95', thumbEdge: '#493448', thumbBody: '#e58b95', thumbLight: '#ffc0b7', plate: false },
     {
       project: 'Catamp Catnip',
+      // The station's name takes the place of LATE AGAIN.
       heal: [
+        { rect: [14, 2, 44, 11], inks: ['#493448'] },
         { rect: [116, 2, 54, 11], inks: ['#493448', '#e58b95'] },
         { rect: [84, 3, 28, 11], inks: ['#493448', '#71988e'] },
         { rect: [200, 3, 15, 8], inks: ['#eaa365', '#71988e'] },
       ],
-      move: [{ rect: [118, 2, 50, 11], to: [68, 2], inks: ['#493448', '#e58b95'] }],
+      move: [{ rect: [118, 2, 50, 11], to: [16, 2], inks: ['#493448', '#e58b95'] }],
     }),
   'moon-garden': artLook(
     { outline: '#354c5f', icon: '#ecedde', slotLight: '#212a45', thumbEdge: '#354c5f', thumbBody: '#f4cf8d', thumbLight: '#f5dcc1', plate: true },
@@ -349,24 +367,34 @@ export const SKINS = {
       project: 'Catamp Moon Garden',
       // The moon rises on a patch of its own sky beside the leaves, and
       // leaves sky where it stood.
-      heal: [{ rect: [112, 4, 66, 10], inks: ['#f4cf8d', '#395963', '#c4b5be'] }],
-      fill: [[100, 126, 176, 196], [200, 244, 176, 196]],
-      move: [{ rect: [206, 0, 28, 14], to: [97, 0] }],
+      heal: [{ rect: [126, 4, 52, 10], inks: ['#f4cf8d', '#395963', '#c4b5be'] }],
+      fill: [[78, 126, 187, 194], [200, 244, 176, 196]],
+      move: [{ rect: [206, 0, 28, 14], to: [50, 0] }],
     }),
   'midnight-snack': artLook(
     { outline: '#3b212f', icon: '#fae5b1', slotLight: '#3d2331', thumbEdge: '#3b212f', thumbBody: '#f4bd68', thumbLight: '#fae5b1', plate: true },
     {
       project: 'Catamp Midnight Snack',
+      // MIDNIGHT is as much of the name as fits between the cat and the
+      // visualizer; the candle gives way to it.
+      fill: [[43, 78, 44, 56]],
       heal: [{ rect: [76, 3, 62, 7], inks: ['#f4bd68'] }],
-      move: [{ rect: [80, 4, 56, 5], to: [66, 4], inks: ['#f4bd68'] }],
+      move: [{ rect: [80, 4, 32, 5], to: [45, 4], inks: ['#f4bd68'] }],
     }),
   'purr-chaos': artLook(
     { outline: '#25352f', icon: '#25352f', slotLight: '#bed1aa', thumbEdge: '#304b36', thumbBody: '#bed1aa', thumbLight: '#fff0c4', plate: false },
     {
       project: 'Catamp Purr Chaos Font Fixed',
+      // NO THOUGHTS, closer together, where the leaf was: the options
+      // button covers the leaf's stem anyway.
+      fill: [[15, 110, 28, 33]],
       heal: [
         { rect: [110, 2, 65, 9], inks: ['#25352f'] },
         { rect: [205, 2, 25, 10], inks: ['#775b44'] },
+      ],
+      move: [
+        { rect: [35, 3, 11, 7], to: [16, 3], inks: ['#25352f'] },
+        { rect: [53, 3, 47, 7], to: [30, 3], inks: ['#25352f'] },
       ],
     }),
 };
@@ -378,6 +406,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const root = new URL('../../', import.meta.url).pathname;
   const project = `${root}assets/skins/${look.project}`;
   await call('studio_project', { action: 'open', path: `${project}.cstudio`, discard: true });
+  if (flags.includes('--replace')) {
+    const status = await call('studio_status', {});
+    for (const plane of status.paint_layers.layers.filter(plane => plane.name === 'Windowshade')) {
+      await call('studio_layers', { action: 'delete', id: plane.id });
+    }
+  }
   await windowshade(look);
   if (flags.includes('--save')) {
     await call('studio_project', { action: 'save', path: `${project}.cstudio` });

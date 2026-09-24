@@ -10,6 +10,9 @@ pub struct Guide {
     pub active: bool,
     pub runtime: bool,
     pub hit: bool,
+    /// The player paints the whole rectangle while music plays, as it does
+    /// the visualizer's field: the art under it shows only when stopped.
+    pub opaque: bool,
 }
 pub fn intersection(a: [u32; 4], b: [u32; 4]) -> Option<[u32; 4]> {
     let x = a[0].max(b[0]);

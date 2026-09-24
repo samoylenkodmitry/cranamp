@@ -31,6 +31,17 @@ impl Layer {
 /// Where the rolled-up window writes the song's time in the text font, over
 /// the strip's artwork.
 pub const SHADE_TIME: [u32; 4] = [POS_SHADE_TIME.0 as u32 + 7, POS_SHADE_TIME.1 as u32, 23, 6];
+/// Where the rolled-up main window draws its visualizer, 38x5, as Winamp's
+/// does: over whatever the strip has there while music plays.
+pub const SHADE_SPECTRUM: [u32; 4] = [
+    POS_SHADE_VISUALIZER.0 as u32,
+    POS_SHADE_VISUALIZER.1 as u32,
+    crate::winamp::vis::SHADE_WIDTH as u32,
+    crate::winamp::vis::SHADE_HEIGHT as u32,
+];
+/// Where the playlist draws its visualizer in the footer's visualizer panel
+/// while the main window is closed: 2,12 into the panel, 72 columns shown.
+pub const FOOTER_SPECTRUM: [u32; 4] = [2, 12, 72, 16];
 
 /// The mini transport the rolled-up strip's artwork draws, with the areas the
 /// player answers clicks in.
@@ -82,13 +93,17 @@ pub const FOOTER_HEIGHT: u32 = 38;
 /// move with the playlist's right edge.
 pub fn footer_guides() -> Vec<super::guides::Guide> {
     let mut out = Vec::new();
-    for (row, (width, _)) in FOOTER_ROWS.into_iter().enumerate() {
+    for (row, (width, visualizer)) in FOOTER_ROWS.into_iter().enumerate() {
         let y = row as u32 * FOOTER_HEIGHT;
         let shift = width - 275;
-        let runtime = [
+        let mut runtime = vec![
             ("TIME / TOTAL", [132 + shift, y + 10, 72, 8]),
             ("ELAPSED", [192 + shift, y + 24, 30, 8]),
         ];
+        if let Some(panel) = visualizer {
+            let [dx, dy, w, h] = FOOTER_SPECTRUM;
+            runtime.push((super::model::SPECTRUM, [panel + dx, y + dy, w, h]));
+        }
         let hits = [
             ("ADD", [10, y + 7, 28, 18]),
             ("REM", [39, y + 7, 28, 18]),
@@ -120,6 +135,7 @@ pub fn footer_guides() -> Vec<super::guides::Guide> {
                 active: true,
                 runtime: !is_hit,
                 hit: is_hit,
+                opaque: !is_hit && name == super::model::SPECTRUM,
             });
         }
     }

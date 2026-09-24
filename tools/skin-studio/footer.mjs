@@ -6,7 +6,9 @@
 //   the visualizer panel, pledit (205,0,75,38), beside the right corner from
 //   350 wide.
 //
-//   node tools/skin-studio/footer.mjs <skin> [--save]
+//   node tools/skin-studio/footer.mjs <skin> [--replace] [--save]
+//
+// --replace draws the Footer layer again in place of the one the skin has.
 //
 // Both continue the footer the skin already has, so a wider playlist reads as
 // the same footer with more room in it. Each skin says where the ground
@@ -21,10 +23,13 @@
 //           quiet spans, a two-pixel dither kept as a dither: for speckled and
 //           dotted grounds a repeated column would streak.
 //
-// Cranamp draws no mini visualizer, so the visualizer panel is more of the
-// same ground rather than a screen that would stay dark. The default skin,
-// assets/winamp.wsz, has Winamp's own tile and panel already and is left as
-// it is.
+// While the main window is closed, Winamp draws its mini visualizer on the
+// panel: a 72x16 field at +2,+12, painted in VISCOLOR.TXT's colour 0 and
+// dotted. The panel is the ground with a screen let into it there, a
+// one-pixel edge in the colour of the skin's own footer displays around the
+// field, so the visualizer appears in a screen rather than on the ground.
+// The default skin, assets/winamp.wsz, has Winamp's own tile and panel
+// already and is left as it is.
 import { call } from './moonlit.mjs';
 
 const TILE = [179, 0, 25, 38];
@@ -32,19 +37,21 @@ const PANEL = [205, 0, 75, 38];
 const LEFT = [0, 72, 125, 38];
 const RIGHT = [126, 72, 150, 38];
 const SEAM = 125;
+/// The screen in the panel: the mini visualizer's field and its edge.
+const SCREEN = [1, 11, 74, 18];
 
 export const SKINS = {
-  silverplay: { project: 'Catamp Silverplay', ground: { column: SEAM } },
-  'feral-night': { project: 'Catamp Feral Night', ground: { noise: [[114, 128]] } },
-  'cat-scan': { project: 'Catamp Cat Scan', ground: { noise: [[2, 10], [260, 273]] } },
-  seance: { project: 'Catamp Seance', ground: { column: SEAM } },
-  salvage: { project: 'Catamp Salvage', ground: { noise: [[2, 10], [258, 273]] } },
-  freefall: { project: 'Catamp Freefall', ground: { column: SEAM } },
+  silverplay: { project: 'Catamp Silverplay', ground: { column: SEAM }, screen: '#102b40' },
+  'feral-night': { project: 'Catamp Feral Night', ground: { noise: [[114, 128]] }, screen: '#231a39' },
+  'cat-scan': { project: 'Catamp Cat Scan', ground: { noise: [[2, 10], [260, 273]] }, screen: '#080f10' },
+  seance: { project: 'Catamp Seance', ground: { column: SEAM }, screen: '#0f0a17' },
+  salvage: { project: 'Catamp Salvage', ground: { noise: [[2, 10], [258, 273]] }, screen: '#112022' },
+  freefall: { project: 'Catamp Freefall', ground: { column: SEAM }, screen: '#33456e' },
   // The cat's body crosses the seam, so the cat grows longer.
-  catnip: { project: 'Catamp Catnip', ground: { column: SEAM - 1 } },
-  'moon-garden': { project: 'Catamp Moon Garden', ground: { plain: SEAM, below: 4, colour: '#171e32' } },
-  'midnight-snack': { project: 'Catamp Midnight Snack', ground: { column: SEAM } },
-  'purr-chaos': { project: 'Catamp Purr Chaos Font Fixed', ground: { column: SEAM } },
+  catnip: { project: 'Catamp Catnip', ground: { column: SEAM - 1 }, screen: '#493448' },
+  'moon-garden': { project: 'Catamp Moon Garden', ground: { plain: SEAM, below: 4, colour: '#171e32' }, screen: '#756951' },
+  'midnight-snack': { project: 'Catamp Midnight Snack', ground: { column: SEAM }, screen: '#3b212f' },
+  'purr-chaos': { project: 'Catamp Purr Chaos Font Fixed', ground: { column: SEAM }, screen: '#365247' },
 };
 
 async function lift(sheet, rect) {
@@ -115,6 +122,16 @@ export async function footer(look) {
   const whole = left.map((row, y) => row.concat(right[y]));
   const tile = ground(whole, look.ground, TILE[2], 1);
   const panel = ground(whole, look.ground, PANEL[2], 2);
+  const options = await call('studio_options', {});
+  const field = options.visualizer_colors?.[0];
+  if (!field) throw new Error('the skin has no VISCOLOR.TXT colour 0 for the screen');
+  const [sx, sy, sw, sh] = SCREEN;
+  for (let y = sy; y < sy + sh; y++) {
+    for (let x = sx; x < sx + sw; x++) {
+      const edge = y === sy || y === sy + sh - 1 || x === sx || x === sx + sw - 1;
+      panel[y][x] = edge ? look.screen : field;
+    }
+  }
   await call('studio_atlas', { sheet: 'pledit.bmp' });
   await call('studio_draw', {
     label: 'Playlist footer tile and visualizer panel',
@@ -134,6 +151,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (!look) throw new Error(`skin is one of ${Object.keys(SKINS).join(', ')}`);
   const root = new URL('../../', import.meta.url).pathname;
   await call('studio_project', { action: 'open', path: `${root}assets/skins/${look.project}.cstudio`, discard: true });
+  if (flags.includes('--replace')) {
+    const status = await call('studio_status', {});
+    for (const plane of status.paint_layers.layers.filter(plane => plane.name === 'Footer')) {
+      await call('studio_layers', { action: 'delete', id: plane.id });
+    }
+  }
   await footer(look);
   if (flags.includes('--save')) {
     const project = `${root}assets/skins/${look.project}`;

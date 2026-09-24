@@ -39,7 +39,7 @@ impl Document {
                 g.runtime
                     && self.view.panel != "atlas"
                     && intersects(rect, g.rect)
-                    && (g.label != "SPECTRUM" || self.view.playback != 0)
+                    && (!g.opaque || self.view.playback != 0)
             })
             .collect();
         let mut targets = BTreeMap::<String, Value>::new();
@@ -70,10 +70,8 @@ impl Document {
                 let top = layers.iter().rev().find(|l| l.map(xx, yy).is_some());
                 let under_runtime = runtime.iter().any(|g| contains(g.rect, xx, yy));
                 // Classic VISCOLOR backgrounds are opaque, including magenta.
-                let opaque_runtime = spectrum_opaque
-                    && runtime
-                        .iter()
-                        .any(|g| g.label == "SPECTRUM" && contains(g.rect, xx, yy));
+                let opaque_runtime =
+                    spectrum_opaque && runtime.iter().any(|g| g.opaque && contains(g.rect, xx, yy));
                 let palette_only = match self.view.panel.as_str() {
                     "canvas" => contains([12, 252, 243, sh.saturating_sub(290)], xx, yy),
                     "playlist" => contains([12, 20, 243, sh.saturating_sub(58)], xx, yy),
@@ -127,12 +125,12 @@ impl Document {
                 "D":"Paintable bitmap; no runtime footprint at this pixel.",
                 "S":"Paintable sprite with states or repeated cells. Inspect variants and shared destinations.",
                 "R":"Paintable bitmap beneath a runtime footprint. Only live content may cover the artwork; this is NOT an inaccessible region.",
-                "O":"Paintable bitmap covered by the solid VISCOLOR spectrum background in this playback state. Stopping reveals the source artwork.",
+                "O":"Paintable bitmap covered by the visualizer's solid VISCOLOR field in this playback state: the main window's, the rolled-up strip's at 79,5, or the playlist footer's panel with the main window closed. Stopping reveals the source artwork.",
                 "P":"No bitmap source: playlist color fill. Use PLEDIT.TXT colors.",
                 "X":"No mapped bitmap source on this surface.",
             },
             "targets":targets.into_values().collect::<Vec<_>>(),
-            "runtime_footprints":runtime.iter().map(|g|json!({"id":g.id,"rect":g.rect,"opaque_background":spectrum_opaque && g.label=="SPECTRUM"})).collect::<Vec<_>>(),
+            "runtime_footprints":runtime.iter().map(|g|json!({"id":g.id,"rect":g.rect,"opaque_background":spectrum_opaque && g.opaque})).collect::<Vec<_>>(),
             "note":"Coverage describes source ownership, independent of selection, clip, masks and locked paint planes. Runtime footprints are not exclusion masks: inspect the exact pixels, keep live content legible, and verify the actual GPU player. Bitmap fonts and shared cells may affect other states or locations.",
         });
         if rows {
