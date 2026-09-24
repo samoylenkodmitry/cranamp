@@ -66,6 +66,41 @@ fn a_key_held_with_a_system_modifier_is_left_to_the_platform() {
 }
 
 #[test]
+fn alt_with_w_e_and_g_opens_and_closes_winamps_windows() {
+    let alt = |key| {
+        KeyEvent::key_down_with_modifiers(
+            key,
+            "",
+            Modifiers {
+                alt: true,
+                ..Modifiers::NONE
+            },
+        )
+    };
+    assert_eq!(window_key(&alt(KeyCode::W)), Some(WinampWindowKey::Main));
+    assert_eq!(
+        window_key(&alt(KeyCode::E)),
+        Some(WinampWindowKey::Playlist)
+    );
+    assert_eq!(
+        window_key(&alt(KeyCode::G)),
+        Some(WinampWindowKey::Equalizer)
+    );
+    assert_eq!(window_key(&alt(KeyCode::Q)), None);
+    assert_eq!(window_key(&press(KeyCode::W)), None, "W alone is not Alt+W");
+    let ctrl_alt = KeyEvent::key_down_with_modifiers(
+        KeyCode::W,
+        "",
+        Modifiers {
+            alt: true,
+            ctrl: true,
+            ..Modifiers::NONE
+        },
+    );
+    assert_eq!(window_key(&ctrl_alt), None, "Ctrl+Alt+W is the platform's");
+}
+
+#[test]
 fn keys_that_are_not_winamp_keys_pass_through() {
     assert_eq!(winamp_key(&press(KeyCode::Q)), None);
     assert_eq!(winamp_key(&press(KeyCode::Space)), None);

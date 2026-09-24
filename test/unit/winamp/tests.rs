@@ -15,63 +15,6 @@ fn remove_playlist_track_at(state: &mut WinampState, index: usize) -> bool {
     true
 }
 
-fn visualizer_bitmap(
-    playing: bool,
-    bands: audio::VisualizerBands,
-    viscolor: VisColor,
-) -> ImageBitmap {
-    let width = VISUALIZER_WIDTH as u32;
-    let height = VISUALIZER_HEIGHT as u32;
-    let bg = viscolor.background();
-    let mut pixels = vec![0u8; width as usize * height as usize * 4];
-    for pixel in pixels.as_chunks_mut::<4>().0 {
-        *pixel = bg;
-    }
-    if !playing {
-        return ImageBitmap::from_rgba8(width, height, pixels)
-            .expect("rendered visualizer bitmap should be valid");
-    }
-    let max_segments = 5;
-    let bar_width = 3;
-    let bar_pitch = 4;
-    let segment_height = 2;
-    let segment_pitch = 3;
-    for bar in 0..VISUALIZER_BARS {
-        let value = visualizer_band_height(bands, bar);
-        let x = (bar * bar_pitch) as u32;
-        for segment in 0..max_segments {
-            let threshold = ((segment + 1) as f32 / max_segments as f32) * VISUALIZER_HEIGHT;
-            let color =
-                visualizer_segment_rgba(segment, max_segments, value >= threshold, &viscolor);
-            let y = height as i32 - ((segment + 1) * segment_pitch) as i32 + 1;
-            fill_visualizer_rect(
-                &mut pixels,
-                width,
-                height,
-                (x, y.max(0) as u32, bar_width, segment_height),
-                color,
-            );
-        }
-    }
-    ImageBitmap::from_rgba8(width, height, pixels)
-        .expect("rendered visualizer bitmap should be valid")
-}
-fn fill_visualizer_rect(
-    pixels: &mut [u8],
-    width: u32,
-    height: u32,
-    rect: (u32, u32, u32, u32),
-    color: [u8; 4],
-) {
-    let (x, y, rect_width, rect_height) = rect;
-    for yy in y..(y + rect_height).min(height) {
-        for xx in x..(x + rect_width).min(width) {
-            let offset = ((yy * width + xx) * 4) as usize;
-            pixels[offset..offset + 4].copy_from_slice(&color);
-        }
-    }
-}
-
 /// Every skin Cranamp ships draws its own pointers. A bundled skin with no
 /// cursors falls back to the desktop arrow, which is the one part of the
 /// window that would not belong to the skin.
@@ -494,54 +437,7 @@ fn marquee_text_ping_pongs_long_titles() {
         "SHORT"
     );
 }
-#[test]
-fn visualizer_bitmap_contains_bright_bars() {
-    let bitmap = visualizer_bitmap(
-        true,
-        [0.8; audio::VISUALIZER_BAND_COUNT],
-        VisColor::default(),
-    );
-    assert_eq!(bitmap.width(), VISUALIZER_WIDTH as u32);
-    assert_eq!(bitmap.height(), VISUALIZER_HEIGHT as u32);
-    assert!(bitmap
-        .pixels()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .any(|pixel| pixel[1] > 180 && pixel[3] == 255));
-}
-#[test]
-fn visualizer_bitmap_is_blank_when_stopped() {
-    let bitmap = visualizer_bitmap(
-        false,
-        [0.8; audio::VISUALIZER_BAND_COUNT],
-        VisColor::default(),
-    );
-    assert!(bitmap
-        .pixels()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .all(|pixel| *pixel == [0, 0, 0, 255]));
-}
 
-#[test]
-fn keyed_visualizer_background_leaves_art_visible_and_keeps_lit_bars() {
-    let mut palette = VisColor::default();
-    palette.0[0] = [255, 0, 255, 255];
-    let stopped = visualizer_bitmap(false, [0.8; audio::VISUALIZER_BAND_COUNT], palette);
-    assert!(stopped
-        .pixels()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .all(|p| *p == [255, 0, 255, 255]));
-    let playing = visualizer_bitmap(true, [0.5; audio::VISUALIZER_BAND_COUNT], palette);
-    let pixels = playing.pixels().as_chunks::<4>().0;
-    assert!(pixels.iter().all(|p| p[3] == 255));
-    assert!(pixels.iter().any(|p| p[3] == 255 && p[1] > 180));
-    assert!(pixels.contains(&[255, 0, 255, 255]));
-}
 #[test]
 fn every_bundled_skin_loads_from_the_bytes_compiled_into_the_binary() {
     for skin in BUNDLED_SKINS {
@@ -595,17 +491,6 @@ fn a_bundled_id_survives_saving_but_is_never_handed_to_the_studio() {
     }
 }
 #[test]
-fn visualizer_uses_viscolor_palette_for_lit_bars() {
-    let palette = VisColor([[5; 4]; 24]);
-    let bitmap = visualizer_bitmap(true, [1.0; audio::VISUALIZER_BAND_COUNT], palette);
-    assert!(bitmap
-        .pixels()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .all(|pixel| *pixel == [5, 5, 5, 5]));
-}
-#[test]
 fn player_state_config_round_trips_settings_and_playlist() {
     let mut eq_values = [0.5; 11];
     eq_values[0] = 0.1;
@@ -616,6 +501,8 @@ fn player_state_config_round_trips_settings_and_playlist() {
         eq_visible: false,
         playlist_visible: false,
         main_shaded: true,
+        main_visible: false,
+        vis_mode: vis::VisMode::Oscilloscope,
         eq_enabled: false,
         eq_auto: true,
         eq_values,
@@ -1302,4 +1189,58 @@ fn test_track_with_path(title: &str, path: &str) -> Track {
         path: Some(path.to_string()),
         duration_seconds: None,
     }
+}
+
+#[test]
+fn the_visualizer_paints_its_field_dots_and_bars_in_the_skins_colours() {
+    let mut viscolor = VisColor([[9, 9, 9, 255]; 24]);
+    viscolor.0[1] = [1, 1, 1, 255];
+    viscolor.0[17] = [17, 17, 17, 255];
+    let mut analyzer = vis::Analyzer::default();
+    analyzer.advance(&[1.0; vis::BARS], 1);
+    let background = [255, 0, 255, 255];
+    let rects = vis_rects(
+        &analyzer.runs(),
+        &viscolor,
+        background,
+        vis::Field::Full,
+        vis::WIDTH,
+    );
+    assert_eq!(rects[0].1, background, "the field is the skin's background");
+    assert_eq!(rects[0].0.width, 76.0);
+    assert!(rects
+        .iter()
+        .any(|(rect, colour)| rect.width == 1.0 && *colour == [1, 1, 1, 255]));
+    assert!(rects
+        .iter()
+        .any(|(rect, colour)| rect.y == 15.0 && rect.width == 3.0 && *colour == [17, 17, 17, 255]));
+
+    let mini = vis_rects(
+        &analyzer.runs(),
+        &viscolor,
+        background,
+        vis::Field::Full,
+        72,
+    );
+    assert_eq!(mini[0].0.width, 72.0);
+    assert!(
+        mini.iter().all(|(rect, _)| rect.x + rect.width <= 72.0),
+        "the playlist's panel shows 72 of the columns"
+    );
+}
+
+#[test]
+fn alt_w_closes_the_main_window_but_never_the_last_one_open() {
+    let mut state = WinampState::default();
+    toggle_winamp_window(&mut state, keys::WinampWindowKey::Main);
+    assert!(!state.main_visible);
+    state.eq_visible = false;
+    toggle_winamp_window(&mut state, keys::WinampWindowKey::Playlist);
+    assert!(
+        state.main_visible,
+        "closing the playlist too brings the main window back"
+    );
+    state.playlist_visible = false;
+    toggle_winamp_window(&mut state, keys::WinampWindowKey::Main);
+    assert!(state.main_visible, "the main window alone stays open");
 }

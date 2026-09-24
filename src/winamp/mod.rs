@@ -15,6 +15,7 @@ pub mod skin;
 mod sprites;
 #[cfg(not(target_os = "ios"))]
 pub mod studio;
+mod vis;
 use crate::audio::{self, Track};
 #[cfg(target_os = "android")]
 use cranpose::{rememberAndroidHostWindowState, AndroidHostWindowState};
@@ -34,7 +35,7 @@ use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
 use cursors::SkinCursor;
 use skin::{load_skin, SkinPalette, VisColor, WinampSkin};
 use sprites::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 #[cfg(target_os = "android")]
@@ -112,6 +113,10 @@ struct WinampState {
     settings_open: bool,
     studio_open: bool,
     main_shaded: bool,
+    /// Winamp's main window can be closed on its own, Alt+W, while the
+    /// equalizer or the playlist stays open.
+    main_visible: bool,
+    vis_mode: vis::VisMode,
     pending_resume: Option<(usize, f32)>,
     eq_values: [f32; 11],
     skin_path: Option<String>,
@@ -158,6 +163,8 @@ impl PartialEq for WinampState {
             && self.settings_open == other.settings_open
             && self.studio_open == other.studio_open
             && self.main_shaded == other.main_shaded
+            && self.main_visible == other.main_visible
+            && self.vis_mode == other.vis_mode
             && self.pending_resume == other.pending_resume
             && self.eq_values == other.eq_values
             && self.skin_path == other.skin_path
@@ -214,6 +221,8 @@ impl Default for WinampState {
             settings_open: false,
             studio_open: false,
             main_shaded: false,
+            main_visible: true,
+            vis_mode: vis::VisMode::default(),
             pending_resume: None,
             eq_values: DEFAULT_EQ_VALUES,
             skin_path: None,
@@ -434,6 +443,10 @@ const PLAYLIST_THUMB_SCROLL_FRAME_MS: u64 = 16;
 const PLAYLIST_SCROLL_HIT_PAD_X: f32 = 8.0;
 /// The square at the playlist's bottom-right corner that resizes the window.
 const PLAYLIST_RESIZE_HANDLE: f32 = 16.0;
+/// Where the playlist's visualizer sits in the footer's visualizer panel, and
+/// how many of the visualizer's columns the panel shows.
+const MINI_VISUALIZER_OFFSET: (f32, f32) = (2.0, 12.0);
+const MINI_VISUALIZER_COLUMNS: usize = 72;
 const DEFAULT_EQ_VALUES: [f32; 11] = [0.5; 11];
 const EQ_ON_BUTTON_HIT_AREA: SpriteRect = (14.0, 18.0, 25.0, 12.0);
 const EQ_AUTO_BUTTON_HIT_AREA: SpriteRect = (40.0, 18.0, 32.0, 12.0);
@@ -669,11 +682,14 @@ impl WinampInlineWindowStates {
                 },
             )
         };
-        let mut windows = vec![rect(
-            InlinePane::Main,
-            MAIN_WIDTH,
-            main_height(snapshot.main_shaded),
-        )];
+        let mut windows = Vec::new();
+        if snapshot.main_visible {
+            windows.push(rect(
+                InlinePane::Main,
+                MAIN_WIDTH,
+                main_height(snapshot.main_shaded),
+            ));
+        }
         if snapshot.eq_visible {
             windows.push(rect(InlinePane::Equalizer, EQ_WIDTH, EQ_HEIGHT));
         }
@@ -687,10 +703,16 @@ impl WinampInlineWindowStates {
     /// grows or shrinks to `height`, and keeps the places.
     fn follow_main_height(&self, snapshot: &WinampState, height: f32) {
         let windows = self.visible(snapshot);
+        let Some(main) = windows
+            .iter()
+            .position(|(pane, _)| *pane == InlinePane::Main)
+        else {
+            return;
+        };
         let rects: Vec<Rect> = windows.iter().map(|(_, rect)| *rect).collect();
         let scale = ui_scale();
-        let delta = scaled(height, scale) - rects[0].height;
-        for index in inline_windows::hanging_below(0, &rects) {
+        let delta = scaled(height, scale) - rects[main].height;
+        for index in inline_windows::hanging_below(main, &rects) {
             let (pane, rect) = windows[index];
             self.position(pane).set(Point::new(rect.x, rect.y + delta));
         }
@@ -2315,14 +2337,18 @@ fn WinampInlineStage(
                     player: state,
                 })
             };
-            MainWindow(
-                skin.clone(),
-                state,
-                skin_state,
-                drag(InlinePane::Main),
-                WinampCloseAction::SetStatus,
-                scale,
-            );
+            // Closed with Alt+W, the main window leaves the others where
+            // they are, as Winamp's did.
+            if state.get().main_visible {
+                MainWindow(
+                    skin.clone(),
+                    state,
+                    skin_state,
+                    drag(InlinePane::Main),
+                    WinampCloseAction::SetStatus,
+                    scale,
+                );
+            }
             if state.get().eq_visible {
                 EqualizerWindow(skin.clone(), state, drag(InlinePane::Equalizer), scale);
             }
@@ -2332,6 +2358,10 @@ fn WinampInlineStage(
                     skin.palette,
                     skin.text.clone(),
                     skin.cursors.clone(),
+                    (
+                        skin.viscolor,
+                        skin.bitmap_mode.spectrum_background(skin.viscolor),
+                    ),
                     state,
                     drag(InlinePane::Playlist),
                     {
@@ -2403,6 +2433,10 @@ fn WinampStackedStage(
                         skin.palette,
                         skin.text.clone(),
                         skin.cursors.clone(),
+                        (
+                            skin.viscolor,
+                            skin.bitmap_mode.spectrum_background(skin.viscolor),
+                        ),
                         state,
                         playlist_drag_target,
                         WinampWindowSize::Fixed(Size::new(
@@ -2597,6 +2631,87 @@ struct WinampWindowPlaces {
     playlist: WinampInitialWindowPosition,
     settings: WinampInitialWindowPosition,
 }
+/// What the stack holds, for setting its panes aside while the main window
+/// is closed.
+#[derive(Clone, Copy, PartialEq)]
+struct StackPanes {
+    main_visible: bool,
+    main_height: f32,
+    eq_shown: bool,
+    eq_docked: bool,
+    playlist_shown: bool,
+    playlist_docked: bool,
+    peer_windows: WinampPeerWindowStates,
+    dock: MutableState<WinampDock>,
+}
+/// Winamp's windows stay where they are when its main window is closed. The
+/// stack draws the main window and the panes docked under it in one window,
+/// so closing it first takes each docked pane out into a window of its own,
+/// in the place it held, and the stack's window goes once it holds nothing.
+/// Opening the main window again puts back the panes still in their places.
+#[composable]
+fn MainWindowClosedAside(panes: StackPanes) {
+    let was_visible = cranpose_core::remember(|| Rc::new(Cell::new(panes.main_visible)))
+        .with(|cell| cell.clone());
+    let reopened = panes.main_visible && !was_visible.get();
+    was_visible.set(panes.main_visible);
+    if panes.main_visible && !reopened {
+        return;
+    }
+    cranpose_core::SideEffect(move || {
+        let StackPanes {
+            main_visible,
+            main_height,
+            eq_shown,
+            eq_docked,
+            playlist_shown,
+            playlist_docked,
+            peer_windows,
+            dock,
+        } = panes;
+        let Some(home) = peer_windows.main.position_non_reactive() else {
+            return;
+        };
+        let eq_slot = Point::new(home.x, home.y + main_height);
+        if main_visible {
+            let mut below = main_height;
+            if eq_shown
+                && !eq_docked
+                && peer_windows
+                    .equalizer
+                    .position_non_reactive()
+                    .is_some_and(|at| pane_came_back_to_its_slot(at, eq_slot))
+            {
+                dock.update(|held| held.dock(WinampPane::Equalizer));
+                below += EQ_HEIGHT;
+            } else if eq_shown && eq_docked {
+                below += EQ_HEIGHT;
+            }
+            let playlist_slot = Point::new(home.x, home.y + below);
+            if playlist_shown
+                && !playlist_docked
+                && peer_windows
+                    .playlist
+                    .position_non_reactive()
+                    .is_some_and(|at| pane_came_back_to_its_slot(at, playlist_slot))
+            {
+                dock.update(|held| held.dock(WinampPane::Playlist));
+            }
+            return;
+        }
+        if eq_docked {
+            peer_windows.equalizer.set_position(Some(eq_slot));
+            dock.update(|held| held.tear(WinampPane::Equalizer));
+        }
+        if playlist_docked {
+            let below = main_height + if eq_docked { EQ_HEIGHT } else { 0.0 };
+            peer_windows
+                .playlist
+                .set_position(Some(Point::new(home.x, home.y + below)));
+            dock.update(|held| held.tear(WinampPane::Playlist));
+        }
+    });
+}
 #[composable]
 fn WinampWindowStack(spec: WinampWindowStackSpec) {
     let WinampWindowStackSpec {
@@ -2638,23 +2753,39 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
             .main
             .set_size(Size::new(stack_width, stack_height));
     }
+    MainWindowClosedAside(StackPanes {
+        main_visible: snapshot.main_visible,
+        main_height: main_height(shaded),
+        eq_shown,
+        eq_docked,
+        playlist_shown,
+        playlist_docked,
+        peer_windows,
+        dock,
+    });
+    let main_visible = snapshot.main_visible;
     let display_text_color = skin.display_text_color;
     Box(
-        Modifier::empty().window(winamp_window_config(WinampWindowPlacement {
-            title: CRANAMP_WINAMP_MAIN_TITLE,
-            initial_position: places.main,
-            state: peer_windows.main,
-        })),
+        Modifier::empty().window(
+            winamp_window_config(WinampWindowPlacement {
+                title: CRANAMP_WINAMP_MAIN_TITLE,
+                initial_position: places.main,
+                state: peer_windows.main,
+            })
+            .with_visible(main_visible || eq_docked || playlist_docked),
+        ),
         BoxSpec::default(),
         move || {
-            MainWindow(
-                skin.clone(),
-                state,
-                skin_state,
-                WinampDragTarget::Native,
-                close,
-                scale,
-            );
+            if main_visible {
+                MainWindow(
+                    skin.clone(),
+                    state,
+                    skin_state,
+                    WinampDragTarget::Native,
+                    close,
+                    scale,
+                );
+            }
             if eq_shown {
                 // Docked or not, the pane is composed here, once. The window
                 // modifier is what pulls it out: with it the subtree draws in
@@ -2738,6 +2869,10 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
                                     pl_skin.palette,
                                     pl_skin.text.clone(),
                                     pl_skin.cursors.clone(),
+                                    (
+                                        pl_skin.viscolor,
+                                        pl_skin.bitmap_mode.spectrum_background(pl_skin.viscolor),
+                                    ),
                                     state,
                                     if playlist_docked {
                                         WinampDragTarget::Tearable {
@@ -2924,14 +3059,15 @@ fn MainWindowFace(
         POS_STATUS.1,
         scale,
     );
-    if snapshot.playback != PlaybackState::Stopped {
-        Visualizer(
-            snapshot.playback == PlaybackState::Playing,
-            skin.viscolor,
-            skin.bitmap_mode,
-            scale,
-        );
-    }
+    ClassicVisualizer(
+        state,
+        skin.viscolor,
+        skin.bitmap_mode.spectrum_background(skin.viscolor),
+        POS_VISUALIZER,
+        vis::Field::Full,
+        vis::WIDTH,
+        scale,
+    );
     if snapshot.playback != PlaybackState::Stopped {
         for (i, digit) in time_digits(snapshot.elapsed_seconds).iter().enumerate() {
             let pos = POS_TIME_DIGITS[i];
@@ -3465,6 +3601,15 @@ fn MainShadeStrip(
             );
         }
     }
+    ClassicVisualizer(
+        state,
+        skin.viscolor,
+        skin.bitmap_mode.spectrum_background(skin.viscolor),
+        POS_SHADE_VISUALIZER,
+        vis::Field::Shade,
+        vis::SHADE_WIDTH,
+        scale,
+    );
     for (area, action) in SHADE_TRANSPORT {
         ClickTarget(area.0, area.1, area.2, area.3, scale, move || action(state));
     }
@@ -4398,6 +4543,7 @@ fn PlaylistWindow(
     palette: SkinPalette,
     text_atlas: ImageBitmap,
     cursors: cursors::SkinCursors,
+    visualizer: (VisColor, [u8; 4]),
     state: MutableState<WinampState>,
     drag_target: WinampDragTarget,
     window_size: WinampWindowSize,
@@ -4541,6 +4687,24 @@ fn PlaylistWindow(
                 bottom_y,
                 scale,
             );
+            // With the main window closed, Winamp draws its visualizer in the
+            // panel, clipped to the panel's 72 columns.
+            if let Some(panel_x) =
+                playlist_size::visualizer_x(width).filter(|_| !snapshot.main_visible)
+            {
+                ClassicVisualizer(
+                    state,
+                    visualizer.0,
+                    visualizer.1,
+                    (
+                        panel_x + MINI_VISUALIZER_OFFSET.0,
+                        bottom_y + MINI_VISUALIZER_OFFSET.1,
+                    ),
+                    vis::Field::Full,
+                    MINI_VISUALIZER_COLUMNS,
+                    scale,
+                );
+            }
             CursorRegions(
                 cursors.clone(),
                 playlist_cursor_areas(PlaylistCursorLayout {
@@ -5859,86 +6023,119 @@ fn main_display_title(state: &WinampState) -> String {
         .map(|track| track.display_title().to_string())
         .unwrap_or_else(|| state.status.clone())
 }
+/// Winamp's frames the analyzer runs between two refreshes of the player.
+const VIS_FRAMES_PER_REFRESH: u32 = (VISUALIZER_REFRESH_MS as f32 / vis::FRAME_MS + 0.5) as u32;
+/// What the visualizer paints in one frame, in its own pixels and `width` of
+/// its columns: the field and its dots, then the bars or the wave on them.
+fn vis_rects(
+    runs: &[(usize, usize, usize, u8)],
+    viscolor: &VisColor,
+    background: [u8; 4],
+    field: vis::Field,
+    width: usize,
+) -> Vec<(Rect, [u8; 4])> {
+    let rect = |x: usize, y: usize, w: usize| Rect {
+        x: x as f32,
+        y: y as f32,
+        width: w as f32,
+        height: 1.0,
+    };
+    let mut out = vec![(
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            width: width as f32,
+            height: field.size().1 as f32,
+        },
+        background,
+    )];
+    if field.dotted() {
+        let dots = viscolor.0[usize::from(vis::DOTS)];
+        out.extend(
+            vis::dots()
+                .filter(|(x, _)| *x < width)
+                .map(|(x, y)| (rect(x, y, 1), dots)),
+        );
+    }
+    out.extend(
+        runs.iter()
+            .filter(|(x, ..)| *x < width)
+            .map(|&(x, y, w, colour)| {
+                (
+                    rect(x, y, w.min(width - x)),
+                    viscolor.0[usize::from(colour)],
+                )
+            }),
+    );
+    out
+}
+/// Winamp's visualizer at `origin`, the first `width` of its 76 columns
+/// showing. It draws while there is a song, playing or paused, and not when
+/// it is stopped or switched off: the skin's own art shows then. A click on
+/// it, drawn or not, steps it on to the next mode.
 #[composable]
-fn Visualizer(playing: bool, viscolor: VisColor, mode: skin::BitmapMode, scale: f32) {
-    let refresh_tick = cranpose_core::rememberMutableStateOf(|| 0_u64);
-    cranpose_core::LaunchedEffectAsync(playing, move |_scope| {
+fn ClassicVisualizer(
+    state: MutableState<WinampState>,
+    viscolor: VisColor,
+    background: [u8; 4],
+    origin: (f32, f32),
+    field: vis::Field,
+    width: usize,
+    scale: f32,
+) {
+    let snapshot = state.get();
+    let playing = snapshot.playback == PlaybackState::Playing;
+    let mode = snapshot.vis_mode;
+    let frame = cranpose_core::rememberMutableStateOf(Vec::<(usize, usize, usize, u8)>::new);
+    cranpose_core::LaunchedEffectAsync((playing, mode), move |_scope| {
         Box::pin(async move {
-            if !playing {
+            if !playing || mode == vis::VisMode::Off {
                 return;
             }
+            let analyzer = RefCell::new(vis::Analyzer::default());
             cranpose_core::interval(Duration::from_millis(VISUALIZER_REFRESH_MS), move || {
-                refresh_tick.update(|tick| *tick = tick.wrapping_add(1));
+                frame.set(match mode {
+                    vis::VisMode::Analyzer => {
+                        let mut analyzer = analyzer.borrow_mut();
+                        analyzer.advance(&audio::visualizer_bands(), VIS_FRAMES_PER_REFRESH);
+                        analyzer.runs_in(field)
+                    }
+                    vis::VisMode::Oscilloscope => {
+                        vis::oscilloscope_runs(&audio::visualizer_wave(), field)
+                    }
+                    vis::VisMode::Off => Vec::new(),
+                });
             })
             .await;
         })
     });
-    let tick = if playing { refresh_tick.value() } else { 0 };
-    let width = scaled(VISUALIZER_WIDTH, scale);
-    let height = scaled(VISUALIZER_HEIGHT, scale);
-    Canvas(
-        Modifier::empty()
-            .size_points(width, height)
-            .absolute_offset(
-                scaled(POS_VISUALIZER.0, scale),
-                scaled(POS_VISUALIZER.1, scale),
-            ),
-        move |scope| {
-            let bands = if playing {
-                let _ = tick;
-                audio::visualizer_bands()
-            } else {
-                [0.0; audio::VISUALIZER_BAND_COUNT]
-            };
-            draw_visualizer_background(
-                scope,
-                playing,
-                bands,
-                viscolor,
-                mode.spectrum_background(viscolor),
-                scale,
-            );
-        },
+    let area = Modifier::empty()
+        .size_points(
+            scaled(width as f32, scale),
+            scaled(field.size().1 as f32, scale),
+        )
+        .absolute_offset(scaled(origin.0, scale), scaled(origin.1, scale));
+    if snapshot.playback != PlaybackState::Stopped && mode != vis::VisMode::Off {
+        let rects = vis_rects(&frame.get(), &viscolor, background, field, width);
+        Canvas(area.clone(), move |scope| {
+            for (rect, colour) in &rects {
+                scope.draw_rect_at(
+                    Rect {
+                        x: rect.x * scale,
+                        y: rect.y * scale,
+                        width: rect.width * scale,
+                        height: rect.height * scale,
+                    },
+                    Brush::solid(color_from_rgba_u8(*colour)),
+                );
+            }
+        });
+    }
+    Box(
+        area.clickable(move |_| state.update(|s| s.vis_mode = s.vis_mode.next())),
+        BoxSpec::default(),
+        || {},
     );
-}
-fn draw_visualizer_background(
-    scope: &mut dyn cranpose_ui_graphics::DrawScope,
-    playing: bool,
-    bands: audio::VisualizerBands,
-    viscolor: VisColor,
-    background: [u8; 4],
-    scale: f32,
-) {
-    let bg = color_from_rgba_u8(background);
-    scope.draw_rect(Brush::solid(bg));
-    if !playing {
-        return;
-    }
-    let max_segments = 5;
-    let bar_width = scaled(3.0, scale);
-    let bar_pitch = scaled(4.0, scale);
-    let segment_height = scaled(2.0, scale);
-    let segment_pitch = scaled(3.0, scale);
-    let height = scaled(VISUALIZER_HEIGHT, scale);
-    for bar in 0..VISUALIZER_BARS {
-        let value = visualizer_band_height(bands, bar);
-        let x = bar as f32 * bar_pitch;
-        for segment in 0..max_segments {
-            let threshold = ((segment + 1) as f32 / max_segments as f32) * VISUALIZER_HEIGHT;
-            let color =
-                visualizer_segment_rgba(segment, max_segments, value >= threshold, &viscolor);
-            let y = (height - (segment + 1) as f32 * segment_pitch + scale).max(0.0);
-            scope.draw_rect_at(
-                Rect {
-                    x,
-                    y,
-                    width: bar_width,
-                    height: segment_height,
-                },
-                Brush::solid(color_from_rgba_u8(color)),
-            );
-        }
-    }
 }
 fn color_from_rgba_u8(color: [u8; 4]) -> Color {
     Color::from_rgba_u8(color[0], color[1], color[2], color[3])
@@ -5973,26 +6170,6 @@ fn EqCurve(values: [f32; 11], atlas: ImageBitmap, scale: f32) {
     );
 }
 
-fn visualizer_band_height(bands: audio::VisualizerBands, bar: usize) -> f32 {
-    let level = bands.get(bar).copied().unwrap_or(0.0).clamp(0.0, 1.0);
-    level * 16.0
-}
-fn visualizer_segment_rgba(
-    segment: usize,
-    max_segments: usize,
-    lit: bool,
-    viscolor: &VisColor,
-) -> [u8; 4] {
-    if !lit {
-        return viscolor.background();
-    }
-    let gradient = viscolor.analyzer_gradient();
-    let last = gradient.len() - 1;
-    let from_top = max_segments - 1 - segment;
-    let denom = (max_segments - 1).max(1);
-    let index = ((from_top * last) + denom / 2) / denom;
-    gradient[index.min(last)]
-}
 #[composable]
 fn Sprite(image: ImageBitmap, source: SpriteRect, x: f32, y: f32, scale: f32) {
     let bounds = pixel_grid::rect(x, y, source.2, source.3, scale);
@@ -7972,15 +8149,42 @@ fn random_shuffle_seed() -> u64 {
 #[composable]
 fn WinampKeyboard(state: MutableState<WinampState>) {
     cranpose_ui::UnhandledKeyEvents(move |event| {
-        let Some(key) = keys::winamp_key(event) else {
-            return false;
-        };
         if state.get_non_reactive().studio_open {
             return false;
         }
+        if let Some(window) = keys::window_key(event) {
+            state.update(|s| toggle_winamp_window(s, window));
+            return true;
+        }
+        let Some(key) = keys::winamp_key(event) else {
+            return false;
+        };
         press_winamp_key(state, key);
         true
     });
+    // However its windows were closed, one stays open: a player with none
+    // left would have nothing to press Alt+W in.
+    let snapshot = state.get();
+    if !snapshot.main_visible && !snapshot.eq_visible && !snapshot.playlist_visible {
+        cranpose_core::SideEffect(move || state.update(|s| s.main_visible = true));
+    }
+}
+/// Opens or closes one of Winamp's windows, never the last one open.
+fn toggle_winamp_window(s: &mut WinampState, window: keys::WinampWindowKey) {
+    use keys::WinampWindowKey;
+    match window {
+        WinampWindowKey::Main => {
+            if s.main_visible && !s.eq_visible && !s.playlist_visible {
+                return;
+            }
+            s.main_visible = !s.main_visible;
+        }
+        WinampWindowKey::Playlist => s.playlist_visible = !s.playlist_visible,
+        WinampWindowKey::Equalizer => s.eq_visible = !s.eq_visible,
+    }
+    if !s.main_visible && !s.eq_visible && !s.playlist_visible {
+        s.main_visible = true;
+    }
 }
 fn press_winamp_key(state: MutableState<WinampState>, key: keys::WinampKey) {
     use keys::WinampKey;
@@ -8480,6 +8684,8 @@ struct SavedPlayerState {
     eq_visible: bool,
     playlist_visible: bool,
     main_shaded: bool,
+    main_visible: bool,
+    vis_mode: vis::VisMode,
     eq_enabled: bool,
     eq_auto: bool,
     eq_values: [f32; 11],
@@ -8497,6 +8703,8 @@ struct SavedPlayerStateKey {
     eq_visible: bool,
     playlist_visible: bool,
     main_shaded: bool,
+    main_visible: bool,
+    vis_mode: vis::VisMode,
     eq_enabled: bool,
     eq_auto: bool,
     eq_values: [f32; 11],
@@ -8516,6 +8724,8 @@ impl SavedPlayerStateKey {
             eq_visible: state.eq_visible,
             playlist_visible: state.playlist_visible,
             main_shaded: state.main_shaded,
+            main_visible: state.main_visible,
+            vis_mode: state.vis_mode,
             eq_enabled: state.eq_enabled,
             eq_auto: state.eq_auto,
             eq_values: state.eq_values.map(clamp01),
@@ -8557,6 +8767,8 @@ impl SavedPlayerState {
             eq_visible: state.eq_visible,
             playlist_visible: state.playlist_visible,
             main_shaded: state.main_shaded,
+            main_visible: state.main_visible,
+            vis_mode: state.vis_mode,
             eq_enabled: state.eq_enabled,
             eq_auto: state.eq_auto,
             eq_values: state.eq_values.map(clamp01),
@@ -8576,6 +8788,8 @@ fn restore_saved_player_state(saved: SavedPlayerState) -> WinampState {
         eq_visible: saved.eq_visible,
         playlist_visible: saved.playlist_visible,
         main_shaded: saved.main_shaded,
+        main_visible: saved.main_visible,
+        vis_mode: saved.vis_mode,
         eq_enabled: saved.eq_enabled,
         eq_auto: saved.eq_auto,
         eq_values: saved.eq_values.map(clamp01),
@@ -8650,6 +8864,8 @@ fn serialize_player_state(config: &SavedPlayerState) -> String {
         format!("eq_visible={}", bool_value(config.eq_visible)),
         format!("playlist_visible={}", bool_value(config.playlist_visible)),
         format!("main_shaded={}", bool_value(config.main_shaded)),
+        format!("main_visible={}", bool_value(config.main_visible)),
+        format!("vis_mode={}", config.vis_mode.name()),
         format!("eq_enabled={}", bool_value(config.eq_enabled)),
         format!("eq_auto={}", bool_value(config.eq_auto)),
         format!("playlist_scroll={:.6}", clamp01(config.playlist_scroll)),
@@ -8714,6 +8930,12 @@ fn apply_player_state_value(config: &mut SavedPlayerState, key: &str, value: &st
         "eq_visible" => update_bool(&mut config.eq_visible, value),
         "playlist_visible" => update_bool(&mut config.playlist_visible, value),
         "main_shaded" => update_bool(&mut config.main_shaded, value),
+        "main_visible" => update_bool(&mut config.main_visible, value),
+        "vis_mode" => {
+            if let Some(mode) = vis::VisMode::parse(value) {
+                config.vis_mode = mode;
+            }
+        }
         "eq_enabled" => update_bool(&mut config.eq_enabled, value),
         "eq_auto" => update_bool(&mut config.eq_auto, value),
         "playlist_scroll" => update_f32(&mut config.playlist_scroll, value),

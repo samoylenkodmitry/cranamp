@@ -322,6 +322,25 @@ pub fn visualizer_bands() -> VisualizerBands {
     };
     compute_analyzer_bands(&samples.samples, samples.sample_rate)
 }
+/// How many samples of the wave the oscilloscope spreads across itself, the
+/// size of the chunks Winamp handed its visualizers.
+const VISUALIZER_WAVE_LEN: usize = 576;
+/// The latest stretch of the wave, mixed down to one channel, from -1 to 1;
+/// nothing while no song is sounding.
+pub fn visualizer_wave() -> Vec<f32> {
+    let Some(samples) = cranpose_services::latest_media_samples() else {
+        return Vec::new();
+    };
+    mixed_down(&samples.samples, samples.channels, VISUALIZER_WAVE_LEN)
+}
+fn mixed_down(samples: &[f32], channels: u16, len: usize) -> Vec<f32> {
+    let channels = usize::from(channels.max(1));
+    samples
+        .chunks_exact(channels)
+        .take(len)
+        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+        .collect()
+}
 fn compute_analyzer_bands(samples: &[f32], sample_rate: u32) -> VisualizerBands {
     if samples.is_empty() || sample_rate == 0 {
         return [0.0; VISUALIZER_BAND_COUNT];

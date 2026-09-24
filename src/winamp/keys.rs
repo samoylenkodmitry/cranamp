@@ -1,6 +1,7 @@
 //! Winamp's keyboard: the keys that drive the player from anywhere in it, as
 //! Winamp 2 had them. A key held with Ctrl, Alt or the command key is left to
-//! the platform, so the browser's and the system's own shortcuts keep working.
+//! the platform, so the browser's and the system's own shortcuts keep working,
+//! except Winamp's own Alt keys for its windows.
 
 use cranpose_ui::{KeyCode, KeyEvent, KeyEventType};
 
@@ -40,6 +41,29 @@ pub(super) fn winamp_key(event: &KeyEvent) -> Option<WinampKey> {
         KeyCode::ArrowUp => WinampKey::VolumeUp,
         KeyCode::ArrowDown => WinampKey::VolumeDown,
         KeyCode::L => WinampKey::OpenFiles,
+        _ => return None,
+    })
+}
+
+/// A window Winamp opens and closes from the keyboard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum WinampWindowKey {
+    Main,
+    Playlist,
+    Equalizer,
+}
+
+/// The window Alt with a key opens or closes, if any: W the main window, E
+/// the playlist and G the equalizer.
+pub(super) fn window_key(event: &KeyEvent) -> Option<WinampWindowKey> {
+    let held = event.modifiers;
+    if event.event_type != KeyEventType::KeyDown || !held.alt || held.ctrl || held.meta {
+        return None;
+    }
+    Some(match event.key_code {
+        KeyCode::W => WinampWindowKey::Main,
+        KeyCode::E => WinampWindowKey::Playlist,
+        KeyCode::G => WinampWindowKey::Equalizer,
         _ => return None,
     })
 }
