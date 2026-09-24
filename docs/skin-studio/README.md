@@ -136,8 +136,13 @@ clicks on the transport. The unroll button is at `0,27`, the 17×7 seek track at
 `0,36` and its 3×7 thumb at `20,36`. The options, minimize and close buttons are
 the same cells as on the full title bar.
 
+Winamp draws its visualizer in the strip too, 38×5 at `79,5`, over whatever the
+art has there while music plays. The strip's layout follows Winamp's: the name
+sits left of `x=79`, the visualizer's field is plain ground or a slot, and the
+time and transport come after it.
+
 The **Windowshade** button beside the drawers, or *The rolled-up player* in the
-atlases drawer, puts the strip on the canvas with those parts as its layers. Guides mark where the time is written and where each mini transport
+atlases drawer, puts the strip on the canvas with those parts as its layers. Guides mark where the time is written, where the visualizer draws, and where each mini transport
 button is clicked, so the art lines up with what the player does. A skin whose
 strip is one flat colour rolls up into the classic skin's strip and font
 instead, the way Winamp filled what a skin left out.
@@ -167,11 +172,14 @@ visualizer panel meets a tile and the right corner. That is every seam Winamp
 shows at any width. Guides mark each row's readouts and buttons.
 
 Every bundled Catamp skin draws both cells, except the default skin, which
-has Winamp's own. `node tools/skin-studio/footer.mjs <skin> [--save]` redraws
-one on a layer of its own. The ground continues what the corners already
-have: a column of the footer repeated, a plain colour under the top rails, or
-each row's own colours as speckle, with a two-pixel dither kept in step.
-Cranamp draws no mini visualizer, so its panel is more of the same ground.
+has Winamp's own. `node tools/skin-studio/footer.mjs <skin> [--replace] [--save]`
+redraws one on a layer of its own. The ground continues what the corners
+already have: a column of the footer repeated, a plain colour under the top
+rails, or each row's own colours as speckle, with a two-pixel dither kept in
+step. With the main window closed, the mini visualizer paints its 72×16 field
+at the panel's `2,12` while music plays, so the panel lets a screen into the
+ground there. The screen is VISCOLOR colour 0 inside a one-pixel edge in the
+colour of the skin's own footer displays. The guide over it is `SPECTRUM`.
 
 ## Cursors
 
@@ -786,6 +794,7 @@ All describe the transaction in hand.
 | `identical_variants` | variants that came out the same picture — 28 slider frames all on frame 0, or a pressed state identical to its released one. Fully transparent variants are excluded; sprites sharing source cells share one entry, with `also` |
 | `unsupported_characters` | characters the face does not have; the rest of the text still landed |
 | `covered_pixels` | ink hidden, in **every** state it was drawn into, behind another part of the same control — a slider's track and its thumb are read from one value, so a mark that runs to the thumb's position is behind the thumb in every frame. Per-frame coverage is what a slider is and is not reported; a background under a button is not either |
+| `under_the_visualizer` | ink in a field Winamp paints its visualizer over while music plays: the main window's `24,43` 76×16, the rolled-up strip's `79,5` 38×5, and the playlist footer panel's `2,12` 72×16 from 350 wide with the main window closed. The art shows only while stopped, so a name or anything else that must stay readable belongs outside. `fields` names each field and its count |
 | `repeated` | how many places `at` ran the operations at |
 | `swept` | which fields walked, and over how many steps |
 | `states_written` | the scope, and how many variants each target got, when it was more than the one in hand |

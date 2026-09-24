@@ -127,3 +127,54 @@ fn stopped_spectrum_reveals_editable_background() {
     assert_eq!(coverage["counts"]["opaque_runtime"], 0);
     assert_eq!(coverage["counts"]["paintable"], 76 * 16);
 }
+
+/// Winamp draws its visualizer in two places a skin's art is also drawn:
+/// the rolled-up strip, 38x5 at 79,5, and the playlist footer's panel while
+/// the main window is closed. Both cover the art while music plays.
+#[test]
+fn the_rolled_up_and_footer_visualizers_cover_their_art_while_playing() {
+    let mut doc = canvas();
+    doc.state(json!({"panel": "shade"})).unwrap();
+    let (stopped, _) = {
+        doc.view.playback = 0;
+        doc.coverage([79, 5, 38, 5], false).unwrap()
+    };
+    assert_eq!(
+        stopped["counts"]["opaque_runtime"], 0,
+        "stopped, the art shows"
+    );
+    doc.view.playback = 1;
+    let (playing, _) = doc.coverage([79, 5, 38, 5], false).unwrap();
+    assert_eq!(playing["counts"]["opaque_runtime"], 38 * 5, "{playing}");
+
+    doc.state(json!({"panel": "footer"})).unwrap();
+    doc.view.playback = 1;
+    let (panel, _) = doc.coverage([177, 50, 72, 16], false).unwrap();
+    assert_eq!(panel["counts"]["opaque_runtime"], 72 * 16, "{panel}");
+    let (narrow, _) = doc.coverage([125, 0, 50, 38], false).unwrap();
+    assert_eq!(
+        narrow["counts"]["opaque_runtime"], 0,
+        "a playlist too narrow for the panel has no visualizer"
+    );
+}
+
+#[test]
+fn ink_under_the_rolled_up_visualizer_is_reported() {
+    let mut doc = canvas();
+    doc.state(json!({"panel": "shade"})).unwrap();
+    let report = doc
+        .draw(&json!({"operations":[
+            {"op":"rect","x":70,"y":6,"width":20,"height":3,"color":"#e8d3ae","fill":true}
+        ]}))
+        .unwrap();
+    let hidden = &report["under_the_visualizer"];
+    assert_eq!(hidden["pixels"], json!(11 * 3), "{report}");
+    assert_eq!(hidden["fields"][0]["id"], json!("runtime.shade.SPECTRUM"));
+
+    let clear = doc
+        .draw(&json!({"operations":[
+            {"op":"rect","x":20,"y":6,"width":20,"height":3,"color":"#e8d3ae","fill":true}
+        ]}))
+        .unwrap();
+    assert!(clear["under_the_visualizer"].is_null(), "{clear}");
+}

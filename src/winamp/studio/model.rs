@@ -20,6 +20,9 @@ use std::{
     path::Path,
 };
 const MAX_PAINT_LAYERS: usize = 64;
+/// The runtime guide for the visualizer's field, which the player paints
+/// whole while music plays.
+pub const SPECTRUM: &str = "SPECTRUM";
 pub const SCOPE_CURRENT: &str = "current";
 pub const SCOPE_ONWARD: &str = "onward";
 pub const SCOPE_UP_TO: &str = "up-to";
@@ -2898,6 +2901,13 @@ impl Document {
             ));
             result["covered_pixels"] = covered;
         }
+        if let Some(hidden) = self.under_the_visualizer() {
+            let total = hidden["pixels"].as_u64().unwrap_or(0);
+            self.message.push_str(&format!(
+                "; {total} pixels are under the visualizer while music plays"
+            ));
+            result["under_the_visualizer"] = hidden;
+        }
         let wrote = std::mem::take(&mut self.scope_writes);
         if !wrote.is_empty() {
             result["states_written"] = json!({
@@ -2974,6 +2984,58 @@ impl Document {
         }
         result["ms"] = json!(started.elapsed().as_millis() as u64);
         Ok(result)
+    }
+    /// The ink this draw left under a visualizer's field on the surface in
+    /// hand. Winamp paints the field whole while music plays, so art there
+    /// shows only while stopped: a name or a detail that must stay readable
+    /// belongs outside it.
+    fn under_the_visualizer(&self) -> Option<Value> {
+        if self.atlas_writes.is_empty() {
+            return None;
+        }
+        let fields: Vec<_> = self.guides().into_iter().filter(|g| g.opaque).collect();
+        if fields.is_empty() {
+            return None;
+        }
+        let layers = self.layers();
+        let sheets: Vec<&String> = self.images.keys().collect();
+        let mut out = Vec::new();
+        let mut total = 0u32;
+        for field in fields {
+            let [fx, fy, fw, fh] = field.rect;
+            let mut pixels = 0u32;
+            for y in fy..fy + fh {
+                for x in fx..fx + fw {
+                    let Some((layer, (sx, sy))) = layers
+                        .iter()
+                        .rev()
+                        .find_map(|l| l.map(x, y).map(|at| (l, at)))
+                    else {
+                        continue;
+                    };
+                    let Some(sheet) = sheets.iter().position(|s| **s == layer.sheet) else {
+                        continue;
+                    };
+                    let inked = layer.variants.iter().any(|cell| {
+                        self.atlas_writes
+                            .get(&(sheet, cell[0] + sx, cell[1] + sy))
+                            .is_some_and(|(colour, _)| colour[3] != 0)
+                    });
+                    pixels += u32::from(inked);
+                }
+            }
+            if pixels > 0 {
+                total += pixels;
+                out.push(json!({"id": field.id, "rect": field.rect, "pixels": pixels}));
+            }
+        }
+        (total > 0).then(|| {
+            json!({
+                "pixels": total,
+                "fields": out,
+                "note": "Winamp paints its visualizer over these fields while music plays; the art shows only while stopped. Keep names and anything that must stay readable outside them.",
+            })
+        })
     }
     fn covered_by_a_sibling_part(&mut self) -> Option<Value> {
         let probes = std::mem::take(&mut self.covered_probe);
@@ -3498,6 +3560,7 @@ impl Document {
                         active: *r == l.source,
                         runtime: false,
                         hit: false,
+                        opaque: false,
                     });
                 }
             }
@@ -3507,7 +3570,7 @@ impl Document {
                     ("TIMER DIGIT 1", [60, 26, 9, 13]),
                     ("TIMER DIGIT 2", [78, 26, 9, 13]),
                     ("TIMER DIGIT 3", [90, 26, 9, 13]),
-                    ("SPECTRUM", [24, 43, 76, 16]),
+                    (SPECTRUM, [24, 43, 76, 16]),
                     ("SONG TEXT", [111, 27, 150, 8]),
                     ("BITRATE", [111, 41, 18, 8]),
                     ("SAMPLE RATE", [156, 41, 12, 8]),
@@ -3525,7 +3588,10 @@ impl Document {
                         ("ELAPSED", [192, h - 14, 30, 8]),
                     ]
                 }
-                "shade" => vec![("TIME", mapping::SHADE_TIME)],
+                "shade" => vec![
+                    ("TIME", mapping::SHADE_TIME),
+                    (SPECTRUM, mapping::SHADE_SPECTRUM),
+                ],
                 _ => vec![],
             };
             let sheet = match panel {
@@ -3551,6 +3617,7 @@ impl Document {
                     active: true,
                     runtime: true,
                     hit: false,
+                    opaque: name == SPECTRUM,
                 });
             }
             let targets: Vec<(&str, [u32; 4])> = match panel {
@@ -3590,6 +3657,7 @@ impl Document {
                     active: true,
                     runtime: false,
                     hit: true,
+                    opaque: false,
                 });
             }
             if panel == "footer" && !atlas {
