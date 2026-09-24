@@ -105,20 +105,26 @@ impl Analyzer {
     /// 0 to 1: a bar rises at once to its level and falls back slowly, and its
     /// peak is left behind to fall on its own.
     pub(crate) fn advance(&mut self, levels: &[f32; BARS], frames: u32) {
-        for bar in 0..BARS {
-            let level = if levels[bar].is_finite() {
-                levels[bar].clamp(0.0, 1.0) * HEIGHT as f32
+        let bars = self
+            .heights
+            .iter_mut()
+            .zip(self.peaks.iter_mut())
+            .zip(self.peak_speeds.iter_mut())
+            .zip(levels);
+        for (((height, peak), peak_speed), level) in bars {
+            let level = if level.is_finite() {
+                level.clamp(0.0, 1.0) * HEIGHT as f32
             } else {
                 0.0
             };
             for _ in 0..frames.max(1) {
-                self.heights[bar] = (self.heights[bar] - BAR_FALLOFF).max(level);
-                if self.peaks[bar] <= self.heights[bar] {
-                    self.peaks[bar] = self.heights[bar];
-                    self.peak_speeds[bar] = PEAK_START_SPEED;
+                *height = (*height - BAR_FALLOFF).max(level);
+                if *peak <= *height {
+                    *peak = *height;
+                    *peak_speed = PEAK_START_SPEED;
                 } else {
-                    self.peaks[bar] = (self.peaks[bar] - self.peak_speeds[bar]).max(0.0);
-                    self.peak_speeds[bar] *= PEAK_ACCELERATION;
+                    *peak = (*peak - *peak_speed).max(0.0);
+                    *peak_speed *= PEAK_ACCELERATION;
                 }
             }
         }
