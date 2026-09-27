@@ -1,42 +1,14 @@
 // Shared by every end-to-end test; each one uses the part it needs.
 #![allow(dead_code)]
 use cranpose_app_shell::AppShell;
-use cranpose_render_common::graph::{HitTestNode, ProjectiveTransform};
-use cranpose_render_common::graph_scene::{ClickAction, HitGeometry, HitTargetSpec, Scene};
-use cranpose_render_common::hit_graph::{collect_hits_from_graph, HitGraphSink};
+use cranpose_render_common::graph::ProjectiveTransform;
+use cranpose_render_common::graph_scene::Scene;
+use cranpose_render_common::hit_graph::collect_hits_from_graph;
 use cranpose_render_common::{RenderScene, Renderer};
 use cranpose_ui::{LayoutTree, Size};
 #[derive(Default)]
 pub struct HitGraphRenderer {
     scene: Scene,
-}
-struct SceneHitSink<'a> {
-    scene: &'a mut Scene,
-}
-impl HitGraphSink for SceneHitSink<'_> {
-    fn push_hit(
-        &mut self,
-        node_id: cranpose_core::NodeId,
-        capture_path: &[cranpose_core::NodeId],
-        geometry: HitGeometry,
-        hit: &HitTestNode,
-    ) {
-        self.scene.push_hit(
-            node_id,
-            capture_path,
-            geometry,
-            HitTargetSpec {
-                shape: hit.shape,
-                click_actions: hit
-                    .click_actions
-                    .iter()
-                    .cloned()
-                    .map(ClickAction::WithPoint),
-                pointer_inputs: &hit.pointer_inputs,
-                pointer_icon: hit.pointer_icon.as_ref(),
-            },
-        );
-    }
 }
 impl Renderer for HitGraphRenderer {
     type Scene = Scene;
@@ -57,13 +29,10 @@ impl Renderer for HitGraphRenderer {
             layout_tree.root(),
             1.0,
         );
-        let mut sink = SceneHitSink {
-            scene: &mut self.scene,
-        };
         collect_hits_from_graph(
             &graph.root,
             ProjectiveTransform::identity(),
-            &mut sink,
+            &mut self.scene,
             None,
         );
         self.scene.replace_graph(graph);
@@ -79,13 +48,10 @@ impl Renderer for HitGraphRenderer {
         if let Some(graph) =
             cranpose_render_common::scene_builder::build_graph_from_applier(applier, root, 1.0)
         {
-            let mut sink = SceneHitSink {
-                scene: &mut self.scene,
-            };
             collect_hits_from_graph(
                 &graph.root,
                 ProjectiveTransform::identity(),
-                &mut sink,
+                &mut self.scene,
                 None,
             );
             self.scene.replace_graph(graph);
@@ -104,7 +70,7 @@ pub fn pump(shell: &mut AppShell<HitGraphRenderer>) {
 pub fn visible_texts(shell: &mut AppShell<HitGraphRenderer>) -> Vec<String> {
     fn collect(node: &cranpose_ui::SemanticsNode, out: &mut Vec<String>) {
         if let cranpose_ui::SemanticsRole::Text { value } = &node.role {
-            out.push(value.clone());
+            out.push(value.as_str().to_owned());
         } else if let Some(description) = &node.description {
             out.push(description.clone());
         }
