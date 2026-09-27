@@ -9,7 +9,7 @@ use cranpose::{AppLauncher, CustomCursorSize};
 cranpose::app_capabilities!();
 const TITLE: &str = "Cranamp";
 const APPLICATION_ID: &str = "com.cranamp.app";
-fn launcher() -> AppLauncher {
+fn launcher() -> AppLauncher<cranpose::AppFonts> {
     AppLauncher::new()
         .with_capabilities(&CAPABILITIES)
         .with_title(TITLE)
@@ -19,7 +19,7 @@ fn launcher() -> AppLauncher {
         // the system pointer they turn into smeared blocks.
         .with_custom_cursor_size(CustomCursorSize::AsDrawn)
 }
-fn desktop_launcher() -> AppLauncher {
+fn desktop_launcher() -> AppLauncher<cranpose::AppFonts> {
     let launcher = launcher();
     match app_icon::window_icon() {
         Ok(icon) => launcher.with_window_icon(icon),
@@ -29,18 +29,18 @@ fn desktop_launcher() -> AppLauncher {
         }
     }
 }
-pub fn create_desktop_app() -> AppLauncher {
+pub fn create_desktop_app() -> AppLauncher<cranpose::AppFonts> {
     desktop_launcher().with_size(1, 1)
 }
-pub fn create_surface_app() -> AppLauncher {
+pub fn create_surface_app() -> AppLauncher<cranpose::AppFonts> {
     desktop_launcher().with_size(900, 700)
 }
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-pub fn create_web_app() -> AppLauncher {
+pub fn create_web_app() -> AppLauncher<cranpose::AppFonts> {
     launcher().with_size(275, 493)
 }
 #[cfg(target_os = "android")]
-pub fn create_android_app() -> AppLauncher {
+pub fn create_android_app() -> AppLauncher<cranpose::AppFonts> {
     winamp::set_android_floating_overlay_enabled(false);
     launcher()
 }

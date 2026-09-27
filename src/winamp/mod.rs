@@ -28,7 +28,7 @@ use cranpose_ui::{
     composable, current_density, Alignment, BasicText, BasicTextField, Box, BoxSpec, Button,
     ButtonSpec, Canvas, Color, Column, ColumnSpec, LinearArrangement, Modifier, Point,
     PointerEventKind, PointerIcon, PointerInputScope, Row, RowSpec, Size, SpanStyle, Text,
-    TextStyle,
+    TextStyle, VerticalAlignment,
 };
 use cranpose_ui::{BoxWithConstraints, BoxWithConstraintsScope};
 use cranpose_ui_graphics::{Brush, ImageBitmap, Rect};
@@ -869,9 +869,9 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
     Column(
         Modifier::empty()
             .fill_max_size()
-            .padding(10.0)
             .background(Color(0.05, 0.06, 0.08, 1.0))
-            .rounded_corners(12.0),
+            .rounded_corners(12.0)
+            .padding(10.0),
         ColumnSpec::default(),
         move || {
             Text(
@@ -2291,10 +2291,9 @@ fn WinampSkinError(error: String) {
 fn DockToggleButton(detached_state: MutableState<bool>, detached: bool) {
     Button(
         Modifier::empty()
-            .padding(8.0)
             .background(Color(0.18, 0.34, 0.58, 1.0))
             .rounded_corners(8.0)
-            .padding(8.0),
+            .padding(16.0),
         ButtonSpec::default(),
         move || {
             detached_state.set(!detached_state.get_non_reactive());
@@ -4000,7 +3999,9 @@ fn SettingsActionButton(label: String, fill: Color, on_click: impl Fn() + 'stati
 fn SettingsHeader(state: MutableState<WinampState>) {
     Row(
         Modifier::empty().fill_max_width(),
-        RowSpec::default().horizontal_arrangement(LinearArrangement::SpaceBetween),
+        RowSpec::default()
+            .horizontal_arrangement(LinearArrangement::SpaceBetween)
+            .vertical_alignment(VerticalAlignment::CenterVertically),
         move || {
             Text(
                 "Settings",
