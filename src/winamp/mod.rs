@@ -2398,14 +2398,17 @@ fn WinampStackedStage(
     let equalizer_drag_target = drag.target(Point::new(0.0, equalizer_y));
     let playlist_drag_target = drag.target(Point::new(0.0, playlist_y));
     Box(
+        // The offset first: it moves the whole window, clip and fill with
+        // it. After a clip, as in Compose, it would move the content inside
+        // the clip instead.
         Modifier::empty()
-            .size_points(scaled(MAIN_WIDTH, scale), scaled(y, scale))
-            .clip_to_bounds()
-            .background(Color(0.02, 0.02, 0.03, 1.0))
             .offset(
                 snap_to_pixel(layout.content_left_inset),
                 snap_to_pixel(layout.content_top_inset),
-            ),
+            )
+            .size_points(scaled(MAIN_WIDTH, scale), scaled(y, scale))
+            .clip_to_bounds()
+            .background(Color(0.02, 0.02, 0.03, 1.0)),
         BoxSpec::default(),
         move || {
             MainWindow(
