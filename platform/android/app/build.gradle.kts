@@ -54,9 +54,6 @@ cranpose {
     // analysis samples; the media module contributes the foreground service
     // and the permissions that needs, so the manifest declares neither.
     services.add("media")
-    // The in-app updater hands its package to PackageInstaller, which Android
-    // refuses without REQUEST_INSTALL_PACKAGES.
-    services.add("update")
 }
 
 android {
