@@ -4395,8 +4395,8 @@ fn SettingsPanel(
             Column(
                 Modifier::empty()
                     .fill_max_size()
-                    .padding(14.0)
-                    .vertical_scroll(scroll, false),
+                    .vertical_scroll(scroll, false)
+                    .padding(14.0),
                 ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(12.0)),
                 move || {
                     SettingsHeader(state);
