@@ -13,7 +13,6 @@ mod playlist_size;
 mod region_clip;
 pub mod skin;
 mod sprites;
-#[cfg(not(target_os = "ios"))]
 pub mod studio;
 mod vis;
 use crate::audio::{self, Track};
@@ -1055,7 +1054,6 @@ fn bundled_skin_entry(path: &str) -> Option<&'static BundledSkin> {
     let id = path.strip_prefix(BUNDLED_PREFIX)?;
     BUNDLED_SKINS.iter().find(|skin| skin.id == id)
 }
-#[cfg(not(target_os = "ios"))]
 fn studio_skin_path(path: Option<String>) -> Option<String> {
     path.filter(|path| bundled_skin_entry(path).is_none())
 }
@@ -1932,7 +1930,6 @@ pub fn WinampWidgetApp() {
         WinampSurfaceApp();
     }
 }
-#[cfg(not(target_os = "ios"))]
 #[composable]
 fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinState) {
     let sessions = cranpose_core::remember(|| {
@@ -1994,7 +1991,6 @@ pub fn WinampStackedApp() {
     let tab_state = remember_winamp_tab_state();
     let skin_state = remember_winamp_skin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
-    #[cfg(not(target_os = "ios"))]
     {
         WinampStudioSurface(tab_state.player, skin_state);
         if tab_state.player.get().studio_open {
@@ -2154,7 +2150,6 @@ pub fn WinampSurfaceApp() {
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
     let floating = remember_floating_surface();
     FloatingSurfaceSize(floating, tab_state.player);
-    #[cfg(not(target_os = "ios"))]
     {
         WinampStudioSurface(tab_state.player, skin_state);
         if tab_state.player.get().studio_open {
@@ -4430,7 +4425,7 @@ fn SettingsPanel(
                             }
                         },
                     );
-                    #[cfg(any(target_os = "android", target_arch = "wasm32"))]
+                    #[cfg(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))]
                     SettingsActionButton("Open Skin Studio".into(), SETTINGS_CARD, move || {
                         state.update(|s| {
                             s.settings_open = false;

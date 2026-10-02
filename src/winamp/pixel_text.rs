@@ -114,7 +114,6 @@ pub(crate) fn glyph(ch: char) -> Option<[u8; 7]> {
         _ => return None,
     })
 }
-#[cfg(not(target_os = "ios"))]
 pub(crate) fn layout(
     text: &str,
     small: bool,
@@ -158,7 +157,6 @@ pub(crate) fn layout(
     }
     skipped
 }
-#[cfg(not(target_os = "ios"))]
 pub(crate) fn measure(text: &str, small: bool, scale: i32, spacing: i32) -> TextExtent {
     let cell = if small { 4 } else { 5 };
     let (mut right, mut bottom) = (0, 0);
@@ -173,14 +171,12 @@ pub(crate) fn measure(text: &str, small: bool, scale: i32, spacing: i32) -> Text
         missing,
     }
 }
-#[cfg(not(target_os = "ios"))]
 pub(crate) struct TextExtent {
     pub width: i32,
     pub height: i32,
     pub advance: i32,
     pub missing: Vec<char>,
 }
-#[cfg(not(target_os = "ios"))]
 pub(crate) fn small_glyph(ch: char) -> Option<[u8; 5]> {
     Some(match ch.to_ascii_uppercase() {
         'A' => [6, 9, 15, 9, 9],

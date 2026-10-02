@@ -212,6 +212,7 @@ mod presentation_tests;
 #[cfg(all(
     feature = "renderer-wgpu",
     not(target_os = "android"),
+    not(target_os = "ios"),
     not(target_arch = "wasm32")
 ))]
 static CAPTURE: std::sync::OnceLock<Mutex<cranpose::Robot>> = std::sync::OnceLock::new();
@@ -239,6 +240,7 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
     #[cfg(all(
         feature = "renderer-wgpu",
         not(target_os = "android"),
+        not(target_os = "ios"),
         not(target_arch = "wasm32")
     ))]
     {
@@ -267,6 +269,7 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
     #[cfg(any(
         not(feature = "renderer-wgpu"),
         target_os = "android",
+        target_os = "ios",
         target_arch = "wasm32"
     ))]
     {
@@ -274,7 +277,11 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
         anyhow::bail!("Scene capture requires the WGPU renderer on a native window")
     }
 }
-#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+#[cfg(all(
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    not(target_arch = "wasm32")
+))]
 pub fn launch(path: Option<&str>) -> std::io::Result<()> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command.arg("--skin-studio");
@@ -346,7 +353,11 @@ fn default_export_path() -> std::path::PathBuf {
     let base = documents.unwrap_or_else(std::env::temp_dir);
     base.join("Skin edited.wsz")
 }
-#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+#[cfg(all(
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    not(target_arch = "wasm32")
+))]
 pub fn run(path: Option<&str>) {
     let doc = initial_document(path).unwrap_or_else(|e| panic!("Open skin: {e:#}"));
     let shared = SharedDocument(Arc::new(Mutex::new(doc)));
@@ -372,7 +383,11 @@ pub fn run(path: Option<&str>) {
         });
     launcher.run(move || SkinStudio(shared.clone(), None));
 }
-#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+#[cfg(all(
+    not(target_os = "android"),
+    not(target_os = "ios"),
+    not(target_arch = "wasm32")
+))]
 pub fn run_touch_preview(editor: bool) {
     let document = new_mobile_document(None).expect("Bundled Studio document");
     if let Err(e) = mcp::start(document.clone()) {

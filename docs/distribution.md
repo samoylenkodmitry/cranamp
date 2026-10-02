@@ -118,6 +118,6 @@ References: [Android bundles](https://developer.android.com/build/building-cmdli
 
 ## Listing assets and privacy
 
-`store/listing-en-US.json` contains shared listing text and platform-specific additions. iOS does not advertise Skin Studio; Android does not advertise the desktop MCP endpoint. `site/privacy/` and `site/support/` are copied into the Pages build. Settings links to the privacy page.
+`store/listing-en-US.json` contains shared listing text and platform-specific additions. Mobile and desktop listings include Skin Studio. The desktop listing also explains agent connections. `site/privacy/` and `site/support/` are copied into the Pages build. Settings links to the privacy page.
 
 The Apple privacy manifest declares file metadata access inside the app container (`C617.1`) and for user-selected files (`3B52.1`), plus elapsed-time measurement for playback and UI timers (`35F9.1`). The iOS release binary imports `stat`, `fstat`, `fstatat`, and `mach_absolute_time`. Preferences use Cranpose's file-backed store rather than UserDefaults. These declarations follow [Apple's required-reason API documentation](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api). Re-audit the binary when dependencies change.
