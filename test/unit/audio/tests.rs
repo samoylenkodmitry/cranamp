@@ -15,6 +15,13 @@ fn extensions_include_common_winamp_formats() {
 #[test]
 fn demo_playlist_uses_external_mp3_files() {
     let tracks = super::demo_playlist_tracks();
+    if cfg!(feature = "store") {
+        assert!(
+            tracks.is_empty(),
+            "store builds do not add bundled demo tracks"
+        );
+        return;
+    }
     assert_eq!(tracks.len(), 5);
     assert!(tracks.iter().all(|track| {
         track

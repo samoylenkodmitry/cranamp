@@ -177,7 +177,9 @@ jobs:
           target: x86_64-pc-windows-msvc
           features: desktop,renderer-wgpu,store
       - name: Build player
-        run: cargo build --locked --release --features store
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --locked --release --features store --target x86_64-pc-windows-msvc
       - name: Build MSIX
         shell: pwsh
         run: ./scripts/distribution/windows.ps1

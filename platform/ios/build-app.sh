@@ -15,7 +15,7 @@ esac
 
 export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-15.0}"
 
-cargo build --manifest-path "$ROOT/Cargo.toml" \
+cargo build --locked --manifest-path "$ROOT/Cargo.toml" \
   --bin cranamp-ios \
   --target "$TARGET" --no-default-features --features "${CRANAMP_IOS_FEATURES:-ios}" $PROFILE_FLAG >&2
 

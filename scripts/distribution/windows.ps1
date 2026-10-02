@@ -14,7 +14,7 @@ if (-not $identity -or -not $publisher -or -not $publisherName) {
 }
 $stage = 'target/distribution/windows'
 New-Item -ItemType Directory -Force $stage, "$stage/Assets", 'store-artifacts' | Out-Null
-Copy-Item target/release/cranamp.exe $stage
+Copy-Item target/x86_64-pc-windows-msvc/release/cranamp.exe $stage
 Copy-Item LICENSE, docs/third-party/LiberationSans-OFL-1.1.txt, target/distribution/THIRD-PARTY.html $stage
 # Scale our existing icon to the required package logo sizes.
 Add-Type -AssemblyName System.Drawing
