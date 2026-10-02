@@ -76,7 +76,7 @@ Credentials are imported into a temporary keychain and removed at job completion
 
 Direct Mac releases require the `CRANAMP_MACOS_DEVID_P12_BASE64` and `CRANAMP_MACOS_DEVID_P12_PASSWORD` secrets plus the three `CRANAMP_ASC_API_*` notarization secrets. The Release workflow checks the local certificate chain and signs a probe before compiling. Signing, notarization, ticket stapling and Gatekeeper assessment must all succeed; it does not fall back to an ad-hoc signature.
 
-Run **Release** manually to verify this path on the self-hosted Mac. That run downloads the current Mac release, signs and notarizes a temporary copy, and saves Apple's receipt as a CI artifact. It does not publish or replace release assets. Tag pushes still build and publish the full release. The signing job uses a temporary keychain and removes its own credentials and search-list entry when it finishes.
+Direct Mac builds and signing run on a clean GitHub-hosted macOS runner. Run **Release** manually to verify this signing path. That run downloads the current Mac release, signs and notarizes a temporary copy, and saves Apple's receipt as a CI artifact. It does not publish or replace release assets. Tag pushes still build and publish the full release. The signing job uses a temporary keychain and removes its own credentials and search-list entry when it finishes.
 
 The store signing secrets and both Cranamp provisioning profiles were configured
 on October 2, 2026. The encrypted PKCS12 backup contains only the Apple Distribution

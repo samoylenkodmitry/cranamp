@@ -17,7 +17,7 @@ jobs:
     if: github.event_name == 'push'
     concurrency: release-${{ matrix.platform }}
     name: Desktop ${{ matrix.os }}
-    runs-on: ${{ matrix.runner || matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -30,7 +30,6 @@ jobs:
             archive: tar.gz
             extra_rustflags: " -Cforce-unwind-tables=no -Clink-arg=-fuse-ld=lld -Clink-arg=-Wl,--icf=all"
           - os: macos-latest
-            runner: [self-hosted, macOS, ARM64]
             artifact: cranamp-macos
             platform: macos
             target: aarch64-apple-darwin
@@ -298,7 +297,7 @@ jobs:
   verify-macos-signing:
     if: github.event_name == 'workflow_dispatch'
     name: Verify Mac signing and notarization
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: macos-latest
     concurrency: release-macos
     timeout-minutes: 30
     permissions:

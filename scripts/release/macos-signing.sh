@@ -43,8 +43,6 @@ prepare() {
     [ -n "$existing" ] && keep+=("$existing")
   done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//;s/"$//')
   security list-keychains -d user -s "${keep[@]}"
-  security default-keychain -d user > "$CRANAMP_SIGN_STATE/default-keychain-before.txt"
-  security default-keychain -d user -s "$CRANAMP_SIGN_KEYCHAIN"
 
   local intermediate="$CRANAMP_SIGN_STATE/DeveloperIDG2CA.cer"
   curl --proto '=https' --tlsv1.2 --retry 5 --retry-connrefused \
@@ -62,38 +60,7 @@ prepare() {
 
   # A codeSign-only evaluation can fetch a missing issuer and conceal a broken
   # local chain. Check local certificates, then actually exercise the private key.
-  if ! security verify-cert -L -p basic -c "$CRANAMP_SIGN_STATE/leaf.pem" -k "$CRANAMP_SIGN_KEYCHAIN"; then
-    date -u
-    sw_vers
-    command -v security codesign openssl
-    openssl x509 -in "$CRANAMP_SIGN_STATE/leaf.pem" -noout -subject -issuer -dates -fingerprint -sha1
-    security verify-cert -L -v -p basic -c "$CRANAMP_SIGN_STATE/leaf.pem" \
-      -k "$CRANAMP_SIGN_KEYCHAIN" -k /System/Library/Keychains/SystemRootCertificates.keychain || true
-    for domain in user admin; do
-      local trust_options=()
-      [ "$domain" = user ] || trust_options=(-d)
-      security trust-settings-export ${trust_options[@]+"${trust_options[@]}"} \
-        "$CRANAMP_SIGN_STATE/$domain-trust.plist" >/dev/null 2>&1 || true
-    done
-    python3 - "$CRANAMP_SIGN_STATE" <<'PY'
-import hashlib, pathlib, plistlib, ssl, sys
-state = pathlib.Path(sys.argv[1])
-leaf = (state / 'leaf.pem').read_text()
-leaf = leaf[leaf.index('-----BEGIN CERTIFICATE-----'):]
-targets = {
-    hashlib.sha1(ssl.PEM_cert_to_DER_cert(leaf)).hexdigest().upper(): 'Developer ID identity',
-    hashlib.sha1((state / 'DeveloperIDG2CA.cer').read_bytes()).hexdigest().upper(): 'Developer ID G2',
-    '611E5B662C593A08FF58D14AE22452D198DF6C60': 'Apple Root CA',
-}
-for domain in ['user', 'admin']:
-    path = state / f'{domain}-trust.plist'
-    trust = plistlib.loads(path.read_bytes()).get('trustList', {}) if path.exists() else {}
-    for fingerprint, name in targets.items():
-        entry = trust.get(fingerprint)
-        print(domain, name, 'override:', entry.get('trustSettings') if entry else 'none')
-PY
-    return 1
-  fi
+  security verify-cert -L -p basic -c "$CRANAMP_SIGN_STATE/leaf.pem" -k "$CRANAMP_SIGN_KEYCHAIN"
   local identity
   identity=$(openssl x509 -in "$CRANAMP_SIGN_STATE/leaf.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')
   security find-identity -v -p codesigning "$CRANAMP_SIGN_KEYCHAIN" \
@@ -145,12 +112,6 @@ cleanup() {
   esac
   local result=0
   if [ -f "${CRANAMP_SIGN_KEYCHAIN:-}" ]; then
-    local current_default previous_default
-    current_default=$(security default-keychain -d user | sed 's/^[[:space:]]*"//;s/"$//')
-    if [ "$current_default" = "$CRANAMP_SIGN_KEYCHAIN" ] && [ -f "$CRANAMP_SIGN_STATE/default-keychain-before.txt" ]; then
-      previous_default=$(sed 's/^[[:space:]]*"//;s/"$//' "$CRANAMP_SIGN_STATE/default-keychain-before.txt")
-      security default-keychain -d user -s "$previous_default" || result=1
-    fi
     local keep=()
     while IFS= read -r existing; do
       [ "$existing" = "$CRANAMP_SIGN_KEYCHAIN" ] || keep+=("$existing")
