@@ -31,7 +31,7 @@ The existing **Release** workflow builds direct downloads. The new **Store packa
 | iOS / TestFlight | `apple-ios-store` | XCArchive; signed runs also export an IPA |
 | Mac App Store | `apple-macos-store` | Universal arm64/x86_64 XCArchive and PKG |
 | Microsoft Store | `microsoft-store-msix` | x64 MSIX |
-| Linux | `linux-repository-packages` | DEB, RPM, tarball, source archive, AUR PKGBUILD and `.SRCINFO` |
+| Linux | `linux-repository-packages` | DEB, RPM, tarball, source archive, AUR source/binary PKGBUILDs and `.SRCINFO` |
 
 Tag builds produce validation artifacts without distribution credentials. Manually enable **signed** to require Apple and Google Play credentials. Signed runs fail if those credentials are missing. Windows packages remain unsigned because Microsoft signs Store submissions. Without Partner Center variables, validation runs use `Cranamp.LocalValidation`, which cannot be submitted.
 
@@ -96,17 +96,17 @@ The desktop package declares `runFullTrust` and uses Cargo's version plus `.0`. 
 
 ## Linux and AUR
 
-`yay` installs recipes from the AUR. The AUR stores PKGBUILDs, not application binaries. The generated recipe builds the release source with Cargo's locked dependencies. CI generates `.SRCINFO` using `makepkg`.
+`yay` installs recipes from the AUR. The AUR stores PKGBUILDs, not application binaries. The `cranamp` recipe builds the release source with Cargo's locked dependencies. The [cranamp-bin package](https://aur.archlinux.org/packages/cranamp-bin) installs the tested x86_64 store tarball and is available with `yay -S cranamp-bin`. CI generates both recipes and their `.SRCINFO` files using `makepkg`.
 
-The existing AUR maintainer account is `faceless33`. Its Cranamp SSH key is registered; the private key is stored in the owner’s mounted Vault. The generated recipe disables debug symbols to keep Rust release builds within available memory.
+The existing AUR maintainer account is `faceless33`. Its Cranamp SSH key is registered; the private key is stored in the owner’s mounted Vault. The source recipe disables debug symbols to keep Rust release builds within available memory and disables Arch's C/C++ LTO so the native TLS library links with Rust. Rust release LTO remains enabled. Runtime dependencies include the libraries loaded dynamically by winit and wgpu, which ELF dependency scanning does not detect.
 
 For a tagged release:
 
 1. Attach `cranamp-VERSION-source.tar.gz` from the workflow artifact to the matching GitHub release. PKGBUILD already contains its checksum.
 2. Test the recipe in a clean Arch build environment (`extra-x86_64-build`) and run `namcap`.
-3. Register an AUR account and SSH key; create or take ownership of the `cranamp` package.
-4. Push only PKGBUILD and `.SRCINFO` to `ssh://aur@aur.archlinux.org/cranamp.git`.
-5. Users can then install with `yay -S cranamp`.
+3. Use the registered `faceless33` account and its Vault SSH key.
+4. Push only PKGBUILD and `.SRCINFO` to the matching `cranamp.git` or `cranamp-bin.git` repository at `ssh://aur@aur.archlinux.org/`.
+5. Users install with `yay -S cranamp-bin`, or `yay -S cranamp` for a source build once that recipe is published.
 
 Publish the exact source archive referenced by the recipe’s checksum before pushing to the AUR. The source must match the tagged release tree; a verified artifact from the same tree can be reused. Source archives use the checked-out Git commit, so local uncommitted edits are not included.
 
