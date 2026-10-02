@@ -40,6 +40,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let scene = scene_state.get();
     let drawing = !live.get() && !review.get();
     let hosted = host.is_some();
+    let document_pickers = hosted || cfg!(feature = "store");
     let armed = confirm.get();
     let mut action = Rows::new(20., ACTION_ROW, scene.width - 20.);
     let undo_at = action.take(76.);
@@ -63,7 +64,11 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let draft_at = hosted.then(|| (action.take(104.), action.take(146.)));
     let inline_files = scene.right(872.) < action.x + 8.;
     let (wsz_at, open_at, export_at, blank_at, keep_at) = if inline_files {
-        let wsz = if hosted { (0., 0.) } else { action.take(222.) };
+        let wsz = if document_pickers {
+            (0., 0.)
+        } else {
+            action.take(222.)
+        };
         (
             wsz,
             action.take(70.),
@@ -659,6 +664,8 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         Err(e) => note(&d, format!("Apply: {e:#}")),
                     },
                 );
+            }
+            if document_pickers {
                 let open = open_launcher.clone();
                 Action("Open…".into(), open_at.0, open_at.1, 70., move || {
                     open.launch(cranpose::FilePickerOptions::default().with_filter(
