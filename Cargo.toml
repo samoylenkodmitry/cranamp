@@ -125,6 +125,9 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))'.dependencies]
 env_logger = { version = "0.11", optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+rfd = "0.17.2"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = { version = "0.1", optional = true }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"], optional = true }

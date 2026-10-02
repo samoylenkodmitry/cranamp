@@ -681,11 +681,38 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     88.,
                     move || match d.lock().unwrap().export_archive() {
                         Ok(bytes) => {
-                            pending_export.set(Some(bytes));
-                            export.launch(cranpose::SaveDocumentRequest::new(
-                                "Catamp edited.wsz",
-                                "application/zip",
-                            ));
+                            #[cfg(all(target_os = "macos", feature = "store"))]
+                            {
+                                // The sandbox grants the selected file, not a temporary sibling.
+                                // The framework's staged sink creates a denied `.partial` file.
+                                let d = d.clone();
+                                cranpose_core::spawn_ui_task(async move {
+                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                        .set_file_name("Catamp edited.wsz")
+                                        .add_filter("WSZ skin", &["wsz"])
+                                        .save_file()
+                                        .await
+                                    {
+                                        let result = file.write(&bytes).await;
+                                        note(
+                                            &d,
+                                            match result {
+                                                Ok(()) => "Exported skin".into(),
+                                                Err(e) => format!("Export: {e:#}"),
+                                            },
+                                        );
+                                    }
+                                });
+                                let _ = &export;
+                            }
+                            #[cfg(not(all(target_os = "macos", feature = "store")))]
+                            {
+                                pending_export.set(Some(bytes));
+                                export.launch(cranpose::SaveDocumentRequest::new(
+                                    "Catamp edited.wsz",
+                                    "application/zip",
+                                ));
+                            }
                         }
                         Err(e) => note(&d, format!("Export: {e:#}")),
                     },
