@@ -1250,3 +1250,27 @@ fn alt_w_closes_the_main_window_but_never_the_last_one_open() {
     toggle_winamp_window(&mut state, keys::WinampWindowKey::Main);
     assert!(state.main_visible, "the main window alone stays open");
 }
+
+#[test]
+fn fullscreen_player_keeps_controls_inside_tablet_and_landscape_surfaces() {
+    for (width, height) in [(1032.0, 1336.0), (844.0, 350.0), (440.0, 874.0)] {
+        for (eq_visible, playlist_visible) in [(true, true), (false, true), (true, false)] {
+            let mut state = initial_winamp_state();
+            state.eq_visible = eq_visible;
+            state.playlist_visible = playlist_visible;
+            let layout = fullscreen_stacked_layout(width, height, &state, 2.0);
+            let content_height = main_height(state.main_shaded)
+                + if eq_visible { EQ_HEIGHT } else { 0.0 }
+                + if playlist_visible {
+                    layout.playlist_height
+                } else {
+                    0.0
+                };
+            assert!(content_height * layout.scale <= height + 0.01);
+            assert!(MAIN_WIDTH * layout.scale + 2.0 * layout.content_left_inset <= width + 0.01);
+            if playlist_visible {
+                assert!(layout.playlist_height >= playlist_min_height());
+            }
+        }
+    }
+}

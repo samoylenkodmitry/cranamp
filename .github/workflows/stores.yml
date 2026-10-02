@@ -21,12 +21,17 @@ on:
         description: Require distribution signing credentials (Apple and Google Play)
         type: boolean
         default: false
+      build_number:
+        description: Apple build number for this version
+        type: string
+        default: '1'
 
 permissions:
   contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CRANAMP_BUILD_NUMBER: ${{ inputs.build_number || '1' }}
   CRANAMP_STORE_SIGNED: ${{ inputs.signed == true && 'true' || 'false' }}
 
 jobs:
