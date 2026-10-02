@@ -9,7 +9,7 @@ Registration status on October 2, 2026:
 | Store | App record | Identity | Status |
 | --- | --- | --- | --- |
 | Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | Draft; free app, English (US) |
-| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | iOS and macOS drafts; manual release |
+| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | iOS 0.1.86 build 1 uploaded; iOS and macOS listings remain drafts |
 | Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | MSIX app name reserved; draft |
 
 GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
@@ -19,7 +19,7 @@ GitHub repository variables contain the registered Apple bundle ID and the exact
 - `CRANAMP_MSIX_PUBLISHER=CN=B3D99093-F004-43B3-80D7-6F628B17CAA6`
 - `CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME=DmitriiSamoilenko`
 
-These registrations do not publish an app or establish legal clearance. Apple initially created version `1.0` for both platforms; align the store version with the intended build before upload. Microsoft requires a submission within three months to retain the name reservation.
+These registrations do not publish an app or establish legal clearance. Apple initially created version `1.0` for both platforms; align each store version with the intended build before review. Microsoft requires a submission within three months to retain the name reservation.
 
 ## Channels and artifacts
 
@@ -74,6 +74,12 @@ Set repository variables:
 
 Credentials are imported into a temporary keychain and removed at job completion. Developer ID certificates for direct Mac downloads do not replace Mac App Store credentials.
 
+The store signing secrets and both Cranamp provisioning profiles were configured
+on October 2, 2026. The encrypted PKCS12 backup contains only the Apple Distribution
+and Mac Installer Distribution identities. Private material stays in Vault and
+GitHub encrypted secrets. The local iOS 0.1.86 build 1 passed Apple's validation
+and uploaded successfully. Device testing and App Review are separate steps.
+
 The Mac package uses App Sandbox with user-selected file read/write, app-scoped bookmarks, network client access for streams, and network server access for the desktop MCP endpoint. Test saved-file reopening, folder sync, playback and MCP in the signed sandbox. Building a package does not validate those runtime behaviors.
 
 An unsigned iOS XCArchive cannot be installed on a device or uploaded as a finished submission. Signed runs export an IPA through `xcodebuild -exportArchive`; Mac uses `productbuild`. Upload with Transporter or App Store Connect tooling. Complete privacy labels and review the final binary for required-reason APIs, SDK privacy manifests and export compliance. Do not invent privacy declarations just to pass upload checks.
@@ -118,6 +124,6 @@ References: [Android bundles](https://developer.android.com/build/building-cmdli
 
 ## Listing assets and privacy
 
-`store/listing-en-US.json` contains shared listing text and platform-specific additions. Mobile and desktop listings include Skin Studio. The desktop listing also explains agent connections. `site/privacy/` and `site/support/` are copied into the Pages build. Settings links to the privacy page.
+`store/listing-en-US.json` contains shared listing text and platform-specific additions. Mobile and desktop listings include Skin Studio. The desktop listing also explains agent connections. The landing page, privacy policy and support page are served at [cranamp.dmitrysamoylenko.in](https://cranamp.dmitrysamoylenko.in/) directly from `site/` in the VPS checkout; see [website deployment](website.md). Settings and store metadata use this domain. `site/privacy/` and `site/support/` are also copied into the Pages web-player build.
 
 The Apple privacy manifest declares file metadata access inside the app container (`C617.1`) and for user-selected files (`3B52.1`), plus elapsed-time measurement for playback and UI timers (`35F9.1`). The iOS release binary imports `stat`, `fstat`, `fstatat`, and `mach_absolute_time`. Preferences use Cranpose's file-backed store rather than UserDefaults. These declarations follow [Apple's required-reason API documentation](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api). Re-audit the binary when dependencies change.
