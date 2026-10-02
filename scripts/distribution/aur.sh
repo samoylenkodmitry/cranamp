@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 version=$(python3 scripts/distribution/version.py)
 out="$PWD/store-artifacts"
-mkdir -p "$out/aur"
+mkdir -p "$out/aur" "$out/aur-bin"
 source_name="cranamp-${version}-source.tar.gz"
 source_dir=$(mktemp -d)
 trap 'rm -rf "$source_dir"' EXIT
@@ -12,6 +12,7 @@ cp target/distribution/THIRD-PARTY.html "$source_dir/cranamp-${version}/docs/thi
 tar -czf "$out/$source_name" -C "$source_dir" "cranamp-${version}"
 digest=$(sha256sum "$out/$source_name" | cut -d' ' -f1)
 cat > "$out/aur/PKGBUILD" <<EOF
+# Maintainer: faceless33
 pkgname=cranamp
 pkgver=$version
 pkgrel=1
@@ -20,7 +21,7 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/samoylenkodmitry/cranamp'
 license=('Apache-2.0')
 options=('!debug' '!lto')
-depends=('alsa-lib' 'gcc-libs' 'glibc')
+depends=('alsa-lib' 'libgcc' 'glibc' 'hicolor-icon-theme' 'libx11' 'libxi' 'libxkbcommon-x11' 'wayland' 'vulkan-icd-loader')
 optdepends=('vulkan-driver: GPU rendering' 'xdg-desktop-portal: file dialogs')
 makedepends=('cargo' 'git' 'pkgconf')
 source=("https://github.com/samoylenkodmitry/cranamp/releases/download/v\$pkgver/cranamp-\$pkgver-source.tar.gz")
@@ -41,6 +42,29 @@ package() {
   install -Dm644 LICENSE "\$pkgdir/usr/share/licenses/cranamp/LICENSE"
   install -Dm644 docs/third-party/THIRD-PARTY.html "\$pkgdir/usr/share/licenses/cranamp/THIRD-PARTY.html"
   install -Dm644 docs/third-party/LiberationSans-OFL-1.1.txt "\$pkgdir/usr/share/licenses/cranamp/LiberationSans-OFL-1.1.txt"
+}
+EOF
+binary_name="cranamp-${version}-linux-x86_64-store.tar.gz"
+binary_digest=$(sha256sum "$out/$binary_name" | cut -d' ' -f1)
+cat > "$out/aur-bin/PKGBUILD" <<EOF
+# Maintainer: faceless33
+pkgname=cranamp-bin
+pkgver=$version
+pkgrel=1
+pkgdesc='Music player in Rust with WSZ skins and an agent-connected Skin Studio'
+arch=('x86_64')
+url='https://github.com/samoylenkodmitry/cranamp'
+license=('Apache-2.0')
+options=('!strip' '!debug')
+depends=('alsa-lib' 'libgcc' 'glibc' 'hicolor-icon-theme' 'libx11' 'libxi' 'libxkbcommon-x11' 'wayland' 'vulkan-icd-loader')
+optdepends=('vulkan-driver: GPU rendering' 'xdg-desktop-portal: file dialogs')
+provides=("cranamp=\$pkgver")
+conflicts=('cranamp')
+source=("https://github.com/samoylenkodmitry/cranamp/releases/download/v\$pkgver/cranamp-\$pkgver-linux-\$CARCH-store.tar.gz")
+sha256sums=('$binary_digest')
+package() {
+  cp -a "\$srcdir/usr" "\$pkgdir/"
+  mv "\$pkgdir/usr/share/licenses/cranamp" "\$pkgdir/usr/share/licenses/\$pkgname"
 }
 EOF
 # Generate .SRCINFO with makepkg on Arch; never maintain it separately.

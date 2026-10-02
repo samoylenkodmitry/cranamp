@@ -219,10 +219,11 @@ jobs:
           bash scripts/distribution/aur.sh
       - name: Generate AUR metadata
         run: |
-          docker run --rm -v "$PWD/store-artifacts/aur:/package" archlinux:base-devel bash -c '
+          docker run --rm -v "$PWD/store-artifacts:/packages" archlinux:base-devel bash -c '
             useradd -m builder
-            chown -R builder:builder /package
-            su builder -c "cd /package && makepkg --printsrcinfo > .SRCINFO"
+            chown -R builder:builder /packages/aur /packages/aur-bin
+            su builder -c "cd /packages/aur && makepkg --printsrcinfo > .SRCINFO"
+            su builder -c "cd /packages/aur-bin && makepkg --printsrcinfo > .SRCINFO"
           '
       - uses: actions/upload-artifact@v7
         with:
