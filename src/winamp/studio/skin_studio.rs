@@ -157,7 +157,8 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     }
     let scene = scene
         .under_chrome(panels.bottom() + CANVAS_HEADER)
-        .over_footer(footer.bottom() + 26.);
+        .over_footer(footer.bottom() + 26.)
+        .with_canvas_room();
     let (canvas_x, canvas_y, canvas_full_w, canvas_h) = scene.painting();
     let (split_w, split_drawer) = scene.split();
     let docked = split_drawer > 0.;
@@ -404,19 +405,11 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
         });
     }
     let document = shared.clone();
-    Box(
-        Modifier::empty().fill_max_size().background(BG),
-        BoxSpec::default(),
+    StudioViewport(
+        scene,
+        scene_state,
+        // Keep the controls and canvas reachable when phone controls wrap.
         move || {
-            BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
-                let measured = Scene::new(
-                    scope.constraints().max_width,
-                    scope.constraints().max_height,
-                );
-                if scene_state.get_non_reactive() != measured {
-                    cranpose_core::SideEffect(move || scene_state.set(measured));
-                }
-            });
             if view.presentation {
                 let d = document.clone();
                 let presentation_zoom = view.zoom.min((800 / preview_size.1).clamp(1, 2)) as f32;
@@ -1016,8 +1009,8 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         doc.view.panel = "canvas".into();
                         let best = fit_zoom(room, doc.canvas_size());
                         let _ = doc.state(
-                            json!({"panel":"canvas","layer":"auto","zoom":best,"presentation":false}),
-                        );
+                        json!({"panel":"canvas","layer":"auto","zoom":best,"presentation":false}),
+                    );
                         live.set(false);
                         review.set(false);
                         pan.set([0, 0]);
@@ -1775,9 +1768,13 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     move || {
                         {
                             let d = d.clone();
-                            Action("Close".into(), 290., 10., 78., move || {
-                                set_drawer(&d, tick, 0)
-                            });
+                            Action(
+                                "Close".into(),
+                                (drawer_w - 90.).max(12.),
+                                10.,
+                                78.,
+                                move || set_drawer(&d, tick, 0),
+                            );
                         }
                         let room = (drawer_w - 24., drawer_h);
                         if open_drawer == 1 {

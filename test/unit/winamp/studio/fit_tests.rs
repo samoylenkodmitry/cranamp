@@ -1,4 +1,22 @@
-use super::{fit_zoom, Scene, CANVAS_MIN, DRAWER_WIDTH};
+use super::{fit_zoom, Scene, CANVAS_MIN, CANVAS_MIN_HEIGHT, DRAWER_WIDTH};
+#[test]
+fn wrapped_phone_controls_keep_a_scrollable_canvas_and_footer() {
+    for (width, height, toolbar, footer) in [
+        (393., 780., 470., 254.),
+        (320., 568., 622., 330.),
+        (844., 390., 242., 178.),
+    ] {
+        let scene = Scene::new(width, height)
+            .under_chrome(toolbar)
+            .over_footer(footer)
+            .with_canvas_room();
+        let (_, top, canvas_width, canvas_height) = scene.painting();
+        assert!(canvas_width > 0.);
+        assert!(canvas_height >= CANVAS_MIN_HEIGHT);
+        assert!(scene.footer_top() >= top + canvas_height);
+        assert!(scene.height >= height);
+    }
+}
 #[test]
 fn the_default_window_fits_the_whole_skin_at_two_times() {
     let scene = Scene::new(1388., 1000.);

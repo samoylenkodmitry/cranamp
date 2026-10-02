@@ -121,7 +121,6 @@ jobs:
             notice_target: aarch64-apple-darwin
             features: desktop,renderer-wgpu,store
     env:
-      CRANAMP_BUILD_NUMBER: ${{ github.run_number }}
       CRANAMP_APPLE_BUNDLE_ID: ${{ vars.CRANAMP_APPLE_BUNDLE_ID || 'io.cranamp.app' }}
     steps:
       - uses: actions/checkout@v6
@@ -188,6 +187,9 @@ jobs:
       - name: Build MSIX
         shell: pwsh
         run: ./scripts/distribution/windows.ps1
+      - name: Capture Windows player and Skin Studio
+        shell: pwsh
+        run: ./test/distribution/windows-store-screenshots.ps1 -Executable target/x86_64-pc-windows-msvc/release/cranamp.exe -OutputDirectory store-artifacts/screenshots
       - uses: actions/upload-artifact@v7
         with:
           name: microsoft-store-msix
