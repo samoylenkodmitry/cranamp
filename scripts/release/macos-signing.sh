@@ -19,10 +19,17 @@ prepare() {
 
   # Import only the identity from the secret. Bundled CA certificates must not
   # shadow the runner's system trust anchors or Apple's current intermediate.
-  openssl pkcs12 -in "$CRANAMP_SIGN_STATE/input.p12" -passin env:P12_PASSWORD \
+  # Older Keychain exports use RC2, which OpenSSL 3 reads via its legacy provider.
+  local read_options=(-passin env:P12_PASSWORD)
+  local pkcs12_help
+  pkcs12_help=$(openssl pkcs12 -help 2>&1 || true)
+  if [[ "$pkcs12_help" == *"-legacy"* ]]; then
+    read_options+=(-legacy)
+  fi
+  openssl pkcs12 -in "$CRANAMP_SIGN_STATE/input.p12" "${read_options[@]}" \
     -clcerts -nokeys -out "$CRANAMP_SIGN_STATE/leaf.pem"
   test "$(grep -c 'BEGIN CERTIFICATE' "$CRANAMP_SIGN_STATE/leaf.pem")" = 1
-  openssl pkcs12 -in "$CRANAMP_SIGN_STATE/input.p12" -passin env:P12_PASSWORD \
+  openssl pkcs12 -in "$CRANAMP_SIGN_STATE/input.p12" "${read_options[@]}" \
     -nocerts -out "$CRANAMP_SIGN_STATE/key.pem" -passout env:CRANAMP_SIGN_KEYCHAIN_PASS
   openssl pkcs12 -export -in "$CRANAMP_SIGN_STATE/leaf.pem" \
     -inkey "$CRANAMP_SIGN_STATE/key.pem" -passin env:CRANAMP_SIGN_KEYCHAIN_PASS \
@@ -31,11 +38,11 @@ prepare() {
   security create-keychain -p "$CRANAMP_SIGN_KEYCHAIN_PASS" "$CRANAMP_SIGN_KEYCHAIN"
   security set-keychain-settings -ut 21600 "$CRANAMP_SIGN_KEYCHAIN"
   security unlock-keychain -p "$CRANAMP_SIGN_KEYCHAIN_PASS" "$CRANAMP_SIGN_KEYCHAIN"
-  local keep=()
+  local keep=("$CRANAMP_SIGN_KEYCHAIN")
   while IFS= read -r existing; do
     [ -n "$existing" ] && keep+=("$existing")
   done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//;s/"$//')
-  security list-keychains -d user -s "$CRANAMP_SIGN_KEYCHAIN" "${keep[@]}"
+  security list-keychains -d user -s "${keep[@]}"
 
   local intermediate="$CRANAMP_SIGN_STATE/DeveloperIDG2CA.cer"
   curl --proto '=https' --tlsv1.2 --retry 5 --retry-connrefused \
@@ -107,7 +114,11 @@ cleanup() {
     while IFS= read -r existing; do
       [ "$existing" = "$CRANAMP_SIGN_KEYCHAIN" ] || keep+=("$existing")
     done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//;s/"$//')
-    security list-keychains -d user -s "${keep[@]}" || result=1
+    if [ "${#keep[@]}" -gt 0 ]; then
+      security list-keychains -d user -s "${keep[@]}" || result=1
+    else
+      security list-keychains -d user -s || result=1
+    fi
     security delete-keychain "$CRANAMP_SIGN_KEYCHAIN" || result=1
   fi
   rm -rf "$CRANAMP_SIGN_STATE"
