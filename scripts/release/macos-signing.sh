@@ -43,6 +43,8 @@ prepare() {
     [ -n "$existing" ] && keep+=("$existing")
   done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//;s/"$//')
   security list-keychains -d user -s "${keep[@]}"
+  security default-keychain -d user > "$CRANAMP_SIGN_STATE/default-keychain-before.txt"
+  security default-keychain -d user -s "$CRANAMP_SIGN_KEYCHAIN"
 
   local intermediate="$CRANAMP_SIGN_STATE/DeveloperIDG2CA.cer"
   curl --proto '=https' --tlsv1.2 --retry 5 --retry-connrefused \
@@ -55,6 +57,8 @@ prepare() {
     -P "$CRANAMP_SIGN_KEYCHAIN_PASS" -T /usr/bin/codesign -f pkcs12
   security set-key-partition-list -S apple-tool:,apple:,codesign: \
     -s -k "$CRANAMP_SIGN_KEYCHAIN_PASS" "$CRANAMP_SIGN_KEYCHAIN" >/dev/null
+  security find-certificate -a -Z -c 'Developer ID Certification Authority' "$CRANAMP_SIGN_KEYCHAIN" \
+    | grep -E 'SHA-256 hash:|"labl"'
 
   # A codeSign-only evaluation can fetch a missing issuer and conceal a broken
   # local chain. Check local certificates, then actually exercise the private key.
@@ -141,6 +145,12 @@ cleanup() {
   esac
   local result=0
   if [ -f "${CRANAMP_SIGN_KEYCHAIN:-}" ]; then
+    local current_default previous_default
+    current_default=$(security default-keychain -d user | sed 's/^[[:space:]]*"//;s/"$//')
+    if [ "$current_default" = "$CRANAMP_SIGN_KEYCHAIN" ] && [ -f "$CRANAMP_SIGN_STATE/default-keychain-before.txt" ]; then
+      previous_default=$(sed 's/^[[:space:]]*"//;s/"$//' "$CRANAMP_SIGN_STATE/default-keychain-before.txt")
+      security default-keychain -d user -s "$previous_default" || result=1
+    fi
     local keep=()
     while IFS= read -r existing; do
       [ "$existing" = "$CRANAMP_SIGN_KEYCHAIN" ] || keep+=("$existing")
