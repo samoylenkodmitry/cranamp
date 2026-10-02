@@ -116,7 +116,7 @@ DEB and RPM files can be attached to a GitHub release for direct installation. T
 
 - Review generated THIRD-PARTY.html, the font notices, and MPL source availability. Cargo notices cover Rust dependencies; separately audit additional platform libraries.
 - Keep provenance and permission records for bundled artwork. Packaging does not establish legal clearance.
-- Complete the Android AAC patent assessment and privacy review identified in the initial investigation.
+- Android includes `symphonia-codec-aac` through `cranpose-media`. Codec patent coverage for the intended countries remains a separate legal assessment; free distribution and open-source copyright licenses do not establish that coverage. [Via LA’s AAC program](https://www.via-la.com/licensing-programs/aac/) describes licensing for end-user encoder/decoder products, but does not determine which claims apply to this specific AAC implementation. The store privacy forms are complete for the audited build.
 - Test the exact signed package on each OS, including file access and sandbox behavior.
 - Supply product screenshots, support and privacy URLs, age ratings and publisher identity in the consoles.
 
