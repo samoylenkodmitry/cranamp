@@ -1000,20 +1000,26 @@ fn only_playlist_urls_are_resolved_before_playing() {
     );
 }
 #[test]
-fn the_shipped_station_is_an_entry_that_resolves_on_play() {
-    let station = audio::track_from_title_path(DEFAULT_STATION_TITLE, DEFAULT_STATION_URL);
-    assert_eq!(playlist_entry_url(&station), Some(DEFAULT_STATION_URL));
+fn a_user_playlist_url_is_an_entry_that_resolves_on_play() {
+    let station = audio::track_from_title_path("Example radio", "https://example.org/radio.m3u");
+    assert_eq!(
+        playlist_entry_url(&station),
+        Some("https://example.org/radio.m3u")
+    );
 }
 #[test]
 fn a_saved_url_entry_survives_a_restart() {
     let restored = restore_saved_track(SavedTrack {
-        title: "Cranamp FM".to_string(),
-        path: DEFAULT_STATION_URL.to_string(),
+        title: "Example radio".to_string(),
+        path: "https://example.org/radio.m3u".to_string(),
         duration_seconds: None,
     })
     .expect("a URL entry should survive being saved and restored");
-    assert_eq!(restored.path.as_deref(), Some(DEFAULT_STATION_URL));
-    assert_eq!(restored.title, "Cranamp FM");
+    assert_eq!(
+        restored.path.as_deref(),
+        Some("https://example.org/radio.m3u")
+    );
+    assert_eq!(restored.title, "Example radio");
     assert!(restore_saved_track(SavedTrack {
         title: "Gone".to_string(),
         path: "/definitely/not/here/song.mp3".to_string(),

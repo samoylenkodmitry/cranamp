@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Cranamp
+Comment=Music player with WSZ skins and an agent-connected Skin Studio
+Exec=cranamp
+Icon=io.cranamp.app
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;audio;skins;WSZ;

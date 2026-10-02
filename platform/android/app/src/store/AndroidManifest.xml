@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Cranamp"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:resizeableActivity="true"
+        android:supportsRtl="true">
+
+        <!--
+            The activity itself comes from the Cranpose Gradle plugin, label,
+            theme and `android.app.lib_name` included. This says only what is
+            specific to a skinned player window: the freeform size a
+            desktop-class window manager opens it at, which is the classic
+            skin's own geometry rather than anything the framework knows.
+        -->
+        <activity
+            android:name="dev.cranpose.android.CranposeActivity"
+            android:resizeableActivity="true"
+            tools:node="merge">
+            <layout
+                android:defaultWidth="275dp"
+                android:defaultHeight="493dp"
+                android:gravity="center"
+                android:minWidth="275dp"
+                android:minHeight="116dp" />
+        </activity>
+        <receiver android:name="dev.cranpose.android.CranposeAppUpdate" tools:node="remove" />
+    </application>
+</manifest>

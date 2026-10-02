@@ -36,7 +36,11 @@ fn studio_edits_the_preferred_extended_number_sheet() {
 }
 
 fn document() -> Document {
-    let mut doc = Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap();
+    let mut doc = Document::open(
+        include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz"),
+        None,
+    )
+    .unwrap();
     doc.open_on_whole_skin();
     doc
 }

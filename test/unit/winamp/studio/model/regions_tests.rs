@@ -1,7 +1,11 @@
 use super::*;
 #[test]
 fn region_generation_is_undoable_and_survives_both_archive_formats() {
-    let mut doc = Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap();
+    let mut doc = Document::open(
+        include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz"),
+        None,
+    )
+    .unwrap();
     let rows = (0..116)
         .map(|y| {
             if y < 3 {
@@ -24,7 +28,11 @@ fn region_generation_is_undoable_and_survives_both_archive_formats() {
 }
 #[test]
 fn project_preserves_unfinished_base_alpha_and_export_refuses_it() {
-    let mut doc = Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap();
+    let mut doc = Document::open(
+        include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz"),
+        None,
+    )
+    .unwrap();
     doc.images
         .get_mut("main.bmp")
         .unwrap()

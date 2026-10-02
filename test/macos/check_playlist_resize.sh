@@ -29,8 +29,8 @@ min_playlist=116
 # The whole steps of $2 a drag of $1 comes to, rounded to the nearest.
 steps() { echo $(( ($1 >= 0 ? $1 + $2 / 2 : $1 - $2 / 2) / $2 * $2 )); }
 
-stack() { "$drag" oswindows cranamp | grep 'Cranamp Winamp$'; }
-torn() { "$drag" oswindows cranamp | grep -F 'Cranamp Winamp Playlist' || true; }
+stack() { "$drag" oswindows cranamp | grep 'Cranamp$'; }
+torn() { "$drag" oswindows cranamp | grep -F 'Cranamp Playlist' || true; }
 
 pkill -f 'target/debug/cranamp' 2> /dev/null || true
 sleep 1

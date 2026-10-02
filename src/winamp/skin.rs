@@ -106,8 +106,8 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
     load_skin_with_mode(wsz_bytes, BitmapMode::Classic)
 }
 pub fn load_skin_with_mode(wsz_bytes: &[u8], mode: BitmapMode) -> Result<WinampSkin> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(wsz_bytes))
-        .context("failed to open winamp .wsz archive")?;
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(wsz_bytes)).context("failed to open WSZ archive")?;
     let mut files: HashMap<String, Vec<u8>> = HashMap::new();
     for idx in 0..archive.len() {
         let mut file = archive.by_index(idx).context("failed to read zip entry")?;
@@ -181,10 +181,12 @@ pub fn load_skin_with_mode(wsz_bytes: &[u8], mode: BitmapMode) -> Result<WinampS
 fn default_text_bitmap() -> ImageBitmap {
     classic_bitmap("text.bmp")
 }
-/// One bitmap of the classic skin bundled with the player.
+/// One bitmap from our bundled Catamp Silverplay artwork.
 fn classic_bitmap(name: &str) -> ImageBitmap {
-    let mut archive = zip::ZipArchive::new(Cursor::new(include_bytes!("../../assets/winamp.wsz")))
-        .expect("bundled classic skin");
+    let mut archive = zip::ZipArchive::new(Cursor::new(include_bytes!(
+        "../../assets/skins/Catamp Silverplay.wsz"
+    )))
+    .expect("bundled classic skin");
     let mut bytes = Vec::new();
     archive
         .by_name(name)

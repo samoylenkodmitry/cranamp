@@ -15,9 +15,9 @@ esac
 
 export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-15.0}"
 
-cargo build --manifest-path "$ROOT/Cargo.toml" \
+cargo build --locked --manifest-path "$ROOT/Cargo.toml" \
   --bin cranamp-ios \
-  --target "$TARGET" --no-default-features --features ios $PROFILE_FLAG >&2
+  --target "$TARGET" --no-default-features --features "${CRANAMP_IOS_FEATURES:-ios}" $PROFILE_FLAG >&2
 
 BIN="$ROOT/target/$TARGET/$PROFILE/cranamp-ios"
 APP="$ROOT/target/$TARGET/$PROFILE/$APP_NAME.app"
@@ -26,6 +26,7 @@ rm -rf "$APP"
 mkdir -p "$APP"
 cp "$BIN" "$APP/$APP_NAME"
 cp "$SCRIPT_DIR/Info.plist" "$APP/Info.plist"
+cp "$ROOT/platform/apple/PrivacyInfo.xcprivacy" "$APP/PrivacyInfo.xcprivacy"
 USAGE="$ROOT/target/cranpose/cranamp-usage.plist"
 if [ ! -f "$USAGE" ]; then
   echo "no usage declaration at $USAGE; the cranamp build script writes it" >&2
@@ -65,6 +66,8 @@ case "$minos" in
     ;;
 esac
 
-codesign --force --sign "${CODESIGN_IDENTITY:--}" "$APP" >&2
+if [ "${CRANAMP_UNSIGNED:-false}" != "true" ]; then
+  codesign --force --sign "${CODESIGN_IDENTITY:--}" "$APP" >&2
+fi
 
 echo "$APP"

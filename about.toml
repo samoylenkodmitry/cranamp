@@ -1,0 +1,4 @@
+# Reviewed SPDX license families in the current dependency graph.
+accepted = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "MPL-2.0", "BSL-1.0", "CC0-1.0", "MIT-0", "0BSD", "Unlicense", "CDLA-Permissive-2.0"]
+ignore-dev-dependencies = true
+ignore-build-dependencies = true

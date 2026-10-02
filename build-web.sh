@@ -28,6 +28,7 @@ sed "$versioned" index.html > dist/index.html
 cp assets/icon/favicon.png assets/icon/apple-touch-icon.png dist/
 cp assets/icon/icon-192.png assets/icon/icon-512.png assets/icon/icon-maskable-512.png dist/
 cp manifest.webmanifest dist/manifest.webmanifest
+cp -R site/privacy site/support dist/
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
 sed "$versioned; s/__CRANAMP_CACHE__/cranamp-${version}-${build}/" sw.js > dist/sw.js
 cp -R pkg dist/pkg

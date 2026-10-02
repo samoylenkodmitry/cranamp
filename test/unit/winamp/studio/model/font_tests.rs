@@ -2,7 +2,11 @@ use super::*;
 
 #[test]
 fn classic_font_paints_real_cells_preserves_view_and_undo() {
-    let mut doc = Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap();
+    let mut doc = Document::open(
+        include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz"),
+        None,
+    )
+    .unwrap();
     let before = doc.images["text.bmp"].clone();
     let view = serde_json::to_value(&doc.view).unwrap();
     doc.classic_font("#fff0c4", "#1d2031").unwrap();

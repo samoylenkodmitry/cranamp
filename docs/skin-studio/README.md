@@ -1,6 +1,6 @@
 # Cranamp Skin Studio
 
-A pixel editor for classic Winamp `.wsz` skins, built into Cranamp. It is driven
+A pixel editor for classic `.wsz` skins, built into Cranamp. It is driven
 by pointer, by touch, and by MCP; all three act on one document with one undo
 history.
 
@@ -37,7 +37,7 @@ cargo check --target wasm32-unknown-unknown --no-default-features --features web
 
 The browser keeps the layered draft under `cranamp.studio.draft.v1` and
 **Apply to player** under `cranamp.skin.v1/Studio edited.wsz`, which joins the
-Settings skin list and survives a reload. **Export Winamp skin…** downloads a
+Settings skin list and survives a reload. **Export WSZ skin…** downloads a
 real `.wsz`.
 
 ## Layouts

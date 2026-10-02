@@ -1,0 +1,22 @@
+name: Store dependency notices
+description: Generate license notices for the selected release target
+inputs:
+  target:
+    required: true
+    description: Rust target triple
+  features:
+    required: true
+    description: Cargo feature list
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: cargo install cargo-about --locked --version 0.8.4
+    - shell: bash
+      env:
+        NOTICE_TARGET: ${{ inputs.target }}
+        NOTICE_FEATURES: ${{ inputs.features }}
+      run: |
+        mkdir -p target/distribution
+        cargo about generate --fail --locked --no-default-features --features "$NOTICE_FEATURES" \
+          --target "$NOTICE_TARGET" scripts/distribution/licenses.hbs > target/distribution/THIRD-PARTY.html

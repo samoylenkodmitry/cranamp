@@ -34,11 +34,15 @@ fn readability_samples_visible_paint_layers_like_the_exported_player_skin() {
     assert_eq!(d.display_ink(), base_ink);
 }
 fn document() -> Document {
-    Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap()
+    Document::open(
+        include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz"),
+        None,
+    )
+    .unwrap()
 }
 /// The bundled skin with a `NORMAL.CUR` written alongside it.
 fn document_with_a_cursor() -> Document {
-    let source = include_bytes!("../../../../../assets/winamp.wsz");
+    let source = include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz");
     let cursor = crate::winamp::cursors::tests::cursor_file(&[
         crate::winamp::cursors::tests::monochrome_2x2(),
     ]);

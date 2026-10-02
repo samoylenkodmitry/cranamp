@@ -45,7 +45,7 @@ picture() {
 pid=$!
 trap 'kill "$pid" 2> /dev/null || true' EXIT
 
-player="$(timeout 30 xdotool search --sync --onlyvisible --name '^Cranamp Winamp$' | head -n 1)" \
+player="$(timeout 30 xdotool search --sync --onlyvisible --name '^Cranamp$' | head -n 1)" \
     || fail "the player did not appear on X display $DISPLAY with WAYLAND_DISPLAY=$WAYLAND_DISPLAY (log: $out/cranamp.log)"
 sleep 2
 eval "$(xdotool getwindowgeometry --shell "$player")"

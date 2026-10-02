@@ -31,6 +31,10 @@ jobs:
         run: python3 test/state_holder_gate.py
       - name: Check native
         run: cargo check --all-targets
+      - name: Check store feature
+        run: cargo check --all-targets --features store
+      - name: Packaging checks
+        run: python3 -m unittest discover -s test/distribution -p 'test_*.py'
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: Test

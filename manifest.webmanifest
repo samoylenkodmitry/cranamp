@@ -1,7 +1,7 @@
 {
   "name": "Cranamp",
   "short_name": "Cranamp",
-  "description": "A Winamp-style audio player with classic skins.",
+  "description": "A music player in Rust with WSZ skins and a built-in Skin Studio.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

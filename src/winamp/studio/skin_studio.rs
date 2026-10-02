@@ -525,7 +525,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 },
             );
             Label(
-                "Classic Winamp skin".into(),
+                "Classic WSZ skin".into(),
                 classic_at.0 + 6.,
                 classic_at.1 + 7.,
                 160.,

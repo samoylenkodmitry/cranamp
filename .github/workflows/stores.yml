@@ -1,0 +1,225 @@
+name: Store packages
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/stores.yml'
+      - '.github/actions/store-notices/**'
+      - 'scripts/distribution/**'
+      - 'platform/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'build.rs'
+      - 'src/**'
+      - 'assets/**'
+      - 'about.toml'
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: Require distribution signing credentials (Apple and Google Play)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CRANAMP_STORE_SIGNED: ${{ inputs.signed == true && 'true' || 'false' }}
+
+jobs:
+  android:
+    name: Google Play AAB
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Android build tools
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;37.0.0" "ndk;29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          cargo install cargo-ndk --locked
+      - uses: ./.github/actions/store-notices
+        with:
+          target: aarch64-linux-android
+          features: android,renderer-wgpu,store
+      - name: Bundle legal notices
+        run: |
+          mkdir -p platform/android/app/src/main/assets/legal
+          cp LICENSE docs/third-party/LiberationSans-OFL-1.1.txt target/distribution/THIRD-PARTY.html platform/android/app/src/main/assets/legal/
+      - name: Prepare upload signing
+        if: inputs.signed == true
+        env:
+          KEYSTORE_BASE64: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEYSTORE_BASE64 || secrets.CRANAMP_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing Play upload or existing Cranamp release keystore'; exit 1; }
+          (umask 077; printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/play-upload.jks")
+          echo "CRANAMP_RELEASE_KEYSTORE=$RUNNER_TEMP/play-upload.jks" >> "$GITHUB_ENV"
+      - name: Build store bundle
+        env:
+          CRANAMP_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEYSTORE_PASSWORD || secrets.CRANAMP_RELEASE_KEYSTORE_PASSWORD }}
+          CRANAMP_RELEASE_KEY_ALIAS: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEY_ALIAS || secrets.CRANAMP_RELEASE_KEY_ALIAS }}
+          CRANAMP_RELEASE_KEY_PASSWORD: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEY_PASSWORD || secrets.CRANAMP_RELEASE_KEY_PASSWORD }}
+        run: |
+          version=$(python3 scripts/distribution/version.py)
+          export GITHUB_REF_NAME="v$version"
+          cd platform/android
+          ./gradlew --no-daemon -PcranampStore=true :app:bundleRelease
+      - name: Verify store manifest and stage AAB
+        run: |
+          python3 test/distribution/check_android_manifest.py platform/android/app/build/intermediates/merged_manifest/release/cranposeReleaseManifestCheck/AndroidManifest.xml
+          mkdir -p store-artifacts
+          cp platform/android/app/build/outputs/bundle/release/*.aab store-artifacts/
+          cp target/distribution/THIRD-PARTY.html store-artifacts/
+          if [ "$CRANAMP_STORE_SIGNED" = true ]; then
+            jarsigner -verify -verbose -certs store-artifacts/*.aab > "$RUNNER_TEMP/aab-signature.txt"
+            grep -q 'jar verified.' "$RUNNER_TEMP/aab-signature.txt"
+            if grep -q 'jar is unsigned' "$RUNNER_TEMP/aab-signature.txt"; then exit 1; fi
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: google-play-bundle
+          path: store-artifacts/
+          if-no-files-found: error
+      - name: Delete upload key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/play-upload.jks"
+
+  apple:
+    name: Apple ${{ matrix.platform }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            targets: aarch64-apple-ios
+            notice_target: aarch64-apple-ios
+            features: ios,store
+          - platform: macos
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            notice_target: aarch64-apple-darwin
+            features: desktop,renderer-wgpu,store
+    env:
+      CRANAMP_BUILD_NUMBER: ${{ github.run_number }}
+      CRANAMP_APPLE_BUNDLE_ID: ${{ vars.CRANAMP_APPLE_BUNDLE_ID || 'io.cranamp.app' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/store-notices
+        with:
+          target: ${{ matrix.notice_target }}
+          features: ${{ matrix.features }}
+      - name: Install distribution credentials
+        if: inputs.signed == true
+        env:
+          P12_BASE64: ${{ secrets.CRANAMP_APPLE_STORE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.CRANAMP_APPLE_STORE_P12_PASSWORD }}
+          PROFILE_BASE64: ${{ matrix.platform == 'ios' && secrets.CRANAMP_IOS_STORE_PROFILE_BASE64 || secrets.CRANAMP_MAC_STORE_PROFILE_BASE64 }}
+          CRANAMP_APPLE_SIGN_IDENTITY: ${{ vars.CRANAMP_APPLE_STORE_SIGN_IDENTITY }}
+          CRANAMP_MAC_INSTALLER_IDENTITY: ${{ vars.CRANAMP_MAC_INSTALLER_IDENTITY }}
+        run: bash scripts/distribution/apple-credentials.sh
+      - name: Build store archive and distribution package
+        env:
+          APPLE_PLATFORM: ${{ matrix.platform }}
+          CRANAMP_APPLE_SIGN_IDENTITY: ${{ vars.CRANAMP_APPLE_STORE_SIGN_IDENTITY }}
+          CRANAMP_MAC_INSTALLER_IDENTITY: ${{ vars.CRANAMP_MAC_INSTALLER_IDENTITY }}
+        run: python3 scripts/distribution/apple.py "$APPLE_PLATFORM"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: apple-${{ matrix.platform }}-store
+          path: store-artifacts/
+          if-no-files-found: error
+      - name: Remove distribution credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/cranamp-store.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/store.p12" "$RUNNER_TEMP/store-profile.mobileprovision"
+          if [ -n "${CRANAMP_INSTALLED_PROFILE:-}" ]; then rm -f "$CRANAMP_INSTALLED_PROFILE"; fi
+
+  windows:
+    name: Microsoft Store MSIX
+    runs-on: windows-latest
+    env:
+      CRANAMP_MSIX_IDENTITY: ${{ vars.CRANAMP_MSIX_IDENTITY }}
+      CRANAMP_MSIX_PUBLISHER: ${{ vars.CRANAMP_MSIX_PUBLISHER }}
+      CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/store-notices
+        with:
+          target: x86_64-pc-windows-msvc
+          features: desktop,renderer-wgpu,store
+      - name: Build player
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --locked --release --features store --target x86_64-pc-windows-msvc
+      - name: Build MSIX
+        shell: pwsh
+        run: ./scripts/distribution/windows.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: microsoft-store-msix
+          path: store-artifacts/
+          if-no-files-found: error
+
+  linux:
+    name: Linux DEB, RPM and AUR source package
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install packaging dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config dpkg-dev rpm desktop-file-utils
+      - uses: ./.github/actions/store-notices
+        with:
+          target: x86_64-unknown-linux-gnu
+          features: desktop,renderer-wgpu,store
+      - name: Build packages
+        run: |
+          desktop-file-validate platform/linux/io.cranamp.app.desktop
+          bash scripts/distribution/linux.sh
+          bash scripts/distribution/aur.sh
+      - name: Generate AUR metadata
+        run: |
+          docker run --rm -v "$PWD/store-artifacts/aur:/package" archlinux:base-devel bash -c '
+            useradd -m builder
+            chown -R builder:builder /package
+            su builder -c "cd /package && makepkg --printsrcinfo > .SRCINFO"
+          '
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-repository-packages
+          path: store-artifacts/
+          include-hidden-files: true
+          if-no-files-found: error

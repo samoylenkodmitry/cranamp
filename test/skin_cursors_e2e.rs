@@ -113,7 +113,7 @@ fn sample_cursor(blue: bool) -> Vec<u8> {
 fn skin_with_cursors(name: &str, cursors: &[(&str, bool)]) -> std::path::PathBuf {
     use std::io::{Read, Write};
 
-    let source = include_bytes!("../assets/winamp.wsz");
+    let source = include_bytes!("../assets/skins/Catamp Silverplay.wsz");
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(source.as_slice()))
         .expect("bundled skin is a zip");
     let mut bytes = std::io::Cursor::new(Vec::new());
@@ -124,6 +124,9 @@ fn skin_with_cursors(name: &str, cursors: &[(&str, bool)]) -> std::path::PathBuf
         for index in 0..zip.len() {
             let mut entry = zip.by_index(index).expect("readable entry");
             let entry_name = entry.name().to_string();
+            if entry_name.to_ascii_lowercase().ends_with(".cur") {
+                continue;
+            }
             let mut data = Vec::new();
             entry.read_to_end(&mut data).expect("readable bytes");
             writer.start_file(entry_name, options).expect("writable");

@@ -74,8 +74,8 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         "sync section should appear; visible={after:?}"
     );
     assert!(
-        contains(&after, "UPDATES"),
-        "updates section should appear; visible={after:?}"
+        contains(&after, "UPDATES") != cfg!(feature = "store"),
+        "updates must appear only in direct builds; visible={after:?}"
     );
     assert!(
         contains(&after, "Open Skin Studio"),
@@ -183,8 +183,8 @@ fn audio_handed_over_by_another_application_plays() {
         "handed-over audio should appear in the player; visible={after:?}"
     );
     assert!(
-        contains(&after, "Cranamp Demo 01 - Retro Tracker"),
-        "the existing playlist should be kept; visible={after:?}"
+        contains(&after, "Cranamp Demo 01 - Retro Tracker") != cfg!(feature = "store"),
+        "direct builds keep the demo playlist; store builds start empty; visible={after:?}"
     );
     assert!(
         after

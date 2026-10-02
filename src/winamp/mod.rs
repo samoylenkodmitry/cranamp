@@ -13,7 +13,6 @@ mod playlist_size;
 mod region_clip;
 pub mod skin;
 mod sprites;
-#[cfg(not(target_os = "ios"))]
 pub mod studio;
 mod vis;
 use crate::audio::{self, Track};
@@ -65,13 +64,13 @@ fn android_floating_overlay_enabled() -> bool {
 fn set_android_winamp_surface_origin(origin: Point) {
     *android_winamp_surface_origin_state()
         .lock()
-        .expect("Android Winamp surface origin state poisoned") = origin;
+        .expect("Android player surface origin state poisoned") = origin;
 }
 #[cfg(target_os = "android")]
 fn android_winamp_surface_origin() -> Point {
     *android_winamp_surface_origin_state()
         .lock()
-        .expect("Android Winamp surface origin state poisoned")
+        .expect("Android player surface origin state poisoned")
 }
 #[cfg(target_os = "android")]
 fn android_winamp_surface_origin_state() -> &'static Mutex<Point> {
@@ -261,15 +260,13 @@ fn initial_winamp_state() -> WinampState {
         .map(restore_saved_player_state)
         .unwrap_or_default();
     if state.playlist.is_empty() {
-        let mut tracks = audio::demo_playlist_tracks();
-        tracks.push(audio::track_from_title_path(
-            DEFAULT_STATION_TITLE,
-            DEFAULT_STATION_URL,
-        ));
-        state.current_index = Some(0);
-        state.status = format!("Loaded {} Track(s)", tracks.len());
-        set_playlist_tracks(&mut state, tracks);
-        set_playlist_selection(&mut state, [0]);
+        let tracks = audio::demo_playlist_tracks();
+        if !tracks.is_empty() {
+            state.current_index = Some(0);
+            state.status = format!("Loaded {} Track(s)", tracks.len());
+            set_playlist_tracks(&mut state, tracks);
+            set_playlist_selection(&mut state, [0]);
+        }
     }
     refresh_shuffle_order(&mut state);
     let _ = audio::set_equalizer(state.eq_enabled, state.eq_values);
@@ -429,9 +426,9 @@ struct EqPreset {
 const MAIN_TITLE_DRAG_HIT_AREA: SpriteRect = (16.0, 0.0, 228.0, 14.0);
 const EQ_TITLE_DRAG_HIT_AREA: SpriteRect = (0.0, 0.0, 264.0, 14.0);
 const MAIN_SKIN_CHOOSER_HIT_AREA: SpriteRect = (249.0, 79.0, 26.0, 33.0);
-const CRANAMP_WINAMP_MAIN_TITLE: &str = "Cranamp Winamp";
-const CRANAMP_WINAMP_EQUALIZER_TITLE: &str = "Cranamp Winamp Equalizer";
-const CRANAMP_WINAMP_PLAYLIST_TITLE: &str = "Cranamp Winamp Playlist";
+const CRANAMP_WINAMP_MAIN_TITLE: &str = "Cranamp";
+const CRANAMP_WINAMP_EQUALIZER_TITLE: &str = "Cranamp Equalizer";
+const CRANAMP_WINAMP_PLAYLIST_TITLE: &str = "Cranamp Playlist";
 const CRANAMP_WINAMP_SETTINGS_TITLE: &str = "Cranamp Settings";
 const WINAMP_DEFAULT_SCREEN_POSITION: Point = Point { x: 140.0, y: 120.0 };
 const TITLE_MARQUEE_CHARS_PER_SECOND: f32 = 2.0;
@@ -1057,7 +1054,6 @@ fn bundled_skin_entry(path: &str) -> Option<&'static BundledSkin> {
     let id = path.strip_prefix(BUNDLED_PREFIX)?;
     BUNDLED_SKINS.iter().find(|skin| skin.id == id)
 }
-#[cfg(not(target_os = "ios"))]
 fn studio_skin_path(path: Option<String>) -> Option<String> {
     path.filter(|path| bundled_skin_entry(path).is_none())
 }
@@ -1231,8 +1227,6 @@ fn apply_library_skin(
         },
     }
 }
-const DEFAULT_STATION_URL: &str = "https://fm.dmitrysamoylenko.in/cranamp-fm-playlist.m3u";
-const DEFAULT_STATION_TITLE: &str = "Cranamp FM";
 #[composable]
 fn WinampRuntimeEffects(
     state: MutableState<WinampState>,
@@ -1607,8 +1601,8 @@ fn SkinPickerEffect(state: MutableState<WinampState>, skin_state: WinampSkinStat
             return;
         }
         let options = cranpose::FilePickerOptions::default()
-            .with_title("Open Winamp skin")
-            .with_filter(cranpose::FileFilter::new("Winamp skin", &["wsz", "zip"]));
+            .with_title("Open WSZ skin")
+            .with_filter(cranpose::FileFilter::new("WSZ skin", &["wsz", "zip"]));
         skin_picker.launch(options);
     });
 }
@@ -1936,7 +1930,6 @@ pub fn WinampWidgetApp() {
         WinampSurfaceApp();
     }
 }
-#[cfg(not(target_os = "ios"))]
 #[composable]
 fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinState) {
     let sessions = cranpose_core::remember(|| {
@@ -1998,7 +1991,6 @@ pub fn WinampStackedApp() {
     let tab_state = remember_winamp_tab_state();
     let skin_state = remember_winamp_skin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
-    #[cfg(not(target_os = "ios"))]
     {
         WinampStudioSurface(tab_state.player, skin_state);
         if tab_state.player.get().studio_open {
@@ -2158,7 +2150,6 @@ pub fn WinampSurfaceApp() {
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
     let floating = remember_floating_surface();
     FloatingSurfaceSize(floating, tab_state.player);
-    #[cfg(not(target_os = "ios"))]
     {
         WinampStudioSurface(tab_state.player, skin_state);
         if tab_state.player.get().studio_open {
@@ -2279,7 +2270,7 @@ fn WinampSkinError(error: String) {
         ColumnSpec::default(),
         move || {
             Text(
-                "Failed to load Winamp skin",
+                "Failed to load WSZ skin",
                 Modifier::empty(),
                 TextStyle::default(),
             );
@@ -4222,7 +4213,7 @@ fn SettingsSkinsSection(state: MutableState<WinampState>, skin_state: WinampSkin
         },
     );
 }
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", not(feature = "store")))]
 #[composable]
 fn SettingsUpdateSection(_state: MutableState<WinampState>) {
     let update_status = cranpose::rememberAppUpdateState();
@@ -4273,7 +4264,7 @@ fn SettingsUpdateSection(_state: MutableState<WinampState>) {
         },
     );
 }
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", not(feature = "store")))]
 fn app_update_status_line(status: &cranpose::AppUpdateStatus) -> String {
     match status {
         cranpose::AppUpdateStatus::Idle => {
@@ -4305,7 +4296,11 @@ fn app_update_status_line(status: &cranpose::AppUpdateStatus) -> String {
         cranpose::AppUpdateStatus::Error(error) => format!("Update error: {error}"),
     }
 }
-#[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+#[cfg(all(
+    not(target_os = "android"),
+    not(target_arch = "wasm32"),
+    not(feature = "store")
+))]
 #[composable]
 fn SettingsUpdateSection(state: MutableState<WinampState>) {
     Column(
@@ -4340,7 +4335,7 @@ fn SettingsUpdateSection(state: MutableState<WinampState>) {
         },
     );
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(feature = "store")))]
 #[composable]
 fn SettingsUpdateSection(_state: MutableState<WinampState>) {
     Column(
@@ -4361,6 +4356,7 @@ fn SettingsUpdateSection(_state: MutableState<WinampState>) {
     );
 }
 #[cfg(all(not(target_os = "android"), not(target_arch = "wasm32")))]
+#[cfg(not(feature = "store"))]
 fn open_releases_page() -> bool {
     cranpose_services::default_uri_handler()
         .open_uri("https://github.com/samoylenkodmitry/cranamp/releases")
@@ -4429,7 +4425,7 @@ fn SettingsPanel(
                             }
                         },
                     );
-                    #[cfg(any(target_os = "android", target_arch = "wasm32"))]
+                    #[cfg(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))]
                     SettingsActionButton("Open Skin Studio".into(), SETTINGS_CARD, move || {
                         state.update(|s| {
                             s.settings_open = false;
@@ -4445,7 +4441,12 @@ fn SettingsPanel(
                     }
                     #[cfg(not(target_arch = "wasm32"))]
                     SettingsSyncSection(state);
+                    #[cfg(not(feature = "store"))]
                     SettingsUpdateSection(state);
+                    SettingsActionButton("Privacy policy".into(), SETTINGS_CARD, || {
+                        let _ = cranpose_services::default_uri_handler()
+                            .open_uri("https://cranamp.dmitrysamoylenko.in/privacy/");
+                    });
                     Text(
                         format!("Cranamp v{} · cranpose", env!("CARGO_PKG_VERSION")),
                         Modifier::empty(),
