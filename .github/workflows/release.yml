@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -13,8 +14,10 @@ env:
 
 jobs:
   desktop:
+    if: github.event_name == 'push'
+    concurrency: release-${{ matrix.platform }}
     name: Desktop ${{ matrix.os }}
-    runs-on: ${{ matrix.runner || matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -27,7 +30,6 @@ jobs:
             archive: tar.gz
             extra_rustflags: " -Cforce-unwind-tables=no -Clink-arg=-fuse-ld=lld -Clink-arg=-Wl,--icf=all"
           - os: macos-latest
-            runner: [self-hosted, macOS, ARM64]
             artifact: cranamp-macos
             platform: macos
             target: aarch64-apple-darwin
@@ -61,81 +63,7 @@ jobs:
         env:
           P12_BASE64: ${{ secrets.CRANAMP_MACOS_DEVID_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.CRANAMP_MACOS_DEVID_P12_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [ -z "$P12_BASE64" ]; then
-            echo "::notice::No CRANAMP_MACOS_DEVID_P12_BASE64 secret, so the .app stays ad-hoc signed and Gatekeeper keeps blocking downloads."
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          KEYCHAIN="$RUNNER_TEMP/cranamp-signing.keychain-db"
-          KEYCHAIN_PASS="$(openssl rand -base64 24)"
-          trap 'rm -f "$RUNNER_TEMP/devid.p12"' EXIT
-          (umask 177; printf '%s' "$P12_BASE64" | base64 -d > "$RUNNER_TEMP/devid.p12")
-          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
-          security set-keychain-settings -ut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/devid.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
-
-          intermediate="$RUNNER_TEMP/DeveloperIDG2CA.cer"
-          curl --proto '=https' --tlsv1.2 --retry 5 --retry-connrefused \
-            --location --silent --show-error --fail \
-            --output "$intermediate" \
-            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
-          expected=f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a
-          actual="$(shasum -a 256 "$intermediate" | cut -d' ' -f1)"
-          if [ "$actual" != "$expected" ]; then
-            echo "::error::Developer ID G2 intermediate digest mismatch: got $actual" >&2
-            exit 1
-          fi
-          if ! security import "$intermediate" -k "$KEYCHAIN" -T /usr/bin/codesign \
-               > "$RUNNER_TEMP/import.log" 2>&1; then
-            if grep -q "already exists" "$RUNNER_TEMP/import.log"; then
-              echo "Developer ID G2 intermediate was already in the keychain"
-            else
-              cat "$RUNNER_TEMP/import.log" >&2
-              exit 1
-            fi
-          fi
-          rm -f "$intermediate"
-
-          echo "== certificates in the signing keychain =="
-          security find-certificate -a "$KEYCHAIN" \
-            | grep -E '"(labl|issu)"' || echo "(none)"
-          echo "== chain evaluation for the leaf =="
-          security find-certificate -a -c "Developer ID Application" -p "$KEYCHAIN" \
-            > "$RUNNER_TEMP/leaf.pem" 2>/dev/null || true
-          if [ -s "$RUNNER_TEMP/leaf.pem" ]; then
-            security verify-cert -c "$RUNNER_TEMP/leaf.pem" -p codeSign \
-              -k "$KEYCHAIN" || echo "verify-cert reported the chain as unusable"
-          else
-            echo "(no Developer ID Application certificate exported)"
-          fi
-          rm -f "$RUNNER_TEMP/leaf.pem"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
-
-          echo "== codesigning identities =="
-          security find-identity -v -p codesigning "$KEYCHAIN" || true
-          security list-keychains -d user | tr -d '"' | sed 's/^[[:space:]]*//' \
-            > "$RUNNER_TEMP/keychains-before.txt"
-          keep=()
-          while IFS= read -r existing; do
-            [ -n "$existing" ] || continue
-            [ "$existing" = "$KEYCHAIN" ] && continue
-            [ -e "$existing" ] || continue
-            keep+=("$existing")
-          done < "$RUNNER_TEMP/keychains-before.txt"
-          security list-keychains -d user -s "$KEYCHAIN" "${keep[@]}"
-          rm -f "$RUNNER_TEMP/devid.p12"
-          identity="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/{print $2; exit}')"
-          [ -n "$identity" ] || { echo "the p12 holds no Developer ID Application certificate" >&2; exit 1; }
-          echo "CRANAMP_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
-          echo "CRANAMP_SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
-          echo "::add-mask::$KEYCHAIN_PASS"
-          echo "CRANAMP_SIGN_KEYCHAIN_PASS=$KEYCHAIN_PASS" >> "$GITHUB_ENV"
-          echo "signed=true" >> "$GITHUB_OUTPUT"
+        run: bash scripts/release/macos-signing.sh prepare
       - name: Build (dist-min)
         shell: bash
         env:
@@ -159,39 +87,12 @@ jobs:
           package_dir="release/cranamp-${version}-${{ matrix.platform }}"
           mkdir -p "$package_dir/demo-music" assets
           if [ "${{ matrix.platform }}" = "macos" ]; then
-            signed_devid=0
             app="$package_dir/Cranamp.app"
             mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
             cp "${{ matrix.binary }}" "$app/Contents/MacOS/Cranamp"
             cp platform/macos/Info.plist "$app/Contents/Info.plist"
             cp assets/icon/Cranamp.icns "$app/Contents/Resources/Cranamp.icns"
-            if [ "${{ steps.devid.outputs.signed }}" = "true" ]; then
-              security unlock-keychain -p "$CRANAMP_SIGN_KEYCHAIN_PASS" \
-                "$CRANAMP_SIGN_KEYCHAIN"
-              if codesign --force --deep --options runtime --timestamp \
-                   --keychain "$CRANAMP_SIGN_KEYCHAIN" \
-                   --sign "$CRANAMP_SIGN_IDENTITY" "$app"; then
-                signed_devid=1
-              else
-                echo "::warning::Developer ID signing failed on this runner; falling back to an ad-hoc signature. The .app is NOT notarized and Gatekeeper will block it until the quarantine flag is cleared."
-                echo "- macOS: **ad-hoc signed, not notarized** (Developer ID signing failed on the runner)" >> "$GITHUB_STEP_SUMMARY"
-                codesign --force --deep --sign - "$app"
-              fi
-            else
-              codesign --force --deep --sign - "$app"
-            fi
-            codesign --verify --strict --verbose=2 "$app"
-            if [ "${signed_devid:-}" = "1" ] && [ -n "$ASC_P8_BASE64" ]; then
-              key="$RUNNER_TEMP/asc.p8"
-              trap 'rm -f "$RUNNER_TEMP/asc.p8" "$RUNNER_TEMP/cranamp-notarize.zip"' EXIT
-              (umask 177; printf '%s' "$ASC_P8_BASE64" | base64 -d > "$key")
-              ditto -c -k --keepParent "$app" "$RUNNER_TEMP/cranamp-notarize.zip"
-              xcrun notarytool submit "$RUNNER_TEMP/cranamp-notarize.zip" \
-                --key "$key" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait
-              rm -f "$key" "$RUNNER_TEMP/cranamp-notarize.zip"
-              xcrun stapler staple "$app"
-              spctl --assess --type execute --verbose=2 "$app"
-            fi
+            bash scripts/release/macos-signing.sh sign "$app"
           else
             cp "${{ matrix.binary }}" "$package_dir/"
           fi
@@ -222,22 +123,10 @@ jobs:
       - name: Restore the keychain search list
         if: always() && matrix.platform == 'macos'
         shell: bash
-        run: |
-          set -uo pipefail
-          if [ -f "$RUNNER_TEMP/keychains-before.txt" ]; then
-            keep=()
-            while IFS= read -r existing; do
-              [ -n "$existing" ] || continue
-              [ -e "$existing" ] || continue
-              keep+=("$existing")
-            done < "$RUNNER_TEMP/keychains-before.txt"
-            if [ ${#keep[@]} -gt 0 ]; then
-              security list-keychains -d user -s "${keep[@]}"
-            fi
-          fi
-          security delete-keychain "$RUNNER_TEMP/cranamp-signing.keychain-db" 2>/dev/null || true
+        run: bash scripts/release/macos-signing.sh cleanup
 
   android:
+    if: github.event_name == 'push'
     name: Android APK
     runs-on: ubuntu-latest
     steps:
@@ -301,6 +190,7 @@ jobs:
           retention-days: 1
 
   web:
+    if: github.event_name == 'push'
     name: Web
     runs-on: ubuntu-latest
     steps:
@@ -327,6 +217,7 @@ jobs:
           retention-days: 1
 
   ios:
+    if: github.event_name == 'push'
     name: iOS
     runs-on: [self-hosted, macOS, apple-signing]
     steps:
@@ -364,6 +255,7 @@ jobs:
           retention-days: 1
 
   publish:
+    if: github.event_name == 'push'
     name: Publish GitHub Release
     needs: [desktop, android, web]
     runs-on: ubuntu-latest
@@ -378,7 +270,7 @@ jobs:
           body: |
             Cranamp release assets for desktop, Android, iOS, and the WebAssembly widget.
 
-            macOS: the `.app` is ad-hoc signed (not notarized), so Gatekeeper blocks it on first launch after download. Right-click `Cranamp.app` → **Open** → **Open**, or run `xattr -dr com.apple.quarantine Cranamp.app`, then launch normally. If you double-click and nothing happens, that is the Gatekeeper block, not a crash.
+            macOS: the Apple Silicon `.app` is signed with Developer ID, notarized by Apple, and includes a stapled notarization ticket.
 
             iOS:
             - `…-ios.ipa` — device build, ad-hoc signed for sideloading (AltStore / Sideloadly).
@@ -388,6 +280,7 @@ jobs:
           files: artifacts/**/*
 
   publish-ios:
+    if: github.event_name == 'push'
     name: Attach iOS Assets
     needs: [ios, publish]
     runs-on: ubuntu-latest
@@ -400,3 +293,47 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  verify-macos-signing:
+    if: github.event_name == 'workflow_dispatch'
+    name: Verify Mac signing and notarization
+    runs-on: macos-latest
+    concurrency: release-macos
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Import the Developer ID certificate
+        env:
+          P12_BASE64: ${{ secrets.CRANAMP_MACOS_DEVID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.CRANAMP_MACOS_DEVID_P12_PASSWORD }}
+        run: bash scripts/release/macos-signing.sh prepare
+      - name: Download the current Mac release for verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 scripts/distribution/version.py)
+          check_dir="$RUNNER_TEMP/cranamp-signing-check"
+          mkdir -p "$check_dir"
+          gh release download "v$version" --pattern "cranamp-$version-macos.tar.gz" --dir "$check_dir"
+          tar -xzf "$check_dir/cranamp-$version-macos.tar.gz" -C "$check_dir"
+          echo "CRANAMP_CHECK_APP=$check_dir/cranamp-$version-macos/Cranamp.app" >> "$GITHUB_ENV"
+      - name: Sign, notarize and validate the app
+        env:
+          ASC_P8_BASE64: ${{ secrets.CRANAMP_ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.CRANAMP_ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.CRANAMP_ASC_API_ISSUER_ID }}
+        run: bash scripts/release/macos-signing.sh sign "$CRANAMP_CHECK_APP"
+      - name: Save notarization receipt
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-notarization-receipt
+          path: ${{ env.CRANAMP_SIGN_STATE }}/notarization.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          bash scripts/release/macos-signing.sh cleanup
+          rm -rf "$RUNNER_TEMP/cranamp-signing-check"
