@@ -1,6 +1,8 @@
 /target
 /dist
 /pkg
+/store-artifacts
+/platform/android/app/src/main/assets/legal/
 /platform/android/.gradle
 /platform/android/build
 /platform/android/app/build

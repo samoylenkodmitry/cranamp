@@ -76,14 +76,14 @@ try {
     Get-Process cranamp -ErrorAction SilentlyContinue | Stop-Process -Force
     $application = Start-Process -FilePath $Executable -WorkingDirectory (Split-Path $Executable) -PassThru -RedirectStandardOutput (Join-Path $outputPath 'stdout.log') -RedirectStandardError (Join-Path $outputPath 'stderr.log')
     Start-Sleep -Seconds 10
-    $window = Find-Window $application.Id 'Cranamp Winamp'
+    $window = Find-Window $application.Id 'Cranamp'
     if ($null -eq $window) { throw 'No player window.' }
     if ($TearOff) {
         # The playlist's title bar sits under the main window and the
         # equalizer; pull it clear of the stack to the right.
         $stack = $window.Current.BoundingRectangle
         Drag-Mouse ([int]$stack.X + 100) ([int]$stack.Y + 238) ([int]$stack.X + $stack.Width + 120) ([int]$stack.Y + 238)
-        $window = Find-Window $application.Id 'Cranamp Winamp Playlist'
+        $window = Find-Window $application.Id 'Cranamp Playlist'
         if ($null -eq $window) { throw 'The playlist did not come out of the stack.' }
     }
     $bounds = $window.Current.BoundingRectangle

@@ -3033,7 +3033,7 @@ impl Document {
             json!({
                 "pixels": total,
                 "fields": out,
-                "note": "Winamp paints its visualizer over these fields while music plays; the art shows only while stopped. Keep names and anything that must stay readable outside them.",
+                "note": "The player paints its visualizer over these fields while music plays; the art shows only while stopped. Keep names and anything that must stay readable outside them.",
             })
         })
     }

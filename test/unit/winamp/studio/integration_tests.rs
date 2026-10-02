@@ -65,7 +65,11 @@ fn blank_atlases_have_no_inherited_art_and_share_native_canvas_history() {
 #[test]
 fn mcp_and_human_edits_share_the_same_undo_history() {
     let shared = SharedDocument(Arc::new(Mutex::new(
-        Document::open(include_bytes!("../../../../assets/winamp.wsz"), None).unwrap(),
+        Document::open(
+            include_bytes!("../../../../assets/skins/Catamp Silverplay.wsz"),
+            None,
+        )
+        .unwrap(),
     )));
     let original = shared.lock().unwrap().archive().unwrap();
     {
@@ -97,7 +101,11 @@ fn mcp_and_human_edits_share_the_same_undo_history() {
 }
 #[test]
 fn a_state_sheet_needs_a_sprite_and_shows_every_variant_of_it() {
-    let mut d = Document::open(include_bytes!("../../../../assets/winamp.wsz"), None).unwrap();
+    let mut d = Document::open(
+        include_bytes!("../../../../assets/skins/Catamp Silverplay.wsz"),
+        None,
+    )
+    .unwrap();
     d.state(json!({"layer":"auto"})).unwrap();
     assert!(
         d.state_sheet(None).is_err(),

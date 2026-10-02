@@ -26,6 +26,8 @@ fun releaseVersionCode(): Int {
 
 // Set by CI (decoded from the CRANAMP_RELEASE_KEYSTORE_BASE64 secret). Local
 // builds without it sign with the debug keystore for emulator work.
+val storeDistribution = providers.gradleProperty("cranampStore").orNull == "true"
+
 val releaseKeystorePath: String? = System.getenv("CRANAMP_RELEASE_KEYSTORE")
 
 fun requiredSigningEnv(name: String): String =
@@ -41,7 +43,7 @@ cranpose {
     // directories up (app -> android -> platform -> repo root).
     workspaceRoot.set("../../..")
     cargoPackage.set("cranamp")
-    features.set(listOf("android", "renderer-wgpu"))
+    features.set(listOf("android", "renderer-wgpu") + if (storeDistribution) listOf("store") else emptyList())
     // The plugin builds debug variants for x86_64, which was the emulator's
     // architecture when every development machine was an Intel one. On an
     // Apple Silicon Mac both the emulator and the phone in the drawer are
@@ -68,6 +70,10 @@ android {
         versionName = releaseVersionName()
     }
 
+    if (storeDistribution) {
+        sourceSets.getByName("main").manifest.srcFile("src/store/AndroidManifest.xml")
+    }
+
     signingConfigs {
         if (releaseKeystorePath != null) {
             create("release") {
@@ -84,7 +90,7 @@ android {
     // from `cranpose { releaseAbis }`, which the plugin writes into the split.
     splits {
         abi {
-            isEnable = isCiBuild
+            isEnable = isCiBuild && !storeDistribution
             isUniversalApk = false
         }
     }
@@ -106,6 +112,8 @@ android {
             )
             signingConfig = if (releaseKeystorePath != null) {
                 signingConfigs.getByName("release")
+            } else if (storeDistribution) {
+                null // Unsigned AAB for validation; store uploads require the upload key.
             } else {
                 signingConfigs.getByName("debug")
             }

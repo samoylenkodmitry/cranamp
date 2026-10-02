@@ -28,12 +28,12 @@ status=0
 
 main_height=116 eq_height=116 grab=110 grip=6
 case "$pane" in
-    equalizer) title="Cranamp Winamp Equalizer" ;;
-    playlist) title="Cranamp Winamp Playlist" ;;
+    equalizer) title="Cranamp Equalizer" ;;
+    playlist) title="Cranamp Playlist" ;;
     *) echo "check_dock_cycles.sh: pane is equalizer or playlist" >&2; exit 2 ;;
 esac
 
-stack() { "$drag" oswindows cranamp | grep 'Cranamp Winamp$'; }
+stack() { "$drag" oswindows cranamp | grep 'Cranamp$'; }
 torn() { "$drag" oswindows cranamp | grep -F "$title" || true; }
 
 pkill -f 'target/debug/cranamp' 2> /dev/null || true

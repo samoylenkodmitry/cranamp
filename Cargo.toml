@@ -2,7 +2,7 @@
 name = "cranamp"
 version = "0.1.85"
 edition = "2021"
-description = "A Cranpose-powered Winamp-style multiplatform audio player."
+description = "A music player in Rust with WSZ skins and an agent-connected Skin Studio."
 license = "Apache-2.0"
 repository = "https://github.com/samoylenkodmitry/cranamp"
 publish = false
@@ -58,6 +58,8 @@ name = "test_location"
 path = "test/test_location.rs"
 
 [features]
+# Store and repository packages receive updates from their distributor.
+store = []
 default = ["renderer-wgpu", "desktop"]
 renderer-wgpu = ["cranpose/renderer-wgpu"]
 renderer-pixels = ["cranpose/renderer-pixels"]

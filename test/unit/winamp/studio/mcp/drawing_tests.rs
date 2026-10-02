@@ -389,7 +389,11 @@ fn ink_that_crosses_into_a_repeated_cell_says_so() {
 #[test]
 fn export_without_a_path_writes_the_skin_back_where_it_came_from() {
     let shared = SharedDocument(Arc::new(Mutex::new(
-        Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap(),
+        Document::open(
+            include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz"),
+            None,
+        )
+        .unwrap(),
     )));
     let first = std::env::temp_dir().join("cranamp-export-in-place.wsz");
     result(
@@ -456,7 +460,10 @@ fn studio_cursors_draws_a_set_and_opens_it_on_the_canvas() {
 
 #[test]
 fn a_surface_puts_the_rolled_up_player_on_the_canvas_and_back() {
-    let document = Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None);
+    let document = Document::open(
+        include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz"),
+        None,
+    );
     let shared = SharedDocument(Arc::new(Mutex::new(document.unwrap())));
     result(&shared, "studio_canvas", json!({"surface": "shade"}));
     let status = result(&shared, "studio_status", json!({}));

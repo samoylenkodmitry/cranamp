@@ -1,7 +1,11 @@
 use super::*;
 
 fn document() -> Document {
-    let mut d = Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap();
+    let mut d = Document::open(
+        include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz"),
+        None,
+    )
+    .unwrap();
     d.open_on_whole_skin();
     d
 }

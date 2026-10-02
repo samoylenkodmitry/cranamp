@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Cranamp third-party licenses</title>
+<h1>Cranamp third-party licenses</h1>
+<p>Source code and release history: <a href="https://github.com/samoylenkodmitry/cranamp">Cranamp</a>.
+The release Cargo.lock records exact dependency versions and source revisions.
+For MPL-covered components, source is available through the component links below;
+crates.io releases provide the exact published source archives.</p>
+{{#each licenses}}<section><h2>{{name}}</h2><ul>
+{{#each used_by}}<li><a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}/{{crate.version}}{{/if}}">{{crate.name}} {{crate.version}}</a> — <a href="https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download">published source</a></li>{{/each}}
+</ul><pre>{{text}}</pre></section>{{/each}}</html>

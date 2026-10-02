@@ -28,7 +28,7 @@
 // dotted. The panel is the ground with a screen let into it there, a
 // one-pixel edge in the colour of the skin's own footer displays around the
 // field, so the visualizer appears in a screen rather than on the ground.
-// The default skin, assets/winamp.wsz, has Winamp's own tile and panel
+// The default skin, assets/skins/Catamp Silverplay.wsz, has Winamp's own tile and panel
 // already and is left as it is.
 import { call } from './moonlit.mjs';
 

@@ -8,7 +8,11 @@ use std::{env, fs, path::PathBuf};
 use cranpose_capabilities::{declare, Use};
 
 fn main() {
-    declare(&[Use::media(), Use::update(), Use::network()]).emit();
+    let mut capabilities = vec![Use::media(), Use::network()];
+    if env::var_os("CARGO_FEATURE_STORE").is_none() {
+        capabilities.push(Use::update());
+    }
+    declare(&capabilities).emit();
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         embed_windows_resources();
     }

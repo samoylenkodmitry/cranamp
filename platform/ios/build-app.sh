@@ -17,7 +17,7 @@ export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-15.0}"
 
 cargo build --manifest-path "$ROOT/Cargo.toml" \
   --bin cranamp-ios \
-  --target "$TARGET" --no-default-features --features ios $PROFILE_FLAG >&2
+  --target "$TARGET" --no-default-features --features "${CRANAMP_IOS_FEATURES:-ios}" $PROFILE_FLAG >&2
 
 BIN="$ROOT/target/$TARGET/$PROFILE/cranamp-ios"
 APP="$ROOT/target/$TARGET/$PROFILE/$APP_NAME.app"
@@ -65,6 +65,8 @@ case "$minos" in
     ;;
 esac
 
-codesign --force --sign "${CODESIGN_IDENTITY:--}" "$APP" >&2
+if [ "${CRANAMP_UNSIGNED:-false}" != "true" ]; then
+  codesign --force --sign "${CODESIGN_IDENTITY:--}" "$APP" >&2
+fi
 
 echo "$APP"

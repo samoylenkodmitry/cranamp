@@ -57,7 +57,7 @@ fn normalize_name_extracts_file_name() {
 }
 #[test]
 fn load_bundled_skin_dimensions_match_classic_template() {
-    let wsz = include_bytes!("../../../../assets/winamp.wsz");
+    let wsz = include_bytes!("../../../../assets/skins/Catamp Silverplay.wsz");
     let skin = load_skin(wsz).expect("bundled skin should load");
     assert_eq!(skin.main.width(), 275);
     assert_eq!(skin.main.height(), 116);
@@ -72,9 +72,10 @@ fn load_bundled_skin_dimensions_match_classic_template() {
 /// The classic skin with its windowshade strip painted over in one colour,
 /// as a skin drawn before the rolled-up window was looks.
 fn classic_skin_with_a_blank_strip() -> Vec<u8> {
-    let mut source =
-        zip::ZipArchive::new(Cursor::new(include_bytes!("../../../../assets/winamp.wsz")))
-            .expect("bundled skin should be a zip");
+    let mut source = zip::ZipArchive::new(Cursor::new(include_bytes!(
+        "../../../../assets/skins/Catamp Silverplay.wsz"
+    )))
+    .expect("bundled skin should be a zip");
     let mut output = Cursor::new(Vec::new());
     {
         let mut writer = zip::ZipWriter::new(&mut output);
@@ -107,7 +108,10 @@ fn classic_skin_with_a_blank_strip() -> Vec<u8> {
 }
 #[test]
 fn a_skin_without_windowshade_art_rolls_up_in_the_classic_strip() {
-    let classic = load_skin(include_bytes!("../../../../assets/winamp.wsz")).unwrap();
+    let classic = load_skin(include_bytes!(
+        "../../../../assets/skins/Catamp Silverplay.wsz"
+    ))
+    .unwrap();
     assert!(!shade_strip_is_blank(&classic.titlebar));
     assert_eq!(classic.shade_titlebar.pixels(), classic.titlebar.pixels());
     let blank = load_skin(&classic_skin_with_a_blank_strip()).unwrap();
@@ -129,9 +133,10 @@ fn every_bundled_skin_draws_its_own_windowshade_strip() {
 }
 #[test]
 fn load_skin_allows_missing_text_bitmap() {
-    let mut source =
-        zip::ZipArchive::new(Cursor::new(include_bytes!("../../../../assets/winamp.wsz")))
-            .expect("bundled skin should be a zip");
+    let mut source = zip::ZipArchive::new(Cursor::new(include_bytes!(
+        "../../../../assets/skins/Catamp Silverplay.wsz"
+    )))
+    .expect("bundled skin should be a zip");
     let mut output = Cursor::new(Vec::new());
     {
         let mut writer = zip::ZipWriter::new(&mut output);
@@ -160,14 +165,18 @@ fn load_skin_allows_missing_text_bitmap() {
     let skin = load_skin(&output.into_inner()).expect("skin without text.bmp should load");
     assert_eq!(skin.text.width(), 155);
     assert_eq!(skin.text.height(), 18);
-    let reference = load_skin(include_bytes!("../../../../assets/winamp.wsz")).unwrap();
+    let reference = load_skin(include_bytes!(
+        "../../../../assets/skins/Catamp Silverplay.wsz"
+    ))
+    .unwrap();
     assert_eq!(skin.text.pixels(), reference.text.pixels());
 }
 /// The bundled skin with extra entries written alongside it.
 fn bundled_skin_plus(extra: &[(&str, Vec<u8>)]) -> Vec<u8> {
-    let mut source =
-        zip::ZipArchive::new(Cursor::new(include_bytes!("../../../../assets/winamp.wsz")))
-            .expect("bundled skin should be a zip");
+    let mut source = zip::ZipArchive::new(Cursor::new(include_bytes!(
+        "../../../../assets/skins/Catamp Silverplay.wsz"
+    )))
+    .expect("bundled skin should be a zip");
     let mut output = Cursor::new(Vec::new());
     {
         let mut writer = zip::ZipWriter::new(&mut output);
@@ -178,6 +187,10 @@ fn bundled_skin_plus(extra: &[(&str, Vec<u8>)]) -> Vec<u8> {
                 .by_index(index)
                 .expect("zip entry should be readable");
             let name = file.name().to_string();
+            // Cursor parser tests supply their own entries; Catamp has a full set.
+            if name.to_ascii_lowercase().ends_with(".cur") {
+                continue;
+            }
             let mut data = Vec::new();
             file.read_to_end(&mut data)
                 .expect("zip entry bytes should be readable");
@@ -276,9 +289,8 @@ fn a_cursor_name_no_player_knows_is_still_reported() {
 }
 
 #[test]
-fn the_classic_reference_skin_ships_no_cursors_and_keeps_the_platform_arrow() {
-    let skin = load_skin(include_bytes!("../../../../assets/winamp.wsz"))
-        .expect("bundled skin should load");
+fn a_skin_without_cursors_keeps_the_platform_arrow() {
+    let skin = load_skin(&bundled_skin_plus(&[])).expect("skin without cursors should load");
 
     assert!(skin.cursors.is_empty());
 }
@@ -326,22 +338,22 @@ fn display_ink_ignores_literal_sprite_keys_in_editor_atlases() {
 }
 #[test]
 fn load_bundled_skin_parses_pledit_palette() {
-    let wsz = include_bytes!("../../../../assets/winamp.wsz");
+    let wsz = include_bytes!("../../../../assets/skins/Catamp Silverplay.wsz");
     let skin = load_skin(wsz).expect("bundled skin should load");
-    assert_eq!(skin.palette.normal, [0xff, 0xc8, 0x6c, 255]);
-    assert_eq!(skin.palette.current, [0xff, 0xff, 0xff, 255]);
-    assert_eq!(skin.palette.normal_bg, [0, 0, 0, 255]);
-    assert_eq!(skin.palette.selected_bg, [0x42, 0x35, 0x1e, 255]);
-    assert_eq!(skin.palette.marquee_fg, [0xff, 0xc8, 0x6c, 255]);
-    assert_eq!(skin.palette.marquee_bg, [0, 0, 0, 255]);
+    assert_eq!(skin.palette.normal, [0xb9, 0xd8, 0xdc, 255]);
+    assert_eq!(skin.palette.current, [0xf1, 0xf5, 0xe6, 255]);
+    assert_eq!(skin.palette.normal_bg, [0x21, 0x46, 0x5c, 255]);
+    assert_eq!(skin.palette.selected_bg, [0x32, 0x62, 0x7b, 255]);
+    assert_eq!(skin.palette.marquee_fg, [0x10, 0x2b, 0x40, 255]);
+    assert_eq!(skin.palette.marquee_bg, [0xaf, 0xce, 0xd2, 255]);
 }
 #[test]
 fn load_bundled_skin_parses_viscolor() {
-    let wsz = include_bytes!("../../../../assets/winamp.wsz");
+    let wsz = include_bytes!("../../../../assets/skins/Catamp Silverplay.wsz");
     let skin = load_skin(wsz).expect("bundled skin should load");
-    assert_eq!(skin.viscolor.0[0], [0, 0, 0, 255]);
-    assert_eq!(skin.viscolor.0[2], [153, 204, 236, 255]);
-    assert_eq!(skin.viscolor.0[23], [153, 204, 236, 255]);
+    assert_eq!(skin.viscolor.0[0], [25, 62, 85, 255]);
+    assert_eq!(skin.viscolor.0[2], [241, 245, 230, 255]);
+    assert_eq!(skin.viscolor.0[23], [241, 245, 230, 255]);
 }
 #[test]
 fn parse_pledit_handles_missing_section_header_and_casing() {

@@ -69,6 +69,9 @@ fn known_demo_duration_seconds(path: &str) -> Option<f32> {
 }
 #[cfg(not(target_arch = "wasm32"))]
 pub fn demo_playlist_tracks() -> Vec<Track> {
+    if cfg!(feature = "store") {
+        return Vec::new();
+    }
     let Some(directory) = find_demo_music_directory() else {
         return Vec::new();
     };
@@ -83,6 +86,9 @@ pub fn demo_playlist_tracks() -> Vec<Track> {
 }
 #[cfg(target_arch = "wasm32")]
 pub fn demo_playlist_tracks() -> Vec<Track> {
+    if cfg!(feature = "store") {
+        return Vec::new();
+    }
     DEMO_TRACKS
         .iter()
         .map(|track| {

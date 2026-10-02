@@ -20,7 +20,11 @@ fn consistent_overpainting_of_a_repeated_rail_is_not_a_conflict() {
     );
 }
 fn document() -> Document {
-    let mut d = Document::open(include_bytes!("../../../../../assets/winamp.wsz"), None).unwrap();
+    let mut d = Document::open(
+        include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz"),
+        None,
+    )
+    .unwrap();
     d.open_on_whole_skin();
     d
 }
