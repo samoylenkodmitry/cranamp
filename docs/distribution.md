@@ -8,9 +8,9 @@ Registration status on October 2, 2026:
 
 | Store | App record | Identity | Status |
 | --- | --- | --- | --- |
-| Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | Draft; free app, English (US) |
-| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | iOS 0.1.86 build 1 uploaded; iOS and macOS listings remain drafts |
-| Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | MSIX app name reserved; draft |
+| Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | 0.1.86 (10086) submitted; changes in review |
+| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | iOS and macOS 0.1.86 (2) submitted; waiting for review |
+| Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.86.0 submitted; in certification |
 
 GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
 
@@ -19,7 +19,7 @@ GitHub repository variables contain the registered Apple bundle ID and the exact
 - `CRANAMP_MSIX_PUBLISHER=CN=B3D99093-F004-43B3-80D7-6F628B17CAA6`
 - `CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME=DmitriiSamoilenko`
 
-These registrations do not publish an app or establish legal clearance. Apple initially created version `1.0` for both platforms; align each store version with the intended build before review. Microsoft requires a submission within three months to retain the name reservation.
+All four store submissions are configured to publish automatically after approval. France is excluded from the initial release. Store submission and approval do not establish legal clearance. The signed binaries were built by [Store packages run 37015856145](https://github.com/samoylenkodmitry/cranamp/actions/runs/37015856145).
 
 ## Channels and artifacts
 
@@ -35,7 +35,7 @@ The existing **Release** workflow builds direct downloads. The new **Store packa
 
 Tag builds produce validation artifacts without distribution credentials. Manually enable **signed** to require Apple and Google Play credentials. Signed runs fail if those credentials are missing. Windows packages remain unsigned because Microsoft signs Store submissions. Without Partner Center variables, validation runs use `Cranamp.LocalValidation`, which cannot be submitted.
 
-Packages are retained as workflow artifacts. This workflow does not submit store listings or publish to repositories. Tags must match Cargo.toml. Apple build numbers use the workflow run number; start a new run for each new upload.
+Packages are retained as workflow artifacts. This workflow does not submit store listings or publish to repositories. Tags must match Cargo.toml. Set the manual `build_number` input to a new Apple build number for each upload of the same version. Its default is `1`; the initial submitted version uses build `2`.
 
 ## Google Play
 
@@ -98,7 +98,7 @@ The desktop package declares `runFullTrust` and uses Cargo's version plus `.0`. 
 
 `yay` installs recipes from the AUR. The AUR stores PKGBUILDs, not application binaries. The generated recipe builds the release source with Cargo's locked dependencies. CI generates `.SRCINFO` using `makepkg`.
 
-On October 2, 2026, the [AUR registration page](https://aur.archlinux.org/register) reported that new account creation was temporarily closed. The connected Chrome profile had no active AUR session. Submission needs an existing maintainer account or registration to reopen.
+The existing AUR maintainer account is `faceless33`. Its Cranamp SSH key is registered; the private key is stored in the owner’s mounted Vault. The generated recipe disables debug symbols to keep Rust release builds within available memory.
 
 For a tagged release:
 
@@ -108,7 +108,7 @@ For a tagged release:
 4. Push only PKGBUILD and `.SRCINFO` to `ssh://aur@aur.archlinux.org/cranamp.git`.
 5. Users can then install with `yay -S cranamp`.
 
-Do not submit a recipe from a non-tag run: its URL expects a published release. Source archives use the checked-out Git commit, so local uncommitted edits are not included.
+Publish the exact source archive referenced by the recipe’s checksum before pushing to the AUR. The source must match the tagged release tree; a verified artifact from the same tree can be reused. Source archives use the checked-out Git commit, so local uncommitted edits are not included.
 
 DEB and RPM files can be attached to a GitHub release for direct installation. They do not create apt or dnf repositories. The x86_64 binaries are built on Ubuntu 22.04; verify installation and runtime dependencies on each advertised distribution. Official Debian/Fedora repositories require their own maintainers and packaging review. Flathub is a separate packaging target.
 
