@@ -71,7 +71,7 @@ def main():
         shutil.copyfile(ROOT / "platform/macos/Info.plist", plist_path)
         shutil.copyfile(ROOT / "assets/icon/Cranamp.icns", resources / "Cranamp.icns")
         sdk = "macosx"
-    for name, source in [("LICENSE", ROOT / "LICENSE"), ("LiberationSans-OFL-1.1.txt", ROOT / "docs/third-party/LiberationSans-OFL-1.1.txt"), ("THIRD-PARTY.html", ROOT / "target/distribution/THIRD-PARTY.html")]:
+    for name, source in [("LICENSE", ROOT / "LICENSE"), ("LiberationSans-OFL-1.1.txt", ROOT / "docs/third-party/LiberationSans-OFL-1.1.txt"), ("THIRD-PARTY.html", ROOT / "target/distribution/THIRD-PARTY.html"), ("PrivacyInfo.xcprivacy", ROOT / "platform/apple/PrivacyInfo.xcprivacy")]:
         shutil.copyfile(source, resources / name)
     plist = plistlib.loads(plist_path.read_bytes())
     xcode_lines = output("xcodebuild", "-version").splitlines()

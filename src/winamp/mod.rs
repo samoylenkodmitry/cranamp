@@ -4448,6 +4448,10 @@ fn SettingsPanel(
                     SettingsSyncSection(state);
                     #[cfg(not(feature = "store"))]
                     SettingsUpdateSection(state);
+                    SettingsActionButton("Privacy policy".into(), SETTINGS_CARD, || {
+                        let _ = cranpose_services::default_uri_handler()
+                            .open_uri("https://samoylenkodmitry.github.io/cranamp/privacy/");
+                    });
                     Text(
                         format!("Cranamp v{} · cranpose", env!("CARGO_PKG_VERSION")),
                         Modifier::empty(),

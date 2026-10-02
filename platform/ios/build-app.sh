@@ -26,6 +26,7 @@ rm -rf "$APP"
 mkdir -p "$APP"
 cp "$BIN" "$APP/$APP_NAME"
 cp "$SCRIPT_DIR/Info.plist" "$APP/Info.plist"
+cp "$ROOT/platform/apple/PrivacyInfo.xcprivacy" "$APP/PrivacyInfo.xcprivacy"
 USAGE="$ROOT/target/cranpose/cranamp-usage.plist"
 if [ ! -f "$USAGE" ]; then
   echo "no usage declaration at $USAGE; the cranamp build script writes it" >&2

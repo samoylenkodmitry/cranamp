@@ -1,6 +1,6 @@
 [package]
 name = "cranamp"
-version = "0.1.85"
+version = "0.1.86"
 edition = "2021"
 description = "A music player in Rust with WSZ skins and an agent-connected Skin Studio."
 license = "Apache-2.0"

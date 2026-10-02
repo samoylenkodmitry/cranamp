@@ -48,6 +48,8 @@ Set repository secrets:
 
 Use the upload key registered with Play App Signing. The application ID is `com.cranamp.app`. Establish signing continuity before distributing direct APKs and Play packages under this ID: their app-signing certificates must match for cross-channel updates.
 
+Until a separate Play upload key is configured, CI uses the existing `CRANAMP_RELEASE_KEYSTORE_*` / `CRANAMP_RELEASE_KEY_*` secrets. Configure all four Play secrets together when rotating the upload key. Private key material stays inside the runner.
+
 ```sh
 cd platform/android
 ./gradlew --no-daemon -PcranampStore=true :app:bundleRelease
@@ -113,3 +115,9 @@ DEB and RPM files can be attached to a GitHub release for direct installation. T
 - Supply product screenshots, support and privacy URLs, age ratings and publisher identity in the consoles.
 
 References: [Android bundles](https://developer.android.com/build/building-cmdline), [Apple distribution](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac/), [Microsoft MSIX submissions](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/create-app-submission), [AUR](https://wiki.archlinux.org/title/Arch_User_Repository).
+
+## Listing assets and privacy
+
+`store/listing-en-US.json` contains shared listing text and platform-specific additions. iOS does not advertise Skin Studio; Android does not advertise the desktop MCP endpoint. `site/privacy/` and `site/support/` are copied into the Pages build. Settings links to the privacy page.
+
+The Apple privacy manifest declares file metadata access inside the app container (`C617.1`) and for user-selected files (`3B52.1`), plus elapsed-time measurement for playback and UI timers (`35F9.1`). The iOS release binary imports `stat`, `fstat`, `fstatat`, and `mach_absolute_time`. Preferences use Cranpose's file-backed store rather than UserDefaults. These declarations follow [Apple's required-reason API documentation](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api). Re-audit the binary when dependencies change.

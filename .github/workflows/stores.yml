@@ -65,16 +65,16 @@ jobs:
       - name: Prepare upload signing
         if: inputs.signed == true
         env:
-          KEYSTORE_BASE64: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEYSTORE_BASE64 || secrets.CRANAMP_RELEASE_KEYSTORE_BASE64 }}
         run: |
-          test -n "$KEYSTORE_BASE64" || { echo 'Missing CRANAMP_PLAY_UPLOAD_KEYSTORE_BASE64'; exit 1; }
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing Play upload or existing Cranamp release keystore'; exit 1; }
           (umask 077; printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/play-upload.jks")
           echo "CRANAMP_RELEASE_KEYSTORE=$RUNNER_TEMP/play-upload.jks" >> "$GITHUB_ENV"
       - name: Build store bundle
         env:
-          CRANAMP_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEYSTORE_PASSWORD }}
-          CRANAMP_RELEASE_KEY_ALIAS: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEY_ALIAS }}
-          CRANAMP_RELEASE_KEY_PASSWORD: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEY_PASSWORD }}
+          CRANAMP_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEYSTORE_PASSWORD || secrets.CRANAMP_RELEASE_KEYSTORE_PASSWORD }}
+          CRANAMP_RELEASE_KEY_ALIAS: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEY_ALIAS || secrets.CRANAMP_RELEASE_KEY_ALIAS }}
+          CRANAMP_RELEASE_KEY_PASSWORD: ${{ secrets.CRANAMP_PLAY_UPLOAD_KEY_PASSWORD || secrets.CRANAMP_RELEASE_KEY_PASSWORD }}
         run: |
           version=$(python3 scripts/distribution/version.py)
           export GITHUB_REF_NAME="v$version"
