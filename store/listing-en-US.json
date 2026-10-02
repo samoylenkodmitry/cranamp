@@ -7,9 +7,9 @@
   "studio_desktop": "SKIN STUDIO\nDraw your own skins with pixel tools, layers, masks and undo/redo. Save layered CStudio projects and export WSZ skins. Connect an MCP-compatible agent to the desktop editor to draw on the same canvas. The agent runs separately and may have its own service requirements.",
   "desktop_windows": "Arrange the player, equalizer and playlist as movable, dockable desktop windows.",
   "keywords": "music,audio,player,playlist,equalizer,pixel,skin,wsz,local,stream",
-  "privacy_url": "https://samoylenkodmitry.github.io/cranamp/privacy/",
-  "support_url": "https://samoylenkodmitry.github.io/cranamp/support/",
-  "website": "https://samoylenkodmitry.github.io/cranamp/",
+  "privacy_url": "https://cranamp.dmitrysamoylenko.in/privacy/",
+  "support_url": "https://cranamp.dmitrysamoylenko.in/support/",
+  "website": "https://cranamp.dmitrysamoylenko.in/",
   "support_email": "trdmitriisamoilenko@gmail.com",
   "copyright": "2026 Dmitrii Samoilenko",
   "release_notes": "First store release of Cranamp: local music, playlists, streams, original Catamp skins and a ten-band equalizer. Store editions receive updates through the store."

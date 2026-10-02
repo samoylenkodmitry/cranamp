@@ -1,0 +1,25 @@
+services:
+  cranamp-landing:
+    image: nginx:alpine
+    container_name: cranamp-landing
+    restart: unless-stopped
+    expose:
+      - "80"
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    environment:
+      VIRTUAL_HOST: cranamp.dmitrysamoylenko.in
+      LETSENCRYPT_HOST: cranamp.dmitrysamoylenko.in
+      LETSENCRYPT_EMAIL: trdmitriisamoilenko@gmail.com
+    networks:
+      - net
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+networks:
+  net:
+    external: true

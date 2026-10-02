@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102c32">
+  <title>Cranamp — Your music. Your pixel canvas.</title>
+  <meta name="description" content="A music player built in Rust, with original pixel skins, WSZ support and Skin Studio on desktop, mobile and web. Bring your music. Draw your player.">
+  <link rel="canonical" href="https://cranamp.dmitrysamoylenko.in/">
+  <link rel="icon" href="assets/icon.png" type="image/png">
+  <meta property="og:title" content="Cranamp — Your music. Your pixel canvas.">
+  <meta property="og:description" content="Local music, original pixel skins and a studio to make your own. Built in Rust for desktop, mobile and web.">
+  <meta property="og:image" content="https://cranamp.dmitrysamoylenko.in/assets/social.jpg">
+  <meta property="og:url" content="https://cranamp.dmitrysamoylenko.in/">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="header wrap">
+    <a class="brand" href="./" aria-label="Cranamp home"><img src="assets/icon.png" width="42" height="42" alt=""><span>cranamp<span class="brand-dot">.</span></span></a>
+    <nav aria-label="Main navigation"><a href="#studio">Skin Studio</a><a href="support/">Support</a><a class="source" href="https://github.com/samoylenkodmitry/cranamp">Source <span aria-hidden="true">↗</span></a></nav>
+  </header>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="signal" aria-hidden="true"></span> A LITTLE PLAYER WITH A LOT OF PERSONALITY</p>
+        <h1 id="hero-title">Your music.<br>Your pixel<br><span>canvas.</span></h1>
+        <p class="intro">A music player built in Rust. Original pixel skins, your own playlists, and a whole studio to draw something new.</p>
+        <div class="actions"><a class="button primary" href="https://samoylenkodmitry.github.io/cranamp/">Open web player <span aria-hidden="true">↗</span></a><a class="button secondary" href="#download">Get Cranamp <span aria-hidden="true">↓</span></a></div>
+        <p class="fine">No account. No ads. Bring your own music.</p>
+      </div>
+      <div class="player-stage">
+        <div class="stage-heading"><span>CATAMP / SILVERPLAY</span><span class="stage-dots" aria-hidden="true">● ● ●</span></div>
+        <div class="stage-body"><div class="pixel-cross cross-one" aria-hidden="true">+</div><div class="pixel-cross cross-two" aria-hidden="true">+</div><svg class="player-image" viewBox="24 20 280 497" role="img" aria-labelledby="player-title"><title id="player-title">Cranamp web player in the original Catamp Silverplay skin, with playback controls, a ten-band equalizer and playlist</title><image href="assets/player.jpg" width="1301" height="877"/></svg></div>
+        <div class="stage-caption"><span>REAL PIXELS. REAL PLAYER.</span><span>01 / CATAMP COLLECTION</span></div>
+      </div>
+    </section>
+    <div class="platform-strip"><div class="wrap"><span>ONE PLAYER. YOUR CHOICE OF SCREEN.</span><p>macOS <b>·</b> Windows <b>·</b> Linux <b>·</b> iOS <b>·</b> Android <b>·</b> Web</p></div></div>
+    <section class="features wrap" aria-labelledby="features-title">
+      <div class="section-heading"><p class="eyebrow">LISTEN YOUR WAY</p><h2 id="features-title">Small details.<br>A familiar feeling.</h2></div>
+      <div class="feature-grid">
+        <article><span class="feature-number">01 / MUSIC</span><h3>Your collection, in play.</h3><p>Open local audio, build playlists, or tune into a stream by URL. Search, sort, shuffle and repeat. Import M3U, M3U8 and PLS playlists.</p></article>
+        <article><span class="feature-number">02 / SOUND</span><h3>Find your frequency.</h3><p>Shape playback with a ten-band equalizer and preamp. Adjust volume and balance, then watch the spectrum analyzer or oscilloscope.</p></article>
+        <article><span class="feature-number">03 / SKINS</span><h3>Give every pixel a job.</h3><p>Pick an original Catamp skin or import a compatible WSZ skin you have permission to use. The player remembers your look.</p></article>
+      </div>
+    </section>
+    <section id="studio" class="studio-section">
+      <div class="wrap studio-layout">
+        <div class="studio-copy"><p class="eyebrow">MEET SKIN STUDIO</p><h2>Make a player<br>that looks<br><em>like you.</em></h2><p>Draw directly on the skin with pixel tools, layers, masks and undo/redo. Keep a layered CStudio project, or export a WSZ skin ready to play.</p><p>Skin Studio is included on desktop, iOS, Android and web. On desktop, connect an MCP-compatible agent to draw on the same canvas.</p><a class="text-link" href="https://github.com/samoylenkodmitry/cranamp/tree/main/docs/skin-studio">Explore the studio guide <span aria-hidden="true">↗</span></a><p class="studio-note">Connected agents run separately and may use their own online services.</p></div>
+        <figure class="studio-preview"><div class="window-bar"><span aria-hidden="true">● ● ●</span><span>CRANAMP SKIN STUDIO</span></div><img src="assets/studio.png" width="1160" height="850" loading="lazy" alt="Skin Studio showing a pixel skin canvas and its painting layers"><figcaption>Your canvas. Your layers. Your next skin.</figcaption></figure>
+      </div>
+    </section>
+    <section id="download" class="download wrap" aria-labelledby="download-title">
+      <div><p class="eyebrow">READY WHEN YOU ARE</p><h2 id="download-title">Press play.</h2><p>Try it in your browser, or pick a build for your device.</p></div>
+      <div class="download-options"><a class="download-card" href="https://samoylenkodmitry.github.io/cranamp/"><span class="download-icon" aria-hidden="true">▷</span><div><h3>Web player &amp; Studio</h3><p>Open in a modern browser.</p></div><span aria-hidden="true">↗</span></a><a class="download-card" href="https://github.com/samoylenkodmitry/cranamp/releases/latest"><span class="download-icon" aria-hidden="true">↓</span><div><h3>Download a release</h3><p>Available builds and installation notes.</p></div><span aria-hidden="true">↗</span></a><p class="availability">Store releases for Apple, Google Play and Microsoft are being prepared. Store links will appear here when they are live. Audio formats and streaming support vary by platform.</p></div>
+    </section>
+    <section class="closing wrap"><img src="assets/icon.png" width="56" height="56" alt="Cranamp cat"><p>An independent project by Dmitrii Samoilenko.<br><span>Built for music, pixels and the joy of making things.</span></p><a href="https://github.com/samoylenkodmitry/cranamp">Made in Rust. Source on GitHub. <span aria-hidden="true">↗</span></a></section>
+  </main>
+  <footer class="wrap"><span>© 2026 Dmitrii Samoilenko</span><nav aria-label="Footer"><a href="privacy/">Privacy policy</a><a href="support/">Support</a><a href="https://github.com/samoylenkodmitry/cranamp/blob/main/LICENSE">License</a></nav></footer>
+</body>
+</html>

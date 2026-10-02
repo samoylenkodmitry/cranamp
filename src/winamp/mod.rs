@@ -4445,7 +4445,7 @@ fn SettingsPanel(
                     SettingsUpdateSection(state);
                     SettingsActionButton("Privacy policy".into(), SETTINGS_CARD, || {
                         let _ = cranpose_services::default_uri_handler()
-                            .open_uri("https://samoylenkodmitry.github.io/cranamp/privacy/");
+                            .open_uri("https://cranamp.dmitrysamoylenko.in/privacy/");
                     });
                     Text(
                         format!("Cranamp v{} · cranpose", env!("CARGO_PKG_VERSION")),
