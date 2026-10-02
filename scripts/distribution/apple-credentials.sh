@@ -18,7 +18,7 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password
 security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
 profile_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 mkdir -p "$profile_dir"
-uuid=$(security cms -D -i "$RUNNER_TEMP/store-profile.mobileprovision" | python3 -c 'import plistlib,sys; print(plistlib.load(sys.stdin.buffer)["UUID"])')
+uuid=$(security cms -D -i "$RUNNER_TEMP/store-profile.mobileprovision" | python3 -c 'import plistlib,sys; print(plistlib.loads(sys.stdin.buffer.read())["UUID"])')
 cp "$RUNNER_TEMP/store-profile.mobileprovision" "$profile_dir/$uuid.mobileprovision"
 printf 'CRANAMP_SIGN_KEYCHAIN=%s\nCRANAMP_PROVISIONING_PROFILE=%s\nCRANAMP_INSTALLED_PROFILE=%s\n' \
   "$keychain" "$RUNNER_TEMP/store-profile.mobileprovision" "$profile_dir/$uuid.mobileprovision" >> "$GITHUB_ENV"
