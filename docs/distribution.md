@@ -2,6 +2,25 @@
 
 Cranamp is a music player in Rust with WSZ support and its own Skin Studio. The desktop editor exposes MCP tools for agents to draw skins.
 
+## Registered apps
+
+Registration status on October 2, 2026:
+
+| Store | App record | Identity | Status |
+| --- | --- | --- | --- |
+| Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | Draft; free app, English (US) |
+| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | iOS and macOS drafts; manual release |
+| Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | MSIX app name reserved; draft |
+
+GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
+
+- `CRANAMP_APPLE_BUNDLE_ID=io.cranamp.app`
+- `CRANAMP_MSIX_IDENTITY=DmitriiSamoilenko.Cranamp`
+- `CRANAMP_MSIX_PUBLISHER=CN=B3D99093-F004-43B3-80D7-6F628B17CAA6`
+- `CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME=DmitriiSamoilenko`
+
+These registrations do not publish an app or establish legal clearance. Apple initially created version `1.0` for both platforms; align the store version with the intended build before upload. Microsoft requires a submission within three months to retain the name reservation.
+
 ## Channels and artifacts
 
 The existing **Release** workflow builds direct downloads. The new **Store packages** workflow runs for `v*` tags and manual dispatches. Its `store` Cargo feature removes updater UI and the APK installation capability, and starts without an automatic demo playlist. No channel adds the former radio preset. All channels use Catamp for fallback artwork.
@@ -70,6 +89,8 @@ The desktop package declares `runFullTrust` and uses Cargo's version plus `.0`. 
 ## Linux and AUR
 
 `yay` installs recipes from the AUR. The AUR stores PKGBUILDs, not application binaries. The generated recipe builds the release source with Cargo's locked dependencies. CI generates `.SRCINFO` using `makepkg`.
+
+On October 2, 2026, the [AUR registration page](https://aur.archlinux.org/register) reported that new account creation was temporarily closed. The connected Chrome profile had no active AUR session. Submission needs an existing maintainer account or registration to reopen.
 
 For a tagged release:
 
