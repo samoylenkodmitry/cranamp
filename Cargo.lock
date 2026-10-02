@@ -858,6 +858,7 @@ dependencies = [
  "getrandom 0.4.3",
  "image",
  "log",
+ "rfd",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -3502,6 +3503,9 @@ dependencies = [
  "raw-window-handle",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
  "web-sys",
  "windows-sys 0.61.2",
 ]

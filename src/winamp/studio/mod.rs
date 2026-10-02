@@ -78,6 +78,7 @@ const SIDEBAR_MIN: f32 = 900.;
 const DRAWER_WIDTH: f32 = 380.;
 const DRAWER_MAX: f32 = 480.;
 const CANVAS_MIN: f32 = 320.;
+const CANVAS_MIN_HEIGHT: f32 = 400.;
 const CANVAS_BOTTOM_RESERVE: f32 = 102.;
 const SCROLLBAR: f32 = 14.;
 const PREVIEW_COLUMN: f32 = PREVIEW_BOX.0 + 12.;
@@ -140,6 +141,12 @@ impl Scene {
     fn over_footer(self, footer: f32) -> Self {
         Self { footer, ..self }
     }
+    fn with_canvas_room(self) -> Self {
+        Self {
+            height: self.height.max(self.top + self.footer + CANVAS_MIN_HEIGHT),
+            ..self
+        }
+    }
     fn footer_top(&self) -> f32 {
         self.height - self.footer + 6.
     }
@@ -196,6 +203,45 @@ fn fit_zoom(canvas: (f32, f32), document: (u32, u32)) -> u8 {
             document.0 as f32 * *z as f32 <= canvas.0 && document.1 as f32 * *z as f32 <= canvas.1
         })
         .unwrap_or(1)
+}
+#[composable]
+fn StudioViewport(
+    scene: Scene,
+    measured_scene: cranpose_core::MutableState<Scene>,
+    content: impl FnMut() + 'static,
+) {
+    let scroll = cranpose_ui::rememberScrollState!(0.0);
+    let content = Rc::new(std::cell::RefCell::new(content));
+    Box(
+        Modifier::empty().fill_max_size().background(BG),
+        BoxSpec::default(),
+        move || {
+            BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
+                let measured = Scene::new(
+                    scope.constraints().max_width,
+                    scope.constraints().max_height,
+                );
+                if measured_scene.get_non_reactive() != measured {
+                    cranpose_core::SideEffect(move || measured_scene.set(measured));
+                }
+            });
+            let content = content.clone();
+            cranpose_ui::Column(
+                Modifier::empty()
+                    .fill_max_size()
+                    .vertical_scroll(scroll, false),
+                cranpose_ui::ColumnSpec::default(),
+                move || {
+                    let content = content.clone();
+                    Box(
+                        Modifier::empty().size_points(scene.width, scene.height),
+                        BoxSpec::default(),
+                        move || (content.borrow_mut())(),
+                    );
+                },
+            );
+        },
+    );
 }
 #[cfg(test)]
 #[path = "../../../test/unit/winamp/studio/fit_tests.rs"]

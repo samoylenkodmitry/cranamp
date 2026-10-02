@@ -19,6 +19,7 @@ pkgdesc='Music player in Rust with WSZ skins and an agent-connected Skin Studio'
 arch=('x86_64' 'aarch64')
 url='https://github.com/samoylenkodmitry/cranamp'
 license=('Apache-2.0')
+options=('!debug')
 depends=('alsa-lib' 'gcc-libs' 'glibc')
 optdepends=('vulkan-driver: GPU rendering' 'xdg-desktop-portal: file dialogs')
 makedepends=('cargo' 'git' 'pkgconf')

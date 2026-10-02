@@ -2446,7 +2446,6 @@ struct StackedLayout {
     content_left_inset: f32,
     content_top_inset: f32,
 }
-#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 fn resizable_stacked_layout(
     available_width: f32,
     available_height: f32,
@@ -2523,39 +2522,16 @@ fn fullscreen_stacked_layout(
     snapshot: &WinampState,
     fallback_scale: f32,
 ) -> StackedLayout {
-    let base_height =
-        main_height(snapshot.main_shaded) + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 };
-    let width_scale = if available_width.is_finite() && available_width > 0.0 {
-        available_width / MAIN_WIDTH
-    } else {
-        fallback_scale
-    };
-    let height_scale =
-        if available_height.is_finite() && available_height > 0.0 && base_height > 0.0 {
-            available_height / base_height
-        } else {
-            fallback_scale
-        };
-    let scale = if snapshot.playlist_visible {
-        width_scale.max(0.5)
-    } else {
-        width_scale.max(height_scale).max(0.5)
-    };
-    let playlist_height = if snapshot.playlist_visible {
-        if available_height.is_finite() && available_height > 0.0 && scale > 0.0 {
-            (available_height / scale - base_height).max(playlist_min_height())
-        } else {
-            PLAYLIST_HEIGHT
-        }
-    } else {
-        PLAYLIST_HEIGHT
-    };
-    StackedLayout {
-        scale,
-        playlist_height,
-        content_left_inset: 0.0,
-        content_top_inset: 0.0,
-    }
+    // Include the playlist minimum when fitting the player. Width-only scaling
+    // clips its footer on tablets and short landscape surfaces.
+    resizable_stacked_layout(
+        available_width,
+        available_height,
+        0.0,
+        0.0,
+        snapshot,
+        fallback_scale,
+    )
 }
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn web_stacked_layout(snapshot: &WinampState) -> StackedLayout {

@@ -40,6 +40,7 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let scene = scene_state.get();
     let drawing = !live.get() && !review.get();
     let hosted = host.is_some();
+    let document_pickers = hosted || cfg!(feature = "store");
     let armed = confirm.get();
     let mut action = Rows::new(20., ACTION_ROW, scene.width - 20.);
     let undo_at = action.take(76.);
@@ -63,7 +64,11 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     let draft_at = hosted.then(|| (action.take(104.), action.take(146.)));
     let inline_files = scene.right(872.) < action.x + 8.;
     let (wsz_at, open_at, export_at, blank_at, keep_at) = if inline_files {
-        let wsz = if hosted { (0., 0.) } else { action.take(222.) };
+        let wsz = if document_pickers {
+            (0., 0.)
+        } else {
+            action.take(222.)
+        };
         (
             wsz,
             action.take(70.),
@@ -157,7 +162,8 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
     }
     let scene = scene
         .under_chrome(panels.bottom() + CANVAS_HEADER)
-        .over_footer(footer.bottom() + 26.);
+        .over_footer(footer.bottom() + 26.)
+        .with_canvas_room();
     let (canvas_x, canvas_y, canvas_full_w, canvas_h) = scene.painting();
     let (split_w, split_drawer) = scene.split();
     let docked = split_drawer > 0.;
@@ -404,19 +410,11 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
         });
     }
     let document = shared.clone();
-    Box(
-        Modifier::empty().fill_max_size().background(BG),
-        BoxSpec::default(),
+    StudioViewport(
+        scene,
+        scene_state,
+        // Keep the controls and canvas reachable when phone controls wrap.
         move || {
-            BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
-                let measured = Scene::new(
-                    scope.constraints().max_width,
-                    scope.constraints().max_height,
-                );
-                if scene_state.get_non_reactive() != measured {
-                    cranpose_core::SideEffect(move || scene_state.set(measured));
-                }
-            });
             if view.presentation {
                 let d = document.clone();
                 let presentation_zoom = view.zoom.min((800 / preview_size.1).clamp(1, 2)) as f32;
@@ -666,6 +664,8 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         Err(e) => note(&d, format!("Apply: {e:#}")),
                     },
                 );
+            }
+            if document_pickers {
                 let open = open_launcher.clone();
                 Action("Open…".into(), open_at.0, open_at.1, 70., move || {
                     open.launch(cranpose::FilePickerOptions::default().with_filter(
@@ -681,11 +681,38 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     88.,
                     move || match d.lock().unwrap().export_archive() {
                         Ok(bytes) => {
-                            pending_export.set(Some(bytes));
-                            export.launch(cranpose::SaveDocumentRequest::new(
-                                "Catamp edited.wsz",
-                                "application/zip",
-                            ));
+                            #[cfg(all(target_os = "macos", feature = "store"))]
+                            {
+                                // The sandbox grants the selected file, not a temporary sibling.
+                                // The framework's staged sink creates a denied `.partial` file.
+                                let d = d.clone();
+                                cranpose_core::spawn_ui_task(async move {
+                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                        .set_file_name("Catamp edited.wsz")
+                                        .add_filter("WSZ skin", &["wsz"])
+                                        .save_file()
+                                        .await
+                                    {
+                                        let result = file.write(&bytes).await;
+                                        note(
+                                            &d,
+                                            match result {
+                                                Ok(()) => "Exported skin".into(),
+                                                Err(e) => format!("Export: {e:#}"),
+                                            },
+                                        );
+                                    }
+                                });
+                                let _ = &export;
+                            }
+                            #[cfg(not(all(target_os = "macos", feature = "store")))]
+                            {
+                                pending_export.set(Some(bytes));
+                                export.launch(cranpose::SaveDocumentRequest::new(
+                                    "Catamp edited.wsz",
+                                    "application/zip",
+                                ));
+                            }
                         }
                         Err(e) => note(&d, format!("Export: {e:#}")),
                     },
@@ -1016,8 +1043,8 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                         doc.view.panel = "canvas".into();
                         let best = fit_zoom(room, doc.canvas_size());
                         let _ = doc.state(
-                            json!({"panel":"canvas","layer":"auto","zoom":best,"presentation":false}),
-                        );
+                        json!({"panel":"canvas","layer":"auto","zoom":best,"presentation":false}),
+                    );
                         live.set(false);
                         review.set(false);
                         pan.set([0, 0]);
@@ -1775,9 +1802,13 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                     move || {
                         {
                             let d = d.clone();
-                            Action("Close".into(), 290., 10., 78., move || {
-                                set_drawer(&d, tick, 0)
-                            });
+                            Action(
+                                "Close".into(),
+                                (drawer_w - 90.).max(12.),
+                                10.,
+                                78.,
+                                move || set_drawer(&d, tick, 0),
+                            );
                         }
                         let room = (drawer_w - 24., drawer_h);
                         if open_drawer == 1 {
