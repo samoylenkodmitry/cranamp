@@ -11,8 +11,31 @@ function Invoke-Studio([string]$Name, [hashtable]$Arguments = @{}) {
     if ($reply.error -or $reply.result.isError) { throw ($reply | ConvertTo-Json -Depth 8) }
     return $reply
 }
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+function Invoke-StudioButton([string]$Name) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    do {
+        $application.Refresh()
+        if ($application.HasExited) { throw "Studio exited with code $($application.ExitCode)" }
+        if ($application.MainWindowHandle -ne [IntPtr]::Zero) {
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($application.MainWindowHandle)
+            $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $Name)
+            $button = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+            if ($null -ne $button -and $button.Current.IsEnabled) {
+                $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
+                return
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Studio button was not available: $Name"
+}
 $application = Start-Process -FilePath ([IO.Path]::GetFullPath($Executable)) -ArgumentList '--skin-studio' -PassThru -RedirectStandardOutput (Join-Path $outputPath 'stdout.log') -RedirectStandardError (Join-Path $outputPath 'stderr.log')
 try {
+    Invoke-StudioButton 'Agent connection'
+    Invoke-StudioButton 'Start server'
     $ready = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         $application.Refresh()
