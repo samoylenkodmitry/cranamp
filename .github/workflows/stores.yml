@@ -191,10 +191,11 @@ jobs:
         shell: pwsh
         run: ./test/distribution/windows-store-screenshots.ps1 -Executable target/x86_64-pc-windows-msvc/release/cranamp.exe -OutputDirectory store-artifacts/screenshots
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: microsoft-store-msix
           path: store-artifacts/
-          if-no-files-found: error
+          if-no-files-found: warn
 
   linux:
     name: Linux DEB, RPM and AUR source package
