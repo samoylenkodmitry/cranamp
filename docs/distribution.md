@@ -19,7 +19,7 @@ GitHub repository variables contain the registered Apple bundle ID and the exact
 - `CRANAMP_MSIX_PUBLISHER=CN=B3D99093-F004-43B3-80D7-6F628B17CAA6`
 - `CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME=DmitriiSamoilenko`
 
-All four store submissions are configured to publish automatically after approval. France is excluded from the initial release. Store submission and approval do not establish legal clearance. The initial signed binaries were built by [Store packages run 37015856145](https://github.com/samoylenkodmitry/cranamp/actions/runs/37015856145). Replacement Apple build 5 comes from commit `c8d1eb7` in [run 37149395670](https://github.com/samoylenkodmitry/cranamp/actions/runs/37149395670); both Apple jobs passed. Later commits correct tests and Windows screenshot automation without changing the submitted app code.
+All four store submissions are configured to publish automatically after approval. France is excluded from the initial release. Store submission and approval do not establish legal clearance. The initial signed binaries were built by [Store packages run 37015856145](https://github.com/samoylenkodmitry/cranamp/actions/runs/37015856145). Replacement Apple build 5 comes from commit `c8d1eb7` in [run 37149395670](https://github.com/samoylenkodmitry/cranamp/actions/runs/37149395670); both Apple jobs passed. Those submitted files are unchanged. Later source changes update tests, Windows screenshot automation and the framework dependency for the Windows shader compiler fix.
 
 Apple rejected Mac build 2 under guideline 2.4.5 because automated analysis could not identify the functionality requiring incoming network access. Build 5 adds the visible Start/Stop/Test connection controls described below. The reviewer received updated instructions and a successful connection screenshot. The replacement iOS build excludes the MCP server entirely. Both build 5 uploads passed Apple processing and were submitted on October 3.
 
@@ -105,6 +105,8 @@ Reserve the app in Partner Center. Set these repository variables to the exact r
 - `CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME`: publisher display name.
 
 The desktop package declares `runFullTrust` and uses Cargo's version plus `.0`. Upload the MSIX in Partner Center and complete the listing, ratings and privacy disclosures. Microsoft applies Store signing. Local sideload testing requires a trusted development signature.
+
+Windows x64 builds bundle DXC because the legacy FXC compiler failed to compile the renderer's shape shader. The generated package notices include DXC's native LLVM/Microsoft and Mach licenses in addition to Cargo dependency notices. CI starts the desktop MCP server through the visible Studio controls, captures the actual GPU output, and rejects blank or undersized screenshots.
 
 ## Linux and AUR
 
