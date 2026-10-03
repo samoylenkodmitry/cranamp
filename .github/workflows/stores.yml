@@ -176,19 +176,23 @@ jobs:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - uses: ./.github/actions/store-notices
         with:
           target: x86_64-pc-windows-msvc
-          features: desktop,renderer-wgpu,store
+          features: desktop,renderer-wgpu,store,logging
       - name: Build player
         env:
           RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo build --locked --release --features store --target x86_64-pc-windows-msvc
+        run: cargo build --locked --release --features store,logging --target x86_64-pc-windows-msvc
       - name: Build MSIX
         shell: pwsh
         run: ./scripts/distribution/windows.ps1
       - name: Capture Windows player and Skin Studio
         shell: pwsh
+        env:
+          RUST_LOG: warn
         run: ./test/distribution/windows-store-screenshots.ps1 -Executable target/x86_64-pc-windows-msvc/release/cranamp.exe -OutputDirectory store-artifacts/screenshots
       - uses: actions/upload-artifact@v7
         if: always()

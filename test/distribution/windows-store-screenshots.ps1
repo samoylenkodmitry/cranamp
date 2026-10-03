@@ -56,7 +56,7 @@ try {
                 for ($x = 0; $x -lt $image.Width; $x += 4) { $null = $colors.Add($image.GetPixel($x, $y).ToArgb()) }
             }
             Write-Output "$($file.Name): $($image.Width)x$($image.Height), $($colors.Count) sampled colors"
-            if ($image.Width -lt 1280 -or $image.Height -lt 720 -or $colors.Count -lt 16) { throw "Blank or undersized capture: $($file.Name)" }
+            if ($image.Width -lt 1366 -or $image.Height -lt 768 -or $colors.Count -lt 16) { throw "Blank or undersized capture: $($file.Name)" }
         } finally { $image.Dispose() }
     }
 } finally {
