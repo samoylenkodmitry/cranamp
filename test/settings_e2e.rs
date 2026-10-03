@@ -6,11 +6,61 @@ use cranpose_core::location_key;
 use cranpose_foundation::Modifiers;
 use std::cell::RefCell;
 use std::rc::Rc;
+static APP_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct TestHost(std::path::PathBuf);
+impl cranpose_services::HostController for TestHost {
+    fn set_keep_screen_on(&self, _: bool) {}
+    fn exit(&self) {}
+    fn background(&self) {}
+    fn platform_directories(&self) -> Option<cranpose_services::PlatformDirectories> {
+        Some(cranpose_services::PlatformDirectories {
+            data: self.0.join("data"),
+            config: self.0.join("config"),
+            cache: self.0.join("cache"),
+            documents: None,
+            temporary: self.0.join("temporary"),
+            shared: None,
+        })
+    }
+}
+struct TestApplication {
+    directory: std::path::PathBuf,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+impl TestApplication {
+    fn new(name: &str) -> Self {
+        let lock = APP_TEST_LOCK.lock().expect("application test lock");
+        let directory = std::env::temp_dir().join(format!(
+            "cranamp-settings-{}-{name}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("test clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).expect("test storage");
+        cranpose_services::set_application_id("cranamp-test").expect("test application id");
+        cranpose_services::set_host_controller(std::sync::Arc::new(TestHost(directory.clone())));
+        Self {
+            directory,
+            _lock: lock,
+        }
+    }
+}
+impl Drop for TestApplication {
+    fn drop(&mut self) {
+        cranpose_services::clear_host_controller();
+        cranpose_services::clear_application_id();
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
 fn contains(texts: &[String], needle: &str) -> bool {
     texts.iter().any(|text| text.contains(needle))
 }
 #[test]
 fn clicking_the_logo_opens_and_closes_the_settings_window() {
+    let _application = TestApplication::new("settings");
     let root_key = location_key(file!(), line!(), column!());
     let mut shell = AppShell::new(
         HitGraphRenderer::default(),
@@ -152,6 +202,7 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
 }
 #[test]
 fn audio_handed_over_by_another_application_plays() {
+    let _application = TestApplication::new("handover");
     let root_key = location_key(file!(), line!(), column!());
     let mut shell = AppShell::new(
         HitGraphRenderer::default(),
@@ -174,12 +225,23 @@ fn audio_handed_over_by_another_application_plays() {
             .with_name(name)
             .with_mime_type("audio/mpeg"),
     );
-    for _ in 0..80 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let after = loop {
         shell.update();
-    }
-    let after = visible_texts(&mut shell);
+        let texts = visible_texts(&mut shell);
+        if texts
+            .iter()
+            .any(|text| text == "handed-over-by-another-app")
+            || std::time::Instant::now() >= deadline
+        {
+            break texts;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
     assert!(
-        contains(&after, "handed-over-by-another-app"),
+        after
+            .iter()
+            .any(|text| text == "handed-over-by-another-app"),
         "handed-over audio should appear in the player; visible={after:?}"
     );
     assert!(
@@ -189,7 +251,7 @@ fn audio_handed_over_by_another_application_plays() {
     assert!(
         after
             .first()
-            .is_some_and(|current| current.contains("handed-over-by-another-app")),
+            .is_some_and(|current| current == "handed-over-by-another-app"),
         "an idle player should start the handed-over track; visible={after:?}"
     );
 }
