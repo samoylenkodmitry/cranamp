@@ -1,4 +1,8 @@
 #![allow(unused_braces)]
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+mod agent_connection;
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+mod agent_server;
 mod brush;
 pub(crate) mod cursor_art;
 mod draft;
@@ -407,10 +411,10 @@ fn default_export_path() -> std::path::PathBuf {
 pub fn run(path: Option<&str>) {
     let doc = initial_document(path).unwrap_or_else(|e| panic!("Open skin: {e:#}"));
     let shared = SharedDocument(Arc::new(Mutex::new(doc)));
-    match mcp::start(shared.clone()) {
+    match agent_server::start(shared.clone()) {
         Ok(()) => println!(
             "Cranamp Skin Studio: MCP on http://{}, editing {}",
-            mcp::ADDRESS,
+            agent_server::ADDRESS,
             path.unwrap_or("the bundled Catamp")
         ),
         Err(e) => {
@@ -436,7 +440,7 @@ pub fn run(path: Option<&str>) {
 ))]
 pub fn run_touch_preview(editor: bool) {
     let document = new_mobile_document(None).expect("Bundled Studio document");
-    if let Err(e) = mcp::start(document.clone()) {
+    if let Err(e) = agent_server::start(document.clone()) {
         document.lock().unwrap().message = e.to_string();
     }
     let launcher = crate::create_surface_app()
@@ -454,8 +458,9 @@ pub fn run_touch_preview(editor: bool) {
         }
     });
 }
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 pub fn stdio_bridge() {
-    mcp::bridge();
+    agent_server::bridge();
 }
 fn text_style(size: f32, color: Color) -> TextStyle {
     TextStyle::from_span_style(SpanStyle {
@@ -879,6 +884,8 @@ fn drawer_id(name: &str) -> u8 {
         "picker" => 8,
         "options" => 9,
         "equalizer" => 10,
+        #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+        "agent" => 11,
         _ => 0,
     }
 }
@@ -894,6 +901,7 @@ fn drawer_name(id: u8) -> &'static str {
         8 => "picker",
         9 => "options",
         10 => "equalizer",
+        11 => "agent",
         _ => "none",
     }
 }
@@ -1505,15 +1513,6 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                             },
                         );
                     }
-                    Label(
-                        "This editor is also an MCP server, so an agent can paint\ninto the same document and share its undo history.\n\n  127.0.0.1:18765\n  cranamp --skin-studio-mcp"
-                            .into(),
-                        12.,
-                        712.,
-                        350.,
-                        11.,
-                        DIM,
-                    );
                 },
             );
         },

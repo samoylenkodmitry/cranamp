@@ -198,6 +198,7 @@ pub const DRAWERS: &[&str] = &[
     "files",
     "states",
     "equalizer",
+    "agent",
 ];
 pub(super) struct Patch {
     pub(super) image: RgbaImage,

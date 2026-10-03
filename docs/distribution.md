@@ -86,6 +86,8 @@ and uploaded successfully. Device testing and App Review are separate steps.
 
 The Mac package uses App Sandbox with user-selected file read/write, app-scoped bookmarks, network client access for streams, and network server access for the desktop MCP endpoint. Test saved-file reopening, folder sync, playback and MCP in the signed sandbox. Building a package does not validate those runtime behaviors.
 
+In desktop Skin Studio, open **Agent connection** to see the loopback address, test a real MCP connection, copy connection details, or stop/restart the server. **Test connection** reads the server identity and available tools without changing the document. The server listens only on `127.0.0.1:18765` and closes with Studio. Local programs can access the active document and files within the app's permissions while it runs. iOS, Android, and web keep Skin Studio's editing features but do not compile the MCP network server or its connection controls.
+
 An unsigned iOS XCArchive cannot be installed on a device or uploaded as a finished submission. Signed runs export an IPA through `xcodebuild -exportArchive`; Mac uses `productbuild`. Upload with Transporter or App Store Connect tooling. Complete privacy labels and review the final binary for required-reason APIs, SDK privacy manifests and export compliance. Do not invent privacy declarations just to pass upload checks.
 
 ## Microsoft Store
