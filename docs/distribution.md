@@ -4,12 +4,12 @@ Cranamp is a music player in Rust with WSZ support and its own Skin Studio. The 
 
 ## Registered apps
 
-Registration status on October 2, 2026:
+Apple status was verified on October 3, 2026; Google Play and Microsoft status below was last verified on October 2:
 
 | Store | App record | Identity | Status |
 | --- | --- | --- | --- |
 | Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | 0.1.86 (10086) submitted; changes in review |
-| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | iOS and macOS 0.1.86 (2) submitted; waiting for review |
+| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | Replacement iOS and macOS 0.1.86 (5) submitted; waiting for review |
 | Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.86.0 submitted; in certification |
 
 GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
@@ -19,7 +19,9 @@ GitHub repository variables contain the registered Apple bundle ID and the exact
 - `CRANAMP_MSIX_PUBLISHER=CN=B3D99093-F004-43B3-80D7-6F628B17CAA6`
 - `CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME=DmitriiSamoilenko`
 
-All four store submissions are configured to publish automatically after approval. France is excluded from the initial release. Store submission and approval do not establish legal clearance. The signed binaries were built by [Store packages run 37015856145](https://github.com/samoylenkodmitry/cranamp/actions/runs/37015856145).
+All four store submissions are configured to publish automatically after approval. France is excluded from the initial release. Store submission and approval do not establish legal clearance. The initial signed binaries were built by [Store packages run 37015856145](https://github.com/samoylenkodmitry/cranamp/actions/runs/37015856145). Replacement Apple build 5 comes from commit `c8d1eb7` in [run 37149395670](https://github.com/samoylenkodmitry/cranamp/actions/runs/37149395670); both Apple jobs passed. Those submitted files are unchanged. Later source changes update tests, Windows screenshot automation and the framework dependency for the Windows shader compiler fix.
+
+Apple rejected Mac build 2 under guideline 2.4.5 because automated analysis could not identify the functionality requiring incoming network access. Build 5 adds the visible Start/Stop/Test connection controls described below. The reviewer received updated instructions and a successful connection screenshot. The replacement iOS build excludes the MCP server entirely. Both build 5 uploads passed Apple processing and were submitted on October 3.
 
 ## Channels and artifacts
 
@@ -35,7 +37,7 @@ The existing **Release** workflow builds direct downloads. The new **Store packa
 
 Tag builds produce validation artifacts without distribution credentials. Manually enable **signed** to require Apple and Google Play credentials. Signed runs fail if those credentials are missing. Windows packages remain unsigned because Microsoft signs Store submissions. Without Partner Center variables, validation runs use `Cranamp.LocalValidation`, which cannot be submitted.
 
-Packages are retained as workflow artifacts. This workflow does not submit store listings or publish to repositories. Tags must match Cargo.toml. Set the manual `build_number` input to a new Apple build number for each upload of the same version. Its default is `1`; the initial submitted version uses build `2`.
+Packages are retained as workflow artifacts. This workflow does not submit store listings or publish to repositories. Tags must match Cargo.toml. Set the manual `build_number` input to a new Apple build number for each upload of the same version. Its default is `1`; the current Apple submission uses build `5`.
 
 ## Google Play
 
@@ -86,6 +88,12 @@ and uploaded successfully. Device testing and App Review are separate steps.
 
 The Mac package uses App Sandbox with user-selected file read/write, app-scoped bookmarks, network client access for streams, and network server access for the desktop MCP endpoint. Test saved-file reopening, folder sync, playback and MCP in the signed sandbox. Building a package does not validate those runtime behaviors.
 
+In desktop Skin Studio, open **Agent connection → Start server**. The server is off by default. **Test connection** reads the server identity and available tools without changing the document. The panel also copies connection details and stops the server. It listens only on `127.0.0.1:18765` and closes with Studio. Local programs can access the active document and files within the app's permissions while it runs. iOS, Android, and web keep Skin Studio's editing features but do not compile the MCP network server or its connection controls.
+
+Studio launched from the desktop player closes when the player exits; a Studio launched separately from the command line remains independent. Imported music is copied into durable app storage on iOS, Android, and sandboxed macOS. Imports have unique names, so selecting two identically named songs does not replace either song. Audio copies are limited to 2 GiB per file. Skin/project archives are limited to 64 MiB on disk, 128 MiB expanded, 16 MiB per entry, and 64 MiB of decoded images.
+
+iOS uses the shared audio decoder for local music and direct audio streams, including EQ, balance, and sample analysis. HLS uses AVPlayer and reports EQ, balance, and analysis as unavailable. The app declares the audio background mode and keeps iOS media-session controls. Simulator and automated checks do not verify physical-device interruptions, Bluetooth routing, background behavior, or thermal performance.
+
 An unsigned iOS XCArchive cannot be installed on a device or uploaded as a finished submission. Signed runs export an IPA through `xcodebuild -exportArchive`; Mac uses `productbuild`. Upload with Transporter or App Store Connect tooling. Complete privacy labels and review the final binary for required-reason APIs, SDK privacy manifests and export compliance. Do not invent privacy declarations just to pass upload checks.
 
 ## Microsoft Store
@@ -97,6 +105,8 @@ Reserve the app in Partner Center. Set these repository variables to the exact r
 - `CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME`: publisher display name.
 
 The desktop package declares `runFullTrust` and uses Cargo's version plus `.0`. Upload the MSIX in Partner Center and complete the listing, ratings and privacy disclosures. Microsoft applies Store signing. Local sideload testing requires a trusted development signature.
+
+Windows x64 builds bundle DXC because the legacy FXC compiler failed to compile the renderer's shape shader. The generated package notices include DXC's native LLVM/Microsoft and Mach licenses in addition to Cargo dependency notices. CI starts the desktop MCP server through the visible Studio controls, captures the actual GPU output, and rejects blank or undersized screenshots.
 
 ## Linux and AUR
 
@@ -120,7 +130,7 @@ DEB and RPM files can be attached to a GitHub release for direct installation. T
 
 - Review generated THIRD-PARTY.html, the font notices, and MPL source availability. Cargo notices cover Rust dependencies; separately audit additional platform libraries.
 - Keep provenance and permission records for bundled artwork. Packaging does not establish legal clearance.
-- Android includes `symphonia-codec-aac` through `cranpose-media`. Codec patent coverage for the intended countries remains a separate legal assessment; free distribution and open-source copyright licenses do not establish that coverage. [Via LA’s AAC program](https://www.via-la.com/licensing-programs/aac/) describes licensing for end-user encoder/decoder products, but does not determine which claims apply to this specific AAC implementation. The store privacy forms are complete for the audited build.
+- Native editions, including iOS, include `symphonia-codec-aac` through `cranpose-media`. Codec patent coverage for the intended countries remains a separate legal assessment; free distribution and open-source copyright licenses do not establish that coverage. [Via LA’s AAC program](https://www.via-la.com/licensing-programs/aac/) describes licensing for end-user encoder/decoder products, but does not determine which claims apply to this specific AAC implementation. The store privacy forms are complete for the audited build.
 - Test the exact signed package on each OS, including file access and sandbox behavior.
 - Supply product screenshots, support and privacy URLs, age ratings and publisher identity in the consoles.
 

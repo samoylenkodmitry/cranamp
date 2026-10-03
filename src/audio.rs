@@ -136,64 +136,17 @@ fn demo_music_directory_has_tracks(directory: &std::path::Path) -> bool {
         .iter()
         .any(|track| directory.join(track.file_name).is_file())
 }
-pub async fn tracks_from_picked_entry(entry: cranpose_services::ContentHandle) -> Vec<Track> {
-    let cache = picker_cache_dir();
-    let mut tracks =
-        collect_picked_audio_tracks(cranpose_services::ContentEntry::File(entry), cache).await;
-    tracks.sort_by(|a, b| a.display_title().cmp(b.display_title()));
-    tracks
+pub async fn tracks_from_picked_entry(
+    entry: cranpose_services::ContentHandle,
+) -> Result<Vec<Track>, String> {
+    Ok(track_from_picked_file(entry).await?.into_iter().collect())
 }
-pub async fn track_from_picked_file(entry: cranpose_services::ContentHandle) -> Option<Track> {
+pub async fn track_from_picked_file(
+    entry: cranpose_services::ContentHandle,
+) -> Result<Option<Track>, String> {
     if !is_audio_name(&entry.metadata().name) {
-        return None;
+        return Ok(None);
     }
-    let cache = picker_cache_dir();
-    picked_audio_track(&entry, &cache).await
-}
-fn picker_cache_dir() -> std::path::PathBuf {
-    let dir = cranpose::application_directories()
-        .map(|directories| directories.temporary.join("picker"))
-        .unwrap_or_else(|_| fallback_cache_dir());
-    let _ = std::fs::create_dir_all(&dir);
-    dir
-}
-#[cfg(target_arch = "wasm32")]
-fn fallback_cache_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from("cranamp-picker")
-}
-#[cfg(not(target_arch = "wasm32"))]
-fn fallback_cache_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join("cranamp-picker")
-}
-fn collect_picked_audio_tracks(
-    entry: cranpose_services::ContentEntry,
-    cache: std::path::PathBuf,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<Track>>>> {
-    Box::pin(async move {
-        let mut tracks = Vec::new();
-        match entry {
-            cranpose_services::ContentEntry::Folder(folder) => {
-                if let Ok(children) = folder.entries().await {
-                    for child in children {
-                        tracks.extend(collect_picked_audio_tracks(child, cache.clone()).await);
-                    }
-                }
-            }
-            cranpose_services::ContentEntry::File(file) => {
-                if is_audio_name(&file.metadata().name) {
-                    if let Some(track) = picked_audio_track(&file, &cache).await {
-                        tracks.push(track);
-                    }
-                }
-            }
-        }
-        tracks
-    })
-}
-async fn picked_audio_track(
-    entry: &cranpose_services::ContentHandle,
-    cache: &std::path::Path,
-) -> Option<Track> {
     let name = entry.metadata().name;
     let title = name
         .rsplit_once('.')
@@ -201,17 +154,105 @@ async fn picked_audio_track(
         .filter(|stem| !stem.is_empty())
         .unwrap_or(&name)
         .to_string();
+    let location = imported_audio_location(&entry)
+        .await
+        .map_err(|error| format!("Cannot import {name}: {error:#}"))?;
+    Ok(Some(track_from_title_path(title, location)))
+}
+#[cfg(not(target_arch = "wasm32"))]
+async fn imported_audio_location(
+    entry: &cranpose_services::ContentHandle,
+) -> anyhow::Result<String> {
     let display = entry.metadata().identifier;
-    let location = if display.starts_with("content://") || std::path::Path::new(&display).is_file()
+    if !cfg!(any(
+        target_os = "ios",
+        target_os = "android",
+        all(target_os = "macos", feature = "store")
+    )) && std::path::Path::new(&display).is_file()
     {
-        display
-    } else {
-        let bytes = entry.read_all().await.ok()?;
-        let destination = cache.join(picker_safe_file_name(&name));
-        std::fs::write(&destination, &bytes).ok()?;
-        destination.to_string_lossy().into_owned()
+        return Ok(display);
+    }
+    let directory = cranpose::application_directories()?
+        .data
+        .join("imported-audio");
+    copy_audio_into(entry, &directory).await
+}
+#[cfg(not(target_arch = "wasm32"))]
+async fn copy_audio_into(
+    entry: &cranpose_services::ContentHandle,
+    directory: &std::path::Path,
+) -> anyhow::Result<String> {
+    use std::io::Write;
+    const LIMIT: u64 = 2 * 1024 * 1024 * 1024;
+    anyhow::ensure!(
+        entry.metadata().len.unwrap_or(0) <= LIMIT,
+        "Imported audio is limited to 2 GiB per file"
+    );
+    std::fs::create_dir_all(directory)?;
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce)
+        .map_err(|error| anyhow::anyhow!("Cannot create an import name: {error}"))?;
+    let unique: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+    let destination = directory.join(format!(
+        "{unique}-{}",
+        picker_safe_file_name(&entry.metadata().name)
+    ));
+    let partial = destination.with_extension("partial");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(&partial)?;
+    let mut pending = PendingAudioImport {
+        path: partial,
+        committed: false,
     };
-    Some(track_from_title_path(title, location))
+    let mut file = std::io::BufWriter::new(file);
+    let reader = entry.open().await?;
+    let mut written = 0u64;
+    while let Some(chunk) = reader.read_chunk().await? {
+        written += chunk.len() as u64;
+        anyhow::ensure!(
+            written <= LIMIT,
+            "Imported audio is limited to 2 GiB per file"
+        );
+        file.write_all(&chunk)?;
+    }
+    file.flush()?;
+    drop(file);
+    std::fs::rename(&pending.path, &destination)?;
+    pending.committed = true;
+    Ok(destination.to_string_lossy().into_owned())
+}
+#[cfg(not(target_arch = "wasm32"))]
+struct PendingAudioImport {
+    path: std::path::PathBuf,
+    committed: bool,
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for PendingAudioImport {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+#[cfg(target_arch = "wasm32")]
+async fn imported_audio_location(
+    entry: &cranpose_services::ContentHandle,
+) -> anyhow::Result<String> {
+    let bytes = crate::content_io::read_content(entry, 64 * 1024 * 1024).await?;
+    Ok(browser_audio_url(&bytes))
+}
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(
+    inline_js = "export function browser_audio_url(bytes) { return URL.createObjectURL(new Blob([bytes])); }"
+)]
+extern "C" {
+    fn browser_audio_url(bytes: &[u8]) -> String;
 }
 fn is_audio_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
@@ -219,9 +260,11 @@ fn is_audio_name(name: &str) -> bool {
         .iter()
         .any(|extension| lower.ends_with(&format!(".{extension}")))
 }
+#[cfg(not(target_arch = "wasm32"))]
 fn picker_safe_file_name(name: &str) -> String {
     let safe: String = name
         .chars()
+        .take(128)
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' || ch == '_' {
                 ch
@@ -238,8 +281,8 @@ fn picker_safe_file_name(name: &str) -> String {
 }
 pub fn supported_audio_extensions() -> &'static [&'static str] {
     &[
-        "aac", "aiff", "alac", "caf", "flac", "m4a", "m4b", "m4v", "mov", "mp1", "mp2", "mp3",
-        "mp4", "oga", "ogg", "opus", "wav", "wave", "webm",
+        "aac", "aif", "aiff", "caf", "flac", "m4a", "m4b", "mka", "mkv", "mp1", "mp2", "mp3",
+        "mp4", "oga", "ogg", "wav", "wave", "webm",
     ]
 }
 const EQUALIZER_MAX_GAIN_DB: f32 = 12.0;
@@ -271,11 +314,30 @@ pub(crate) fn has_uri_scheme(value: &str) -> bool {
         None => false,
     }
 }
-pub fn play_track(track: &Track, volume: f32, repeat: bool) -> Result<(), String> {
+#[derive(Clone, Copy)]
+pub struct PlaybackSettings {
+    pub volume: f32,
+    pub balance: f32,
+    pub equalizer_enabled: bool,
+    pub equalizer_values: [f32; 11],
+}
+pub fn playing_status(track: &Track) -> String {
+    if cranpose_services::media_capabilities().equalizer {
+        format!("Playing {}", track.display_title())
+    } else {
+        format!(
+            "Playing {} · EQ, balance and visualizer unavailable for this stream",
+            track.display_title()
+        )
+    }
+}
+pub fn play_track(track: &Track, settings: PlaybackSettings) -> Result<(), String> {
     let item = media_item(track).ok_or_else(|| "track has no source".to_string())?;
-    cranpose_services::set_media_volume(volume);
-    cranpose_services::set_media_looping(repeat);
+    cranpose_services::set_media_volume(settings.volume);
+    cranpose_services::set_media_looping(false);
     cranpose_services::open_media(item).map_err(|error| error.to_string())?;
+    let _ = set_balance(settings.balance);
+    let _ = set_equalizer(settings.equalizer_enabled, settings.equalizer_values);
     cranpose_services::set_media_analysis_enabled(true);
     cranpose_services::play_media().map_err(|error| error.to_string())
 }
@@ -294,6 +356,13 @@ pub fn set_volume(volume: f32) -> Result<(), String> {
     cranpose_services::set_media_volume(volume);
     Ok(())
 }
+pub fn set_balance(fraction: f32) -> Result<(), String> {
+    if cranpose_services::set_media_balance(fraction.clamp(0.0, 1.0) * 2.0 - 1.0) {
+        Ok(())
+    } else {
+        Err("Balance is unavailable for this stream".to_string())
+    }
+}
 pub fn set_equalizer(enabled: bool, values: [f32; 11]) -> Result<(), String> {
     let bands = cranpose_services::media_equalizer_bands();
     let settings = cranpose_services::EqualizerSettings {
@@ -306,8 +375,11 @@ pub fn set_equalizer(enabled: bool, values: [f32; 11]) -> Result<(), String> {
             .collect(),
     }
     .clamped_to(&bands);
-    cranpose_services::set_media_equalizer(settings);
-    Ok(())
+    if cranpose_services::set_media_equalizer(settings) {
+        Ok(())
+    } else {
+        Err("Equalizer is unavailable for this stream".to_string())
+    }
 }
 pub fn seek_fraction(fraction: f32) -> Result<(), String> {
     cranpose_services::seek_media_fraction(fraction).map_err(|error| error.to_string())
@@ -323,10 +395,13 @@ pub fn probe_track_duration_seconds(path: &std::path::Path) -> Result<Option<f32
     )
 }
 pub fn visualizer_bands() -> VisualizerBands {
+    if !cranpose_services::media_capabilities().analysis {
+        return [0.0; VISUALIZER_BAND_COUNT];
+    }
     let Some(samples) = cranpose_services::latest_media_samples() else {
         return [0.0; VISUALIZER_BAND_COUNT];
     };
-    compute_analyzer_bands(&samples.samples, samples.sample_rate)
+    compute_analyzer_bands(&samples.samples, samples.sample_rate, samples.channels)
 }
 /// How many samples of the wave the oscilloscope spreads across itself, the
 /// size of the chunks Winamp handed its visualizers.
@@ -334,6 +409,9 @@ const VISUALIZER_WAVE_LEN: usize = 576;
 /// The latest stretch of the wave, mixed down to one channel, from -1 to 1;
 /// nothing while no song is sounding.
 pub fn visualizer_wave() -> Vec<f32> {
+    if !cranpose_services::media_capabilities().analysis {
+        return Vec::new();
+    }
     let Some(samples) = cranpose_services::latest_media_samples() else {
         return Vec::new();
     };
@@ -347,15 +425,17 @@ fn mixed_down(samples: &[f32], channels: u16, len: usize) -> Vec<f32> {
         .map(|frame| frame.iter().sum::<f32>() / channels as f32)
         .collect()
 }
-fn compute_analyzer_bands(samples: &[f32], sample_rate: u32) -> VisualizerBands {
-    if samples.is_empty() || sample_rate == 0 {
+fn compute_analyzer_bands(samples: &[f32], sample_rate: u32, channels: u16) -> VisualizerBands {
+    let channels = usize::from(channels.max(1));
+    let frames = samples.chunks_exact(channels);
+    if frames.len() == 0 || sample_rate == 0 {
         return [0.0; VISUALIZER_BAND_COUNT];
     }
     let nyquist = sample_rate as f32 * 0.5;
     let min_frequency = 60.0_f32;
     let max_frequency = nyquist.min(12_000.0).max(min_frequency + 1.0);
     let frequency_ratio = max_frequency / min_frequency;
-    let sample_count = samples.len() as f32;
+    let sample_count = frames.len() as f32;
     std::array::from_fn(|band| {
         let position = band as f32 / (VISUALIZER_BAND_COUNT - 1) as f32;
         let frequency = min_frequency * frequency_ratio.powf(position);
@@ -363,7 +443,8 @@ fn compute_analyzer_bands(samples: &[f32], sample_rate: u32) -> VisualizerBands 
         let coeff = 2.0 * omega.cos();
         let mut previous = 0.0;
         let mut previous_2 = 0.0;
-        for sample in samples.iter().copied() {
+        for frame in frames.clone() {
+            let sample = frame.iter().sum::<f32>() / channels as f32;
             let current = sample + coeff * previous - previous_2;
             previous_2 = previous;
             previous = current;

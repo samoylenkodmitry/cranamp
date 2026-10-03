@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Read;
 
 #[test]
 fn readability_samples_visible_paint_layers_like_the_exported_player_skin() {
@@ -40,7 +41,7 @@ fn document() -> Document {
     )
     .unwrap()
 }
-/// The bundled skin with a `NORMAL.CUR` written alongside it.
+/// The bundled skin with its normal cursor replaced by the test fixture.
 fn document_with_a_cursor() -> Document {
     let source = include_bytes!("../../../../../assets/skins/Catamp Silverplay.wsz");
     let cursor = crate::winamp::cursors::tests::cursor_file(&[
@@ -55,6 +56,9 @@ fn document_with_a_cursor() -> Document {
         for index in 0..zip.len() {
             let mut entry = zip.by_index(index).unwrap();
             let name = entry.name().to_string();
+            if name.eq_ignore_ascii_case("normal.cur") {
+                continue;
+            }
             let mut data = Vec::new();
             entry.read_to_end(&mut data).unwrap();
             writer.start_file(name, opts).unwrap();

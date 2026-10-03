@@ -1,6 +1,34 @@
 use super::{
     compute_analyzer_bands, equalizer_value_gain_db, has_uri_scheme, media_item, mixed_down, Track,
 };
+fn ready<T>(future: impl std::future::Future<Output = T>) -> T {
+    let mut future = std::pin::pin!(future);
+    let waker = std::task::Waker::noop();
+    match future
+        .as_mut()
+        .poll(&mut std::task::Context::from_waker(waker))
+    {
+        std::task::Poll::Ready(value) => value,
+        std::task::Poll::Pending => panic!("in-memory content must be ready"),
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn imports_preserve_two_files_with_the_same_name_after_sources_are_dropped() {
+    let directory =
+        std::env::temp_dir().join(format!("cranamp-import-test-{}", std::process::id()));
+    let first = cranpose_services::BytesContent::named("same.mp3", vec![1, 2, 3]).handle();
+    let second = cranpose_services::BytesContent::named("same.mp3", vec![4, 5, 6]).handle();
+    let one = ready(super::copy_audio_into(&first, &directory)).unwrap();
+    let two = ready(super::copy_audio_into(&second, &directory)).unwrap();
+    drop((first, second));
+    assert_ne!(one, two);
+    assert_eq!(std::fs::read(&one).unwrap(), [1, 2, 3]);
+    assert_eq!(std::fs::read(&two).unwrap(), [4, 5, 6]);
+    std::fs::remove_file(one).unwrap();
+    std::fs::remove_file(two).unwrap();
+    std::fs::remove_dir(directory).unwrap();
+}
 #[test]
 fn extensions_include_common_winamp_formats() {
     let extensions = super::supported_audio_extensions();
@@ -53,8 +81,23 @@ fn analyzer_bands_follow_sample_energy() {
             phase.sin() * 0.8
         })
         .collect::<Vec<_>>();
-    let bands = compute_analyzer_bands(&samples, sample_rate);
+    let bands = compute_analyzer_bands(&samples, sample_rate, 1);
     assert!(bands.iter().any(|band| *band > 0.2));
+}
+#[test]
+fn stereo_visualizer_preserves_the_frequency_of_a_mono_signal() {
+    let mono: Vec<_> = (0..2048)
+        .map(|index| (index as f32 * 1_000.0 * std::f32::consts::TAU / 48_000.0).sin() * 0.05)
+        .collect();
+    let stereo: Vec<_> = mono.iter().flat_map(|sample| [*sample, *sample]).collect();
+    assert_eq!(
+        compute_analyzer_bands(&mono, 48_000, 1),
+        compute_analyzer_bands(&stereo, 48_000, 2)
+    );
+    assert_eq!(
+        compute_analyzer_bands(&[1.0], 48_000, 2),
+        [0.0; super::VISUALIZER_BAND_COUNT]
+    );
 }
 #[test]
 fn a_source_that_names_a_scheme_is_a_uri_and_the_rest_is_a_path() {

@@ -17,6 +17,24 @@ fn touch(document: cranamp::winamp::studio::SharedDocument) -> AppShell<HitGraph
 fn contains(texts: &[String], needle: &str) -> bool {
     texts.iter().any(|text| text.contains(needle))
 }
+#[test]
+fn desktop_agent_panel_explains_local_access_and_offers_connection_controls() {
+    let document = cranamp::winamp::studio::open_document(None).expect("a document");
+    open(&document, "agent", "pencil");
+    let mut shell = touch(document);
+    let texts = visible_texts(&mut shell);
+    for control in [
+        "AGENT CONNECTION",
+        "Stopped",
+        "127.0.0.1:18765/mcp",
+        "Start server",
+        "Test connection",
+        "Copy connection details",
+        "local programs can edit this skin",
+    ] {
+        assert!(contains(&texts, control), "Missing {control}: {texts:?}");
+    }
+}
 fn open(document: &cranamp::winamp::studio::SharedDocument, drawer: &str, brush: &str) {
     document
         .lock()
@@ -43,7 +61,7 @@ fn a_drawer_named_on_the_document_is_the_drawer_this_layout_opens() {
         ("tools", "DRAWING TOOLS"),
         ("layers", "PAINTING LAYERS"),
         ("targets", "SPRITE TARGETS"),
-        ("options", "CLASSIC WINAMP SKIN"),
+        ("options", "CLASSIC WSZ SKIN"),
         ("equalizer", "EQ WORKBENCH"),
         ("history", "EDIT HISTORY"),
     ] {

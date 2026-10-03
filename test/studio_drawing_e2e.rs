@@ -248,7 +248,7 @@ fn every_window_s_options_are_reachable_without_scrolling_the_canvas() {
     click(&mut shell, PANEL_ROW[7]);
     let texts = visible_texts(&mut shell);
     for option in [
-        "CLASSIC WINAMP SKIN",
+        "CLASSIC WSZ SKIN",
         "EXPORT FORMAT CHECK",
         "WINDOW CUTOUTS",
         "PLEDIT.TXT",

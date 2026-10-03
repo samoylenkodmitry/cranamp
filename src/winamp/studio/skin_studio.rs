@@ -3,14 +3,11 @@ use super::*;
 
 #[composable]
 pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
-    if host.is_some() || std::env::args().any(|arg| arg == "--touch-preview") {
+    #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+    {
         let active = shared.clone();
-        cranpose_core::LaunchedEffect(shared.clone(), move |_| {
-            if let Err(error) = mcp::start(active.clone()) {
-                let mut doc = active.lock().unwrap();
-                doc.message = error.to_string();
-                doc.revision += 1;
-            }
+        cranpose_core::DisposableEffect(shared.clone(), move |scope| {
+            scope.on_dispose(move || agent_server::stop_for(&active))
         });
     }
     let tick = cranpose_core::rememberMutableStateOf(|| 0u64);
@@ -99,6 +96,12 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 (1, "Sprite targets", 120.),
                 (9, "Skin options", 116.),
                 (10, "EQ workbench", 124.),
+                #[cfg(not(any(
+                    target_os = "ios",
+                    target_os = "android",
+                    target_arch = "wasm32"
+                )))]
+                (11, "Agent connection", 150.),
                 (3, "Skin atlases", 116.),
                 (2, "Edit history", 108.),
             ]
@@ -113,6 +116,12 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 (5, "Pixel study", 104.),
                 (9, "Skin options", 116.),
                 (10, "EQ workbench", 124.),
+                #[cfg(not(any(
+                    target_os = "ios",
+                    target_os = "android",
+                    target_arch = "wasm32"
+                )))]
+                (11, "Agent connection", 150.),
             ]
         };
         list.iter()
@@ -259,7 +268,11 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 Ok(Some(entry)) => {
                     cranpose_core::spawn_ui_task(async move {
                         let loaded = async {
-                            let bytes = entry.read_all().await?;
+                            let bytes = crate::content_io::read_content(
+                                &entry,
+                                crate::content_io::MAX_DOCUMENT_BYTES,
+                            )
+                            .await?;
                             let mut doc = if entry
                                 .metadata()
                                 .name
@@ -1829,6 +1842,13 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                             SkinOptionsChooser(d.clone(), revision, room);
                         } else if open_drawer == 10 {
                             equalizer::EqualizerChooser(d.clone(), revision, room, review, live);
+                        } else if open_drawer == 11 {
+                            #[cfg(not(any(
+                                target_os = "ios",
+                                target_os = "android",
+                                target_arch = "wasm32"
+                            )))]
+                            agent_connection::AgentConnection(d.clone(), revision, room);
                         } else {
                             Label("SKIN ATLASES".into(), 12., 17., 260., 14., FG);
                             Label(

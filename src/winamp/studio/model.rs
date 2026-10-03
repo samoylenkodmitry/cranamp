@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{Cursor, Read, Write},
+    io::{Cursor, Write},
     path::Path,
 };
 const MAX_PAINT_LAYERS: usize = 64;
@@ -198,6 +198,7 @@ pub const DRAWERS: &[&str] = &[
     "files",
     "states",
     "equalizer",
+    "agent",
 ];
 pub(super) struct Patch {
     pub(super) image: RgbaImage,
@@ -587,7 +588,7 @@ impl Document {
     }
     pub fn open(bytes: &[u8], path: Option<String>) -> Result<Self> {
         crate::winamp::skin::load_skin(bytes).map_err(|e| anyhow::anyhow!("{e:#}"))?;
-        let mut zip = zip::ZipArchive::new(Cursor::new(bytes))?;
+        let mut zip = crate::content_io::open_archive(bytes)?;
         let mut files = BTreeMap::new();
         let mut images = BTreeMap::new();
         for i in 0..zip.len() {
@@ -602,10 +603,9 @@ impl Document {
                 .next()
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            let mut data = Vec::new();
-            entry.read_to_end(&mut data)?;
+            let data = crate::content_io::read_entry(&mut entry)?;
             if name.ends_with(".bmp") {
-                let image = image::load_from_memory(&data)?.to_rgba8();
+                let image = crate::content_io::decode_image(&data)?;
                 images.insert(name.clone(), image);
             } else if let Some(image) = cursor_image(&name, &data) {
                 images.insert(name.clone(), image);
@@ -2594,9 +2594,8 @@ impl Document {
                             let bytes = base64::engine::general_purpose::STANDARD
                                 .decode(data.trim())
                                 .context("image data is not valid base64")?;
-                            let mut im = image::load_from_memory(&bytes)
-                                .context("image data is not a readable PNG")?
-                                .to_rgba8();
+                            let mut im = crate::content_io::decode_image(&bytes)
+                                .context("image data is not a readable PNG")?;
                             anyhow::ensure!(
                                 im.width() <= 2048 && im.height() <= 2048,
                                 "Image is at most 2048x2048"
@@ -3972,23 +3971,24 @@ impl Document {
         Ok(json!({"path":path,"layers":self.planes.len(),"bytes":bytes.len()}))
     }
     pub fn open_project(bytes: &[u8]) -> Result<Self> {
-        let mut z = zip::ZipArchive::new(Cursor::new(bytes))?;
-        let mut base = Vec::new();
-        z.by_name("base.wsz")?.read_to_end(&mut base)?;
-        let mut meta = String::new();
-        z.by_name("project.json")?.read_to_string(&mut meta)?;
-        let meta: Value = serde_json::from_str(&meta)?;
+        let mut z = crate::content_io::open_archive(bytes)?;
+        let base = crate::content_io::read_entry(z.by_name("base.wsz")?)?;
+        let meta = crate::content_io::read_entry(z.by_name("project.json")?)?;
+        let meta: Value = serde_json::from_slice(&meta)?;
         anyhow::ensure!(
             meta["version"] == 1 || meta["version"] == 2,
             "Unsupported project version"
         );
         let mut d = Self::open(&base, meta["skin_path"].as_str().map(str::to_owned))?;
+        let mut budget = crate::content_io::ImageBudget::default();
+        for image in d.images.values() {
+            budget.include_decoded(image)?;
+        }
         if meta["version"] == 2 {
             for (name, image) in &mut d.images {
-                if let Ok(mut entry) = z.by_name(&format!("base/{name}.png")) {
-                    let mut data = Vec::new();
-                    entry.read_to_end(&mut data)?;
-                    let restored = image::load_from_memory(&data)?.to_rgba8();
+                if let Ok(entry) = z.by_name(&format!("base/{name}.png")) {
+                    let data = crate::content_io::read_entry(entry)?;
+                    let restored = crate::content_io::decode_image(&data)?;
                     anyhow::ensure!(
                         restored.dimensions() == image.dimensions(),
                         "Base dimensions differ from atlas"
@@ -4010,10 +4010,10 @@ impl Document {
             anyhow::ensure!(ids.insert(id.clone()), "Duplicate layer id");
             let mut images = BTreeMap::new();
             for (name, base) in &d.images {
-                if let Ok(mut entry) = z.by_name(&format!("layers/{i}/{name}.png")) {
-                    let mut b = Vec::new();
-                    entry.read_to_end(&mut b)?;
-                    let im = image::load_from_memory(&b)?.to_rgba8();
+                if let Ok(entry) = z.by_name(&format!("layers/{i}/{name}.png")) {
+                    let b = crate::content_io::read_entry(entry)?;
+                    budget.include(&b)?;
+                    let im = crate::content_io::decode_image(&b)?;
                     anyhow::ensure!(
                         im.dimensions() == base.dimensions(),
                         "Layer dimensions differ from atlas"
@@ -4042,7 +4042,7 @@ impl Document {
         d.message = if meta["version"] == 1 {
             "Opened legacy project in classic mode. Magenta is now opaque; review the source cells before exporting.".into()
         } else {
-            "Opened classic Winamp project".into()
+            "Opened classic WSZ project".into()
         };
         Ok(d)
     }

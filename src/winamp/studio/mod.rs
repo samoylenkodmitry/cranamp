@@ -1,4 +1,8 @@
 #![allow(unused_braces)]
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+mod agent_connection;
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+mod agent_server;
 mod brush;
 pub(crate) mod cursor_art;
 mod draft;
@@ -323,25 +327,27 @@ pub fn capture_scene(revision: u64) -> anyhow::Result<image::RgbaImage> {
         anyhow::bail!("Scene capture requires the WGPU renderer on a native window")
     }
 }
-#[cfg(all(
-    not(target_os = "android"),
-    not(target_os = "ios"),
-    not(target_arch = "wasm32")
-))]
+fn open_on_whole_skin(doc: &mut Document) {
+    doc.open_on_whole_skin();
+}
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 pub fn launch(path: Option<&str>) -> std::io::Result<()> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
-    command.arg("--skin-studio");
+    command
+        .arg("--skin-studio-owned")
+        .stdin(std::process::Stdio::piped());
     if let Some(path) = path {
         command.arg(path);
     }
     let mut child = command.spawn()?;
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
+    let parent = child.stdin.take();
+    std::thread::Builder::new()
+        .name("studio-lifetime".into())
+        .spawn(move || {
+            let _ = child.wait();
+            drop(parent);
+        })?;
     Ok(())
-}
-fn open_on_whole_skin(doc: &mut Document) {
-    doc.open_on_whole_skin();
 }
 fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
     let Some(path) = path else {
@@ -357,7 +363,7 @@ fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
         return Ok(doc);
     };
     #[cfg(not(target_arch = "wasm32"))]
-    let bytes = std::fs::read(path)?;
+    let bytes = crate::content_io::read_document(path)?;
     #[cfg(target_arch = "wasm32")]
     let bytes = super::browser_skins::load(cranpose_services::preferences().as_ref(), path)
         .map_err(anyhow::Error::msg)?;
@@ -404,20 +410,9 @@ fn default_export_path() -> std::path::PathBuf {
     not(target_os = "ios"),
     not(target_arch = "wasm32")
 ))]
-pub fn run(path: Option<&str>) {
+pub fn run(path: Option<&str>, owned: bool) {
     let doc = initial_document(path).unwrap_or_else(|e| panic!("Open skin: {e:#}"));
     let shared = SharedDocument(Arc::new(Mutex::new(doc)));
-    match mcp::start(shared.clone()) {
-        Ok(()) => println!(
-            "Cranamp Skin Studio: MCP on http://{}, editing {}",
-            mcp::ADDRESS,
-            path.unwrap_or("the bundled Catamp")
-        ),
-        Err(e) => {
-            eprintln!("Cranamp Skin Studio: no MCP -- {e:#}");
-            shared.lock().unwrap().message = format!("MCP unavailable: {e:#}");
-        }
-    }
     let launcher = crate::create_surface_app()
         .with_title("Cranamp · Skin Studio")
         .with_size(1388, 1000);
@@ -427,7 +422,17 @@ pub fn run(path: Option<&str>) {
         .with_test_driver(|robot| {
             let _ = CAPTURE.set(Mutex::new(robot));
         });
-    launcher.run(move || SkinStudio(shared.clone(), None));
+    launcher.run(move || {
+        cranpose_core::LaunchedEffect(owned, move |_| {
+            if owned {
+                std::thread::spawn(|| {
+                    let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+                    cranpose_services::request_exit();
+                });
+            }
+        });
+        SkinStudio(shared.clone(), None);
+    });
 }
 #[cfg(all(
     not(target_os = "android"),
@@ -436,9 +441,6 @@ pub fn run(path: Option<&str>) {
 ))]
 pub fn run_touch_preview(editor: bool) {
     let document = new_mobile_document(None).expect("Bundled Studio document");
-    if let Err(e) = mcp::start(document.clone()) {
-        document.lock().unwrap().message = e.to_string();
-    }
     let launcher = crate::create_surface_app()
         .with_title("Cranamp · Touch preview")
         .with_size(393, 780);
@@ -454,8 +456,9 @@ pub fn run_touch_preview(editor: bool) {
         }
     });
 }
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 pub fn stdio_bridge() {
-    mcp::bridge();
+    agent_server::bridge();
 }
 fn text_style(size: f32, color: Color) -> TextStyle {
     TextStyle::from_span_style(SpanStyle {
@@ -879,6 +882,8 @@ fn drawer_id(name: &str) -> u8 {
         "picker" => 8,
         "options" => 9,
         "equalizer" => 10,
+        #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+        "agent" => 11,
         _ => 0,
     }
 }
@@ -894,6 +899,7 @@ fn drawer_name(id: u8) -> &'static str {
         8 => "picker",
         9 => "options",
         10 => "equalizer",
+        11 => "agent",
         _ => "none",
     }
 }
@@ -1300,7 +1306,7 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                 BoxSpec::default(),
                 move || {
                     let report = shared.lock().unwrap().classic_report().unwrap_or_else(|e| json!({"exportable":false,"divergences":[{"entry":"Skin","problem":e.to_string(),"fix":"Review source sheets"}]}));
-                    Label("CLASSIC WINAMP SKIN".into(), 12., 17., 300., 14., FG);
+                    Label("CLASSIC WSZ SKIN".into(), 12., 17., 300., 14., FG);
                     Label("Opaque BMPs and explicit palettes.\nEditor, player and export use the same pixels.".into(), 12., 41., 355., 11., DIM);
                     Label("EXPORT FORMAT CHECK".into(), 12., 86., 260., 11., DIM);
                     if report["exportable"] == true {
@@ -1505,15 +1511,6 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                             },
                         );
                     }
-                    Label(
-                        "This editor is also an MCP server, so an agent can paint\ninto the same document and share its undo history.\n\n  127.0.0.1:18765\n  cranamp --skin-studio-mcp"
-                            .into(),
-                        12.,
-                        712.,
-                        350.,
-                        11.,
-                        DIM,
-                    );
                 },
             );
         },

@@ -1,74 +1,11 @@
 use super::{model::Document, SharedDocument};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
-use std::{
-    io::{BufRead, Read, Write},
-    net::{TcpListener, TcpStream},
-    path::Path,
-    time::Duration,
-};
-pub const ADDRESS: &str = "127.0.0.1:18765";
-static ACTIVE: std::sync::OnceLock<std::sync::Mutex<SharedDocument>> = std::sync::OnceLock::new();
-pub fn start(shared: SharedDocument) -> Result<()> {
-    if let Some(active) = ACTIVE.get() {
-        *active.lock().unwrap() = shared;
-        return Ok(());
-    }
-    let listener =
-        TcpListener::bind(ADDRESS).context("Skin Studio MCP port 18765 is already in use")?;
-    let _ = ACTIVE.set(std::sync::Mutex::new(shared.clone()));
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-            let shared = ACTIVE.get().unwrap().lock().unwrap().clone();
-            let _ = serve(&mut stream, &shared);
-        }
-    });
-    Ok(())
-}
-fn serve(stream: &mut TcpStream, shared: &SharedDocument) -> Result<()> {
-    let mut reader = std::io::BufReader::new(stream.try_clone()?);
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    let valid = line.starts_with("POST /mcp HTTP/1.");
-    let mut length = 0;
-    let mut origin = false;
-    loop {
-        line.clear();
-        reader.read_line(&mut line)?;
-        if line == "\r\n" || line.is_empty() {
-            break;
-        }
-        let lower = line.to_ascii_lowercase();
-        if let Some(v) = lower.strip_prefix("content-length:") {
-            length = v.trim().parse()?;
-        }
-        if lower.starts_with("origin:") {
-            origin = true;
-        }
-    }
-    if !valid || origin || length > 8 * 1024 * 1024 {
-        stream.write_all(
-            b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        )?;
-        return Ok(());
-    }
-    let mut body = vec![0; length];
-    reader.read_exact(&mut body)?;
-    let request: Value = serde_json::from_slice(&body)?;
-    if request.get("id").is_none() {
-        stream.write_all(
-            b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        )?;
-        return Ok(());
-    }
-    let response = dispatch(request, shared);
-    let bytes = serde_json::to_vec(&response)?;
-    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", bytes.len())?;
-    stream.write_all(&bytes)?;
-    Ok(())
-}
+use std::path::Path;
+#[cfg(any(
+    test,
+    not(any(target_os = "ios", target_os = "android", target_arch = "wasm32"))
+))]
 pub fn dispatch(request: Value, shared: &SharedDocument) -> Value {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
@@ -244,7 +181,7 @@ fn tools() -> Vec<Value> {
     vec![
         tool("studio_regions", "Read or generate genuine REGION.TXT. Generate an exact window mask as merged rectangles for matching Winamp/Webamp/Audacious clipping. rows: # visible, . hole, 275 characters each. Alternatively explicitly select transparent_color in MAIN/EQMAIN background; exterior_only defaults true. Bitmap colors remain untouched. This clips the ENTIRE window including live text and controls, never individual sprites. Undoable. Shade masks can be authored and exported; Cranamp rolls up the main window without applying the WindowShade mask.", json!({"action":{"enum":["list","generate","normalize","remove"]},"section":{"enum":["Normal","WindowShade","Equalizer","EqualizerWS"]},"rows":{"type":"array","items":{"type":"string"}},"transparent_color":{"type":"string"},"exterior_only":{"type":"boolean"}}), &[]),
         tool("studio_font", "Paint a legible classic text.bmp atlas with exact 5x6 cells, standard character positions, punctuation, and opaque spacing/blank cells. Uses the shared native pen on the active paint layer and is undoable. Inspect the font in the GPU with changing song names and times. This replaces only the text atlas, not illustrated captions.", json!({"ink":{"type":"string"},"background":{"type":"string"}}), &["ink", "background"]),
-        tool("studio_canvas", "The whole skin as one canvas. Main, equalizer and playlist sit at their own positions. surface puts another surface on it instead: shade is the main window rolled up, its 275x14 strip on titlebar.bmp, where Winamp draws its visualizer 38x5 at 79,5 over the art while music plays, so a name ends before x=79; footer is the playlist footer at the classic widths 325 and 400, where the footer tile pledit (179,0,25,38) repeats between the corners and the visualizer panel pledit (205,0,75,38) stands beside the right one; and cursors is the cursor set. Reads it back as a PNG at a whole-number zoom, cropped to [x,y,width,height] if you ask. With path it writes a file and says where. It also sets what the canvas shows: zoom, brush, colour, width, the state each sprite is in, and which panel is open.", json!({"surface":{"enum":["skin","shade","footer","cursors"],"description":"What the canvas holds: the whole skin, the rolled-up main window, the playlist footer at two classic widths, or the cursor set. Left out, the whole skin."},"zoom":{"type":"integer","minimum":1,"maximum":8,"description":"The canvas zoom in the editor, and the image enlargement when magnify is absent."},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the image, nearest neighbour, instead of zoom. A 14x25 handle wants more than 8x. The limit is 2048 pixels a side, so crop first for a closer look."},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"measure":{"type":["string","array"],"items":{"type":"string"},"description":"How wide these words come out in the current face and scale, instead of a canvas read. width and height are the ink. advance is where the pen ends. The engine walks the glyphs, so you need no copy of the sums."},"spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for this measure only. text_spacing is the one the brush and the operations use."},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft","text"]},"ramp_to":{"type":["string","null"],"description":"A gradient from the brush colour to this one, along the shape the gesture drew. null turns it off."},"ramp_axis":{"enum":["down","across"]},"bevel":{"type":"integer","minimum":0,"maximum":128,"description":"The glass lens bevel. 0 takes it from the height of the drag."},"refraction":{"type":"integer","minimum":0,"maximum":32},"text":{"type":"string","description":"What the text brush writes."},"face":{"enum":["5x7","small"]},"text_scale":{"type":"integer","minimum":1,"maximum":8},"drawer":{"enum":["none","tools","layers","targets","rectangles","atlases","history","study","options","picker","files","states"],"description":"Which panel is open. It sits on the document, so a caller with no pointer opens one. A name this layout does not have opens nothing."},"text_spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for the text brush and for any text operation with none of its own. It decides whether a word fits: STEREO in the small face is 29 pixels of ink at spacing 1, and the stereo lamp is 29 pixels wide."},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"grain":{"type":"integer","minimum":0,"maximum":64},"grain_size":{"type":"integer","minimum":1,"maximum":16},"opacity":{"type":"integer","minimum":1,"maximum":255},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"states":{"enum":["current","onward","up-to","all"],"description":"Which states of each target this writes into: the one the canvas shows, that one and every later one, every earlier one, or all of them. A slider has 28 frames that differ by one object, so a run from the frame in hand to an end fits its art. all_states true is the old name for all."},"stamp_repeat":{"type":"integer","minimum":1,"maximum":64,"description":"How many copies a Stamp drag drops, evenly along the drag. It is the pointer's half of studio_draw at."},"stamp_sweep":{"type":"boolean","description":"A Stamp drag drops one copy per state of the edit scope, a step at a time along the drag. It is the pointer's half of a swept [from, to]."},"all_states":{"type":"boolean","description":"The old name for states."},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean","description":"Which state the canvas shows, and so which state a stroke lands in. A four-state switch is one call run four ways with active and pressed."},"active":{"type":"boolean","description":"Focused titles, and on or off for the channel lamps, shuffle, repeat and the equalizer switches. It picks the state a stroke lands in, as pressed does."},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}), &[]),
+        tool("studio_canvas", "The whole skin as one canvas. Main, equalizer and playlist sit at their own positions. surface puts another surface on it instead: shade is the main window rolled up, its 275x14 strip on titlebar.bmp, where Winamp draws its visualizer 38x5 at 79,5 over the art while music plays, so a name ends before x=79; footer is the playlist footer at the classic widths 325 and 400, where the footer tile pledit (179,0,25,38) repeats between the corners and the visualizer panel pledit (205,0,75,38) stands beside the right one; and cursors is the cursor set. Reads it back as a PNG at a whole-number zoom, cropped to [x,y,width,height] if you ask. With path it writes a file and says where. It also sets what the canvas shows: zoom, brush, colour, width, the state each sprite is in, and which panel is open.", json!({"surface":{"enum":["skin","shade","footer","cursors"],"description":"What the canvas holds: the whole skin, the rolled-up main window, the playlist footer at two classic widths, or the cursor set. Left out, the whole skin."},"zoom":{"type":"integer","minimum":1,"maximum":8,"description":"The canvas zoom in the editor, and the image enlargement when magnify is absent."},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the image, nearest neighbour, instead of zoom. A 14x25 handle wants more than 8x. The limit is 2048 pixels a side, so crop first for a closer look."},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"measure":{"type":["string","array"],"items":{"type":"string"},"description":"How wide these words come out in the current face and scale, instead of a canvas read. width and height are the ink. advance is where the pen ends. The engine walks the glyphs, so you need no copy of the sums."},"spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for this measure only. text_spacing is the one the brush and the operations use."},"color":{"type":"string"},"brush":{"enum":["pencil","line","rect","ellipse","lift","stamp","glass","curve","tuft","text"]},"ramp_to":{"type":["string","null"],"description":"A gradient from the brush colour to this one, along the shape the gesture drew. null turns it off."},"ramp_axis":{"enum":["down","across"]},"bevel":{"type":"integer","minimum":0,"maximum":128,"description":"The glass lens bevel. 0 takes it from the height of the drag."},"refraction":{"type":"integer","minimum":0,"maximum":32},"text":{"type":"string","description":"What the text brush writes."},"face":{"enum":["5x7","small"]},"text_scale":{"type":"integer","minimum":1,"maximum":8},"drawer":{"enum":["none","tools","layers","targets","rectangles","atlases","history","study","options","picker","files","states","equalizer","agent"],"description":"Which panel is open. It sits on the document, so a caller with no pointer opens one. A name this layout does not have opens nothing."},"text_spacing":{"type":"integer","minimum":-2,"maximum":8,"description":"Letter spacing for the text brush and for any text operation with none of its own. It decides whether a word fits: STEREO in the small face is 29 pixels of ink at spacing 1, and the stereo lamp is 29 pixels wide."},"brush_size":{"type":"integer","minimum":1,"maximum":32},"curve_bend":{"type":"integer","minimum":-100,"maximum":100},"grain":{"type":"integer","minimum":0,"maximum":64},"grain_size":{"type":"integer","minimum":1,"maximum":16},"opacity":{"type":"integer","minimum":1,"maximum":255},"clean_corners":{"type":"boolean"},"filled":{"type":"boolean"},"mirror_x":{"type":"boolean"},"mirror_y":{"type":"boolean"},"grid":{"type":"boolean"},"guides":{"type":"boolean"},"alpha_lock":{"type":"boolean"},"mask_colors":{"type":"array","items":{"type":"string"}},"states":{"enum":["current","onward","up-to","all"],"description":"Which states of each target this writes into: the one the canvas shows, that one and every later one, every earlier one, or all of them. A slider has 28 frames that differ by one object, so a run from the frame in hand to an end fits its art. all_states true is the old name for all."},"stamp_repeat":{"type":"integer","minimum":1,"maximum":64,"description":"How many copies a Stamp drag drops, evenly along the drag. It is the pointer's half of studio_draw at."},"stamp_sweep":{"type":"boolean","description":"A Stamp drag drops one copy per state of the edit scope, a step at a time along the drag. It is the pointer's half of a swept [from, to]."},"all_states":{"type":"boolean","description":"The old name for states."},"clip":{"type":["array","null"],"items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4},"pressed":{"type":"boolean","description":"Which state the canvas shows, and so which state a stroke lands in. A four-state switch is one call run four ways with active and pressed."},"active":{"type":"boolean","description":"Focused titles, and on or off for the channel lamps, shuffle, repeat and the equalizer switches. It picks the state a stroke lands in, as pressed does."},"volume":{"type":"integer","minimum":0,"maximum":27},"balance":{"type":"integer","minimum":0,"maximum":27},"position":{"type":"integer","minimum":0,"maximum":27},"scroll":{"type":"integer","minimum":0,"maximum":27},"eq":{"type":"array","items":{"type":"integer","minimum":0,"maximum":27},"minItems":11,"maxItems":11},"digit":{"type":"integer","minimum":0,"maximum":9},"playback":{"type":"integer","minimum":0,"maximum":2},"presentation":{"type":"boolean"},"preview_playlist_height":{"type":"integer","minimum":145,"maximum":522}}), &[]),
         tool("studio_atlas", "One BMP on its own, at its own coordinates. It shares the brush and the history with the canvas. path, crop and zoom read it back the way studio_canvas reads the skin. This is the only way to see a sheet the canvas never shows, such as numbers.bmp or text.bmp. Leave out sheet to go back to the whole skin.", json!({"sheet":{"type":"string"},"zoom":{"type":"integer","minimum":1,"maximum":8},"magnify":{"type":"integer","minimum":1,"maximum":64,"description":"How much to enlarge the image, nearest neighbour, instead of zoom. A 14x25 handle wants more than 8x. The limit is 2048 pixels a side, so crop first for a closer look."},"path":{"type":"string"},"crop":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4}}), &[]),
         tool("studio_targets", "The sprites a stroke goes into. It lists the whole skin whatever surface is open, except the rolled-up player (surface shade), which lists its own. Leave out everything for the full list. Narrow it with sheet or id, which take one substring or a list. Each sprite says its sheet, its cell, how many states it has, and whether anything is drawn in it yet.", json!({"layers":{"type":"array","items":{"type":"string"}},"solo":{"type":"string"},"auto":{"type":"boolean"},"paint_layer":{"type":["string","null"]},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One substring, or several. Case does not matter. Six transport keys take one call."},"variants":{"type":"boolean"}}), &[]),
         tool("studio_rectangles", "Where each sprite state sits on the canvas, plus the two kinds of rectangle that have no sprite. Narrow it with at, sheet, id, runtime for the readouts the player writes, or hit for controls the player hit-tests but never draws. gaps lists the parts of a sheet no cell uses.", json!({"select":{"type":"string"},"sheet":{"type":["string","array"],"items":{"type":"string"}},"id":{"type":["string","array"],"items":{"type":"string"},"description":"One substring, or several. Case does not matter."},"at":{"type":"array","items":{"type":"integer","minimum":0},"minItems":4,"maxItems":4,"description":"Everything that overlaps this [x,y,width,height] box on the surface in hand: what a new band would cross. A plain list says where each one is, not what sits next to what."},"runtime":{"type":"boolean"},"gaps":{"type":"boolean","description":"The parts of one sheet no sprite reads, as rectangles, so you can keep ink out of them. pledit.bmp column 125 falls between the two footer flaps. Takes sheet, or uses the open one."},"hit":{"type":"boolean"}}), &[]),
@@ -1046,32 +983,6 @@ fn base64(bytes: &[u8]) -> String {
         });
     }
     s
-}
-pub fn bridge() {
-    let stdin = std::io::stdin();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let response = (|| -> Result<String> {
-            let mut s =
-                TcpStream::connect(ADDRESS).context("Launch cranamp --skin-studio first")?;
-            write!(s, "POST /mcp HTTP/1.1\r\nHost: {ADDRESS}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{line}", line.len())?;
-            let mut body = String::new();
-            s.read_to_string(&mut body)?;
-            Ok(body
-                .split_once("\r\n\r\n")
-                .context("HTTP response")?
-                .1
-                .to_string())
-        })();
-        match response {
-            Ok(r) if !r.is_empty() => println!("{r}"),
-            Ok(_) => {}
-            Err(e) => eprintln!("{e:#}"),
-        }
-    }
 }
 #[cfg(test)]
 #[path = "../../../test/unit/winamp/studio/mcp/drawing_tests.rs"]

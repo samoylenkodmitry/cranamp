@@ -4,7 +4,7 @@
   "short_description": "Play your music with original pixel skins, playlists and a ten-band equalizer.",
   "description": "Make your music player your own. Cranamp is a music player built in Rust with original Catamp pixel skins and support for importing WSZ skins.\n\nYOUR MUSIC\nOpen local audio files, organize playlists, or play an audio stream by URL. Import M3U, M3U8 and PLS playlists and export M3U playlists. Use search, sorting, shuffle and repeat to find your next track.\n\nYOUR SOUND\nAdjust volume and balance, shape playback with a ten-band equalizer and preamp, and watch a spectrum analyzer or oscilloscope.\n\nYOUR LOOK\nChoose from the original Catamp skin collection, or import a compatible WSZ or ZIP skin you have permission to use. Cranamp remembers your selected skin, playlists and playback settings.\n\nNo account, advertising or subscription is required. Bring your own music: Cranamp does not include a commercial music catalog. Audio format and streaming support depend on the platform and source.",
   "studio_mobile": "SKIN STUDIO\nDraw your own skins with pixel tools, layers, masks and undo/redo. Save layered CStudio projects and export WSZ skins.",
-  "studio_desktop": "SKIN STUDIO\nDraw your own skins with pixel tools, layers, masks and undo/redo. Save layered CStudio projects and export WSZ skins. Connect an MCP-compatible agent to the desktop editor to draw on the same canvas. The agent runs separately and may have its own service requirements.",
+  "studio_desktop": "SKIN STUDIO\nDraw your own skins with pixel tools, layers, masks and undo/redo. Save layered CStudio projects and export WSZ skins. Enable the local server in Agent connection, then connect an MCP-compatible agent to the desktop editor to draw on the same canvas. The agent runs separately and may have its own service requirements.",
   "desktop_windows": "Arrange the player, equalizer and playlist as movable, dockable desktop windows.",
   "keywords": "music,audio,player,playlist,equalizer,pixel,skin,wsz,local,stream",
   "privacy_url": "https://cranamp.dmitrysamoylenko.in/privacy/",
@@ -12,5 +12,6 @@
   "website": "https://cranamp.dmitrysamoylenko.in/",
   "support_email": "trdmitriisamoilenko@gmail.com",
   "copyright": "2026 Dmitrii Samoilenko",
-  "release_notes": "First store release of Cranamp: local music, playlists, streams, original Catamp skins and a ten-band equalizer. Store editions receive updates through the store."
+  "release_notes": "First store release of Cranamp: local music, playlists, streams, original Catamp skins and a ten-band equalizer. Store editions receive updates through the store.",
+  "ios_audio": "On iOS, HLS streams use system playback and do not support the equalizer, balance or visualizer. These controls work with supported local files and direct audio streams."
 }
