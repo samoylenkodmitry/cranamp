@@ -8,8 +8,14 @@ fn main() {
         cranamp::winamp::studio::run_touch_preview(args.get(2).is_some_and(|s| s == "--studio"));
         return;
     }
-    if args.get(1).is_some_and(|arg| arg == "--skin-studio") {
-        cranamp::winamp::studio::run(args.get(2).map(String::as_str));
+    if args
+        .get(1)
+        .is_some_and(|arg| arg == "--skin-studio" || arg == "--skin-studio-owned")
+    {
+        cranamp::winamp::studio::run(
+            args.get(2).map(String::as_str),
+            args[1] == "--skin-studio-owned",
+        );
         return;
     }
     if args.get(1).is_some_and(|arg| arg == "--skin-studio-mcp") {

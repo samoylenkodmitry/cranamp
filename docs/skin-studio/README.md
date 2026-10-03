@@ -660,9 +660,12 @@ history.
 
 ## MCP
 
-The running Studio serves JSON-RPC at `http://127.0.0.1:18765/mcp`. It binds
-only to loopback, rejects browser `Origin` headers, and accepts at most 8 MiB
-per request. Run one Studio for that endpoint.
+Open **Agent connection → Start server** in desktop Studio to serve JSON-RPC
+at `http://127.0.0.1:18765/mcp`. The server is off by default and stops when
+Studio closes. While enabled, local programs can edit the document and use
+files available to the app. It binds only to loopback, validates the HTTP host,
+rejects browser `Origin` headers, and limits headers to 16 KiB and bodies to
+8 MiB. Run one Studio for that endpoint.
 
 ```json
 {
@@ -675,12 +678,8 @@ per request. Run one Studio for that endpoint.
 }
 ```
 
-The stdio relay connects to that same native window rather than opening a
-document of its own. On Android, forward the port:
-
-```sh
-adb -s DEVICE_SERIAL forward tcp:18766 tcp:18765
-```
+The stdio relay connects to the running desktop Studio after you start its
+server. Mobile and web editions include the editor but do not run MCP.
 
 A thin development client (Node 18+) takes a tool name and its arguments:
 

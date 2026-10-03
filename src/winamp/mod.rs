@@ -270,6 +270,7 @@ fn initial_winamp_state() -> WinampState {
     }
     refresh_shuffle_order(&mut state);
     let _ = audio::set_equalizer(state.eq_enabled, state.eq_values);
+    let _ = audio::set_balance(state.balance);
     state
 }
 fn set_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
@@ -1062,7 +1063,7 @@ fn bundled_skin() -> Result<WinampSkin, String> {
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn load_skin_file(path: &std::path::Path) -> Result<WinampSkin, String> {
-    let bytes = std::fs::read(path).map_err(|error| format!("{error}"))?;
+    let bytes = crate::content_io::read_document(path).map_err(|error| format!("{error}"))?;
     load_skin(&bytes).map_err(|err| format!("{err:#}"))
 }
 const BUNDLED_SKIN_LABEL: &str = "Catamp Silverplay (Bundled)";
@@ -1301,7 +1302,7 @@ fn receive_playlist_import(
         Ok(Some(entry)) => {
             cranpose_core::spawn_ui_task(async move {
                 let source = entry.metadata().identifier;
-                match entry.read_all().await {
+                match crate::content_io::read_content(&entry, 1024 * 1024).await {
                     Ok(bytes) => match String::from_utf8(bytes) {
                         Ok(text) => apply_imported_playlist(state, &text, &source),
                         Err(error) => state.update(|app| {
@@ -1370,7 +1371,13 @@ fn IncomingContentEffect(state: MutableState<WinampState>) {
             return;
         };
         cranpose_core::spawn_ui_task(async move {
-            let tracks = audio::tracks_from_picked_entry(content).await;
+            let tracks = match audio::tracks_from_picked_entry(content).await {
+                Ok(tracks) => tracks,
+                Err(error) => {
+                    state.update(|s| s.status = error);
+                    return;
+                }
+            };
             if tracks.is_empty() {
                 log::info!(target: "cranamp::incoming", "{name:?} is not playable audio");
                 state.update(|s| s.status = "No Supported Audio".to_string());
@@ -1500,11 +1507,18 @@ fn receive_files(
             state.update(|s| s.status = "Loading selection".to_string());
             cranpose_core::spawn_ui_task(async move {
                 let mut tracks = Vec::new();
+                let mut failure = None;
                 for entry in entries {
-                    tracks.extend(audio::tracks_from_picked_entry(entry).await);
+                    match audio::tracks_from_picked_entry(entry).await {
+                        Ok(added) => tracks.extend(added),
+                        Err(error) => failure = Some(error),
+                    }
                 }
                 state.update(|s| s.pending_pick = None);
                 load_recovered_tracks(state, tracks, append);
+                if let Some(error) = failure {
+                    state.update(|s| s.status = error);
+                }
             });
         }
         Err(error) => state.update(move |s| {
@@ -1534,6 +1548,7 @@ async fn consume_folder_stream(
     let mut started = false;
     let mut total = 0usize;
     let mut seen = 0usize;
+    let mut failure = None;
     let mut batch: Vec<Track> = Vec::with_capacity(BATCH);
     let flush = |batch: &mut Vec<Track>, total: &mut usize, started: &mut bool| {
         if batch.is_empty() {
@@ -1554,10 +1569,12 @@ async fn consume_folder_stream(
             Ok(Some(entry)) => {
                 seen += 1;
                 let name = entry.metadata().name;
-                if let Some(track) = audio::track_from_picked_file(entry).await {
-                    batch.push(track);
-                } else {
-                    log::info!(target: "cranamp::picker", "skipped non-audio entry: {name:?}");
+                match audio::track_from_picked_file(entry).await {
+                    Ok(Some(track)) => batch.push(track),
+                    Ok(None) => {
+                        log::info!(target: "cranamp::picker", "skipped non-audio entry: {name:?}")
+                    }
+                    Err(error) => failure = Some(error),
                 }
                 if batch.len() >= BATCH {
                     flush(&mut batch, &mut total, &mut started);
@@ -1572,7 +1589,9 @@ async fn consume_folder_stream(
                 );
                 state.update(|s| {
                     s.pending_pick = None;
-                    s.status = if total == 0 {
+                    s.status = if let Some(error) = failure {
+                        format!("Loaded {total} tracks; {error}")
+                    } else if total == 0 {
                         "No audio files found".to_string()
                     } else {
                         format!("Loaded {total} Track(s)")
@@ -1615,7 +1634,9 @@ fn receive_skin_pick(
         Ok(Some(entry)) => {
             let label = entry.metadata().name;
             cranpose_core::spawn_ui_task(async move {
-                match entry.read_all().await {
+                match crate::content_io::read_content(&entry, crate::content_io::MAX_DOCUMENT_BYTES)
+                    .await
+                {
                     Ok(bytes) => {
                         state.update(|s| s.pending_skin_pick = false);
                         if let Err(error) = load_skin(&bytes) {
@@ -2875,11 +2896,14 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
     );
     if snapshot.settings_open {
         Box(
-            Modifier::empty().window(winamp_window_config(WinampWindowPlacement {
-                title: CRANAMP_WINAMP_SETTINGS_TITLE,
-                initial_position: places.settings,
-                state: settings_window,
-            })),
+            Modifier::empty().window(
+                winamp_window_config(WinampWindowPlacement {
+                    title: CRANAMP_WINAMP_SETTINGS_TITLE,
+                    initial_position: places.settings,
+                    state: settings_window,
+                })
+                .with_focus(cranpose::WindowFocus::Always),
+            ),
             BoxSpec::default(),
             move || {
                 SettingsPanel(state, skin_state, display_text_color, 0.0, 0.0, true, scale);
@@ -3262,7 +3286,10 @@ fn MainWindowFace(
                         return;
                     };
                     balance_drag_commit.set(None);
-                    state.update(|s| s.balance = fraction);
+                    state.update(|s| match audio::set_balance(fraction) {
+                        Ok(()) => s.balance = fraction,
+                        Err(error) => s.status = error,
+                    });
                 }
             },
         );
@@ -4373,36 +4400,25 @@ fn SettingsPanel(
                 move || {
                     SettingsHeader(state);
                     SettingsSkinsSection(state, skin_state);
-                    #[cfg(all(
-                        not(target_arch = "wasm32"),
-                        not(target_os = "android"),
-                        not(target_os = "ios")
-                    ))]
-                    SettingsActionButton(
-                        "Open Skin Studio".to_string(),
-                        SETTINGS_CARD,
-                        move || {
-                            if std::env::args().any(|arg| arg == "--touch-preview") {
-                                state.update(|s| {
-                                    s.settings_open = false;
-                                    s.studio_open = true;
-                                });
-                                return;
-                            }
+                    SettingsActionButton("Open Skin Studio".into(), SETTINGS_CARD, move || {
+                        #[cfg(not(any(
+                            target_os = "ios",
+                            target_os = "android",
+                            target_arch = "wasm32"
+                        )))]
+                        if !std::env::args().any(|arg| arg == "--touch-preview") {
                             let path = studio_skin_path(state.get_non_reactive().skin_path);
                             match studio::launch(path.as_deref()) {
                                 Ok(()) => state.update(|s| {
                                     s.settings_open = false;
                                     s.status = "Opened Skin Studio".into();
                                 }),
-                                Err(error) => state.update(|s| {
-                                    s.status = format!("Skin Studio: {error}");
-                                }),
+                                Err(error) => {
+                                    state.update(|s| s.status = format!("Skin Studio: {error}"))
+                                }
                             }
-                        },
-                    );
-                    #[cfg(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))]
-                    SettingsActionButton("Open Skin Studio".into(), SETTINGS_CARD, move || {
+                            return;
+                        }
                         state.update(|s| {
                             s.settings_open = false;
                             s.studio_open = true;
@@ -8470,7 +8486,7 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
                     s.elapsed_seconds = 0.0;
                     s.duration_seconds = None;
                     s.title_marquee_phase = 0.0;
-                    s.status = format!("Playing {}", track.display_title());
+                    s.status = audio::playing_status(&track);
                 });
             }
             Err(error) => state.update(|s| {
@@ -8486,15 +8502,15 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let volume = snapshot.volume;
-        let eq_enabled = snapshot.eq_enabled;
-        let eq_values = snapshot.eq_values;
+        let settings = audio::PlaybackSettings {
+            volume: snapshot.volume,
+            balance: snapshot.balance,
+            equalizer_enabled: snapshot.eq_enabled,
+            equalizer_values: snapshot.eq_values,
+        };
         let track_for_play = track.clone();
         cranpose_core::launchBlocking(
-            move || {
-                audio::set_equalizer(eq_enabled, eq_values)?;
-                audio::play_track(&track_for_play, volume, false)
-            },
+            move || audio::play_track(&track_for_play, settings),
             move |result| match result {
                 Ok(()) => {
                     state.update(|s| {
@@ -8507,7 +8523,7 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
                         s.elapsed_seconds = 0.0;
                         s.duration_seconds = None;
                         s.title_marquee_phase = 0.0;
-                        s.status = format!("Playing {}", track.display_title());
+                        s.status = audio::playing_status(&track);
                     });
                 }
                 Err(error) => state.update(|s| {
@@ -8522,7 +8538,15 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         );
     }
     #[cfg(target_arch = "wasm32")]
-    match audio::play_track(&track, snapshot.volume, false) {
+    match audio::play_track(
+        &track,
+        audio::PlaybackSettings {
+            volume: snapshot.volume,
+            balance: snapshot.balance,
+            equalizer_enabled: snapshot.eq_enabled,
+            equalizer_values: snapshot.eq_values,
+        },
+    ) {
         Ok(()) => {
             state.update(|s| {
                 s.current_index = Some(index);
@@ -8534,7 +8558,7 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
                 s.elapsed_seconds = 0.0;
                 s.duration_seconds = None;
                 s.title_marquee_phase = 0.0;
-                s.status = format!("Playing {}", track.display_title());
+                s.status = audio::playing_status(&track);
             });
         }
         Err(error) => state.update(|s| {

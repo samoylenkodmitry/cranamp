@@ -20,7 +20,7 @@ pub fn AgentConnection(shared: SharedDocument, _revision: u64, room: (f32, f32))
                 move || {
                     let width = room.0;
                     Label("AGENT CONNECTION".into(), 12., 17., width - 86., 14., FG);
-                    Label("Let a local agent edit this canvas through MCP.\nIts changes share your undo history.".into(), 12., 58., width, 12., DIM);
+                    Label("Start the server to let local agents edit this canvas.\nIts changes share your undo history.".into(), 12., 58., width, 12., DIM);
                     Label(
                         if connection.stopping {
                             "Stopping…"
@@ -85,7 +85,7 @@ pub fn AgentConnection(shared: SharedDocument, _revision: u64, room: (f32, f32))
                     );
                     Label(connection.message.clone(), 12., 274., width, 12., FG);
                     Label("Test connection checks the server identity and\navailable tools. It does not change your skin.".into(), 12., 354., width, 12., DIM);
-                    Label("ACCESS\nLocal programs can read and edit the open skin\nand use files this app can access. Stop the server\nto disconnect agents. Closing Studio stops it too.\n\nThe server is unavailable on mobile and web.".into(), 12., 414., width, 11., DIM);
+                    Label("ACCESS · OFF UNTIL YOU START IT\nWhile running, local programs can edit this skin\nand use files this app can access. Stop the server\nto disconnect agents. Closing Studio stops it too.\n\nThe server is unavailable on mobile and web.".into(), 12., 414., width, 11., DIM);
                 },
             );
         },

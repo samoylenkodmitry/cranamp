@@ -2,6 +2,7 @@
 #![recursion_limit = "256"]
 mod app_icon;
 pub mod audio;
+mod content_io;
 mod fonts;
 mod sync;
 pub mod winamp;

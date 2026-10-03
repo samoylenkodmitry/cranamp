@@ -71,3 +71,19 @@ fn browser_origin_is_rejected_and_non_loopback_bind_is_refused() {
     )
     .is_err());
 }
+#[test]
+fn oversized_headers_and_untrusted_hosts_are_rejected() {
+    let (_server, address) = server();
+    for request in [
+        "POST /mcp HTTP/1.1\r\nHost: attacker.example\r\nContent-Length: 0\r\n\r\n".to_string(),
+        format!("POST /mcp HTTP/1.1\r\nHost: {address}\r\nContent-Length: 0\r\nContent-Length: 2\r\n\r\n"),
+        format!("POST /mcp HTTP/1.1\r\nHost: {address}\r\nX-Large: {}\r\n\r\n", "x".repeat(HEADER_LIMIT)),
+    ] {
+        let mut client = TcpStream::connect(address).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        client.write_all(request.as_bytes()).unwrap();
+        let mut response = [0; 128];
+        let count = client.read(&mut response).unwrap();
+        assert!(response[..count].starts_with(b"HTTP/1.1 400"));
+    }
+}

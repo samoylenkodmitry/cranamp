@@ -16,6 +16,7 @@ use std::{
 pub const ADDRESS: &str = "127.0.0.1:18765";
 pub const ENDPOINT: &str = "http://127.0.0.1:18765/mcp";
 const TIMEOUT: Duration = Duration::from_secs(5);
+const HEADER_LIMIT: usize = 16 * 1024;
 
 #[derive(Clone, Default)]
 pub struct Status {
@@ -207,13 +208,13 @@ pub fn test_connection(shared: SharedDocument) {
         state.status.testing = false;
         state.status.message = message.clone();
         drop(state);
-        note(&shared, message);
+        note(&shared, message.replace('\n', " · "));
     });
 }
 fn request(address: SocketAddr, body: &str) -> Result<String> {
     let mut stream = TcpStream::connect_timeout(&address, TIMEOUT)
         .context("Open Skin Studio and start its agent server")?;
-    stream.set_read_timeout(Some(TIMEOUT))?;
+    stream.set_read_timeout(Some(Duration::from_secs(60)))?;
     stream.set_write_timeout(Some(TIMEOUT))?;
     write!(stream, "POST /mcp HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())?;
     let mut response = String::new();
@@ -264,7 +265,19 @@ pub fn bridge() {
         match request(ADDRESS.parse().expect("fixed loopback address"), &line) {
             Ok(response) if !response.is_empty() => println!("{response}"),
             Ok(_) => {}
-            Err(error) => eprintln!("{error:#}"),
+            Err(error) => {
+                let id = serde_json::from_str::<Value>(&line)
+                    .ok()
+                    .and_then(|value| value.get("id").cloned());
+                if let Some(id) = id {
+                    println!(
+                        "{}",
+                        json!({"jsonrpc":"2.0", "id":id, "error":{"code":-32000, "message":format!("{error:#}")}})
+                    );
+                } else {
+                    eprintln!("{error:#}");
+                }
+            }
         }
     }
 }
@@ -272,31 +285,58 @@ pub fn bridge() {
 fn serve(stream: &mut TcpStream, shared: &SharedDocument) -> Result<()> {
     let mut reader = std::io::BufReader::new(stream.try_clone()?);
     let mut line = String::new();
-    reader.read_line(&mut line)?;
-    let valid = line.starts_with("POST /mcp HTTP/1.");
-    let mut length = 0;
-    let mut origin = false;
+    let mut consumed = (&mut reader)
+        .take(HEADER_LIMIT as u64)
+        .read_line(&mut line)?;
+    let mut valid = line == "POST /mcp HTTP/1.1\r\n";
+    let mut length = None;
+    let mut host = false;
+    let local = stream.local_addr()?;
     loop {
+        if !valid || consumed >= HEADER_LIMIT {
+            break;
+        }
         line.clear();
-        reader.read_line(&mut line)?;
-        if line == "\r\n" || line.is_empty() {
+        consumed += (&mut reader)
+            .take((HEADER_LIMIT - consumed) as u64)
+            .read_line(&mut line)?;
+        if line == "\r\n" {
+            break;
+        }
+        if !line.ends_with("\r\n") {
+            valid = false;
             break;
         }
         let lower = line.to_ascii_lowercase();
         if let Some(v) = lower.strip_prefix("content-length:") {
-            length = v.trim().parse()?;
+            if length.is_some() {
+                valid = false;
+                break;
+            }
+            length = v.trim().parse::<usize>().ok();
+            valid &= length.is_some();
         }
-        if lower.starts_with("origin:") {
-            origin = true;
+        if let Some(value) = lower.strip_prefix("host:") {
+            valid &= !host
+                && (value.trim() == local.to_string()
+                    || value.trim() == format!("localhost:{}", local.port()));
+            host = true;
+        }
+        if lower.starts_with("origin:") || lower.starts_with("transfer-encoding:") {
+            valid = false;
         }
     }
-    if !valid || origin || length > 8 * 1024 * 1024 {
+    if !valid
+        || !host
+        || consumed >= HEADER_LIMIT
+        || length.is_none_or(|length| length > 8 * 1024 * 1024)
+    {
         stream.write_all(
             b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         )?;
         return Ok(());
     }
-    let mut body = vec![0; length];
+    let mut body = vec![0; length.unwrap_or(0)];
     reader.read_exact(&mut body)?;
     let request: Value = serde_json::from_slice(&body)?;
     if request.get("id").is_none() {

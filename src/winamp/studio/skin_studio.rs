@@ -268,7 +268,11 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
                 Ok(Some(entry)) => {
                     cranpose_core::spawn_ui_task(async move {
                         let loaded = async {
-                            let bytes = entry.read_all().await?;
+                            let bytes = crate::content_io::read_content(
+                                &entry,
+                                crate::content_io::MAX_DOCUMENT_BYTES,
+                            )
+                            .await?;
                             let mut doc = if entry
                                 .metadata()
                                 .name

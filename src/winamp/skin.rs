@@ -107,17 +107,24 @@ pub fn load_skin(wsz_bytes: &[u8]) -> Result<WinampSkin> {
 }
 pub fn load_skin_with_mode(wsz_bytes: &[u8], mode: BitmapMode) -> Result<WinampSkin> {
     let mut archive =
-        zip::ZipArchive::new(Cursor::new(wsz_bytes)).context("failed to open WSZ archive")?;
+        crate::content_io::open_archive(wsz_bytes).context("failed to open WSZ archive")?;
     let mut files: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut images = crate::content_io::ImageBudget::default();
     for idx in 0..archive.len() {
         let mut file = archive.by_index(idx).context("failed to read zip entry")?;
         if file.is_dir() {
             continue;
         }
-        let mut data = Vec::new();
-        file.read_to_end(&mut data)
+        let data = crate::content_io::read_entry(&mut file)
             .with_context(|| format!("failed to read entry {}", file.name()))?;
-        files.insert(normalize_name(file.name()), data);
+        let name = normalize_name(file.name());
+        if name.ends_with(".bmp") {
+            images.include(&data)?;
+        }
+        anyhow::ensure!(
+            files.insert(name, data).is_none(),
+            "Ambiguous duplicate skin filename"
+        );
     }
     let decode = |name: &str| -> Result<ImageBitmap> {
         let bytes = files
@@ -367,8 +374,7 @@ fn decode_bmp(bytes: &[u8]) -> Result<ImageBitmap> {
     decode_bmp_with_mode(bytes, BitmapMode::Classic)
 }
 fn decode_bmp_with_mode(bytes: &[u8], _mode: BitmapMode) -> Result<ImageBitmap> {
-    let dynamic = image::load_from_memory(bytes).context("image decode")?;
-    let mut rgba = dynamic.to_rgba8();
+    let mut rgba = crate::content_io::decode_image(bytes).context("image decode")?;
     for pixel in rgba.pixels_mut() {
         pixel.0[3] = 255;
     }
@@ -466,7 +472,7 @@ pub fn divergences(entries: &[SkinEntry]) -> Vec<Divergence> {
     out
 }
 pub fn entries_of(wsz_bytes: &[u8]) -> Result<Vec<SkinEntry>> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(wsz_bytes)).context("not a .wsz archive")?;
+    let mut archive = crate::content_io::open_archive(wsz_bytes).context("not a .wsz archive")?;
     let mut out = Vec::new();
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).context("unreadable zip entry")?;
@@ -474,8 +480,7 @@ pub fn entries_of(wsz_bytes: &[u8]) -> Result<Vec<SkinEntry>> {
             continue;
         }
         let name = normalize_name(file.name());
-        let mut data = Vec::new();
-        file.read_to_end(&mut data)?;
+        let data = crate::content_io::read_entry(&mut file)?;
         let size = decode_bmp(&data)
             .ok()
             .map(|image| (image.width(), image.height()));

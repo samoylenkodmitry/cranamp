@@ -30,7 +30,7 @@ fn desktop_agent_panel_explains_local_access_and_offers_connection_controls() {
         "Start server",
         "Test connection",
         "Copy connection details",
-        "Local programs can read and edit",
+        "local programs can edit this skin",
     ] {
         assert!(contains(&texts, control), "Missing {control}: {texts:?}");
     }
