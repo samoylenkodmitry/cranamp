@@ -1306,7 +1306,7 @@ fn SkinOptionsChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) 
                 BoxSpec::default(),
                 move || {
                     let report = shared.lock().unwrap().classic_report().unwrap_or_else(|e| json!({"exportable":false,"divergences":[{"entry":"Skin","problem":e.to_string(),"fix":"Review source sheets"}]}));
-                    Label("CLASSIC WINAMP SKIN".into(), 12., 17., 300., 14., FG);
+                    Label("CLASSIC WSZ SKIN".into(), 12., 17., 300., 14., FG);
                     Label("Opaque BMPs and explicit palettes.\nEditor, player and export use the same pixels.".into(), 12., 41., 355., 11., DIM);
                     Label("EXPORT FORMAT CHECK".into(), 12., 86., 260., 11., DIM);
                     if report["exportable"] == true {

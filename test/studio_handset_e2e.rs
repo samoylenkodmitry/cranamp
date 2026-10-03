@@ -61,7 +61,7 @@ fn a_drawer_named_on_the_document_is_the_drawer_this_layout_opens() {
         ("tools", "DRAWING TOOLS"),
         ("layers", "PAINTING LAYERS"),
         ("targets", "SPRITE TARGETS"),
-        ("options", "CLASSIC WINAMP SKIN"),
+        ("options", "CLASSIC WSZ SKIN"),
         ("equalizer", "EQ WORKBENCH"),
         ("history", "EDIT HISTORY"),
     ] {

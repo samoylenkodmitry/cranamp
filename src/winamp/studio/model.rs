@@ -4042,7 +4042,7 @@ impl Document {
         d.message = if meta["version"] == 1 {
             "Opened legacy project in classic mode. Magenta is now opaque; review the source cells before exporting.".into()
         } else {
-            "Opened classic Winamp project".into()
+            "Opened classic WSZ project".into()
         };
         Ok(d)
     }
