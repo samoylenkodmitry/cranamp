@@ -20,3 +20,4 @@ runs:
         mkdir -p target/distribution
         cargo about generate --fail --locked --no-default-features --features "$NOTICE_FEATURES" \
           --target "$NOTICE_TARGET" scripts/distribution/licenses.hbs > target/distribution/THIRD-PARTY.html
+        python3 scripts/distribution/native_notices.py "$NOTICE_TARGET" target/distribution/THIRD-PARTY.html
