@@ -4,12 +4,12 @@ Cranamp is a music player in Rust with WSZ support and its own Skin Studio. The 
 
 ## Registered apps
 
-Registration status on October 2, 2026:
+Apple status was verified on October 3, 2026; Google Play and Microsoft status below was last verified on October 2:
 
 | Store | App record | Identity | Status |
 | --- | --- | --- | --- |
 | Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | 0.1.86 (10086) submitted; changes in review |
-| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | iOS and macOS 0.1.86 (2) submitted; waiting for review |
+| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | Replacement iOS and macOS 0.1.86 (5) submitted; waiting for review |
 | Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.86.0 submitted; in certification |
 
 GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
@@ -19,7 +19,9 @@ GitHub repository variables contain the registered Apple bundle ID and the exact
 - `CRANAMP_MSIX_PUBLISHER=CN=B3D99093-F004-43B3-80D7-6F628B17CAA6`
 - `CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME=DmitriiSamoilenko`
 
-All four store submissions are configured to publish automatically after approval. France is excluded from the initial release. Store submission and approval do not establish legal clearance. The signed binaries were built by [Store packages run 37015856145](https://github.com/samoylenkodmitry/cranamp/actions/runs/37015856145).
+All four store submissions are configured to publish automatically after approval. France is excluded from the initial release. Store submission and approval do not establish legal clearance. The initial signed binaries were built by [Store packages run 37015856145](https://github.com/samoylenkodmitry/cranamp/actions/runs/37015856145). Replacement Apple build 5 comes from commit `c8d1eb7` in [run 37149395670](https://github.com/samoylenkodmitry/cranamp/actions/runs/37149395670); both Apple jobs passed. Later commits correct tests and Windows screenshot automation without changing the submitted app code.
+
+Apple rejected Mac build 2 under guideline 2.4.5 because automated analysis could not identify the functionality requiring incoming network access. Build 5 adds the visible Start/Stop/Test connection controls described below. The reviewer received updated instructions and a successful connection screenshot. The replacement iOS build excludes the MCP server entirely. Both build 5 uploads passed Apple processing and were submitted on October 3.
 
 ## Channels and artifacts
 
@@ -35,7 +37,7 @@ The existing **Release** workflow builds direct downloads. The new **Store packa
 
 Tag builds produce validation artifacts without distribution credentials. Manually enable **signed** to require Apple and Google Play credentials. Signed runs fail if those credentials are missing. Windows packages remain unsigned because Microsoft signs Store submissions. Without Partner Center variables, validation runs use `Cranamp.LocalValidation`, which cannot be submitted.
 
-Packages are retained as workflow artifacts. This workflow does not submit store listings or publish to repositories. Tags must match Cargo.toml. Set the manual `build_number` input to a new Apple build number for each upload of the same version. Its default is `1`; the initial submitted version uses build `2`.
+Packages are retained as workflow artifacts. This workflow does not submit store listings or publish to repositories. Tags must match Cargo.toml. Set the manual `build_number` input to a new Apple build number for each upload of the same version. Its default is `1`; the current Apple submission uses build `5`.
 
 ## Google Play
 
