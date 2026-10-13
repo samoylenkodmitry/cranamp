@@ -3,7 +3,7 @@
 
 A music player in Rust with WSZ skin support and a built-in Skin Studio, powered by [Cranpose](https://github.com/samoylenkodmitry/Cranpose).
 
-[Website](https://cranamp.dmitrysamoylenko.in/) · [Download](https://github.com/samoylenkodmitry/cranamp/releases/latest) · [Play in your browser](https://samoylenkodmitry.github.io/cranamp/) · [Skin Studio](docs/skin-studio/README.md)
+[Website](https://cranamp.dmitrysamoylenko.in/) · [Google Play](https://play.google.com/store/apps/details?id=com.cranamp.app) · [App Store](https://apps.apple.com/app/id6818451356) · [Microsoft Store](https://apps.microsoft.com/detail/9N0XTC9PGM8X) · [AUR](https://aur.archlinux.org/packages/cranamp) · [Download](https://github.com/samoylenkodmitry/cranamp/releases/latest) · [Play in your browser](https://samoylenkodmitry.github.io/cranamp/) · [Skin Studio](docs/skin-studio/README.md)
 
 ![Cranamp on Android, iOS and desktop, in decorative device frames](docs/images/devices.png)
 

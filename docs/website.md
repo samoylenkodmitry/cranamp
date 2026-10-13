@@ -36,8 +36,9 @@ Static file changes are visible immediately through the read-only bind mount.
 After changing `deploy/nginx.conf`, run
 `docker compose exec cranamp-landing nginx -s reload`.
 
-Verify `/`, `/privacy/`, `/support/`, images and HTTPS after deploying. Only add
-store download links once those listings are publicly available.
+Verify `/`, `/privacy/`, `/support/`, images and HTTPS after deploying. The
+download section links the App Store, Google Play, Microsoft Store and AUR
+listings, which were public on 13 October 2026.
 
 The landing page has no JavaScript, third-party fonts, analytics or cookies.
 The site container disables access logging; the VPS reverse proxy and host may
