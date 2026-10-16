@@ -52,10 +52,6 @@ cranpose {
     debugAbis.set(listOf("arm64-v8a"))
     releaseAbis.set(listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
     label.set("Cranamp")
-    // Playback continues with the app off screen, and the visualiser reads
-    // analysis samples; the media module contributes the foreground service
-    // and the permissions that needs, so the manifest declares neither.
-    services.add("media")
 }
 
 android {

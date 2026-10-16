@@ -11,12 +11,17 @@ fn main() {
 fn screen() {
     let status = cranpose::rememberMutableStateOf(|| "Testing audio output…".to_string());
     cranpose::LaunchedEffect((), move |_| {
-        cranpose_core::launchBlocking(run, move |result| {
-            status.set(match result {
-                Ok(()) => "Audio audit finished. Read audio-audit.json.".into(),
-                Err(error) => format!("Audio audit failed: {error:#}"),
-            });
+        let started = cranpose_core::launchBlocking(run, move |result| {
+            status.set(
+                match result.map_err(anyhow::Error::from).and_then(|ran| ran) {
+                    Ok(()) => "Audio audit finished. Read audio-audit.json.".into(),
+                    Err(error) => format!("Audio audit failed: {error:#}"),
+                },
+            );
         });
+        if let Err(error) = started {
+            status.set(format!("Audio audit failed: {error}"));
+        }
     });
     Text(
         status.get(),

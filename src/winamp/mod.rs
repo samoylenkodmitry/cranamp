@@ -969,9 +969,9 @@ fn load_skin_file_background(
 ) {
     let path_for_work = path.clone();
     let saved_skin_path = persist_path.then(|| path.to_string_lossy().to_string());
-    cranpose_core::launchBlocking(
+    launch_blocking(
         move || load_skin_file(&path_for_work),
-        move |result| match result {
+        move |result| match result.and_then(|loaded| loaded) {
             Ok(skin) => {
                 skin_state.set(Ok(skin));
                 if saved_skin_path.is_some() || status_on_success.is_some() {
@@ -1851,7 +1851,7 @@ fn receive_sync_folder(
 ) {
     let status = match result {
         Ok(Some(handle)) => {
-            cranpose_core::launchBlocking(
+            launch_blocking(
                 move || {
                     let _ = crate::sync::runtime::set_folder(Some(handle));
                 },
@@ -7081,7 +7081,7 @@ fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
     if jobs.is_empty() {
         return;
     }
-    cranpose_core::launchBlocking(
+    launch_blocking(
         move || {
             jobs.into_iter()
                 .filter_map(|(index, path)| {
@@ -7093,6 +7093,7 @@ fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
                 .collect::<Vec<_>>()
         },
         move |durations| {
+            let Ok(durations) = durations else { return };
             if durations.is_empty() {
                 return;
             }
@@ -8509,9 +8510,9 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
             equalizer_values: snapshot.eq_values,
         };
         let track_for_play = track.clone();
-        cranpose_core::launchBlocking(
+        launch_blocking(
             move || audio::play_track(&track_for_play, settings),
-            move |result| match result {
+            move |result| match result.and_then(|played| played) {
                 Ok(()) => {
                     state.update(|s| {
                         s.current_index = Some(index);
@@ -9036,8 +9037,26 @@ fn save_player_state(config: &SavedPlayerState) -> Result<(), String> {
         .set(PLAYER_STATE_KEY, &serialize_player_state(config))
         .map_err(|error| error.to_string())
 }
+fn launch_blocking<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+    on_ui: impl FnOnce(Result<T, String>) + 'static,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        on_ui(Ok(work()));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let started = cranpose_core::launchBlocking(work, move |result| {
+            on_ui(result.map_err(|error| error.to_string()));
+        });
+        if let Err(error) = started {
+            log::warn!(target: "cranamp::blocking", "background work did not start: {error}");
+        }
+    }
+}
 fn save_player_state_background(config: SavedPlayerState) {
-    cranpose_core::launchBlocking(
+    launch_blocking(
         move || {
             let _ = save_player_state(&config);
         },
@@ -9220,7 +9239,7 @@ fn save_window_config(config: SavedWinampWindowConfig) -> Result<(), String> {
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn save_window_config_background(config: SavedWinampWindowConfig) {
-    cranpose_core::launchBlocking(
+    launch_blocking(
         move || {
             let _ = save_window_config(config);
         },
