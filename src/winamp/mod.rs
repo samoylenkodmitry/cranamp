@@ -6692,6 +6692,8 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
                                         | PointerEventKind::RotaryScrollPre
                                         | PointerEventKind::RotaryScroll
                                         | PointerEventKind::Zoom
+                                        | PointerEventKind::ButtonDown(_)
+                                        | PointerEventKind::ButtonUp(_)
                                         | PointerEventKind::Enter
                                         | PointerEventKind::Exit => {}
                                     }
@@ -6795,6 +6797,8 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
                                         | PointerEventKind::RotaryScrollPre
                                         | PointerEventKind::RotaryScroll
                                         | PointerEventKind::Zoom
+                                        | PointerEventKind::ButtonDown(_)
+                                        | PointerEventKind::ButtonUp(_)
                                         | PointerEventKind::Enter
                                         | PointerEventKind::Exit => {}
                                     }
