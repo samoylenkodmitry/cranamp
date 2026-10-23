@@ -114,14 +114,14 @@ anyhow = "1.0"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-coroflow = "0.13.0"
-cranpose = { version = "0.13.0", default-features = false }
-cranpose-core = "0.13.0"
-cranpose-coroflow = "0.13.0"
-cranpose-foundation = "0.13.0"
-cranpose-services = { version = "0.13.0", default-features = false }
-cranpose-ui = "0.13.0"
-cranpose-ui-graphics = "0.13.0"
+coroflow = "0.17.2"
+cranpose = { version = "0.17.2", default-features = false }
+cranpose-core = "0.17.2"
+cranpose-coroflow = "0.17.2"
+cranpose-foundation = "0.17.2"
+cranpose-services = { version = "0.17.2", default-features = false }
+cranpose-ui = "0.17.2"
+cranpose-ui-graphics = "0.17.2"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png"] }
 log = "0.4"
@@ -142,8 +142,8 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 wasm-logger = { version = "0.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cranpose-app-shell = "0.13.0"
-cranpose-render-common = "0.13.0"
+cranpose-app-shell = "0.17.2"
+cranpose-render-common = "0.17.2"
 
 [profile.release]
 opt-level = 3
@@ -162,5 +162,5 @@ inherits = "release-small"
 panic = "abort"
 
 [build-dependencies]
-cranpose-capabilities = "0.13.0"
+cranpose-capabilities = "0.17.2"
 embed-resource = "3.0.11"
