@@ -25,6 +25,10 @@ on:
         description: Apple build number for this version
         type: string
         default: '1'
+      apple_status_only:
+        description: Read Apple version and review status without building packages
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -35,7 +39,23 @@ env:
   CRANAMP_STORE_SIGNED: ${{ inputs.signed == true && 'true' || 'false' }}
 
 jobs:
+  apple-status:
+    if: inputs.apple_status_only == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install 'PyJWT[crypto]==2.10.1'
+      - name: Read App Store Connect status
+        env:
+          ASC_P8_BASE64: ${{ secrets.CRANAMP_ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.CRANAMP_ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.CRANAMP_ASC_API_ISSUER_ID }}
+        run: python3 scripts/distribution/apple-status.py
   android:
+    if: inputs.apple_status_only != true
     name: Google Play AAB
     runs-on: ubuntu-latest
     steps:
@@ -106,6 +126,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/play-upload.jks"
 
   apple:
+    if: inputs.apple_status_only != true
     name: Apple ${{ matrix.platform }}
     runs-on: macos-latest
     strategy:
@@ -163,6 +184,7 @@ jobs:
           if [ -n "${CRANAMP_INSTALLED_PROFILE:-}" ]; then rm -f "$CRANAMP_INSTALLED_PROFILE"; fi
 
   windows:
+    if: inputs.apple_status_only != true
     name: Microsoft Store MSIX
     runs-on: windows-latest
     env:
@@ -202,6 +224,7 @@ jobs:
           if-no-files-found: warn
 
   linux:
+    if: inputs.apple_status_only != true
     name: Linux DEB, RPM and AUR source package
     runs-on: ubuntu-22.04
     steps:
