@@ -2,6 +2,7 @@
 /dist
 /pkg
 /store-artifacts
+.DS_Store
 /platform/android/app/src/main/assets/legal/
 /platform/android/.gradle
 /platform/android/build

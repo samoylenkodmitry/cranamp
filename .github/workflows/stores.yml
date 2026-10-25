@@ -22,9 +22,9 @@ on:
         type: boolean
         default: false
       build_number:
-        description: Apple build number for this version
+        description: Apple build number (empty uses the increasing workflow run number)
         type: string
-        default: '1'
+        default: ''
       apple_status_only:
         description: Read Apple version and review status without building packages
         type: boolean
@@ -40,7 +40,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  CRANAMP_BUILD_NUMBER: ${{ inputs.build_number || '1' }}
+  CRANAMP_BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
   CRANAMP_STORE_SIGNED: ${{ inputs.signed == true && 'true' || 'false' }}
 
 jobs:

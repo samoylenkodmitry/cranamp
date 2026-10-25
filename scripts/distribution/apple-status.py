@@ -48,8 +48,14 @@ def main():
         "fields[reviewSubmissionItems]": "state,appStoreVersion",
         "fields[appStoreVersions]": "platform,versionString,appVersionState",
     })
+    builds = get("builds", {
+        "filter[app]": app, "limit": 20, "sort": "-uploadedDate",
+        "include": "preReleaseVersion",
+        "fields[builds]": "version,processingState,uploadedDate,preReleaseVersion",
+        "fields[preReleaseVersions]": "version,platform",
+    })
     # These field selections contain release status only, with no contact data.
-    print(json.dumps({"versions": versions, "reviews": reviews}, indent=2))
+    print(json.dumps({"versions": versions, "reviews": reviews, "builds": builds}, indent=2))
 
 
 if __name__ == "__main__":

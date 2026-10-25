@@ -845,6 +845,17 @@ fn drawing_stays_quiet_and_errors_use_one_dismissible_bottom_right_notice() {
     assert!((notice.x + notice.width - 476.).abs() < 1.);
     assert!((notice.y + notice.height - 688.).abs() < 1.);
     click(&mut shell, "Dismiss notification");
+    // Dismissal retains the surface during its exit animation. A fixed number
+    // of update calls does not advance enough wall time on a fast CI runner.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while visible_texts(&mut shell)
+        .iter()
+        .any(|s| s == "Studio notification")
+        && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(std::time::Duration::from_millis(16));
+        pump(&mut shell);
+    }
     assert!(!visible_texts(&mut shell)
         .iter()
         .any(|s| s == "Studio notification"));
