@@ -34,6 +34,8 @@ function Invoke-StudioButton([string]$Name) {
 }
 $application = Start-Process -FilePath ([IO.Path]::GetFullPath($Executable)) -ArgumentList '--skin-studio' -PassThru -RedirectStandardOutput (Join-Path $outputPath 'stdout.log') -RedirectStandardError (Join-Path $outputPath 'stderr.log')
 try {
+    Invoke-StudioButton 'Open working copy'
+    Invoke-StudioButton 'Project actions'
     Invoke-StudioButton 'Agent connection'
     Invoke-StudioButton 'Start server'
     $ready = $false
@@ -44,9 +46,17 @@ try {
         catch { Start-Sleep -Seconds 2 }
     }
     if (-not $ready) { throw 'Studio MCP did not start within 60 seconds' }
+    Invoke-StudioButton 'Close panel'
     $null = Invoke-Studio 'studio_canvas' @{drawer='none'; presentation=$false; zoom=2}
-    $null = Invoke-Studio 'studio_screenshot' @{path=(Join-Path $outputPath 'windows-studio.png')}
-    $null = Invoke-Studio 'studio_screenshot' @{presentation=$true; path=(Join-Path $outputPath 'windows-player.png')}
+    $null = Invoke-Studio 'studio_screenshot' @{path=(Join-Path $outputPath '02-studio-canvas.png')}
+    Invoke-StudioButton 'Sprites'
+    $null = Invoke-Studio 'studio_screenshot' @{path=(Join-Path $outputPath '03-sprites.png')}
+    Invoke-StudioButton 'States'
+    $null = Invoke-Studio 'studio_screenshot' @{path=(Join-Path $outputPath '05-states.png')}
+    Invoke-StudioButton 'Skin'
+    $null = Invoke-Studio 'studio_screenshot' @{path=(Join-Path $outputPath '04-skin-colours.png')}
+    Invoke-StudioButton 'Preview'
+    $null = Invoke-Studio 'studio_screenshot' @{path=(Join-Path $outputPath '01-player-preview.png')}
     Add-Type -AssemblyName System.Drawing
     foreach ($file in Get-ChildItem $outputPath -Filter '*.png') {
         $image = [Drawing.Bitmap]::FromFile($file.FullName)
