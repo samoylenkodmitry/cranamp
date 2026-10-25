@@ -17,6 +17,7 @@ fn launcher() -> AppLauncher<cranpose::AppFonts> {
         .with_title(TITLE)
         .with_application_id(APPLICATION_ID)
         .with_fonts(fonts::APP_FONTS)
+        .with_developer_inspector(cfg!(debug_assertions) && !cfg!(feature = "store"))
         // A skin's cursors are pixel art drawn at an exact size; enlarged with
         // the system pointer they turn into smeared blocks.
         .with_custom_cursor_size(CustomCursorSize::AsDrawn)
