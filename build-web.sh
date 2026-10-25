@@ -1,22 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if command -v wasm-pack >/dev/null 2>&1; then
-  WASM_PACK="wasm-pack"
-elif [[ -x "$HOME/.cargo/bin/wasm-pack" ]]; then
-  WASM_PACK="$HOME/.cargo/bin/wasm-pack"
-else
-  echo "wasm-pack is required. Install it with: cargo install wasm-pack" >&2
+if ! command -v cranpose-build >/dev/null 2>&1; then
+  echo "cranpose-build 0.3.0 or later is required: https://github.com/samoylenkodmitry/cranpose-build/releases" >&2
   exit 1
 fi
 
 rm -rf pkg dist
 
-"$WASM_PACK" build \
-  --target web \
-  --release \
-  --no-default-features \
-  --features web,renderer-wgpu
+# cranpose-build records the pipelines the first screen draws with in headless
+# Chrome and builds the module again with them embedded, so on WebGL the page
+# builds them as it starts. Without Chrome it keeps the module it built first.
+OUT="target/cranpose-web-page"
+cranpose-build build --platform web --release --output-dir "$OUT"
+cp -R "$(ls -dt "$OUT"/web/release/build-*/application | head -1)/pkg" pkg
 
 mkdir -p dist
 # The page asks for this build's player by a name of its own, and the service
