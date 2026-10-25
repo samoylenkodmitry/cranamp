@@ -101,6 +101,7 @@ jobs:
           PY
           platform=ios
           if [ "$APPLE_PLATFORM" = macos ]; then platform=osx; fi
+          cd "$RUNNER_TEMP/apple-listing"
           fastlane deliver --api_key_path "$key_path" --app_identifier io.cranamp.app \
             --platform "$platform" --app_version "$(cat "$RUNNER_TEMP/apple-listing/version.txt")" \
             --build_number "$BUILD_NUMBER" --skip_binary_upload true --force true \
