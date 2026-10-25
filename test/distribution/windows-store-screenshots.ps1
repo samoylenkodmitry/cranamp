@@ -25,6 +25,8 @@ function Invoke-StudioButton([string]$Name) {
             if ($null -ne $button -and $button.Current.IsEnabled) {
                 $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
                 ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
+                # Wait for the screen entrance animation before a listing capture.
+                Start-Sleep -Milliseconds 350
                 return
             }
         }

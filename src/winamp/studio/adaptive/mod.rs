@@ -549,6 +549,13 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
         busy || (sheet != Sheet::None && (layout.inspector.is_none() || sheet == Sheet::Tools));
     let covered_hints = cranpose_core::rememberMutableStateOf(|| None);
     let revision = ui.tick.get();
+    // The player acknowledges after its skin reload. Other workspaces compose
+    // the document directly and must also release pending GPU captures.
+    if screen != Screen::Preview {
+        cranpose_core::SideEffect(move || {
+            super::COMPOSED_REVISION.fetch_max(revision, std::sync::atomic::Ordering::Release);
+        });
+    }
     let (name, message, dirty) = {
         let doc = ui.shared.lock().unwrap();
         (

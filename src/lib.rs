@@ -49,11 +49,11 @@ pub fn create_android_app() -> AppLauncher<cranpose::AppFonts> {
 }
 #[cfg(all(feature = "ios", feature = "renderer-wgpu", target_os = "ios"))]
 pub fn ios_entry_point() {
-    launcher().run(ios_root);
+    launcher().run(mobile_root);
 }
-#[cfg(all(feature = "ios", feature = "renderer-wgpu", target_os = "ios"))]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 #[cranpose::composable]
-fn ios_root() {
+fn mobile_root() {
     cranpose::Box(
         cranpose::Modifier::empty()
             .fill_max_size()
@@ -65,7 +65,7 @@ fn ios_root() {
 #[cfg(not(all(feature = "studio-review", target_os = "android")))]
 cranpose::android_main! {
     launcher: create_android_app(),
-    content: winamp::WinampStackedApp,
+    content: mobile_root,
 }
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use wasm_bindgen::prelude::*;
