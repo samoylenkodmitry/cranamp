@@ -29,9 +29,14 @@ on:
         description: Read Apple version and review status without building packages
         type: boolean
         default: false
+      apple_upload_run:
+        description: Upload signed Apple artifacts from this Store packages run instead of building
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -39,6 +44,52 @@ env:
   CRANAMP_STORE_SIGNED: ${{ inputs.signed == true && 'true' || 'false' }}
 
 jobs:
+  apple-upload:
+    if: inputs.apple_upload_run != ''
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ios, macos]
+    steps:
+      - name: Check source package job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.apple_upload_run }}
+          SOURCE_REPO: ${{ github.repository }}
+          APPLE_PLATFORM: ${{ matrix.platform }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+          gh api "repos/$SOURCE_REPO/actions/runs/$SOURCE_RUN/jobs" > "$RUNNER_TEMP/package-jobs.json"
+          python3 - <<'PY'
+          import json, os
+          jobs = json.load(open(os.environ['RUNNER_TEMP'] + '/package-jobs.json'))['jobs']
+          name = 'Apple ' + os.environ['APPLE_PLATFORM']
+          assert any(j['name'] == name and j['conclusion'] == 'success' for j in jobs), name + ' did not pass'
+          PY
+      - uses: actions/download-artifact@v8
+        with:
+          name: apple-${{ matrix.platform }}-store
+          path: apple-upload
+          run-id: ${{ inputs.apple_upload_run }}
+          github-token: ${{ github.token }}
+      - name: Upload signed package to App Store Connect
+        env:
+          ASC_P8_BASE64: ${{ secrets.CRANAMP_ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.CRANAMP_ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.CRANAMP_ASC_API_ISSUER_ID }}
+          APPLE_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          key_dir="$RUNNER_TEMP/cranamp-apple-upload-keys"
+          mkdir -m 700 "$key_dir"
+          trap 'rm -rf "$key_dir"' EXIT
+          (umask 077; printf '%s' "$ASC_P8_BASE64" | base64 -d > "$key_dir/AuthKey_$ASC_KEY_ID.p8")
+          export API_PRIVATE_KEYS_DIR="$key_dir"
+          if [ "$APPLE_PLATFORM" = ios ]; then extension=ipa; upload_type=ios; else extension=pkg; upload_type=macos; fi
+          package=$(find "$GITHUB_WORKSPACE/apple-upload" -name "*.$extension" -type f)
+          test -n "$package" && test -f "$package"
+          xcrun altool --upload-app -f "$package" -t "$upload_type" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
   apple-status:
     if: inputs.apple_status_only == true
     runs-on: ubuntu-latest
@@ -55,7 +106,7 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.CRANAMP_ASC_API_ISSUER_ID }}
         run: python3 scripts/distribution/apple-status.py
   android:
-    if: inputs.apple_status_only != true
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == ''
     name: Google Play AAB
     runs-on: ubuntu-latest
     steps:
@@ -126,7 +177,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/play-upload.jks"
 
   apple:
-    if: inputs.apple_status_only != true
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == ''
     name: Apple ${{ matrix.platform }}
     runs-on: macos-latest
     strategy:
@@ -184,7 +235,7 @@ jobs:
           if [ -n "${CRANAMP_INSTALLED_PROFILE:-}" ]; then rm -f "$CRANAMP_INSTALLED_PROFILE"; fi
 
   windows:
-    if: inputs.apple_status_only != true
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == ''
     name: Microsoft Store MSIX
     runs-on: windows-latest
     env:
@@ -224,7 +275,7 @@ jobs:
           if-no-files-found: warn
 
   linux:
-    if: inputs.apple_status_only != true
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == ''
     name: Linux DEB, RPM and AUR source package
     runs-on: ubuntu-22.04
     steps:
