@@ -1,6 +1,10 @@
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 use super::model::Document;
 use anyhow::Result;
-use image::{Rgba, RgbaImage};
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+use image::Rgba;
+use image::RgbaImage;
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 use serde_json::Value;
 pub fn crop(im: &RgbaImage, rect: [u32; 4]) -> Result<RgbaImage> {
     let [x, y, w, h] = rect;
@@ -14,6 +18,7 @@ pub fn crop(im: &RgbaImage, rect: [u32; 4]) -> Result<RgbaImage> {
     Ok(image::imageops::crop_imm(im, x, y, w, h).to_image())
 }
 /// Exact colours in a native crop, ordered by coverage with deterministic ties.
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 pub fn palette(im: &RgbaImage, rect: [u32; 4]) -> Result<Value> {
     let region = crop(im, rect)?;
     let mut counts = std::collections::BTreeMap::<[u8; 4], u32>::new();
@@ -31,6 +36,7 @@ pub fn palette(im: &RgbaImage, rect: [u32; 4]) -> Result<Value> {
     )
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 pub fn enlarged(im: &RgbaImage, zoom: u32, grid: bool) -> RgbaImage {
     let mut out = image::imageops::resize(
         im,
@@ -78,6 +84,7 @@ pub fn context_rect(rect: [u32; 4], size: (u32, u32), padding: u32) -> Result<[u
     ])
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 pub fn region(doc: &Document, args: &Value) -> Result<([u32; 4], [u32; 4], u32)> {
     let size = doc.canvas_size();
     let rect: [u32; 4] = args
@@ -98,6 +105,7 @@ pub fn region(doc: &Document, args: &Value) -> Result<([u32; 4], [u32; 4], u32)>
     Ok((rect, context_rect(rect, size, padding)?, padding))
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 pub fn report(doc: &Document, args: &Value) -> Result<Value> {
     let (requested, rect, padding) = region(doc, args)?;
     let (coverage, _) = doc.coverage(rect, false)?;
@@ -114,6 +122,7 @@ pub fn report(doc: &Document, args: &Value) -> Result<Value> {
     }))
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 pub fn board(doc: &Document, args: &Value) -> Result<RgbaImage> {
     if args["states"] != true {
         return board_view(doc, args, None);
@@ -170,6 +179,7 @@ pub fn board(doc: &Document, args: &Value) -> Result<RgbaImage> {
     Ok(out)
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 fn board_view(
     doc: &Document,
     args: &Value,

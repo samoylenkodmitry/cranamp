@@ -11,6 +11,7 @@ mod equalizer;
 mod guides;
 mod mapping;
 mod material;
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 mod mcp;
 mod model;
 pub(crate) use draft::new_mobile_document;
