@@ -33,6 +33,14 @@ on:
         description: Upload signed Apple artifacts from this Store packages run instead of building
         type: string
         default: ''
+      apple_listing_platform:
+        description: Prepare Apple listing only (ios or macos; empty builds packages)
+        type: string
+        default: ''
+      apple_submit_for_review:
+        description: Submit the prepared Apple version and selected build for review
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,6 +52,62 @@ env:
   CRANAMP_STORE_SIGNED: ${{ inputs.signed == true && 'true' || 'false' }}
 
 jobs:
+  apple-listing:
+    if: inputs.apple_listing_platform != ''
+    runs-on: macos-latest
+    timeout-minutes: 20
+    concurrency:
+      group: apple-listing-${{ inputs.apple_listing_platform }}
+      cancel-in-progress: false
+    env:
+      FASTLANE_SKIP_UPDATE_CHECK: '1'
+      FASTLANE_HIDE_GITHUB_ISSUES: '1'
+      FASTLANE_OPT_OUT_USAGE: '1'
+      FASTLANE_DISABLE_COLORS: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: gem install fastlane -v 2.241.1 --no-document
+      - name: Stage reviewed listing and screenshots
+        env:
+          APPLE_PLATFORM: ${{ inputs.apple_listing_platform }}
+        run: python3 scripts/distribution/apple-listing.py "$APPLE_PLATFORM" "$RUNNER_TEMP/apple-listing"
+      - name: Upload listing and optionally submit for review
+        env:
+          ASC_P8_BASE64: ${{ secrets.CRANAMP_ASC_API_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.CRANAMP_ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.CRANAMP_ASC_API_ISSUER_ID }}
+          APPLE_PLATFORM: ${{ inputs.apple_listing_platform }}
+          SUBMIT: ${{ inputs.apple_submit_for_review }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          set -euo pipefail
+          test -n "$BUILD_NUMBER"
+          key_path="$RUNNER_TEMP/apple-listing-key.json"
+          trap 'rm -f "$key_path"' EXIT
+          export APPLE_LISTING_KEY_PATH="$key_path"
+          python3 - <<'PY'
+          import base64, json, os
+          key = {"key_id": os.environ["ASC_KEY_ID"], "issuer_id": os.environ["ASC_ISSUER_ID"],
+                 "key": base64.b64decode(os.environ["ASC_P8_BASE64"]).decode(), "duration": 1200, "in_house": False}
+          fd = os.open(os.environ["APPLE_LISTING_KEY_PATH"], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(fd, 'w') as output:
+              json.dump(key, output)
+          PY
+          platform=ios
+          if [ "$APPLE_PLATFORM" = macos ]; then platform=osx; fi
+          fastlane deliver --api_key_path "$key_path" --app_identifier io.cranamp.app \
+            --platform "$platform" --app_version "$(cat "$RUNNER_TEMP/apple-listing/version.txt")" \
+            --build_number "$BUILD_NUMBER" --skip_binary_upload true --force true \
+            --metadata_path "$RUNNER_TEMP/apple-listing/metadata" \
+            --screenshots_path "$RUNNER_TEMP/apple-listing/screenshots" \
+            --overwrite_screenshots true --submit_for_review "$SUBMIT" --automatic_release true \
+            --precheck_include_in_app_purchases false --reject_if_possible false
   apple-upload:
     if: inputs.apple_upload_run != ''
     runs-on: macos-latest
@@ -106,7 +170,7 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.CRANAMP_ASC_API_ISSUER_ID }}
         run: python3 scripts/distribution/apple-status.py
   android:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == ''
     name: Google Play AAB
     runs-on: ubuntu-latest
     steps:
@@ -177,7 +241,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/play-upload.jks"
 
   apple:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == ''
     name: Apple ${{ matrix.platform }}
     runs-on: macos-latest
     strategy:
@@ -235,7 +299,7 @@ jobs:
           if [ -n "${CRANAMP_INSTALLED_PROFILE:-}" ]; then rm -f "$CRANAMP_INSTALLED_PROFILE"; fi
 
   windows:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == ''
     name: Microsoft Store MSIX
     runs-on: windows-latest
     env:
@@ -275,7 +339,7 @@ jobs:
           if-no-files-found: warn
 
   linux:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == ''
     name: Linux DEB, RPM and AUR source package
     runs-on: ubuntu-22.04
     steps:
