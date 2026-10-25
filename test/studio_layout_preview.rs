@@ -43,22 +43,69 @@ fn main() {
                 ..Default::default()
             },
         );
-        cranamp::create_surface_app()
+        let launcher = cranamp::create_surface_app()
             .with_title("Cranamp · Control review")
             .with_developer_inspector(false)
-            .with_size(width, height + 40)
-            .run(move || {
-                cranamp::winamp::studio::ReviewGallery(width as f32, height as f32, start)
-            });
+            .with_size(width, height + 40);
+        with_capture(launcher, Some(height)).run(move || {
+            cranamp::winamp::studio::ReviewGallery(width as f32, height as f32, start)
+        });
     }
     let doc = cranamp::winamp::studio::open_document(None).expect("bundled skin");
     doc.lock()
         .unwrap()
         .state(serde_json::json!({"drawer":"none","panel":"canvas","zoom":1}))
         .unwrap();
-    cranamp::create_surface_app()
+    let launcher = cranamp::create_surface_app()
         .with_title("Cranamp · Layout review")
         .with_developer_inspector(false)
-        .with_size(width, height)
+        .with_size(width, height);
+    with_capture(launcher, None)
         .run(move || cranamp::winamp::studio::SkinStudio(doc.clone(), None));
+}
+
+// Export actual GPU frames. When reviewing a case, omit only the separate
+// review navigation footer below the product UI.
+fn with_capture(
+    launcher: cranpose::AppLauncher<cranpose::AppFonts>,
+    product_height: Option<u32>,
+) -> cranpose::AppLauncher<cranpose::AppFonts> {
+    if let Some(path) = std::env::var_os("CRANAMP_REVIEW_CAPTURE") {
+        let once = std::env::var_os("CRANAMP_REVIEW_CAPTURE_ONCE").is_some();
+        let scale = std::env::var("CRANAMP_REVIEW_CAPTURE_SCALE")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|scale| scale.is_finite() && *scale > 0. && *scale <= 4.)
+            .unwrap_or(1.);
+        launcher.with_test_driver(move |robot| {
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                let Ok(shot) = robot.screenshot_with_scale(scale) else {
+                    break;
+                };
+                if let Some(frame) =
+                    image::RgbaImage::from_raw(shot.width, shot.height, shot.pixels)
+                {
+                    let frame = if let Some(height) = product_height {
+                        let height = (height as f32 * scale).round() as u32;
+                        image::imageops::crop_imm(&frame, 0, 0, shot.width, height).to_image()
+                    } else {
+                        frame
+                    };
+                    let path = std::path::PathBuf::from(&path);
+                    let pending = path.with_extension("pending.png");
+                    if frame.save(&pending).is_ok() {
+                        if let Err(error) = std::fs::rename(pending, path) {
+                            eprintln!("Capture save failed: {error}");
+                        } else if once {
+                            cranpose_services::request_exit();
+                            break;
+                        }
+                    }
+                }
+            });
+        })
+    } else {
+        launcher
+    }
 }

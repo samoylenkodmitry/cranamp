@@ -4,13 +4,13 @@ Cranamp is a music player in Rust with WSZ support and its own Skin Studio. The 
 
 ## Registered apps
 
-Apple status was verified on October 3, 2026; Google Play and Microsoft status below was last verified on October 2:
+Store status was verified on October 25, 2026:
 
 | Store | App record | Identity | Status |
 | --- | --- | --- | --- |
-| Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | 0.1.86 (10086) submitted; changes in review |
-| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | Replacement iOS and macOS 0.1.86 (5) submitted; waiting for review |
-| Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.86.0 submitted; in certification |
+| Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | 0.1.86 live since October 6; 0.1.88 package prepared |
+| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | iOS 0.1.86 (5) waiting for review since October 3; macOS 0.1.86 (5) live |
+| Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.86.0 live; 0.1.88 package prepared |
 
 GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
 
@@ -19,9 +19,9 @@ GitHub repository variables contain the registered Apple bundle ID and the exact
 - `CRANAMP_MSIX_PUBLISHER=CN=B3D99093-F004-43B3-80D7-6F628B17CAA6`
 - `CRANAMP_MSIX_PUBLISHER_DISPLAY_NAME=DmitriiSamoilenko`
 
-All four store submissions are configured to publish automatically after approval. France is excluded from the initial release. Store submission and approval do not establish legal clearance. The initial signed binaries were built by [Store packages run 37015856145](https://github.com/samoylenkodmitry/cranamp/actions/runs/37015856145). Replacement Apple build 5 comes from commit `c8d1eb7` in [run 37149395670](https://github.com/samoylenkodmitry/cranamp/actions/runs/37149395670); both Apple jobs passed. Those submitted files are unchanged. Later source changes update tests, Windows screenshot automation and the framework dependency for the Windows shader compiler fix.
+All four store submissions are configured to publish automatically after approval. France is excluded from the initial release. Store submission and approval do not establish legal clearance. The initial signed binaries were built by [Store packages run 37015856145](https://github.com/samoylenkodmitry/cranamp/actions/runs/37015856145). Replacement Apple build 5 comes from commit `c8d1eb7` in [run 37149395670](https://github.com/samoylenkodmitry/cranamp/actions/runs/37149395670); both Apple jobs passed. The 0.1.88 packages passed all five platform jobs in [run 40230129037](https://github.com/samoylenkodmitry/cranamp/actions/runs/40230129037). The iOS 0.1.88 (2) binary uploaded successfully. Apple refused the Mac upload because build 2 is below the previously uploaded build 5; build 6 is being prepared.
 
-Apple rejected Mac build 2 under guideline 2.4.5 because automated analysis could not identify the functionality requiring incoming network access. Build 5 adds the visible Start/Stop/Test connection controls described below. The reviewer received updated instructions and a successful connection screenshot. The replacement iOS build excludes the MCP server entirely. Both build 5 uploads passed Apple processing and were submitted on October 3.
+Apple rejected Mac build 2 under guideline 2.4.5 because automated analysis could not identify the functionality requiring incoming network access. Build 5 adds the visible Start/Stop/Test connection controls described below. The reviewer received updated instructions and a successful connection screenshot. The replacement iOS build excludes the MCP server entirely. Both build 5 uploads passed Apple processing and were submitted on October 3. The October 25 check found no active rejection or reviewer request on the pending iOS submission. The build remains valid. The 22-day wait alone does not identify a policy violation. Keep the pending submission until the replacement build and listing are ready.
 
 ## Channels and artifacts
 
@@ -37,7 +37,7 @@ The existing **Release** workflow builds direct downloads. The new **Store packa
 
 Tag builds produce validation artifacts without distribution credentials. Manually enable **signed** to require Apple and Google Play credentials. Signed runs fail if those credentials are missing. Windows packages remain unsigned because Microsoft signs Store submissions. Without Partner Center variables, validation runs use `Cranamp.LocalValidation`, which cannot be submitted.
 
-Packages are retained as workflow artifacts. This workflow does not submit store listings or publish to repositories. Tags must match Cargo.toml. Set the manual `build_number` input to a new Apple build number for each upload of the same version. Its default is `1`; the current Apple submission uses build `5`.
+Packages are retained as workflow artifacts. The `apple_status_only` input reads current Apple versions and review status without building. The `apple_upload_run` input uploads signed Apple packages from a successful Store packages run. It does not submit a version for review or change its listing. Tags must match Cargo.toml. Set `build_number` above the highest previously uploaded Mac build number, including earlier marketing versions. The default `1` is only suitable for local or unsigned validation. The previous Apple release uses build `5`; the replacement uses `6`.
 
 ## Google Play
 

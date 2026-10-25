@@ -12,6 +12,6 @@
   "website": "https://cranamp.dmitrysamoylenko.in/",
   "support_email": "trdmitriisamoilenko@gmail.com",
   "copyright": "2026 Dmitrii Samoilenko",
-  "release_notes": "Skin Studio now adapts to phone, tablet and desktop window sizes. Drawing tools show their current settings and rendered previews. Skin settings include exact playlist and visualizer colours, bitmap fonts, window cutouts and cursor editing. Added broader local audio import, including mono and stereo Ogg Opus. Improved canvas zoom and pan, file-picker cancellation and Android window sizing.",
+  "release_notes": "Skin Studio now adapts to phone, tablet and desktop window sizes. Drawing tools show their current settings and rendered previews. Skin settings include exact playlist and visualizer colours, bitmap fonts, window cutouts and cursor editing. Added broader local audio import, including mono and stereo Ogg Opus. Improved canvas zoom and pan, file-picker cancellation and window layouts.",
   "ios_audio": "On iOS, HLS streams use system playback and do not support the equalizer, balance or visualizer. These controls work with supported local files and direct audio streams."
 }
