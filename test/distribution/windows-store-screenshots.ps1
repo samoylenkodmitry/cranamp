@@ -26,7 +26,7 @@ function Invoke-StudioButton([string]$Name) {
                 $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
                 ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
                 # Wait for the screen entrance animation before a listing capture.
-                Start-Sleep -Milliseconds 350
+                Start-Sleep -Milliseconds 1000
                 return
             }
         }
@@ -49,6 +49,8 @@ try {
     }
     if (-not $ready) { throw 'Studio MCP did not start within 60 seconds' }
     Invoke-StudioButton 'Close panel'
+    # Server-start feedback must finish before any marketing capture.
+    Start-Sleep -Seconds 6
     $null = Invoke-Studio 'studio_canvas' @{drawer='none'; presentation=$false; zoom=2}
     $null = Invoke-Studio 'studio_screenshot' @{path=(Join-Path $outputPath '02-studio-canvas.png')}
     Invoke-StudioButton 'Sprites'
