@@ -15,6 +15,14 @@ from check_android_manifest import verify
 
 
 class PackagingTests(unittest.TestCase):
+    def test_ios_registers_framework_scene_lifecycle(self):
+        info = plistlib.loads((ROOT / "platform/ios/Info.plist").read_bytes())
+        scene = info["UIApplicationSceneManifest"]
+        self.assertFalse(scene["UIApplicationSupportsMultipleScenes"])
+        configs = scene["UISceneConfigurations"]["UIWindowSceneSessionRoleApplication"]
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0]["UISceneDelegateClassName"], "CranposeSceneDelegate")
+
     def test_apple_bundle_uses_release_version_and_preserves_identity(self):
         spec = importlib.util.spec_from_file_location("apple_version", ROOT / "scripts/distribution/apple-version.py")
         module = importlib.util.module_from_spec(spec)
