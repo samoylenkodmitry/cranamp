@@ -2,6 +2,7 @@
 #![recursion_limit = "256"]
 mod app_icon;
 pub mod audio;
+mod audio_import;
 mod content_io;
 mod fonts;
 mod sync;
@@ -60,6 +61,7 @@ fn ios_root() {
         winamp::WinampStackedApp,
     );
 }
+#[cfg(not(all(feature = "studio-review", target_os = "android")))]
 cranpose::android_main! {
     launcher: create_android_app(),
     content: winamp::WinampStackedApp,

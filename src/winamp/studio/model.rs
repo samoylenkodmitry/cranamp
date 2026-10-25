@@ -273,6 +273,7 @@ pub struct View {
     pub presentation: bool,
     pub classic_preview: bool,
     pub color: String,
+    pub swatches: Vec<String>,
     pub brush_size: u32,
     pub brush: String,
     pub curve_bend: i32,
@@ -323,6 +324,13 @@ impl Default for View {
             presentation: false,
             classic_preview: true,
             color: "#ffffff".into(),
+            swatches: [
+                "#ffffff", "#a7c5d5", "#24485d", "#081520", "#56c9dc", "#e37e66", "#e5c777",
+                "#8fbb8f",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
             brush_size: 1,
             brush: "pencil".into(),
             curve_bend: 35,
@@ -375,6 +383,7 @@ pub struct PaintLayer {
 }
 #[derive(Clone, PartialEq)]
 struct Snapshot {
+    swatches: Vec<String>,
     eq_artwork_only: bool,
     planes: Vec<PaintLayer>,
     images: BTreeMap<String, RgbaImage>,
@@ -392,6 +401,7 @@ pub struct Document {
     pub view: View,
     pub revision: u64,
     pub message: String,
+    pub notice: Option<(u64, String)>,
     pub path: Option<String>,
     pub dirty: bool,
     images: BTreeMap<String, RgbaImage>,
@@ -524,6 +534,12 @@ fn contrast_ratio(a: [u8; 4], b: [u8; 4]) -> f64 {
     ((x.max(y) + 0.05) / (x.min(y) + 0.05) * 10.).round() / 10.
 }
 impl Document {
+    pub(super) fn notify(&mut self, message: String) {
+        let id = self.notice.as_ref().map_or(1, |(id, _)| id + 1);
+        self.message = message.clone();
+        self.notice = Some((id, message));
+    }
+
     pub fn blank() -> Self {
         let mut images = BTreeMap::new();
         let mut files = BTreeMap::new();
@@ -549,6 +565,7 @@ impl Document {
             files.insert(name.to_string(), vec![]);
         }
         let saved = Snapshot {
+            swatches: View::default().swatches,
             eq_artwork_only: false,
             planes: vec![],
             images: images.clone(),
@@ -559,6 +576,7 @@ impl Document {
             planes: vec![],
             view: View::default(),
             revision: 0,
+            notice: None,
             message: "Blank skin. Every sprite starts transparent.".into(),
             path: None,
             dirty: false,
@@ -620,10 +638,12 @@ impl Document {
             planes: vec![],
             view: View::default(),
             revision: 0,
+            notice: None,
             message: "Draw on assembled bitmap surfaces. Shared tiles repeat; classic list fill has no bitmap source.".into(),
             path,
             dirty: false,
             saved: Snapshot {
+                swatches: View::default().swatches,
                 eq_artwork_only,
                 planes: vec![],
                 images: images.clone(),
@@ -654,6 +674,7 @@ impl Document {
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
+            swatches: self.view.swatches.clone(),
             eq_artwork_only: self.eq_artwork_only,
             planes: self.planes.clone(),
             images: self.images.clone(),
@@ -661,6 +682,7 @@ impl Document {
         }
     }
     fn restore(&mut self, s: Snapshot) {
+        self.view.swatches = s.swatches;
         self.eq_artwork_only = s.eq_artwork_only;
         self.images = s.images;
         self.planes = s.planes;
@@ -1018,9 +1040,17 @@ impl Document {
             );
         }
         parse_color(&view.color)?;
+        anyhow::ensure!(view.swatches.len() <= 24, "At most 24 saved colours");
+        for colour in &view.swatches {
+            parse_color(colour)?;
+        }
         anyhow::ensure!(view.mask_colors.len() <= 256, "At most 256 mask colors");
         for c in &view.mask_colors {
             parse_color(c)?;
+        }
+        let palette_changed = self.view.swatches != view.swatches;
+        if palette_changed {
+            self.record(self.snapshot(), "Saved colours".into(), "Studio");
         }
         let opened = self.view.panel != "atlas" || self.view.sheet != view.sheet;
         self.view = view;
@@ -1035,7 +1065,11 @@ impl Document {
                 None => format!("{} · {w}x{h}", self.view.sheet),
             };
         }
-        self.revision += 1;
+        if palette_changed {
+            self.changed();
+        } else {
+            self.revision += 1;
+        }
         Ok(self.brief())
     }
     pub fn status(&self) -> Value {
@@ -1298,6 +1332,89 @@ impl Document {
         let (w, h) = self.canvas_size_for(&view);
         self.render_patch_for(&view, [0, 0, w as i32, h as i32])
             .image
+    }
+    /// A disposable sample uses the same paint path as the editor. It never
+    /// changes the document, selection, history or current paint destination.
+    pub(super) fn tool_sample(&self) -> RgbaImage {
+        self.tool_sample_for(&self.view.brush)
+    }
+    pub(super) fn tool_sample_for(&self, brush: &str) -> RgbaImage {
+        if matches!(brush, "lift" | "stamp") {
+            return self
+                .cluster
+                .clone()
+                .unwrap_or_else(|| RgbaImage::new(120, 48));
+        }
+        let mut sample = Self::blank();
+        sample.view = self.view.clone();
+        sample.view.brush = brush.into();
+        sample.view.panel = "atlas".into();
+        sample.view.sheet = "main.bmp".into();
+        sample.view.layer = "sheet".into();
+        sample.view.layers.clear();
+        sample.view.paint_layer = None;
+        sample.view.clip = None;
+        sample.view.grid = false;
+        if brush == "glass" {
+            if let Some(background) = self.composite_images().remove("main.bmp") {
+                sample.images.insert("main.bmp".into(), background);
+            }
+        }
+        if brush == "pencil" {
+            let color = parse_color(&self.view.color).unwrap_or([255; 4]);
+            let mut from = [16, 32];
+            for x in (17..145).step_by(4) {
+                let to = [x, 32 + ((x as f32 / 22.).sin() * 12.) as i32];
+                let _ = sample.paint_line(from, to, color, "selection", Scope::Current.into());
+                from = to;
+            }
+        } else {
+            let end = if brush == "text" { [16, 20] } else { [140, 44] };
+            let _ = sample.shape_stroke([16, 16], end);
+        }
+        image::imageops::crop_imm(&sample.images["main.bmp"], 0, 0, 160, 64).to_image()
+    }
+    pub(super) fn paint_layer_thumbnail(&self, id: &str) -> RgbaImage {
+        if id == "base" {
+            return self
+                .images
+                .get("main.bmp")
+                .cloned()
+                .unwrap_or_else(|| RgbaImage::new(1, 1));
+        }
+        let Some(plane) = self.planes.iter().find(|p| p.id == id) else {
+            return RgbaImage::new(1, 1);
+        };
+        let mut best = None;
+        let mut count = 0;
+        for image in plane.images.values() {
+            let visible = image.pixels().filter(|p| p[3] != 0).count();
+            if visible > count {
+                best = Some(image);
+                count = visible;
+            }
+        }
+        let Some(image) = best else {
+            return RgbaImage::new(1, 1);
+        };
+        let mut bounds = [image.width(), image.height(), 0, 0];
+        for (x, y, p) in image.enumerate_pixels().filter(|(_, _, p)| p[3] != 0) {
+            let _ = p;
+            bounds = [
+                bounds[0].min(x),
+                bounds[1].min(y),
+                bounds[2].max(x),
+                bounds[3].max(y),
+            ];
+        }
+        image::imageops::crop_imm(
+            image,
+            bounds[0],
+            bounds[1],
+            bounds[2] - bounds[0] + 1,
+            bounds[3] - bounds[1] + 1,
+        )
+        .to_image()
     }
     fn forget_atlas_writes(&mut self) {
         self.atlas_writes.clear();
@@ -1583,7 +1700,7 @@ impl Document {
         let im = self
             .cluster
             .as_ref()
-            .context("Lift a pixel cluster first")?;
+            .context("Copy an area with Lift pixels first.")?;
         let mut palette = BTreeMap::new();
         let mut colors = BTreeMap::new();
         let mut rows = Vec::new();
@@ -1612,7 +1729,10 @@ impl Document {
     }
     pub fn transform_cluster(&mut self, flip_x: bool, flip_y: bool, turns: u32) -> Result<Value> {
         anyhow::ensure!(turns < 4, "quarter_turns is 0..3");
-        let mut im = self.cluster.clone().context("Lift a pixel cluster first")?;
+        let mut im = self
+            .cluster
+            .clone()
+            .context("Copy an area with Lift pixels first.")?;
         if flip_x {
             im = image::imageops::flip_horizontal(&im);
         }
@@ -2065,7 +2185,10 @@ impl Document {
                 self.images = before.images.clone();
                 self.planes = before.planes.clone();
             }
-            let cluster = self.cluster.clone().context("Lift a pixel cluster first")?;
+            let cluster = self
+                .cluster
+                .clone()
+                .context("Copy an area with Lift pixels first.")?;
             let layers = self.layers();
             let scope = Scope::named(&self.view.states);
             let variants = self
@@ -2549,7 +2672,10 @@ impl Document {
                         }
                         "cluster" => {
                             let (x, y) = (placed("x")?, placed("y")?);
-                            let im = self.cluster.clone().context("Lift a pixel cluster first")?;
+                            let im = self
+                                .cluster
+                                .clone()
+                                .context("Copy an area with Lift pixels first.")?;
                             count += self.paint_cluster(&im, [x, y], layer, all, &paint_layers)?;
                         }
                         "stamp" => {
@@ -3956,7 +4082,7 @@ impl Document {
     pub fn mark_project_saved(&mut self, label: String) {
         self.saved = self.snapshot();
         self.dirty = false;
-        self.message = label;
+        self.notify(label);
         self.revision += 1;
     }
     pub fn save_project(&mut self, path: &Path) -> Result<Value> {
@@ -4037,6 +4163,9 @@ impl Document {
             .as_bool()
             .unwrap_or(d.eq_artwork_only);
         d.state(meta["view"].clone())?;
+        d.undo.clear();
+        d.redo.clear();
+        d.discarded_history = 0;
         d.saved = d.snapshot();
         d.dirty = false;
         d.message = if meta["version"] == 1 {
@@ -4297,7 +4426,10 @@ impl Document {
             .into_iter()
             .filter(|r| r["readable"] == false)
             .collect();
-        self.message = format!("Saved {}", path.display());
+        self.notify(format!(
+            "Saved {}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ));
         if !undrawn.is_empty() {
             self.message
                 .push_str(&format!("; {} sprites are still blank", undrawn.len()));

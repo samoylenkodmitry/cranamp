@@ -163,6 +163,35 @@ pub async fn track_from_picked_file(
 async fn imported_audio_location(
     entry: &cranpose_services::ContentHandle,
 ) -> anyhow::Result<String> {
+    let name = entry.metadata().name.to_ascii_lowercase();
+    if name.ends_with(".opus") || name.ends_with(".ogg") || name.ends_with(".oga") {
+        let reader = entry.open().await?;
+        let first = reader.read_chunk().await?.unwrap_or_default();
+        if name.ends_with(".opus") || crate::audio_import::is_ogg_opus(&first) {
+            let directory = cranpose::application_directories()?
+                .data
+                .join("imported-audio");
+            let source = copy_audio_into(entry, &directory).await?;
+            let input = PendingAudioImport {
+                path: source.clone().into(),
+                committed: false,
+            };
+            let destination = std::path::PathBuf::from(&source).with_extension("wav");
+            let mut output_guard = PendingAudioImport {
+                path: destination.clone(),
+                committed: false,
+            };
+            let decoder = crate::audio_import::Decoder::open(
+                Box::new(std::fs::File::open(&source)?),
+                "opus",
+            )?;
+            let mut output = std::fs::File::create(&destination)?;
+            crate::audio_import::write_wav(decoder, &mut output, 2 * 1024 * 1024 * 1024).await?;
+            output_guard.committed = true;
+            drop(input);
+            return Ok(destination.to_string_lossy().into_owned());
+        }
+    }
     let display = entry.metadata().identifier;
     if !cfg!(any(
         target_os = "ios",
@@ -245,14 +274,42 @@ async fn imported_audio_location(
     entry: &cranpose_services::ContentHandle,
 ) -> anyhow::Result<String> {
     let bytes = crate::content_io::read_content(entry, 64 * 1024 * 1024).await?;
-    Ok(browser_audio_url(&bytes))
+    // Test the actual bytes: a container extension does not identify its codec.
+    if browser_can_decode(&bytes).await {
+        return Ok(browser_audio_url(&bytes));
+    }
+    let extension = entry
+        .metadata()
+        .name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_owned();
+    let decoder =
+        crate::audio_import::Decoder::open(Box::new(std::io::Cursor::new(bytes)), &extension)?;
+    let mut output = std::io::Cursor::new(Vec::new());
+    crate::audio_import::write_wav(decoder, &mut output, crate::audio_import::WEB_PCM_LIMIT)
+        .await?;
+    Ok(browser_audio_url(output.get_ref()))
 }
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen(
-    inline_js = "export function browser_audio_url(bytes) { return URL.createObjectURL(new Blob([bytes])); }"
-)]
+#[wasm_bindgen::prelude::wasm_bindgen(inline_js = r#"
+export function browser_audio_url(bytes) { return URL.createObjectURL(new Blob([bytes])); }
+export async function browser_can_decode(bytes) {
+    const Audio = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!Audio) return false;
+    let context;
+    try {
+        context = new Audio();
+        await context.decodeAudioData(bytes.slice().buffer);
+        return true;
+    } catch (_) { return false; }
+    finally { if (context) await context.close().catch(() => {}); }
+}
+"#)]
 extern "C" {
     fn browser_audio_url(bytes: &[u8]) -> String;
+    async fn browser_can_decode(bytes: &[u8]) -> bool;
 }
 fn is_audio_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
@@ -281,8 +338,8 @@ fn picker_safe_file_name(name: &str) -> String {
 }
 pub fn supported_audio_extensions() -> &'static [&'static str] {
     &[
-        "aac", "aif", "aiff", "caf", "flac", "m4a", "m4b", "mka", "mkv", "mp1", "mp2", "mp3",
-        "mp4", "oga", "ogg", "wav", "wave", "webm",
+        "aac", "adts", "aif", "aiff", "aifc", "caf", "flac", "m4a", "m4b", "mka", "mkv", "mp1",
+        "mp2", "mp3", "mp4", "mpa", "oga", "ogg", "opus", "wav", "wave", "webm",
     ]
 }
 const EQUALIZER_MAX_GAIN_DB: f32 = 12.0;

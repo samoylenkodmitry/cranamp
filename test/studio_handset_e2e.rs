@@ -48,7 +48,7 @@ fn the_text_brush_offers_its_face_its_scale_and_its_letter_spacing() {
     open(&document, "tools", "text");
     let mut shell = touch(document);
     let texts = visible_texts(&mut shell);
-    for control in ["WORD", "FACE", "5×7", "4×5 small caps", "LETTER SPACING"] {
+    for control in ["Text", "Text size", "5 x 7 font", "Small font", "Spacing"] {
         assert!(
             contains(&texts, control),
             "{control:?} is a text brush setting and has to be pressable here; visible={texts:?}"
@@ -58,12 +58,12 @@ fn the_text_brush_offers_its_face_its_scale_and_its_letter_spacing() {
 #[test]
 fn a_drawer_named_on_the_document_is_the_drawer_this_layout_opens() {
     for (drawer, marker) in [
-        ("tools", "DRAWING TOOLS"),
-        ("layers", "PAINTING LAYERS"),
+        ("tools", "Tool properties"),
+        ("layers", "Layers, top first"),
         ("targets", "SPRITE TARGETS"),
-        ("options", "CLASSIC WSZ SKIN"),
-        ("equalizer", "EQ WORKBENCH"),
-        ("history", "EDIT HISTORY"),
+        ("options", "Playlist colours"),
+        ("equalizer", "Equalizer"),
+        ("history", "Edit history"),
     ] {
         let document = cranamp::winamp::studio::open_document(None).expect("a document");
         open(&document, drawer, "pencil");
@@ -81,7 +81,7 @@ fn the_brushes_do_not_fill_the_drawer_before_their_own_settings() {
     open(&document, "tools", "glass");
     let mut shell = touch(document);
     let texts = visible_texts(&mut shell);
-    for control in ["BEVEL", "REFRACTION"] {
+    for control in ["Bevel", "Refraction"] {
         assert!(
             contains(&texts, control),
             "{control:?} is the glass lens' own setting; visible={texts:?}"
@@ -93,13 +93,15 @@ fn the_edit_scope_is_reachable_where_there_is_no_sidebar() {
     let document = cranamp::winamp::studio::open_document(None).expect("a document");
     open(&document, "tools", "pencil");
     let mut shell = touch(document);
+    click_text(&mut shell, "Close panel");
+    click_text(&mut shell, "Canvas state");
     let texts = visible_texts(&mut shell);
     for control in [
-        "EDIT SCOPE",
-        "This state only",
-        "This state onward",
-        "Up to this state",
-        "All sprite states",
+        "Paint into",
+        "This state",
+        "This and later",
+        "This and earlier",
+        "All states",
     ] {
         assert!(
             contains(&texts, control),
@@ -114,12 +116,7 @@ fn stamp_repeat_and_sweep_are_reachable_where_there_is_no_sidebar() {
     open(&document, "tools", "stamp");
     let mut shell = touch(document);
     let texts = visible_texts(&mut shell);
-    for control in [
-        "STAMP COPIES ALONG A DRAG",
-        "5×",
-        "11×",
-        "Every copy in the edit scope",
-    ] {
+    for control in ["Repeat", "Sweep states"] {
         assert!(
             contains(&texts, control),
             "{control:?} is how a hand does what studio_draw's at does; visible={texts:?}"
@@ -131,9 +128,133 @@ fn the_export_format_check_is_reachable_where_there_is_no_sidebar() {
     let document = cranamp::winamp::studio::open_document(None).expect("a document");
     open(&document, "options", "pencil");
     let mut shell = touch(document);
+    click_text(&mut shell, "Format check");
     let texts = visible_texts(&mut shell);
     assert!(
-        contains(&texts, "EXPORT FORMAT CHECK"),
+        contains(&texts, "Ready for WSZ export")
+            || contains(&texts, "Fix these items before WSZ export"),
         "the export format check must be available on a handset; visible={texts:?}"
     );
+}
+
+fn click_text(shell: &mut AppShell<HitGraphRenderer>, label: &str) {
+    fn find(node: &cranpose_ui::SemanticsNode, label: &str) -> Option<(f32, f32)> {
+        if node.hidden {
+            return None;
+        }
+        if node.description.as_deref() == Some(label) {
+            return Some((
+                node.bounds.x + node.bounds.width / 2.,
+                node.bounds.y + node.bounds.height / 2.,
+            ));
+        }
+        if let cranpose_ui::SemanticsRole::Text { value } = &node.role {
+            if value.as_str() == label {
+                return Some((
+                    node.bounds.x + node.bounds.width / 2.,
+                    node.bounds.y + node.bounds.height / 2.,
+                ));
+            }
+        }
+        node.children.iter().find_map(|child| find(child, label))
+    }
+    shell.set_semantics_enabled(true);
+    let (x, y) = find(shell.semantics_tree().unwrap().root(), label)
+        .unwrap_or_else(|| panic!("Missing {label}"));
+    assert!(
+        x >= 0. && x < WINDOW.0 as f32 && y >= 0. && y < WINDOW.1 as f32,
+        "{label} is outside the screen at {x},{y}"
+    );
+    shell.set_cursor(x, y);
+    shell.pointer_pressed();
+    pump(shell);
+    shell.pointer_released();
+    pump(shell);
+}
+
+struct PickDocument(Option<cranpose_services::ContentHandle>);
+impl cranpose_services::FilePicker for PickDocument {
+    fn pick_file(
+        &self,
+        _: cranpose_services::FilePickerOptions,
+    ) -> cranpose_services::PickerFuture<
+        Result<Option<cranpose_services::ContentHandle>, cranpose_services::FilePickerError>,
+    > {
+        let content = self.0.clone();
+        Box::pin(async move { Ok(content) })
+    }
+    fn pick_folder(
+        &self,
+        _: cranpose_services::FilePickerOptions,
+    ) -> cranpose_services::PickerFuture<
+        Result<Option<cranpose_services::ContentFolderRef>, cranpose_services::FilePickerError>,
+    > {
+        Box::pin(async { Ok(None) })
+    }
+}
+
+#[test]
+fn phone_navigation_opens_a_file_and_returns_to_canvas() {
+    let source = cranamp::winamp::studio::open_document(None).unwrap();
+    let bytes = source.lock().unwrap().project_bytes().unwrap();
+    for (name, bytes) in [
+        ("test.CSTUDIO", bytes),
+        (
+            "test.wsz",
+            include_bytes!("../assets/skins/Catamp Moon Garden.wsz").to_vec(),
+        ),
+        (
+            "test.zip",
+            include_bytes!("../assets/skins/Catamp Moon Garden.wsz").to_vec(),
+        ),
+    ] {
+        let picked = cranpose_services::BytesContent::named(name, bytes).handle();
+        cranpose_services::set_platform_file_picker(std::rc::Rc::new(PickDocument(Some(picked))));
+        let document = cranamp::winamp::studio::open_document(None).unwrap();
+        document
+            .lock()
+            .unwrap()
+            .state(serde_json::json!({"drawer":"none", "zoom":8, "panel":"atlas"}))
+            .unwrap();
+        let mut shell = touch(document.clone());
+        click_text(&mut shell, "Open skin or project");
+        pump(&mut shell);
+        assert_eq!(document.lock().unwrap().view.panel, "canvas");
+        assert_eq!(document.lock().unwrap().view.zoom, 1);
+        click_text(&mut shell, "Joined canvas");
+        click_text(&mut shell, "Edit Player");
+        assert_eq!(document.lock().unwrap().view.panel, "main");
+        click_text(&mut shell, "Brush colour");
+        assert!(contains(&visible_texts(&mut shell), "HEX"));
+        cranpose_services::clear_platform_file_picker();
+    }
+}
+
+#[test]
+fn cancelled_and_invalid_picks_preserve_the_document() {
+    for content in [
+        None,
+        Some(cranpose_services::BytesContent::named("bad.wsz", vec![0; 32]).handle()),
+    ] {
+        cranpose_services::set_platform_file_picker(std::rc::Rc::new(PickDocument(content)));
+        let document = cranamp::winamp::studio::open_document(None).unwrap();
+        document
+            .lock()
+            .unwrap()
+            .state(serde_json::json!({"drawer":"none"}))
+            .unwrap();
+        let before = document.lock().unwrap().project_bytes().unwrap();
+        let mut shell = touch(document.clone());
+        click_text(&mut shell, "Open skin or project");
+        assert_eq!(document.lock().unwrap().project_bytes().unwrap(), before);
+        click_text(&mut shell, "Open working copy");
+        click_text(&mut shell, "Brush colour");
+        assert!(contains(&visible_texts(&mut shell), "HEX"));
+        click_text(&mut shell, "Close panel");
+        click_text(&mut shell, "Back");
+        click_text(&mut shell, "Open working copy");
+        click_text(&mut shell, "Brush size value");
+        assert_eq!(document.lock().unwrap().project_bytes().unwrap(), before);
+        cranpose_services::clear_platform_file_picker();
+    }
 }

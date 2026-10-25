@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep Android's freeform caption and resize controls available in DeX.
+         The player and Studio share this Activity and fit its content bounds. -->
+    <style name="CranampActivity" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#10151d</item>
+        <item name="android:navigationBarColor">#10151d</item>
+        <item name="android:windowBackground">#10151d</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
+</resources>

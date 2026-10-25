@@ -2,7 +2,8 @@ use super::*;
 pub(crate) fn new_mobile_document(path: Option<&str>) -> anyhow::Result<SharedDocument> {
     let mut doc = initial_document(path)?;
     doc.view.panel = "canvas".into();
-    doc.view.zoom = 2;
+    doc.view.zoom = 1;
+    doc.view.drawer = "none".into();
     let shared = SharedDocument(Arc::new(Mutex::new(doc)));
     Ok(shared)
 }

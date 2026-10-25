@@ -2,6 +2,35 @@ use super::*;
 use std::io::Read;
 
 #[test]
+fn tool_samples_use_current_paint_settings_without_editing_the_document() {
+    let mut d = document();
+    d.state(json!({"brush":"pencil","color":"#fe3148","brush_size":1}))
+        .unwrap();
+    let before = d.project_bytes().unwrap();
+    let history = d.history_depth();
+    let small = d.tool_sample();
+    assert!(small.pixels().any(|p| p[0] == 254 && p[3] > 0));
+    assert_eq!(d.project_bytes().unwrap(), before);
+    assert_eq!(d.history_depth(), history);
+    d.state(json!({"brush_size":12})).unwrap();
+    let large = d.tool_sample();
+    assert!(
+        large.pixels().filter(|p| p[3] > 0).count() > small.pixels().filter(|p| p[3] > 0).count()
+    );
+    for tool in ["line", "rect", "ellipse", "curve", "tuft", "text", "glass"] {
+        let result = d.tool_sample_for(tool);
+        assert!(result.pixels().any(|p| p[3] > 0), "Empty {tool} sample");
+    }
+    d.cluster = Some(image::RgbaImage::from_pixel(
+        3,
+        2,
+        image::Rgba([80, 120, 240, 255]),
+    ));
+    assert_eq!(d.tool_sample_for("stamp"), d.cluster.clone().unwrap());
+    assert_eq!(d.tool_sample_for("lift"), d.cluster.clone().unwrap());
+}
+
+#[test]
 fn readability_samples_visible_paint_layers_like_the_exported_player_skin() {
     let mut d = document();
     d.state(json!({"panel":"atlas","sheet":"text.bmp","layer":"sheet"}))
@@ -1962,4 +1991,27 @@ fn the_track_row_rectangle_has_no_gutter_because_no_marker_sheet_exists() {
         .rect;
     assert_eq!(rows[0], 16, "list at 12, text inset 4");
     assert_eq!(rows[2], 227);
+}
+
+#[test]
+fn saved_colour_swatches_round_trip_and_reject_invalid_edits() {
+    let mut doc = document();
+    doc.state(json!({"swatches":["#123456","#abcdef"]}))
+        .unwrap();
+    assert!(doc.dirty);
+    assert_eq!(doc.history_depth().0, 1);
+    doc.undo();
+    assert_eq!(doc.view.swatches, View::default().swatches);
+    assert!(!doc.dirty);
+    doc.redo();
+    let bytes = doc.project_bytes().unwrap();
+    let restored = Document::open_project(&bytes).unwrap();
+    assert_eq!(restored.view.swatches, ["#123456", "#abcdef"]);
+    assert_eq!(restored.history_depth(), (0, 0));
+    assert!(!restored.dirty);
+    assert!(doc.state(json!({"swatches":["not a colour"]})).is_err());
+    assert!(doc.state(json!({"swatches":vec!["#ffffff";25]})).is_err());
+    assert_eq!(doc.view.swatches, ["#123456", "#abcdef"]);
+    let old: View = serde_json::from_value(json!({"color":"#aabbcc"})).unwrap();
+    assert_eq!(old.swatches.len(), 8);
 }
