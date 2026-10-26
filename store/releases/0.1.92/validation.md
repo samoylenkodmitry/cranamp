@@ -33,6 +33,9 @@ against those artifacts, not inferred from a successful build.
   already authorized RoundSync folder. Audio-cache size remained 0 KiB before
   and after the test. The runner restored the original app preferences.
 - Galaxy Tab WindowLayoutTest passed both tests in 2.26 seconds.
+- Galaxy Tab StudioCancelReviewTest passed in 103.324 seconds. It cancelled
+  the real provider picker and rendered all 130 Studio control cases. The test
+  now handles Back navigating through provider folders before cancellation.
 - The previous exact AAB-derived candidate passed background playback, notification
   pause/resume and Stop checks. Stop removed its foreground media service.
   Final AAB evidence must be recorded again after the file-grant change.
