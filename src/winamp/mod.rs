@@ -4086,6 +4086,11 @@ fn SettingsSyncSection(state: MutableState<WinampState>) {
             );
             let (color, line) = sync_status_display(&status);
             Text(line, Modifier::empty(), settings_text_style(12.0, color));
+            Text(
+                "Saves track titles, play counts, listening positions and a device ID in your chosen folder. Anyone with folder access can read them. Audio files stay in place.",
+                Modifier::empty().fill_max_width(),
+                settings_text_style(12.0, SETTINGS_TEXT_DIM),
+            );
             {
                 let state_toggle = state;
                 let label = if enabled {

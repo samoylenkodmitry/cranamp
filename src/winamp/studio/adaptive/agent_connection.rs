@@ -41,7 +41,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
         access_y + 144. + if preview.is_some() { 152. } else { 0. },
         move || {
             Label(
-                "Connect your agent to this skin.\nEdits appear on the canvas and in Undo.".into(),
+                "Your agent can read this skin and local files.\nIts provider may receive the data it reads.".into(),
                 16.,
                 4.,
                 width,
