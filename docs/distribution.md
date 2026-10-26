@@ -11,6 +11,7 @@ Store status was verified on October 26, 2026:
 | Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | 0.1.86 live since October 6; 0.1.88 package prepared |
 | Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | macOS 0.1.88 (6) submitted and waiting for review; iOS 0.1.88 draft replaces the removed 0.1.86 submission; both replacement uploads valid |
 | Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.86.0 live; 0.1.88.0 package validated and saved in submission 2 |
+| Arch User Repository | [Source](https://aur.archlinux.org/packages/cranamp), [binary](https://aur.archlinux.org/packages/cranamp-bin) | `cranamp`, `cranamp-bin` | Both updated to 0.1.88-1 on October 26 |
 
 GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
 
@@ -122,7 +123,7 @@ Windows x64 builds bundle DXC because the legacy FXC compiler failed to compile 
 
 `yay` installs recipes from the AUR. The AUR stores PKGBUILDs, not application binaries. The `cranamp` recipe builds the release source with Cargo's locked dependencies. The [cranamp-bin package](https://aur.archlinux.org/packages/cranamp-bin) installs the tested x86_64 store tarball and is available with `yay -S cranamp-bin`. CI generates both recipes and their `.SRCINFO` files using `makepkg`.
 
-The existing AUR maintainer account is `faceless33`. Its Cranamp SSH key is registered; the private key is stored in the owner’s mounted Vault. The source recipe disables debug symbols to keep Rust release builds within available memory and disables Arch's C/C++ LTO so the native TLS library links with Rust. Rust release LTO remains enabled. Runtime dependencies include the libraries loaded dynamically by winit and wgpu, which ELF dependency scanning does not detect.
+The existing AUR maintainer account is `faceless33`. Its Cranamp SSH key is registered; the private key is stored in the owner’s mounted Vault. The source recipe disables debug symbols to keep Rust release builds within available memory and disables Arch's C/C++ LTO so the native TLS library links with Rust. Rust release LTO remains enabled. The source recipe removes inherited C optimization flags so AWS-LC can compile its entropy code with the required `-O0`. The remaining C flags are preserved. Both 0.1.88 recipes built in a fresh Arch container and passed `namcap` without errors. The warnings name GPU and window libraries that the app loads at runtime. The binary package also installed successfully and had no missing linked libraries. Runtime dependencies include the libraries loaded dynamically by winit and wgpu, which ELF dependency scanning does not detect.
 
 For a tagged release:
 
