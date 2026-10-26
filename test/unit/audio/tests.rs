@@ -1,33 +1,33 @@
 use super::{
     compute_analyzer_bands, equalizer_value_gain_db, has_uri_scheme, media_item, mixed_down, Track,
 };
-fn ready<T>(future: impl std::future::Future<Output = T>) -> T {
-    let mut future = std::pin::pin!(future);
-    let waker = std::task::Waker::noop();
-    match future
-        .as_mut()
-        .poll(&mut std::task::Context::from_waker(waker))
-    {
-        std::task::Poll::Ready(value) => value,
-        std::task::Poll::Pending => panic!("in-memory content must be ready"),
-    }
-}
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn imports_preserve_two_files_with_the_same_name_after_sources_are_dropped() {
-    let directory =
-        std::env::temp_dir().join(format!("cranamp-import-test-{}", std::process::id()));
-    let first = cranpose_services::BytesContent::named("same.mp3", vec![1, 2, 3]).handle();
-    let second = cranpose_services::BytesContent::named("same.mp3", vec![4, 5, 6]).handle();
-    let one = ready(super::copy_audio_into(&first, &directory)).unwrap();
-    let two = ready(super::copy_audio_into(&second, &directory)).unwrap();
-    drop((first, second));
-    assert_ne!(one, two);
-    assert_eq!(std::fs::read(&one).unwrap(), [1, 2, 3]);
-    assert_eq!(std::fs::read(&two).unwrap(), [4, 5, 6]);
-    std::fs::remove_file(one).unwrap();
-    std::fs::remove_file(two).unwrap();
-    std::fs::remove_dir(directory).unwrap();
+fn adding_a_provider_track_does_not_open_or_copy_its_audio() {
+    use cranpose_services::{
+        Content, ContentError, ContentFuture, ContentMetadata, ContentReaderRef,
+    };
+    struct ProviderTrack;
+    impl Content for ProviderTrack {
+        fn metadata(&self) -> ContentMetadata {
+            let mut metadata = ContentMetadata::named("remote.flac")
+                .with_identifier("content://test.provider/document/remote.flac");
+            metadata.len = Some(5 * 1024 * 1024 * 1024);
+            metadata
+        }
+        fn media_uri(&self) -> Result<String, ContentError> {
+            Ok(self.metadata().identifier)
+        }
+        fn open(&self) -> ContentFuture<'_, Result<ContentReaderRef, ContentError>> {
+            panic!("adding a track must not open its audio");
+        }
+    }
+    let track = super::track_from_picked_file(std::rc::Rc::new(ProviderTrack))
+        .expect("keep the provider reference")
+        .expect("supported audio");
+    assert_eq!(
+        track.path.as_deref(),
+        Some("content://test.provider/document/remote.flac")
+    );
 }
 #[test]
 fn extensions_include_common_winamp_formats() {

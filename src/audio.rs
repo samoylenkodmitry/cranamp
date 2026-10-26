@@ -136,12 +136,12 @@ fn demo_music_directory_has_tracks(directory: &std::path::Path) -> bool {
         .iter()
         .any(|track| directory.join(track.file_name).is_file())
 }
-pub async fn tracks_from_picked_entry(
+pub fn tracks_from_picked_entry(
     entry: cranpose_services::ContentHandle,
 ) -> Result<Vec<Track>, String> {
-    Ok(track_from_picked_file(entry).await?.into_iter().collect())
+    Ok(track_from_picked_file(entry)?.into_iter().collect())
 }
-pub async fn track_from_picked_file(
+pub fn track_from_picked_file(
     entry: cranpose_services::ContentHandle,
 ) -> Result<Option<Track>, String> {
     if !is_audio_name(&entry.metadata().name) {
@@ -154,187 +154,16 @@ pub async fn track_from_picked_file(
         .filter(|stem| !stem.is_empty())
         .unwrap_or(&name)
         .to_string();
-    let location = imported_audio_location(&entry)
-        .await
-        .map_err(|error| format!("Cannot import {name}: {error:#}"))?;
+    let location = entry
+        .media_uri()
+        .map_err(|error| format!("Cannot open {name}: {error}"))?;
     Ok(Some(track_from_title_path(title, location)))
-}
-#[cfg(not(target_arch = "wasm32"))]
-async fn imported_audio_location(
-    entry: &cranpose_services::ContentHandle,
-) -> anyhow::Result<String> {
-    let name = entry.metadata().name.to_ascii_lowercase();
-    if name.ends_with(".opus") || name.ends_with(".ogg") || name.ends_with(".oga") {
-        let reader = entry.open().await?;
-        let first = reader.read_chunk().await?.unwrap_or_default();
-        if name.ends_with(".opus") || crate::audio_import::is_ogg_opus(&first) {
-            let directory = cranpose::application_directories()?
-                .data
-                .join("imported-audio");
-            let source = copy_audio_into(entry, &directory).await?;
-            let input = PendingAudioImport {
-                path: source.clone().into(),
-                committed: false,
-            };
-            let destination = std::path::PathBuf::from(&source).with_extension("wav");
-            let mut output_guard = PendingAudioImport {
-                path: destination.clone(),
-                committed: false,
-            };
-            let decoder = crate::audio_import::Decoder::open(
-                Box::new(std::fs::File::open(&source)?),
-                "opus",
-            )?;
-            let mut output = std::fs::File::create(&destination)?;
-            crate::audio_import::write_wav(decoder, &mut output, 2 * 1024 * 1024 * 1024).await?;
-            output_guard.committed = true;
-            drop(input);
-            return Ok(destination.to_string_lossy().into_owned());
-        }
-    }
-    let display = entry.metadata().identifier;
-    if !cfg!(any(
-        target_os = "ios",
-        target_os = "android",
-        all(target_os = "macos", feature = "store")
-    )) && std::path::Path::new(&display).is_file()
-    {
-        return Ok(display);
-    }
-    let directory = cranpose::application_directories()?
-        .data
-        .join("imported-audio");
-    copy_audio_into(entry, &directory).await
-}
-#[cfg(not(target_arch = "wasm32"))]
-async fn copy_audio_into(
-    entry: &cranpose_services::ContentHandle,
-    directory: &std::path::Path,
-) -> anyhow::Result<String> {
-    use std::io::Write;
-    const LIMIT: u64 = 2 * 1024 * 1024 * 1024;
-    anyhow::ensure!(
-        entry.metadata().len.unwrap_or(0) <= LIMIT,
-        "Imported audio is limited to 2 GiB per file"
-    );
-    std::fs::create_dir_all(directory)?;
-    let mut nonce = [0u8; 16];
-    getrandom::fill(&mut nonce)
-        .map_err(|error| anyhow::anyhow!("Cannot create an import name: {error}"))?;
-    let unique: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
-    let destination = directory.join(format!(
-        "{unique}-{}",
-        picker_safe_file_name(&entry.metadata().name)
-    ));
-    let partial = destination.with_extension("partial");
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let file = options.open(&partial)?;
-    let mut pending = PendingAudioImport {
-        path: partial,
-        committed: false,
-    };
-    let mut file = std::io::BufWriter::new(file);
-    let reader = entry.open().await?;
-    let mut written = 0u64;
-    while let Some(chunk) = reader.read_chunk().await? {
-        written += chunk.len() as u64;
-        anyhow::ensure!(
-            written <= LIMIT,
-            "Imported audio is limited to 2 GiB per file"
-        );
-        file.write_all(&chunk)?;
-    }
-    file.flush()?;
-    drop(file);
-    std::fs::rename(&pending.path, &destination)?;
-    pending.committed = true;
-    Ok(destination.to_string_lossy().into_owned())
-}
-#[cfg(not(target_arch = "wasm32"))]
-struct PendingAudioImport {
-    path: std::path::PathBuf,
-    committed: bool,
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl Drop for PendingAudioImport {
-    fn drop(&mut self) {
-        if !self.committed {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-}
-#[cfg(target_arch = "wasm32")]
-async fn imported_audio_location(
-    entry: &cranpose_services::ContentHandle,
-) -> anyhow::Result<String> {
-    let bytes = crate::content_io::read_content(entry, 64 * 1024 * 1024).await?;
-    // Test the actual bytes: a container extension does not identify its codec.
-    if browser_can_decode(&bytes).await {
-        return Ok(browser_audio_url(&bytes));
-    }
-    let extension = entry
-        .metadata()
-        .name
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_owned();
-    let decoder =
-        crate::audio_import::Decoder::open(Box::new(std::io::Cursor::new(bytes)), &extension)?;
-    let mut output = std::io::Cursor::new(Vec::new());
-    crate::audio_import::write_wav(decoder, &mut output, crate::audio_import::WEB_PCM_LIMIT)
-        .await?;
-    Ok(browser_audio_url(output.get_ref()))
-}
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen(inline_js = r#"
-export function browser_audio_url(bytes) { return URL.createObjectURL(new Blob([bytes])); }
-export async function browser_can_decode(bytes) {
-    const Audio = globalThis.AudioContext || globalThis.webkitAudioContext;
-    if (!Audio) return false;
-    let context;
-    try {
-        context = new Audio();
-        await context.decodeAudioData(bytes.slice().buffer);
-        return true;
-    } catch (_) { return false; }
-    finally { if (context) await context.close().catch(() => {}); }
-}
-"#)]
-extern "C" {
-    fn browser_audio_url(bytes: &[u8]) -> String;
-    async fn browser_can_decode(bytes: &[u8]) -> bool;
 }
 fn is_audio_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     supported_audio_extensions()
         .iter()
         .any(|extension| lower.ends_with(&format!(".{extension}")))
-}
-#[cfg(not(target_arch = "wasm32"))]
-fn picker_safe_file_name(name: &str) -> String {
-    let safe: String = name
-        .chars()
-        .take(128)
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if safe.is_empty() {
-        "track".to_string()
-    } else {
-        safe
-    }
 }
 pub fn supported_audio_extensions() -> &'static [&'static str] {
     &[

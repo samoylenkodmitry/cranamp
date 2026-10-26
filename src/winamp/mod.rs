@@ -1263,7 +1263,7 @@ fn LaunchArgPickEffect(state: MutableState<WinampState>) {
 #[composable]
 fn PlaylistDurationHydrationEffect(state: MutableState<WinampState>) {
     cranpose_core::remember(move || {
-        hydrate_playlist_durations_background(state);
+        hydrate_playlist_durations_background(state, 0);
     });
 }
 #[cfg(target_arch = "wasm32")]
@@ -1371,7 +1371,7 @@ fn IncomingContentEffect(state: MutableState<WinampState>) {
             return;
         };
         cranpose_core::spawn_ui_task(async move {
-            let tracks = match audio::tracks_from_picked_entry(content).await {
+            let tracks = match audio::tracks_from_picked_entry(content) {
                 Ok(tracks) => tracks,
                 Err(error) => {
                     state.update(|s| s.status = error);
@@ -1395,7 +1395,7 @@ fn receive_incoming_tracks(state: MutableState<WinampState>, tracks: Vec<Track>)
     state.update(|s| {
         append_playlist_tracks(s, tracks);
     });
-    hydrate_playlist_durations_background(state);
+    hydrate_playlist_durations_background(state, first_new);
     if idle {
         start_track(state, first_new);
     } else {
@@ -1433,7 +1433,7 @@ fn apply_imported_playlist(state: MutableState<WinampState>, text: &str, source:
         app.playback = PlaybackState::Stopped;
         app.status = format!("Imported {} Track(s)", app.playlist.len());
     });
-    hydrate_playlist_durations_background(state);
+    hydrate_playlist_durations_background(state, 0);
 }
 #[composable]
 fn CranposePickerEffect(state: MutableState<WinampState>) {
@@ -1509,7 +1509,7 @@ fn receive_files(
                 let mut tracks = Vec::new();
                 let mut failure = None;
                 for entry in entries {
-                    match audio::tracks_from_picked_entry(entry).await {
+                    match audio::tracks_from_picked_entry(entry) {
                         Ok(added) => tracks.extend(added),
                         Err(error) => failure = Some(error),
                     }
@@ -1569,16 +1569,17 @@ async fn consume_folder_stream(
             Ok(Some(entry)) => {
                 seen += 1;
                 let name = entry.metadata().name;
-                match audio::track_from_picked_file(entry).await {
+                match audio::track_from_picked_file(entry) {
                     Ok(Some(track)) => batch.push(track),
                     Ok(None) => {
                         log::info!(target: "cranamp::picker", "skipped non-audio entry: {name:?}")
                     }
                     Err(error) => failure = Some(error),
                 }
-                if batch.len() >= BATCH {
+                if !started || batch.len() >= BATCH {
                     flush(&mut batch, &mut total, &mut started);
                     state.update(|s| s.status = format!("Scanning {total} tracks…"));
+                    coroflow::yield_now().await;
                 }
             }
             Ok(None) => {
@@ -7090,7 +7091,7 @@ fn replace_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track
     state.update(|s| {
         replace_playlist_tracks(s, tracks);
     });
-    hydrate_playlist_durations_background(state);
+    hydrate_playlist_durations_background(state, 0);
     start_track(state, 0);
 }
 fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
@@ -7100,23 +7101,29 @@ fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>
         });
         return;
     }
-    let should_start = state.get_non_reactive().playlist.is_empty();
+    let first_added = state.get_non_reactive().playlist.len();
+    let should_start = first_added == 0;
     state.update(|s| {
         append_playlist_tracks(s, tracks);
     });
-    hydrate_playlist_durations_background(state);
+    hydrate_playlist_durations_background(state, first_added);
     if should_start {
         start_track(state, 0);
     }
 }
-fn hydrate_playlist_durations_background(state: MutableState<WinampState>) {
+fn hydrate_playlist_durations_background(state: MutableState<WinampState>, first: usize) {
     let jobs = state
         .get_non_reactive()
         .playlist
         .iter()
         .enumerate()
+        .skip(first)
         .filter(|(_, track)| track.duration_seconds.is_none())
-        .filter_map(|(index, track)| track.path.clone().map(|path| (index, path)))
+        .filter_map(|(index, track)| {
+            let path = track.path.as_ref()?;
+            cranpose_services::path_from_uri(path)?;
+            Some((index, path.clone()))
+        })
         .collect::<Vec<_>>();
     if jobs.is_empty() {
         return;
