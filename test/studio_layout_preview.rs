@@ -1,5 +1,22 @@
 //! Native GPU review at a requested logical size. Run only with studio-review.
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--player") {
+        let width = std::env::args()
+            .nth(2)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1280);
+        let height = std::env::args()
+            .nth(3)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(800);
+        let launcher = cranamp::create_surface_app()
+            .with_title("Cranamp")
+            .with_application_id("com.cranamp.store-capture")
+            .with_developer_inspector(false)
+            .with_size(width, height);
+        with_capture(launcher, None).run(cranamp::winamp::WinampStackedApp);
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--design") {
         let width = std::env::args()
             .nth(2)
