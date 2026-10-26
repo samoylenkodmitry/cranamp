@@ -332,6 +332,18 @@ jobs:
         env:
           RUST_LOG: warn
         run: ./test/distribution/windows-store-screenshots.ps1 -Executable target/x86_64-pc-windows-msvc/release/cranamp.exe -OutputDirectory store-artifacts/screenshots
+      - name: Capture the running Windows player
+        shell: pwsh
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+          CRANAMP_REVIEW_CAPTURE: store-artifacts/screenshots/00-playback.png
+          CRANAMP_REVIEW_CAPTURE_ONCE: '1'
+          CRANAMP_REVIEW_CAPTURE_RGB: '1'
+        run: |
+          cargo build --locked --release --features studio-review --bin cranamp-studio-review --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/x86_64-pc-windows-msvc/release/cranamp-studio-review.exe --player 1440 900
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         if: always()
         with:
