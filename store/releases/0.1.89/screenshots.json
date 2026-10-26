@@ -156,6 +156,15 @@
       "status": "ready",
       "images": [
         {
+          "file": "screenshots/macos/00-playback.png",
+          "width": 1280,
+          "height": 800,
+          "sha256": "4223675155a5c917f72d83629421d9fe4aa3c1b5c655c796a2907e6fc38fcbcf",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_commit": "7dc3703",
+          "capture": "Native macOS running player in an isolated capture profile. Generated Cranamp demo tracks; no user media."
+        },
+        {
           "file": "screenshots/macos/01-studio-canvas.png",
           "width": 1440,
           "height": 900,
@@ -200,6 +209,15 @@
       "source_commit": "3c39b5d791d8d305b76560f8fee125f17391b0a3",
       "status": "ready",
       "images": [
+        {
+          "file": "screenshots/windows/00-playback.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "ace24a965a9a132367d49bce4c9cf57a457e9f7127697c875948956fcc32ae60",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_commit": "7dc3703",
+          "capture": "Native Windows CI player capture with generated Cranamp demo tracks; no user media."
+        },
         {
           "file": "screenshots/windows/01-player-preview.png",
           "width": 1388,
