@@ -406,13 +406,6 @@
           "capture": "Native Windows CI player capture with generated Cranamp demo tracks; no user media."
         },
         {
-          "file": "../0.1.89/screenshots/windows/01-player-preview.png",
-          "width": 1388,
-          "height": 1000,
-          "sha256": "3e89838eec5526d1d5fbbd06a33dc9020b9cc3ab7f934866d124ee1a11f9d8d3",
-          "caption": "Preview the skin in the player."
-        },
-        {
           "file": "../0.1.89/screenshots/windows/02-studio-canvas.png",
           "width": 1388,
           "height": 1000,
