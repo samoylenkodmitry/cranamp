@@ -37,7 +37,6 @@ function Invoke-StudioButton([string]$Name) {
 $application = Start-Process -FilePath ([IO.Path]::GetFullPath($Executable)) -ArgumentList '--skin-studio' -PassThru -RedirectStandardOutput (Join-Path $outputPath 'stdout.log') -RedirectStandardError (Join-Path $outputPath 'stderr.log')
 try {
     Invoke-StudioButton 'Open working copy'
-    Invoke-StudioButton 'Project actions'
     Invoke-StudioButton 'Agent connection'
     Invoke-StudioButton 'Start server'
     $ready = $false
@@ -48,6 +47,9 @@ try {
         catch { Start-Sleep -Seconds 2 }
     }
     if (-not $ready) { throw 'Studio MCP did not start within 60 seconds' }
+    Invoke-StudioButton 'Test connection'
+    Start-Sleep -Seconds 2
+    $null = Invoke-Studio 'studio_screenshot' @{path=(Join-Path $outputPath '06-agent-connection.png')}
     Invoke-StudioButton 'Close panel'
     # Server-start feedback must finish before any marketing capture.
     Start-Sleep -Seconds 6

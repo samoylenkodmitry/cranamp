@@ -282,6 +282,19 @@ pub fn review_cases() -> Vec<ReviewCase> {
         paint_layer: false,
         pan: false,
     });
+    #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+    for name in ["agent-connection", "agent-running"] {
+        cases.push(ReviewCase {
+            name: name.into(),
+            screen: Screen::Canvas,
+            sheet: Sheet::Advanced(11),
+            tool: "pencil",
+            patch: json!({}),
+            copied: false,
+            paint_layer: false,
+            pan: false,
+        });
+    }
     cases
 }
 
@@ -386,6 +399,34 @@ fn ReviewCases(width: f32, height: f32, start: usize, automatic: bool) {
         let shared = case_document(&case);
         case_ui(&case, shared, width, height)
     });
+    #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+    {
+        let document = ui.shared.clone();
+        let running = case.name == "agent-running";
+        cranpose_core::LaunchedEffect(running, move |_| {
+            if running {
+                agent_server::start(document.clone()).expect("review server");
+                agent_server::test_connection(document.clone());
+            }
+        });
+        let document = ui.shared.clone();
+        cranpose_core::DisposableEffect(at, move |scope| {
+            scope.on_dispose(move || agent_server::stop_for(&document))
+        });
+        let document = ui.shared.clone();
+        let tick = ui.tick;
+        cranpose_core::LaunchedEffectAsync(at, move |_| {
+            Box::pin(async move {
+                cranpose_core::interval(Duration::from_millis(16), move || {
+                    let revision = document.lock().unwrap().revision;
+                    if tick.get_non_reactive() != revision {
+                        tick.set(revision);
+                    }
+                })
+                .await;
+            })
+        });
+    }
     let actions = Actions {
         open: Rc::new(|| {}),
         project: Rc::new(|| {}),

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+mod agent_connection;
 mod canvas;
 mod colour;
 pub(crate) mod controls;
@@ -467,6 +469,12 @@ fn finish_save(shared: &SharedDocument, project: bool, revision: u64, result: Re
     }
 }
 fn sheet_area(ui: &Ui, layout: Layout, sheet: Sheet) -> Area {
+    #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+    if sheet == Sheet::Advanced(11) {
+        let width = (layout.width - 16.).min(408.);
+        let height = (layout.height - 72.).clamp(1., 688.);
+        return Area::new(layout.width - width - 8., 64., width, height);
+    }
     let mut panel = layout.panel(matches!(sheet, Sheet::Advanced(_)) && layout.inspector.is_none());
     if layout.inspector.is_none() {
         let needed = match sheet {
@@ -597,7 +605,12 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                         vec![controls::hint_context().provides(Some(ui.hints))],
                         move || {
                             if matches!(screen, Screen::Canvas | Screen::Sprites | Screen::States) {
-                                for area in [layout.rail, layout.inspector, layout.references]
+                                let inspector = if sheet == Sheet::Advanced(11) {
+                                    None
+                                } else {
+                                    layout.inspector
+                                };
+                                for area in [layout.rail, inspector, layout.references]
                                     .into_iter()
                                     .flatten()
                                 {
@@ -651,6 +664,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                         }
                                     }
                                     if sheet != Sheet::None
+                                        && sheet != Sheet::Advanced(11)
                                         && layout.inspector.is_none()
                                         && layout.class != WidthClass::SmallPhone
                                         && layout.height >= 500.
@@ -921,35 +935,52 @@ fn Header(ui: Ui, layout: Layout, name: String, dirty: bool) {
             DIM,
         );
         let (undo, redo) = ui.shared.lock().unwrap().history_depth();
-        let header_items = [
+        let header_items = vec![
             (Icon::Undo, "Undo", undo > 0),
             (Icon::Redo, "Redo", redo > 0),
             (Icon::More, "Project actions", true),
         ];
+        #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+        let header_items = {
+            let mut items = header_items;
+            if layout.class == WidthClass::Desktop {
+                items.push((Icon::Agent, "Agent connection", true));
+            }
+            items
+        };
+        let slots = header_items.len() - usize::from(compact_header);
         let mut slot = 0;
         for (i, (icon, label, enabled)) in header_items.into_iter().enumerate() {
             if compact_header && i == 1 {
                 continue;
             }
-            let x = layout.width - if compact_header { 92. } else { 136. } + slot as f32 * 44.;
+            let x = layout.width - 4. - slots as f32 * 44. + slot as f32 * 44.;
             slot += 1;
             let ui = ui.clone();
+            #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
+            let selected =
+                i == 3 && (agent_server::status().running || ui.sheet.get() == Sheet::Advanced(11));
+            #[cfg(any(target_os = "ios", target_os = "android", target_arch = "wasm32"))]
+            let selected = false;
             Control(
                 icon,
                 label.into(),
                 match i {
                     0 => "Undo the last edit",
                     1 => "Redo the last undone edit",
-                    _ => "Save, preview and advanced skin settings",
+                    2 => "Project tools and help",
+                    _ => "Connect an MCP agent to this canvas",
                 }
                 .into(),
                 Area::new(x, 6., 44., 44.),
-                false,
+                selected,
                 enabled,
                 false,
                 ui.hints,
                 move || {
-                    if i == 2 {
+                    if i == 3 {
+                        ui.open_sheet(Sheet::Advanced(11));
+                    } else if i == 2 {
                         ui.open_sheet(Sheet::More);
                     } else {
                         let mut doc = ui.shared.lock().unwrap();

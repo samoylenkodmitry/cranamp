@@ -51,6 +51,10 @@ name = "studio_handset_e2e"
 path = "test/studio_handset_e2e.rs"
 
 [[test]]
+name = "studio_mcp_e2e"
+path = "test/studio_mcp_e2e.rs"
+
+[[test]]
 name = "bundled_skins_are_portable"
 path = "test/bundled_skins_are_portable.rs"
 
