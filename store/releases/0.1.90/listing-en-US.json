@@ -12,6 +12,6 @@
   "website": "https://cranamp.dmitrysamoylenko.in/",
   "support_email": "trdmitriisamoilenko@gmail.com",
   "copyright": "2026 Dmitrii Samoilenko",
-  "release_notes": "Android Studio now restores the window size after leaving the player. Player sizing works at startup. Mouse and stylus hover use the selected tool cursor, including custom cursor artwork.",
+  "release_notes": "Skin Studio can resize freely on Android. The player keeps its narrow shape from startup. Mouse and stylus hover use the current cursor, including custom tool cursors.",
   "ios_audio": "On iOS, HLS streams use system playback and do not support the equalizer, balance or visualizer. These controls work with supported local files and direct audio streams."
 }
