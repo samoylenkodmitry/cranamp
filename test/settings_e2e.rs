@@ -212,35 +212,27 @@ fn audio_handed_over_by_another_application_plays() {
     shell.set_buffer_size(500, 700);
     shell.set_viewport(500.0, 700.0);
     pump(&mut shell);
-    let name = "handed-over-by-another-app.mp3";
     let before = visible_texts(&mut shell);
     assert!(
-        !contains(&before, "handed-over-by-another-app"),
+        !contains(&before, "tone"),
         "the handed-over track must not already be present; visible={before:?}"
     );
-    let source = _application.directory.join(name);
-    std::fs::hard_link(demo_track_for_handover(), &source)
-        .expect("a source file to hand over without copying its audio");
+    let source =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/audio/tone.wav");
     cranpose_services::publish_incoming_content(
-        cranpose_services::IncomingContent::from_file(&source).with_mime_type("audio/mpeg"),
+        cranpose_services::IncomingContent::from_file(&source).with_mime_type("audio/wav"),
     );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let after = loop {
         shell.update();
         let texts = visible_texts(&mut shell);
-        if texts
-            .iter()
-            .any(|text| text == "handed-over-by-another-app")
-            || std::time::Instant::now() >= deadline
-        {
+        if texts.iter().any(|text| text == "tone") || std::time::Instant::now() >= deadline {
             break texts;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     };
     assert!(
-        after
-            .iter()
-            .any(|text| text == "handed-over-by-another-app"),
+        after.iter().any(|text| text == "tone"),
         "handed-over audio should appear in the player; visible={after:?}"
     );
     assert!(
@@ -248,21 +240,9 @@ fn audio_handed_over_by_another_application_plays() {
         "direct builds keep the demo playlist; store builds start empty; visible={after:?}"
     );
     assert!(
-        after
-            .first()
-            .is_some_and(|current| current == "handed-over-by-another-app"),
+        after.first().is_some_and(|current| current == "tone"),
         "an idle player should start the handed-over track; visible={after:?}"
     );
-}
-fn demo_track_for_handover() -> std::path::PathBuf {
-    let directory =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/demo-music/generated");
-    std::fs::read_dir(&directory)
-        .expect("demo music directory")
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .find(|path| path.extension().is_some_and(|extension| extension == "mp3"))
-        .expect("at least one bundled demo mp3")
 }
 
 #[test]
