@@ -1,0 +1,74 @@
+{
+  "status": "unreleased",
+  "locale": "en-US",
+  "capture_date": "2026-10-26",
+  "source_commit": "629eaa347fe625b28b6a3ec3bbda7fd34e5ea5a1",
+  "caption": "Connect an MCP agent to the same canvas and undo history.",
+  "screenshots": [
+    {
+      "platform": "apple_macos",
+      "path": "screenshots/macos/01-agent-connection.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "sha256": "6a2fadae6cfcf51d3e1acaf48b55f82d7890bae572a52431647aa2618550782f",
+      "source": "Native macOS GPU capture from cranamp-studio-review, agent-running case. The server was started and checked before capture. The review navigation footer is outside the captured app area.",
+      "format": "PNG RGB, no alpha",
+      "edits": "None; exported directly from opaque GPU RGB pixels."
+    },
+    {
+      "platform": "microsoft",
+      "path": "screenshots/windows/01-agent-connection.png",
+      "dimensions": [
+        1388,
+        1000
+      ],
+      "sha256": "213e52f88f90dc7709515c0fc4ac37f7b36499a9cd46cdc7f5b3a874d556302d",
+      "source": "Native Windows GPU capture through studio_screenshot after clicking Start server and Test connection in the packaged desktop executable.",
+      "source_commit": "3c39b5d",
+      "workflow": "https://github.com/samoylenkodmitry/cranamp/actions/runs/40277241466",
+      "artifact": "microsoft-store-msix/screenshots/06-agent-connection.png",
+      "format": "PNG RGBA",
+      "edits": "None; copied directly from the Windows build artifact."
+    }
+  ],
+  "layout_review": {
+    "script": "../../../test/distribution/capture_mcp_layouts.py",
+    "states": [
+      "agent-connection",
+      "agent-running"
+    ],
+    "sizes": [
+      [
+        320,
+        780
+      ],
+      [
+        520,
+        820
+      ],
+      [
+        900,
+        900
+      ],
+      [
+        1280,
+        900
+      ],
+      [
+        1440,
+        900
+      ],
+      [
+        1920,
+        1080
+      ],
+      [
+        1440,
+        420
+      ]
+    ],
+    "result": "All 14 actual GPU captures inspected. Short windows show a scrollbar. Small widths are desktop windows; MCP is absent on mobile and web."
+  }
+}

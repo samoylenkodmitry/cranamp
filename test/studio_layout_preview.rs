@@ -72,6 +72,7 @@ fn with_capture(
 ) -> cranpose::AppLauncher<cranpose::AppFonts> {
     if let Some(path) = std::env::var_os("CRANAMP_REVIEW_CAPTURE") {
         let once = std::env::var_os("CRANAMP_REVIEW_CAPTURE_ONCE").is_some();
+        let rgb = std::env::var_os("CRANAMP_REVIEW_CAPTURE_RGB").is_some();
         let scale = std::env::var("CRANAMP_REVIEW_CAPTURE_SCALE")
             .ok()
             .and_then(|value| value.parse::<f32>().ok())
@@ -94,7 +95,18 @@ fn with_capture(
                     };
                     let path = std::path::PathBuf::from(&path);
                     let pending = path.with_extension("pending.png");
-                    if frame.save(&pending).is_ok() {
+                    let saved = if rgb {
+                        assert!(
+                            frame.pixels().all(|pixel| pixel[3] == 255),
+                            "Store captures must be opaque"
+                        );
+                        image::DynamicImage::ImageRgba8(frame)
+                            .into_rgb8()
+                            .save(&pending)
+                    } else {
+                        frame.save(&pending)
+                    };
+                    if saved.is_ok() {
                         if let Err(error) = std::fs::rename(pending, path) {
                             eprintln!("Capture save failed: {error}");
                         } else if once {

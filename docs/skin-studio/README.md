@@ -682,8 +682,13 @@ without that panel on mobile. The optional desktop connection remains included
 in Store builds; self-update and installer features remain excluded.
 
 The [desktop MCP listing draft](../../store/previews/desktop-mcp/listing-en-US.json)
-and its screenshots describe the next build. They do not replace the submitted
-0.1.88 listing assets.
+and [native screenshots](../../store/previews/desktop-mcp/index.html) describe
+the next build. The submitted 0.1.88 listing assets remain archived.
+
+For a local layout review, build `cranamp-studio-review` with `studio-review`,
+then run `python3 test/distribution/capture_mcp_layouts.py`. It captures the off
+and running states at seven desktop window sizes and writes a gallery to
+`target/mcp-ui-review/index.html`.
 
 ```json
 {
