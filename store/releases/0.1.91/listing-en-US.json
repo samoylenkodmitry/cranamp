@@ -1,0 +1,69 @@
+{
+  "version": "0.1.91",
+  "locale": "en-US",
+  "apple_ios": {
+    "name": "Cranamp",
+    "subtitle": "Music player and skin editor",
+    "keywords": "music,audio,player,playlist,equalizer,pixel,skin,wsz,local,stream",
+    "description": "Cranamp plays your music in a compact player with original Catamp pixel skins. Import compatible WSZ or ZIP skins, or make your own in Skin Studio.\n\nMUSIC AND PLAYLISTS\nOpen local audio files or an audio stream URL. Import M3U, M3U8 and PLS playlists, search your tracks, and use shuffle or repeat. Export playlists as M3U files.\n\nPlay MP3, FLAC, WAV, AIFF, AAC-LC, ALAC, Ogg Vorbis and Ogg Opus files. Audio from MP4, MKV and WebM files works when the audio codec is supported. Files play from their original location. Protected files are not supported.\n\nSOUND CONTROLS\nAdjust the ten-band equalizer and preamp. Set volume and balance, and view a spectrum analyzer or oscilloscope.\n\nPIXEL SKINS\nChoose an original Catamp skin or import a compatible skin you have permission to use. Cranamp remembers your selected skin and playback settings.\n\nNo account, advertising or subscription is required. Bring your own audio files or stream URLs. Cranamp does not provide a commercial music catalogue.\n\nSKIN STUDIO\nDraw with pixel tools and paint layers. Edit exact colours, compare button states, and preview the result in the player. Change playlist and visualizer colours, build a bitmap font, edit window cutouts, and draw cursor artwork. Zoom and pan the canvas. The controls adapt to the available window width. Save layered CSTUDIO projects or export WSZ skins.\n\nTo open Studio, tap the lower-right corner of the top player window. In Settings, choose Open Skin Studio, then Open working copy.\n\nOn iOS, HLS streams use system playback and do not support the equalizer, balance or visualizer. These controls work with supported local files and direct audio streams.",
+    "whats_new": "Folder playback starts when the first track is found. Audio files play from their original location without import copies or WAV conversion. Added streaming Opus decoding. Android player windows keep their shape, and Skin Studio resizes freely.",
+    "review_notes": "The app starts in the music player. Click or tap the menu button at the lower-right of the top player window to open Settings, then choose Open Skin Studio. Choose Open working copy to edit the current skin, or Open skin or project to import a WSZ, ZIP or CSTUDIO file. Canvas contains drawing tools; Skin contains playlist and visualizer colours, bitmap font generation, window cutouts and cursor artwork. Save and share exports CSTUDIO or WSZ through the system file picker. Imported skins and projects contain image and settings data; they do not execute downloaded code. The store build has no self-update controls or installer capability. No login or purchase is needed. Test local playback with an audio file selected through the system picker. iOS does not include the desktop MCP server. Version 0.1.91 fixes folder playback and reads selected audio from its original location. The first screenshot shows the actual player. Additional screenshots show Skin Studio after the steps above."
+  },
+  "apple_macos": {
+    "name": "Cranamp",
+    "subtitle": "Music player and skin editor",
+    "keywords": "music,audio,player,playlist,equalizer,pixel,skin,wsz,local,stream,mcp,agent",
+    "description": "Cranamp plays your music in a compact player with original Catamp pixel skins. Import compatible WSZ or ZIP skins, or make your own in Skin Studio.\n\nMUSIC AND PLAYLISTS\nOpen local audio files or an audio stream URL. Import M3U, M3U8 and PLS playlists, search your tracks, and use shuffle or repeat. Export playlists as M3U files.\n\nPlay MP3, FLAC, WAV, AIFF, AAC-LC, ALAC, Ogg Vorbis and Ogg Opus files. Audio from MP4, MKV and WebM files works when the audio codec is supported. Files play from their original location. Protected files are not supported.\n\nSOUND CONTROLS\nAdjust the ten-band equalizer and preamp. Set volume and balance, and view a spectrum analyzer or oscilloscope.\n\nPIXEL SKINS\nChoose an original Catamp skin or import a compatible skin you have permission to use. Cranamp remembers your selected skin and playback settings.\n\nNo account, advertising or subscription is required. Bring your own audio files or stream URLs. Cranamp does not provide a commercial music catalogue.\n\nSKIN STUDIO\nDraw with pixel tools and paint layers. Edit exact colours, compare button states, and preview the result in the player. Change playlist and visualizer colours, build a bitmap font, edit window cutouts, and draw cursor artwork. Zoom and pan the canvas. The controls adapt to the available window width. Save layered CSTUDIO projects or export WSZ skins.\n\nMCP AGENT CONNECTION\nConnect a separate MCP agent to the desktop editor. Start the local server, copy its URL and check the connection in Studio. Agent edits appear on your canvas and share your undo history. The server is off by default, accepts connections only from this computer and stops when Studio closes. Agents can use files that Cranamp can access. An agent may require its own account or service.\n\nArrange the player, equalizer and playlist as movable, dockable desktop windows.\n\nTo open Studio, click the lower-right corner of the top player window. In Settings, choose Open Skin Studio, then Open working copy.",
+    "whats_new": "Folder playback starts when the first track is found. Audio files play from their original location without import copies or WAV conversion. Added streaming Opus decoding. Android player windows keep their shape, and Skin Studio resizes freely.",
+    "review_notes": "The app starts in the music player. Click or tap the menu button at the lower-right of the top player window to open Settings, then choose Open Skin Studio. Choose Open working copy to edit the current skin, or Open skin or project to import a WSZ, ZIP or CSTUDIO file. Canvas contains drawing tools; Skin contains playlist and visualizer colours, bitmap font generation, window cutouts and cursor artwork. Save and share exports CSTUDIO or WSZ through the system file picker. Imported skins and projects contain image and settings data; they do not execute downloaded code. The store build has no self-update controls or installer capability. No login or purchase is needed. Test local playback with an audio file selected through the system picker. To test incoming network access, open Studio, then Agent connection in the top toolbar, Start server, and Test connection. In narrower desktop windows, Agent connection is inside Project actions. The user starts this loopback-only server to connect a separate MCP agent. It is off by default. Stop server ends the connection. The app uses App Sandbox and user-selected file access. Version 0.1.91 fixes folder playback and reads selected audio from its original location. The first screenshot shows the actual player. Additional screenshots show Skin Studio after the steps above."
+  },
+  "google_play": {
+    "name": "Cranamp",
+    "short_description": "Play local music, build playlists and draw pixel skins in Skin Studio.",
+    "full_description": "Cranamp plays your music in a compact player with original Catamp pixel skins. Import compatible WSZ or ZIP skins, or make your own in Skin Studio.\n\nMUSIC AND PLAYLISTS\nOpen local audio files or an audio stream URL. Import M3U, M3U8 and PLS playlists, search your tracks, and use shuffle or repeat. Export playlists as M3U files.\n\nPlay MP3, FLAC, WAV, AIFF, AAC-LC, ALAC, Ogg Vorbis and Ogg Opus files. Audio from MP4, MKV and WebM files works when the audio codec is supported. Files play from their original location. Protected files are not supported.\n\nSOUND CONTROLS\nAdjust the ten-band equalizer and preamp. Set volume and balance, and view a spectrum analyzer or oscilloscope.\n\nPIXEL SKINS\nChoose an original Catamp skin or import a compatible skin you have permission to use. Cranamp remembers your selected skin and playback settings.\n\nNo account, advertising or subscription is required. Bring your own audio files or stream URLs. Cranamp does not provide a commercial music catalogue.\n\nSKIN STUDIO\nDraw with pixel tools and paint layers. Edit exact colours, compare button states, and preview the result in the player. Change playlist and visualizer colours, build a bitmap font, edit window cutouts, and draw cursor artwork. Zoom and pan the canvas. The controls adapt to the available window width. Save layered CSTUDIO projects or export WSZ skins.\n\nTo open Studio, tap the lower-right corner of the top player window. In Settings, choose Open Skin Studio, then Open working copy.",
+    "release_notes": "Folder playback starts when the first track is found. Audio files play from their original location without import copies or WAV conversion. Added streaming Opus decoding. Android player windows keep their shape, and Skin Studio resizes freely."
+  },
+  "microsoft": {
+    "name": "Cranamp",
+    "description": "Cranamp plays your music in a compact player with original Catamp pixel skins. Import compatible WSZ or ZIP skins, or make your own in Skin Studio.\n\nMUSIC AND PLAYLISTS\nOpen local audio files or an audio stream URL. Import M3U, M3U8 and PLS playlists, search your tracks, and use shuffle or repeat. Export playlists as M3U files.\n\nPlay MP3, FLAC, WAV, AIFF, AAC-LC, ALAC, Ogg Vorbis and Ogg Opus files. Audio from MP4, MKV and WebM files works when the audio codec is supported. Files play from their original location. Protected files are not supported.\n\nSOUND CONTROLS\nAdjust the ten-band equalizer and preamp. Set volume and balance, and view a spectrum analyzer or oscilloscope.\n\nPIXEL SKINS\nChoose an original Catamp skin or import a compatible skin you have permission to use. Cranamp remembers your selected skin and playback settings.\n\nNo account, advertising or subscription is required. Bring your own audio files or stream URLs. Cranamp does not provide a commercial music catalogue.\n\nSKIN STUDIO\nDraw with pixel tools and paint layers. Edit exact colours, compare button states, and preview the result in the player. Change playlist and visualizer colours, build a bitmap font, edit window cutouts, and draw cursor artwork. Zoom and pan the canvas. The controls adapt to the available window width. Save layered CSTUDIO projects or export WSZ skins.\n\nMCP AGENT CONNECTION\nConnect a separate MCP agent to the desktop editor. Start the local server, copy its URL and check the connection in Studio. Agent edits appear on your canvas and share your undo history. The server is off by default, accepts connections only from this computer and stops when Studio closes. Agents can use files that Cranamp can access. An agent may require its own account or service.\n\nArrange the player, equalizer and playlist as movable, dockable desktop windows.\n\nTo open Studio, click the lower-right corner of the top player window. In Settings, choose Open Skin Studio, then Open working copy.",
+    "whats_new": "Folder playback starts when the first track is found. Audio files play from their original location without import copies or WAV conversion. Added streaming Opus decoding. Android player windows keep their shape, and Skin Studio resizes freely.",
+    "features": [
+      "Play local audio files and direct audio streams.",
+      "Import and export playlists.",
+      "Adjust the ten-band equalizer and preamp.",
+      "Choose Catamp skins or import compatible WSZ skins.",
+      "Draw and export skins in Skin Studio.",
+      "Edit exact skin colours with rendered previews.",
+      "Share canvas edits and Undo history with a separate MCP agent."
+    ]
+  },
+  "links": {
+    "privacy_url": "https://cranamp.dmitrysamoylenko.in/privacy/",
+    "support_url": "https://cranamp.dmitrysamoylenko.in/support/",
+    "website": "https://cranamp.dmitrysamoylenko.in/",
+    "support_email": "trdmitriisamoilenko@gmail.com",
+    "copyright": "2026 Dmitrii Samoilenko"
+  },
+  "screenshots": [
+    {
+      "id": "01-playback",
+      "caption": "Play your music with playlists and an equalizer."
+    },
+    {
+      "id": "02-sprites",
+      "caption": "Edit each control at pixel size."
+    },
+    {
+      "id": "03-studio-canvas",
+      "caption": "Draw pixel artwork with tool settings beside the canvas."
+    },
+    {
+      "id": "04-skin-colours",
+      "caption": "Set exact skin colours and preview the result."
+    },
+    {
+      "id": "05-states",
+      "caption": "Compare the artwork for different control states."
+    }
+  ]
+}

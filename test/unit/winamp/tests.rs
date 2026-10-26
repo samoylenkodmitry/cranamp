@@ -124,6 +124,59 @@ fn playlist_border_tiles_preserve_source_texels_and_crop_partial_edges() {
     assert!(super::native_sprite_tiles(source, 0., 0.).is_empty());
 }
 use super::*;
+
+#[test]
+fn a_folder_publishes_its_first_track_before_the_next_entry_arrives() {
+    use cranpose_services::{ContentError, ContentFuture, ContentHandle, ContentStream};
+    use std::{
+        cell::Cell,
+        future::Future,
+        rc::Rc,
+        task::{Context, Poll, Waker},
+    };
+    struct DelayedFolder {
+        first: Cell<bool>,
+        path: std::path::PathBuf,
+    }
+    impl ContentStream for DelayedFolder {
+        fn next(&self) -> ContentFuture<'_, Result<Option<ContentHandle>, ContentError>> {
+            Box::pin(async move {
+                if self.first.replace(false) {
+                    Ok(Some(cranpose_services::file_content(&self.path)))
+                } else {
+                    std::future::pending().await
+                }
+            })
+        }
+    }
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/audio/tone.flac");
+    let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
+        cranpose_core::DefaultScheduler,
+    ));
+    let state =
+        cranpose_core::OwnedMutableState::with_runtime(WinampState::default(), runtime.handle());
+    let stream = Rc::new(DelayedFolder {
+        first: Cell::new(true),
+        path: path.clone(),
+    });
+    let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, false));
+    assert!(matches!(
+        scan.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Pending
+    ));
+    let snapshot = state.get();
+    assert_eq!(
+        snapshot.playlist.len(),
+        1,
+        "the first track must appear while the provider is still scanning"
+    );
+    assert_eq!(
+        snapshot.playlist[0].path.as_deref(),
+        Some(cranpose_services::uri_for_path(&path).as_str())
+    );
+    assert_eq!(snapshot.current_index, Some(0));
+}
 fn test_playlist(tracks: Vec<Track>) -> Rc<Vec<Track>> {
     Rc::new(tracks)
 }
