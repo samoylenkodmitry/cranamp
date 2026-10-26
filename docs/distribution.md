@@ -10,7 +10,7 @@ Store status was verified on October 26, 2026:
 | --- | --- | --- | --- |
 | Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | 0.1.88 (10088) published with a 100% production rollout |
 | Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | macOS 0.1.89 (76) and iOS 0.1.88 (6) waiting for review |
-| Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.89.0 published; submission 3 is live |
+| Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.89.0 published; submission 4 is live |
 | Arch User Repository | [Source](https://aur.archlinux.org/packages/cranamp), [binary](https://aur.archlinux.org/packages/cranamp-bin) | `cranamp`, `cranamp-bin` | Both updated to 0.1.89-1 on October 26 |
 
 GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
@@ -56,11 +56,15 @@ Version 0.1.89 includes the redesigned desktop MCP panel. The [listing text](../
 
 The actual running player appears in both desktop galleries. Apple and Microsoft reviewer notes identify the menu button at the lower-right of the top player window, then **Open Skin Studio**. iOS retains its playback screenshot; Google Play retains its actual player image. The capture launcher uses an isolated application profile and generated Cranamp demo tracks, so no user media enters the gallery.
 
-The [signed build](https://github.com/samoylenkodmitry/cranamp/actions/runs/40283101250) passed all five platforms. Mac build 76 was uploaded and submitted with six screenshots in [submission 02c1ca97](https://appstoreconnect.apple.com/apps/6818451356/distribution/reviewsubmissions/details/02c1ca97-8a36-4d47-a877-380637be1371). Microsoft submission 3 is live; submission 4 adds the running player screenshot and precise reviewer entry instructions.
+The [signed build](https://github.com/samoylenkodmitry/cranamp/actions/runs/40283101250) passed all five platforms. Mac build 76 was uploaded and submitted with six screenshots in [submission 02c1ca97](https://appstoreconnect.apple.com/apps/6818451356/distribution/reviewsubmissions/details/02c1ca97-8a36-4d47-a877-380637be1371). Microsoft submission 4 is live; submission 4 adds the running player screenshot and precise reviewer entry instructions.
 
 [GitHub Release 0.1.89](https://github.com/samoylenkodmitry/cranamp/releases/tag/v0.1.89) was published from green main commit `6d1f1c46eca5c6a4f33f721592d1da7885eb1b8a`. The [release workflow](https://github.com/samoylenkodmitry/cranamp/actions/runs/40285725283) and [Pages deployment](https://github.com/samoylenkodmitry/cranamp/actions/runs/40285476925) passed. The release also contains Linux repository packages and the source archive used by AUR. Both AUR recipes passed clean Arch builds; the binary installed with no missing shared libraries. Published AUR commits are `32486c7a8589d8693f44dab171cc4a4b5f4ca498` for `cranamp` and `7b81cd4ab9d0a3f41f098ef1f708a49e6a362763` for `cranamp-bin`.
 
-Android gallery validation found a missing Cranpose activity-window restore fix in the published 0.17.2 dependency. The fix is under device validation in an isolated checkout; the current Google Play release remains 0.1.88.
+## Android 0.1.90 follow-up
+
+[PR 127](https://github.com/samoylenkodmitry/cranamp/pull/127) pins the merged Cranpose Android window and cursor fixes at `e7b999ebdcc3cca05b1136675546f228f3fec0fc`. All application checks and five store package builds passed. The public Android window and cursor instrumentation tests passed on Galaxy Tab S7. Studio entry and gallery capture passed on the tablet and phone emulator.
+
+The [gallery](../store/releases/0.1.90/screenshots/index.html) contains six phone images and four images for each Android tablet and desktop group. Each group starts with the actual player. The [manifest](../store/releases/0.1.90/screenshots.json) records dimensions and hashes. The [listing](../store/releases/0.1.90/listing-en-US.json) gives the exact player-to-Studio path. Google Play gallery changes are saved as a draft pending the signed 0.1.90 bundle. Apple reviews remain in place; Microsoft submission 4 is live.
 
 ## Google Play
 

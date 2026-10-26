@@ -1,0 +1,436 @@
+{
+  "version": "0.1.90",
+  "locale": "en-US",
+  "capture_date": "2026-10-26",
+  "product_source": "ab23dc4bb9d9fc912ac0afbb0317d8650ab450c4",
+  "framework_source": "e7b999ebdcc3cca05b1136675546f228f3fec0fc",
+  "image_processing": "Android screenshots are unchanged emulator pixels. Apple and Windows captures retain their previously reviewed source and processing records.",
+  "galleries": [
+    {
+      "family": "android-phone",
+      "store_slot": "Phone",
+      "layout": "Phone; small and large layouts",
+      "device": "Android emulator",
+      "status": "ready",
+      "note": "Actual store-feature candidate captures with Cranpose e7b999e. Phone and portrait tablet captures preceded the version-only 0.1.90 bump. Mobile MCP is excluded at every width.",
+      "images": [
+        {
+          "file": "screenshots/android-phone/01-playback.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "0d2f0884d0a1c1feb85606cf5224460ba12b39291bfd9d43ab01507877aa2759",
+          "caption": "Play local audio with the equalizer and playlist."
+        },
+        {
+          "file": "screenshots/android-phone/02-studio-canvas.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "2a40536b237975175357b12a0f31e12eca9b61dcee27469b180cd15738a9725f",
+          "caption": "Draw pixel artwork with the current tool settings."
+        },
+        {
+          "file": "screenshots/android-phone/03-skin-colours.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "51b0c26bc0ce75718095cd5ca7888c4632383f73b4ab4d1452efa7175d44a313",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/android-phone/04-states.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "5b75bae99b2849cce704eb762694263a5a4a9091851f1643ba62874c66603c88",
+          "caption": "Compare released and pressed control artwork."
+        },
+        {
+          "file": "screenshots/android-phone/05-open-studio.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "9fcc8acfd261d3fc775ad37a9621e10f407f97389c7b40ba658f76c1dd0aeb6e",
+          "caption": "Open a working copy in Skin Studio."
+        },
+        {
+          "file": "screenshots/android-phone/06-compact-canvas.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "ae04deb9a26f89142a6d3a9a433d45c8d1f63bd8857645304f02ddceb8681a9d",
+          "caption": "Draw with the compact phone controls."
+        }
+      ]
+    },
+    {
+      "family": "android-tablet-7",
+      "store_slot": "7-inch tablet",
+      "layout": "Tablet, portrait",
+      "device": "Android emulator",
+      "status": "ready",
+      "note": "Actual store-feature candidate captures with Cranpose e7b999e. Phone and portrait tablet captures preceded the version-only 0.1.90 bump. Mobile MCP is excluded at every width.",
+      "images": [
+        {
+          "file": "screenshots/android-tablet-7/01-playback.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "17304cb7db760b7c34e1a29b9bed8192e967044370e22f8e08dfb486e30ec27f",
+          "caption": "Play local audio with the equalizer and playlist."
+        },
+        {
+          "file": "screenshots/android-tablet-7/02-studio-canvas.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "d2448f1b2aa1916a6cc53e7c2a7c0d3b8c3d41598c28b10fa12248e40d07a1b2",
+          "caption": "Draw pixel artwork with the current tool settings."
+        },
+        {
+          "file": "screenshots/android-tablet-7/03-skin-colours.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "c6f44aeb499ad824c93025a0318faa6d618b9ccf1fbc96ea2a8cd7617582c780",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/android-tablet-7/04-states.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "9d23e43fdc8f6f8ac7b6147d138bfb525b99066e034808b0c2eb0577382691f0",
+          "caption": "Compare released and pressed control artwork."
+        }
+      ]
+    },
+    {
+      "family": "android-tablet-10",
+      "store_slot": "10-inch tablet",
+      "layout": "Wide tablet, landscape",
+      "device": "Android emulator",
+      "status": "ready",
+      "note": "Actual store-feature candidate captures with Cranpose e7b999e. Phone and portrait tablet captures preceded the version-only 0.1.90 bump. Mobile MCP is excluded at every width.",
+      "images": [
+        {
+          "file": "screenshots/android-tablet-10/01-playback.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "b61da4b43e1c549d7d5d121bd0ecffbe5fc594b31ccbaee182c39fdb5fccd8b8",
+          "caption": "Play local audio with the equalizer and playlist."
+        },
+        {
+          "file": "screenshots/android-tablet-10/02-studio-canvas.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "034e11c97bcfae6e96bacd28822c827bb2ae0b1697d1a0f366eca289d81d90e8",
+          "caption": "Draw pixel artwork with the current tool settings."
+        },
+        {
+          "file": "screenshots/android-tablet-10/03-skin-colours.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "ad29d7134b264ba08dfd9e69a8f1d9e92c1f06e2f7f1b457fe0de770e8361ef2",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/android-tablet-10/04-states.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "e5109e87c6232302f0c264e9349fd8417202727a1ef041ba81eee7bb6b729a84",
+          "caption": "Compare released and pressed control artwork."
+        }
+      ]
+    },
+    {
+      "family": "android-desktop",
+      "store_slot": "Desktop",
+      "layout": "Desktop-width Android window",
+      "device": "Android emulator",
+      "status": "ready",
+      "note": "Actual store-feature candidate captures with Cranpose e7b999e. Phone and portrait tablet captures preceded the version-only 0.1.90 bump. Mobile MCP is excluded at every width.",
+      "images": [
+        {
+          "file": "screenshots/android-desktop/01-playback.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "328dfdba661071050b4f6b60a087a0aa729d934b114f67668db1b50736aaa301",
+          "caption": "Play local audio with the equalizer and playlist."
+        },
+        {
+          "file": "screenshots/android-desktop/02-studio-canvas.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "93b807ff4e7781467afc647166f5969bd6d351de506dd12f28be7c3f503fe94f",
+          "caption": "Draw pixel artwork with the current tool settings."
+        },
+        {
+          "file": "screenshots/android-desktop/03-skin-colours.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "923e53449821925d04765ca0183a79f7212e7507f7d528f782c8183412190bab",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/android-desktop/04-states.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "28e39c40e3cc4fa848fd2e3e54466e31e41823cf3470b62d4fd0ab290194235e",
+          "caption": "Compare released and pressed control artwork."
+        }
+      ]
+    },
+    {
+      "family": "ios-small",
+      "store_slot": "iPhone with Face ID, medium display",
+      "layout": "Small phone",
+      "device": "iPhone 13 mini simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.88/screenshots/ios-small/01-studio-canvas.png",
+          "width": 1080,
+          "height": 2340,
+          "sha256": "8be69f12687e874f46c9a2b533b386b47d9a6371dc012ac4d5e9909471282a8a",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-small/02-window-shape.png",
+          "width": 1080,
+          "height": 2340,
+          "sha256": "2737d4593c826e054435a9557246145e605b8b2bb8053b13579229dc1938a36b",
+          "caption": "Edit the visible shape of each skin window."
+        }
+      ],
+      "note": "Inherited from the submitted Apple or published Windows listing; these screenshots remain accurate."
+    },
+    {
+      "family": "ios-6.9",
+      "store_slot": "iPhone, large display",
+      "layout": "Large phone",
+      "device": "iPhone 17 Pro Max simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/01-playback.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "f57509bf9d66568634af590ea120d07ed63a531079f9009063b301e0a026fab6",
+          "caption": "Play your music with playlists and an equalizer."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/02-sprites.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "8cd7fa54eafc6a0f3ac49b20ef5d095daf63e0427454507c3343acef142c0efc",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/03-studio-canvas.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "22d51b33600406d5677a936592b29ee3c29f40f18281156f8202aad97d4e8bce",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/04-skin-colours.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "bc3a9f34b23bbaed5f41831f9db9a94bf0b5c7c7c47bbd03c142455c20b69b0e",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/05-states.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "1c5ccfe2b28c39af7a0774f1302488d77d5479bfa1b715fee6342c5cf112b4d6",
+          "caption": "Compare released and pressed control artwork."
+        }
+      ],
+      "note": "Inherited from the submitted Apple or published Windows listing; these screenshots remain accurate."
+    },
+    {
+      "family": "ipad-11",
+      "store_slot": "iPad 11-inch",
+      "layout": "Tablet",
+      "device": "iPad Air 11-inch M3 simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.88/screenshots/ipad-11/01-studio-canvas.png",
+          "width": 1640,
+          "height": 2360,
+          "sha256": "58a25f664774d79ad5b4fdca958bda3e09c97f175bf168bd81d8b2a44f930b65",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-11/02-bitmap-font.png",
+          "width": 1640,
+          "height": 2360,
+          "sha256": "a9f370393d3a40e633bfc67ea432849ed6e6d3eeb63bb2606443c3df88f1b610",
+          "caption": "Set font colours and edit the letters."
+        }
+      ],
+      "note": "Inherited from the submitted Apple or published Windows listing; these screenshots remain accurate."
+    },
+    {
+      "family": "ipad-13",
+      "store_slot": "iPad 13-inch",
+      "layout": "Wide tablet and desktop",
+      "device": "iPad Pro 13-inch M4 simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.88/screenshots/ipad-13/01-studio-canvas.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "108716fa762134fe3e4b96af887e9bab0b2b71b4d63205ef1f7d6a547c5ae328",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-13/02-sprites.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "baeac8dcbadf3da766b1569b2ae8b7dcb6d43f52a5421fa42846548ba8213906",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-13/03-skin-colours.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "b37e7c28b3406eb4e0ff37342ad2179293cd0982747f40dd39734bb3eb500390",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-13/04-states.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "fddf5d014e363595cd96aefe34af8355342ab415ae8f05fb0a3c8090a8b570bd",
+          "caption": "Compare released and pressed control artwork."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-13/05-player-preview.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "bd6a35a35caf0964fa983f1efd0647ea5eaa6c45989051a5767e9a6627967fa8",
+          "caption": "Preview the skin in the player."
+        }
+      ],
+      "note": "Inherited from the submitted Apple or published Windows listing; these screenshots remain accurate."
+    },
+    {
+      "family": "macos",
+      "store_slot": "Mac",
+      "layout": "Desktop",
+      "device": "Native macOS GPU review launcher",
+      "source_commit": "629eaa347fe625b28b6a3ec3bbda7fd34e5ea5a1",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.89/screenshots/macos/00-playback.png",
+          "width": 1280,
+          "height": 800,
+          "sha256": "4223675155a5c917f72d83629421d9fe4aa3c1b5c655c796a2907e6fc38fcbcf",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_commit": "7dc3703",
+          "capture": "Native macOS running player in an isolated capture profile. Generated Cranamp demo tracks; no user media."
+        },
+        {
+          "file": "../0.1.89/screenshots/macos/01-studio-canvas.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "78f283db37e52434bcef9ce47477f842307d2c9a756f59182d2afa64dfaf1af0",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.89/screenshots/macos/02-sprites.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "f40c0a3d52810aa92636a704d1fe347d83e00b8a11dfc1c7d6418653c25500c5",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "../0.1.89/screenshots/macos/03-skin-colours.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "4711f5647008ed0ce7edd5642180b09c9e0e6eb655b39556079e50cc5a5e9275",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "../0.1.89/screenshots/macos/04-states.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "bf07199868d2d101c5a1cf68ffba63caa5189658ecd00fff0551b221d8ad79f7",
+          "caption": "Compare released and pressed control artwork."
+        },
+        {
+          "file": "../0.1.89/screenshots/macos/05-agent-connection.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "6a2fadae6cfcf51d3e1acaf48b55f82d7890bae572a52431647aa2618550782f",
+          "caption": "Connect an MCP agent to the same canvas and undo history."
+        }
+      ],
+      "note": "Inherited from the submitted Apple or published Windows listing; these screenshots remain accurate."
+    },
+    {
+      "family": "windows",
+      "store_slot": "Windows desktop",
+      "layout": "Desktop",
+      "device": "Native Windows app; Actions run 40232444953",
+      "source_commit": "3c39b5d791d8d305b76560f8fee125f17391b0a3",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.89/screenshots/windows/00-playback.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "ace24a965a9a132367d49bce4c9cf57a457e9f7127697c875948956fcc32ae60",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_commit": "7dc3703",
+          "capture": "Native Windows CI player capture with generated Cranamp demo tracks; no user media."
+        },
+        {
+          "file": "../0.1.89/screenshots/windows/01-player-preview.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "3e89838eec5526d1d5fbbd06a33dc9020b9cc3ab7f934866d124ee1a11f9d8d3",
+          "caption": "Preview the skin in the player."
+        },
+        {
+          "file": "../0.1.89/screenshots/windows/02-studio-canvas.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "0931bca4233153b3b6b7281ee909cd685dbbce729d42e1ad2dc9b90be8634222",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.89/screenshots/windows/03-sprites.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "0c5ab71f9be093b400bc02990234199cb6122ffbb6e94da768bd1844b349f689",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "../0.1.89/screenshots/windows/04-skin-colours.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "59cfb54104cc197c0e289570137f0d53a01f5b75895fa30ecb652422a2de2f87",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "../0.1.89/screenshots/windows/05-states.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "2fbb84d18290af0bb417bb233fb48f55e8e9b5c3325a3143e67358ff6fe2dec1",
+          "caption": "Compare released and pressed control artwork."
+        },
+        {
+          "file": "../0.1.89/screenshots/windows/06-agent-connection.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "213e52f88f90dc7709515c0fc4ac37f7b36499a9cd46cdc7f5b3a874d556302d",
+          "caption": "Connect an MCP agent to the same canvas and undo history."
+        }
+      ],
+      "source_workflow": "https://github.com/samoylenkodmitry/cranamp/actions/runs/40277241466",
+      "note": "Inherited from the submitted Apple or published Windows listing; these screenshots remain accurate."
+    }
+  ]
+}
