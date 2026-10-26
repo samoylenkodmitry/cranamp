@@ -38,3 +38,35 @@ fn every_bundled_skin_uses_classic_entries_and_loads() {
     }
     assert!(checked >= 18, "only {checked} skins were checked");
 }
+
+#[test]
+fn bundled_clock_digits_are_distinct() {
+    for entry in std::fs::read_dir("assets/skins").unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("wsz") {
+            continue;
+        }
+        let skin = skin::load_skin(&std::fs::read(&path).unwrap()).unwrap();
+        let stride = skin.numbers.width() as usize * 4;
+        let glyphs: Vec<Vec<u8>> = (0..10)
+            .map(|digit| {
+                (0..13)
+                    .flat_map(|y| {
+                        let start = y * stride + digit * 9 * 4;
+                        skin.numbers.pixels()[start..start + 9 * 4].iter().copied()
+                    })
+                    .collect()
+            })
+            .collect();
+        for a in 0..10 {
+            for b in a + 1..10 {
+                assert_ne!(
+                    glyphs[a],
+                    glyphs[b],
+                    "{}: digits {a} and {b} are identical",
+                    path.display()
+                );
+            }
+        }
+    }
+}

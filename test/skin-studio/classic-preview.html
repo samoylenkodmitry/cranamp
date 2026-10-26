@@ -9,11 +9,12 @@ for(const name of names)picker.add(new Option(name,name));
 picker.value='Catamp Purr Chaos Font Fixed.wsz';
 const url=name=>'/assets/skins/'+encodeURIComponent(name)+'?review='+Date.now();
 // Silent test media stays entirely in this browser; no network track requests.
-const data=new ArrayBuffer(44+8000*2),view=new DataView(data);
+const sampleCount=8000*120;
+const data=new ArrayBuffer(44+sampleCount*2),view=new DataView(data);
 const chars=(i,s)=>[...s].forEach((c,j)=>view.setUint8(i+j,c.charCodeAt(0)));
-chars(0,'RIFF');view.setUint32(4,data.byteLength-8,true);chars(8,'WAVEfmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,8000,true);view.setUint32(28,16000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);chars(36,'data');view.setUint32(40,16000,true);
+chars(0,'RIFF');view.setUint32(4,data.byteLength-8,true);chars(8,'WAVEfmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,8000,true);view.setUint32(28,16000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);chars(36,'data');view.setUint32(40,sampleCount*2,true);
 const media=URL.createObjectURL(new Blob([data],{type:'audio/wav'}));
-const app=new Webamp({initialSkin:{url:url(picker.value)},initialTracks:[{url:media,metaData:{title:'Retro Tracker',artist:''},duration:100},{url:media,metaData:{title:'Neon Ambient',artist:''},duration:90},{url:media,metaData:{title:'Lo-Fi Jungle',artist:''},duration:120}],windowLayout:{main:{position:{x:0,y:0}},equalizer:{position:{x:0,y:116}},playlist:{position:{x:0,y:232},size:[0,4]}}});
+const app=new Webamp({initialSkin:{url:url(picker.value)},initialTracks:[{url:media,metaData:{title:'Retro Tracker',artist:''},duration:120},{url:media,metaData:{title:'Neon Ambient',artist:''},duration:120},{url:media,metaData:{title:'Lo-Fi Jungle',artist:''},duration:120}],windowLayout:{main:{position:{x:0,y:0}},equalizer:{position:{x:0,y:116}},playlist:{position:{x:0,y:232},size:[0,4]}}});
 app.renderWhenReady(document.querySelector('#stage')).then(()=>status.textContent='Webamp '+Webamp.VERSION+' · '+picker.value).catch(e=>status.textContent=String(e));
 const load=async()=>{const name=picker.value; status.textContent='Loading '+name; app.setSkinFromUrl(url(name)); await app.skinIsLoaded(); status.textContent='Webamp '+Webamp.VERSION+' · '+name};
 document.querySelector('#load').onclick=load;

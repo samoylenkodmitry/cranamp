@@ -90,45 +90,64 @@ fn with_capture(
     if let Some(path) = std::env::var_os("CRANAMP_REVIEW_CAPTURE") {
         let once = std::env::var_os("CRANAMP_REVIEW_CAPTURE_ONCE").is_some();
         let rgb = std::env::var_os("CRANAMP_REVIEW_CAPTURE_RGB").is_some();
+        let settings = std::env::var_os("CRANAMP_REVIEW_OPEN_SETTINGS").is_some();
         let scale = std::env::var("CRANAMP_REVIEW_CAPTURE_SCALE")
             .ok()
             .and_then(|value| value.parse::<f32>().ok())
             .filter(|scale| scale.is_finite() && *scale > 0. && *scale <= 4.)
             .unwrap_or(1.);
         launcher.with_test_driver(move |robot| {
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                let Ok(shot) = robot.screenshot_with_scale(scale) else {
-                    break;
-                };
-                if let Some(frame) =
-                    image::RgbaImage::from_raw(shot.width, shot.height, shot.pixels)
-                {
-                    let frame = if let Some(height) = product_height {
-                        let height = (height as f32 * scale).round() as u32;
-                        image::imageops::crop_imm(&frame, 0, 0, shot.width, height).to_image()
-                    } else {
-                        frame
+            std::thread::spawn(move || {
+                if settings {
+                    robot.wait_for_idle().expect("player ready");
+                    let frame = robot.screenshot_with_scale(1.).expect("player frame");
+                    let width = frame.width as f32;
+                    let height = frame.height as f32;
+                    let scale = (width / 275.).min(height / 493.).clamp(0.5, 4.);
+                    robot
+                        .click((width - 275. * scale) / 2. + 262. * scale, 95.5 * scale)
+                        .expect("open player settings");
+                    robot.wait_for_idle().expect("settings ready");
+                    robot
+                        .validate_content("Settings")
+                        .expect("settings visible");
+                    robot.mouse_move(width / 2., height / 2.).unwrap();
+                    robot.mouse_scroll(0., -450.).unwrap();
+                }
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    let Ok(shot) = robot.screenshot_with_scale(scale) else {
+                        break;
                     };
-                    let path = std::path::PathBuf::from(&path);
-                    let pending = path.with_extension("pending.png");
-                    let saved = if rgb {
-                        assert!(
-                            frame.pixels().all(|pixel| pixel[3] == 255),
-                            "Store captures must be opaque"
-                        );
-                        image::DynamicImage::ImageRgba8(frame)
-                            .into_rgb8()
-                            .save(&pending)
-                    } else {
-                        frame.save(&pending)
-                    };
-                    if saved.is_ok() {
-                        if let Err(error) = std::fs::rename(pending, path) {
-                            eprintln!("Capture save failed: {error}");
-                        } else if once {
-                            cranpose_services::request_exit();
-                            break;
+                    if let Some(frame) =
+                        image::RgbaImage::from_raw(shot.width, shot.height, shot.pixels)
+                    {
+                        let frame = if let Some(height) = product_height {
+                            let height = (height as f32 * scale).round() as u32;
+                            image::imageops::crop_imm(&frame, 0, 0, shot.width, height).to_image()
+                        } else {
+                            frame
+                        };
+                        let path = std::path::PathBuf::from(&path);
+                        let pending = path.with_extension("pending.png");
+                        let saved = if rgb {
+                            assert!(
+                                frame.pixels().all(|pixel| pixel[3] == 255),
+                                "Store captures must be opaque"
+                            );
+                            image::DynamicImage::ImageRgba8(frame)
+                                .into_rgb8()
+                                .save(&pending)
+                        } else {
+                            frame.save(&pending)
+                        };
+                        if saved.is_ok() {
+                            if let Err(error) = std::fs::rename(pending, path) {
+                                eprintln!("Capture save failed: {error}");
+                            } else if once {
+                                cranpose_services::request_exit();
+                                break;
+                            }
                         }
                     }
                 }

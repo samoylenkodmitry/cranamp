@@ -34,8 +34,21 @@ public final class StudioCancelReviewTest {
                 android.os.SystemClock.sleep(100);
             }
             assertTrue("The system file picker must open",picker);
-            assertTrue(InstrumentationRegistry.getInstrumentation().getUiAutomation()
-                .performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK));
+            // Back may first leave a provider directory or close its navigation drawer.
+            // Continue until the picker returns its cancellation result to the app.
+            for (int attempts = 0; attempts < 16; attempts++) {
+                String progress = result.isFile()
+                        ? new String(Files.readAllBytes(result.toPath()), StandardCharsets.UTF_8) : "";
+                if (!progress.equals("picker-open")) break;
+                AccessibilityNodeInfo root = InstrumentationRegistry.getInstrumentation()
+                        .getUiAutomation().getRootInActiveWindow();
+                String pkg = root == null ? "" : String.valueOf(root.getPackageName());
+                if (pkg.contains("documentsui") || pkg.contains("myfiles")) {
+                    assertTrue(InstrumentationRegistry.getInstrumentation().getUiAutomation()
+                            .performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK));
+                }
+                android.os.SystemClock.sleep(750);
+            }
             deadline=android.os.SystemClock.uptimeMillis()+180000;
             String state="";
             while(android.os.SystemClock.uptimeMillis()<deadline) {

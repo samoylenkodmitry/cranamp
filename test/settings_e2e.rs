@@ -124,6 +124,10 @@ fn clicking_the_logo_opens_and_closes_the_settings_window() {
         "sync section should appear; visible={after:?}"
     );
     assert!(
+        contains(&after, "Anyone with folder access can read them."),
+        "sync must explain folder access before the user enables it; visible={after:?}"
+    );
+    assert!(
         contains(&after, "UPDATES") != cfg!(feature = "store"),
         "updates must appear only in direct builds; visible={after:?}"
     );
