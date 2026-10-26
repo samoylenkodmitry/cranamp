@@ -11,35 +11,47 @@
       "layout": "Phone; small and large layouts",
       "device": "Android emulator",
       "status": "ready",
-      "note": "Existing screenshots remain accurate for this playback update.",
+      "note": "Player, canvas, colours and state captures refreshed for 0.1.92. Any extra phone images retain their recorded source.",
       "images": [
         {
-          "file": "../0.1.90/screenshots/android-phone/01-playback.png",
+          "file": "screenshots/android-phone/01-playback.png",
           "width": 1080,
           "height": 1920,
-          "sha256": "0d2f0884d0a1c1feb85606cf5224460ba12b39291bfd9d43ab01507877aa2759",
-          "caption": "Play local audio with the equalizer and playlist."
+          "sha256": "06092be4288fa19fc7656f9fc9c92c44230be70b089e1653ae27d16ab4120df4",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1080x1920 at 480 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-phone/02-studio-canvas.png",
+          "file": "screenshots/android-phone/02-studio-canvas.png",
           "width": 1080,
           "height": 1920,
-          "sha256": "2a40536b237975175357b12a0f31e12eca9b61dcee27469b180cd15738a9725f",
-          "caption": "Draw pixel artwork with the current tool settings."
+          "sha256": "9e91acaa488baa9d45bf2154d71c44691afd07c818b4f19acb9ab4f92e330ee8",
+          "caption": "Draw pixel artwork with the current tool settings.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1080x1920 at 480 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-phone/03-skin-colours.png",
+          "file": "screenshots/android-phone/03-skin-colours.png",
           "width": 1080,
           "height": 1920,
-          "sha256": "51b0c26bc0ce75718095cd5ca7888c4632383f73b4ab4d1452efa7175d44a313",
-          "caption": "Set exact skin colours and preview the result."
+          "sha256": "d3dbc41128a885fc90cab04b3a2702fd9af7b818ee4af1eaa38cdd581ed31197",
+          "caption": "Set exact skin colours and preview the result.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1080x1920 at 480 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-phone/04-states.png",
+          "file": "screenshots/android-phone/04-states.png",
           "width": 1080,
           "height": 1920,
-          "sha256": "5b75bae99b2849cce704eb762694263a5a4a9091851f1643ba62874c66603c88",
-          "caption": "Compare released and pressed control artwork."
+          "sha256": "881b1bafc780bcf0a17b63bcda5754c3f15dd736e43adf2327619db0932b856b",
+          "caption": "Compare released and pressed control artwork.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1080x1920 at 480 dpi, store features. Native screenshots through public app controls."
         },
         {
           "file": "../0.1.90/screenshots/android-phone/05-open-studio.png",
@@ -63,35 +75,47 @@
       "layout": "Tablet, portrait",
       "device": "Android emulator",
       "status": "ready",
-      "note": "Existing screenshots remain accurate for this playback update.",
+      "note": "Player, canvas, colours and state captures refreshed for 0.1.92. Any extra phone images retain their recorded source.",
       "images": [
         {
-          "file": "../0.1.90/screenshots/android-tablet-7/01-playback.png",
+          "file": "screenshots/android-tablet-7/01-playback.png",
           "width": 1080,
           "height": 1920,
-          "sha256": "17304cb7db760b7c34e1a29b9bed8192e967044370e22f8e08dfb486e30ec27f",
-          "caption": "Play local audio with the equalizer and playlist."
+          "sha256": "3f8964d638da79bad78df939209055bfd35c624477f05a2893a37d71030eb7e4",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1080x1920 at 240 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-tablet-7/02-studio-canvas.png",
+          "file": "screenshots/android-tablet-7/02-studio-canvas.png",
           "width": 1080,
           "height": 1920,
-          "sha256": "d2448f1b2aa1916a6cc53e7c2a7c0d3b8c3d41598c28b10fa12248e40d07a1b2",
-          "caption": "Draw pixel artwork with the current tool settings."
+          "sha256": "11ff783fe81ad4cc36a5027a8688d925404c5ad1aae9eec1bb1bd803d585b650",
+          "caption": "Draw pixel artwork with the current tool settings.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1080x1920 at 240 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-tablet-7/03-skin-colours.png",
+          "file": "screenshots/android-tablet-7/03-skin-colours.png",
           "width": 1080,
           "height": 1920,
-          "sha256": "c6f44aeb499ad824c93025a0318faa6d618b9ccf1fbc96ea2a8cd7617582c780",
-          "caption": "Set exact skin colours and preview the result."
+          "sha256": "63671a872356851b0a37eedbb0bdab0bf7ea50bfde2b3d11359898445a3d558d",
+          "caption": "Set exact skin colours and preview the result.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1080x1920 at 240 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-tablet-7/04-states.png",
+          "file": "screenshots/android-tablet-7/04-states.png",
           "width": 1080,
           "height": 1920,
-          "sha256": "9d23e43fdc8f6f8ac7b6147d138bfb525b99066e034808b0c2eb0577382691f0",
-          "caption": "Compare released and pressed control artwork."
+          "sha256": "bc3b8b0b378036ce0c08a8452498a1c5f30e239d73c9498c05dba09deccdaeb5",
+          "caption": "Compare released and pressed control artwork.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1080x1920 at 240 dpi, store features. Native screenshots through public app controls."
         }
       ]
     },
@@ -101,35 +125,47 @@
       "layout": "Wide tablet, landscape",
       "device": "Android emulator",
       "status": "ready",
-      "note": "Existing screenshots remain accurate for this playback update.",
+      "note": "Player, canvas, colours and state captures refreshed for 0.1.92. Any extra phone images retain their recorded source.",
       "images": [
         {
-          "file": "../0.1.90/screenshots/android-tablet-10/01-playback.png",
+          "file": "screenshots/android-tablet-10/01-playback.png",
           "width": 1920,
           "height": 1080,
-          "sha256": "b61da4b43e1c549d7d5d121bd0ecffbe5fc594b31ccbaee182c39fdb5fccd8b8",
-          "caption": "Play local audio with the equalizer and playlist."
+          "sha256": "0d7ae0d5ae8a708c9ccff2ce416247a453eea515371a306b69d71c3047edff35",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1920x1080 at 240 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-tablet-10/02-studio-canvas.png",
+          "file": "screenshots/android-tablet-10/02-studio-canvas.png",
           "width": 1920,
           "height": 1080,
-          "sha256": "034e11c97bcfae6e96bacd28822c827bb2ae0b1697d1a0f366eca289d81d90e8",
-          "caption": "Draw pixel artwork with the current tool settings."
+          "sha256": "cad2c7ee35220e69dd6be435ab18ef64e21b12e46cf9e5a291c15d0276c5a56b",
+          "caption": "Draw pixel artwork with the current tool settings.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1920x1080 at 240 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-tablet-10/03-skin-colours.png",
+          "file": "screenshots/android-tablet-10/03-skin-colours.png",
           "width": 1920,
           "height": 1080,
-          "sha256": "ad29d7134b264ba08dfd9e69a8f1d9e92c1f06e2f7f1b457fe0de770e8361ef2",
-          "caption": "Set exact skin colours and preview the result."
+          "sha256": "1fc6d25f2cd5eaa05fd5cdeeee6d19f14332d6a46049c9f6505a9f58a9ca2322",
+          "caption": "Set exact skin colours and preview the result.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1920x1080 at 240 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-tablet-10/04-states.png",
+          "file": "screenshots/android-tablet-10/04-states.png",
           "width": 1920,
           "height": 1080,
-          "sha256": "e5109e87c6232302f0c264e9349fd8417202727a1ef041ba81eee7bb6b729a84",
-          "caption": "Compare released and pressed control artwork."
+          "sha256": "28b89134fe6cfe6b2a4187ccd1a46198bf310e41524ff6b252cd9f65434e403d",
+          "caption": "Compare released and pressed control artwork.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 1920x1080 at 240 dpi, store features. Native screenshots through public app controls."
         }
       ]
     },
@@ -139,35 +175,47 @@
       "layout": "Desktop-width Android window",
       "device": "Android emulator",
       "status": "ready",
-      "note": "Existing screenshots remain accurate for this playback update.",
+      "note": "Player, canvas, colours and state captures refreshed for 0.1.92. Any extra phone images retain their recorded source.",
       "images": [
         {
-          "file": "../0.1.90/screenshots/android-desktop/01-playback.png",
+          "file": "screenshots/android-desktop/01-playback.png",
           "width": 2560,
           "height": 1440,
-          "sha256": "328dfdba661071050b4f6b60a087a0aa729d934b114f67668db1b50736aaa301",
-          "caption": "Play local audio with the equalizer and playlist."
+          "sha256": "3a13133e24959c111eebe0ac85a595723dcf8a294c463d5d03420a27ad83e73b",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 2560x1440 at 240 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-desktop/02-studio-canvas.png",
+          "file": "screenshots/android-desktop/02-studio-canvas.png",
           "width": 2560,
           "height": 1440,
-          "sha256": "93b807ff4e7781467afc647166f5969bd6d351de506dd12f28be7c3f503fe94f",
-          "caption": "Draw pixel artwork with the current tool settings."
+          "sha256": "c356565fee7b7b30086a547088169c738d2e86e0da279fb94f93cc4d40c08b9a",
+          "caption": "Draw pixel artwork with the current tool settings.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 2560x1440 at 240 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-desktop/03-skin-colours.png",
+          "file": "screenshots/android-desktop/03-skin-colours.png",
           "width": 2560,
           "height": 1440,
-          "sha256": "923e53449821925d04765ca0183a79f7212e7507f7d528f782c8183412190bab",
-          "caption": "Set exact skin colours and preview the result."
+          "sha256": "350ea86e58c84cbc561042bbee4a5c45dff9d96f3848ab64f607627588b5abb8",
+          "caption": "Set exact skin colours and preview the result.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 2560x1440 at 240 dpi, store features. Native screenshots through public app controls."
         },
         {
-          "file": "../0.1.90/screenshots/android-desktop/04-states.png",
+          "file": "screenshots/android-desktop/04-states.png",
           "width": 2560,
           "height": 1440,
-          "sha256": "28e39c40e3cc4fa848fd2e3e54466e31e41823cf3470b62d4fd0ab290194235e",
-          "caption": "Compare released and pressed control artwork."
+          "sha256": "ea5d1726e4c16d44fe2766bb30d77216682b8519264c158aab02f70ec30a3477",
+          "caption": "Compare released and pressed control artwork.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Android emulator, 2560x1440 at 240 dpi, store features. Native screenshots through public app controls."
         }
       ]
     },
@@ -413,52 +461,68 @@
       "status": "ready",
       "images": [
         {
-          "file": "../0.1.89/screenshots/windows/00-playback.png",
+          "file": "screenshots/windows/00-playback.png",
           "width": 1440,
           "height": 900,
           "sha256": "ace24a965a9a132367d49bce4c9cf57a457e9f7127697c875948956fcc32ae60",
           "caption": "Play local audio with the equalizer and playlist.",
-          "source_commit": "7dc3703",
-          "capture": "Native Windows CI player capture with generated Cranamp demo tracks; no user media."
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Windows GPU capture from store package CI run 40382240309. Player first, then Studio through public controls.",
+          "source_version": "0.1.92"
         },
         {
-          "file": "../0.1.89/screenshots/windows/02-studio-canvas.png",
+          "file": "screenshots/windows/02-studio-canvas.png",
           "width": 1388,
           "height": 1000,
           "sha256": "0931bca4233153b3b6b7281ee909cd685dbbce729d42e1ad2dc9b90be8634222",
-          "caption": "Draw pixel artwork with tool settings beside the canvas."
+          "caption": "Draw pixel artwork with tool settings beside the canvas.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Windows GPU capture from store package CI run 40382240309. Player first, then Studio through public controls."
         },
         {
-          "file": "../0.1.89/screenshots/windows/03-sprites.png",
+          "file": "screenshots/windows/03-sprites.png",
           "width": 1388,
           "height": 1000,
-          "sha256": "0c5ab71f9be093b400bc02990234199cb6122ffbb6e94da768bd1844b349f689",
-          "caption": "Edit each control at pixel size."
+          "sha256": "61e4ffc8757d4fc0e9de73f6f5be3ab47c6142f83f129e45d11bb75ce377ba60",
+          "caption": "Edit each control at pixel size.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Windows GPU capture from store package CI run 40382240309. Player first, then Studio through public controls."
         },
         {
-          "file": "../0.1.89/screenshots/windows/04-skin-colours.png",
+          "file": "screenshots/windows/04-skin-colours.png",
           "width": 1388,
           "height": 1000,
           "sha256": "59cfb54104cc197c0e289570137f0d53a01f5b75895fa30ecb652422a2de2f87",
-          "caption": "Set exact skin colours and preview the result."
+          "caption": "Set exact skin colours and preview the result.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Windows GPU capture from store package CI run 40382240309. Player first, then Studio through public controls."
         },
         {
-          "file": "../0.1.89/screenshots/windows/05-states.png",
+          "file": "screenshots/windows/05-states.png",
           "width": 1388,
           "height": 1000,
           "sha256": "2fbb84d18290af0bb417bb233fb48f55e8e9b5c3325a3143e67358ff6fe2dec1",
-          "caption": "Compare released and pressed control artwork."
+          "caption": "Compare released and pressed control artwork.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Windows GPU capture from store package CI run 40382240309. Player first, then Studio through public controls."
         },
         {
-          "file": "../0.1.89/screenshots/windows/06-agent-connection.png",
+          "file": "screenshots/windows/06-agent-connection.png",
           "width": 1388,
           "height": 1000,
-          "sha256": "213e52f88f90dc7709515c0fc4ac37f7b36499a9cd46cdc7f5b3a874d556302d",
-          "caption": "Connect an MCP agent to the same canvas and undo history."
+          "sha256": "31695b201474486c37554795320256a01f08aea2efc32b8b1d143551b71833f6",
+          "caption": "Connect an MCP agent to the same canvas and undo history.",
+          "source_version": "0.1.92",
+          "source_commit": "f9b050280caff3bfd7195baa541b653e900d3451",
+          "capture": "Windows GPU capture from store package CI run 40382240309. Player first, then Studio through public controls."
         }
       ],
       "source_workflow": "https://github.com/samoylenkodmitry/cranamp/actions/runs/40277241466",
-      "note": "Existing screenshots remain accurate for this playback update."
+      "note": "Six native Windows captures. Includes the player and the desktop MCP connection."
     }
   ]
 }
