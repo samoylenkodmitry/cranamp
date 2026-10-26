@@ -1,0 +1,260 @@
+{
+  "version": "0.1.89",
+  "locale": "en-US",
+  "capture_date": "2026-10-26",
+  "product_source": "033e6f485391df7bccc48400a5e9666fb1696a25",
+  "image_processing": "Actual app pixels. Fully opaque alpha removed; RGB bytes verified unchanged. Mac captures omit the review navigation footer.",
+  "galleries": [
+    {
+      "family": "ios-small",
+      "store_slot": "iPhone with Face ID, medium display",
+      "layout": "Small phone",
+      "device": "iPhone 13 mini simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.88/screenshots/ios-small/01-studio-canvas.png",
+          "width": 1080,
+          "height": 2340,
+          "sha256": "8be69f12687e874f46c9a2b533b386b47d9a6371dc012ac4d5e9909471282a8a",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-small/02-window-shape.png",
+          "width": 1080,
+          "height": 2340,
+          "sha256": "2737d4593c826e054435a9557246145e605b8b2bb8053b13579229dc1938a36b",
+          "caption": "Edit the visible shape of each skin window."
+        }
+      ],
+      "note": "Mobile UI unchanged for this desktop MCP release; inherited native captures from 0.1.88."
+    },
+    {
+      "family": "ios-6.9",
+      "store_slot": "iPhone, large display",
+      "layout": "Large phone",
+      "device": "iPhone 17 Pro Max simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/01-playback.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "f57509bf9d66568634af590ea120d07ed63a531079f9009063b301e0a026fab6",
+          "caption": "Play your music with playlists and an equalizer."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/02-sprites.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "8cd7fa54eafc6a0f3ac49b20ef5d095daf63e0427454507c3343acef142c0efc",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/03-studio-canvas.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "22d51b33600406d5677a936592b29ee3c29f40f18281156f8202aad97d4e8bce",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/04-skin-colours.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "bc3a9f34b23bbaed5f41831f9db9a94bf0b5c7c7c47bbd03c142455c20b69b0e",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "../0.1.88/screenshots/ios-6.9/05-states.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "1c5ccfe2b28c39af7a0774f1302488d77d5479bfa1b715fee6342c5cf112b4d6",
+          "caption": "Compare released and pressed control artwork."
+        }
+      ],
+      "note": "Mobile UI unchanged for this desktop MCP release; inherited native captures from 0.1.88."
+    },
+    {
+      "family": "ipad-11",
+      "store_slot": "iPad 11-inch",
+      "layout": "Tablet",
+      "device": "iPad Air 11-inch M3 simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.88/screenshots/ipad-11/01-studio-canvas.png",
+          "width": 1640,
+          "height": 2360,
+          "sha256": "58a25f664774d79ad5b4fdca958bda3e09c97f175bf168bd81d8b2a44f930b65",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-11/02-bitmap-font.png",
+          "width": 1640,
+          "height": 2360,
+          "sha256": "a9f370393d3a40e633bfc67ea432849ed6e6d3eeb63bb2606443c3df88f1b610",
+          "caption": "Set font colours and edit the letters."
+        }
+      ],
+      "note": "Mobile UI unchanged for this desktop MCP release; inherited native captures from 0.1.88."
+    },
+    {
+      "family": "ipad-13",
+      "store_slot": "iPad 13-inch",
+      "layout": "Wide tablet and desktop",
+      "device": "iPad Pro 13-inch M4 simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "../0.1.88/screenshots/ipad-13/01-studio-canvas.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "108716fa762134fe3e4b96af887e9bab0b2b71b4d63205ef1f7d6a547c5ae328",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-13/02-sprites.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "baeac8dcbadf3da766b1569b2ae8b7dcb6d43f52a5421fa42846548ba8213906",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-13/03-skin-colours.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "b37e7c28b3406eb4e0ff37342ad2179293cd0982747f40dd39734bb3eb500390",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-13/04-states.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "fddf5d014e363595cd96aefe34af8355342ab415ae8f05fb0a3c8090a8b570bd",
+          "caption": "Compare released and pressed control artwork."
+        },
+        {
+          "file": "../0.1.88/screenshots/ipad-13/05-player-preview.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "bd6a35a35caf0964fa983f1efd0647ea5eaa6c45989051a5767e9a6627967fa8",
+          "caption": "Preview the skin in the player."
+        }
+      ],
+      "note": "Mobile UI unchanged for this desktop MCP release; inherited native captures from 0.1.88."
+    },
+    {
+      "family": "macos",
+      "store_slot": "Mac",
+      "layout": "Desktop",
+      "device": "Native macOS GPU review launcher",
+      "source_commit": "629eaa347fe625b28b6a3ec3bbda7fd34e5ea5a1",
+      "status": "ready",
+      "images": [
+        {
+          "file": "screenshots/macos/01-studio-canvas.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "78f283db37e52434bcef9ce47477f842307d2c9a756f59182d2afa64dfaf1af0",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "screenshots/macos/02-sprites.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "f40c0a3d52810aa92636a704d1fe347d83e00b8a11dfc1c7d6418653c25500c5",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "screenshots/macos/03-skin-colours.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "4711f5647008ed0ce7edd5642180b09c9e0e6eb655b39556079e50cc5a5e9275",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/macos/04-states.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "bf07199868d2d101c5a1cf68ffba63caa5189658ecd00fff0551b221d8ad79f7",
+          "caption": "Compare released and pressed control artwork."
+        },
+        {
+          "file": "screenshots/macos/05-agent-connection.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "6a2fadae6cfcf51d3e1acaf48b55f82d7890bae572a52431647aa2618550782f",
+          "caption": "Connect an MCP agent to the same canvas and undo history."
+        }
+      ]
+    },
+    {
+      "family": "windows",
+      "store_slot": "Windows desktop",
+      "layout": "Desktop",
+      "device": "Native Windows app; Actions run 40232444953",
+      "source_commit": "3c39b5d791d8d305b76560f8fee125f17391b0a3",
+      "status": "ready",
+      "images": [
+        {
+          "file": "screenshots/windows/01-player-preview.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "3e89838eec5526d1d5fbbd06a33dc9020b9cc3ab7f934866d124ee1a11f9d8d3",
+          "caption": "Preview the skin in the player."
+        },
+        {
+          "file": "screenshots/windows/02-studio-canvas.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "0931bca4233153b3b6b7281ee909cd685dbbce729d42e1ad2dc9b90be8634222",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "screenshots/windows/03-sprites.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "0c5ab71f9be093b400bc02990234199cb6122ffbb6e94da768bd1844b349f689",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "screenshots/windows/04-skin-colours.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "59cfb54104cc197c0e289570137f0d53a01f5b75895fa30ecb652422a2de2f87",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/windows/05-states.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "2fbb84d18290af0bb417bb233fb48f55e8e9b5c3325a3143e67358ff6fe2dec1",
+          "caption": "Compare released and pressed control artwork."
+        },
+        {
+          "file": "screenshots/windows/06-agent-connection.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "213e52f88f90dc7709515c0fc4ac37f7b36499a9cd46cdc7f5b3a874d556302d",
+          "caption": "Connect an MCP agent to the same canvas and undo history."
+        }
+      ],
+      "source_workflow": "https://github.com/samoylenkodmitry/cranamp/actions/runs/40277241466"
+    }
+  ],
+  "pending": [
+    "Android phone screenshots",
+    "Android 7-inch tablet screenshots",
+    "Android 10-inch tablet screenshots",
+    "Android desktop screenshots"
+  ],
+  "references": [
+    "https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications/",
+    "https://support.google.com/googleplay/android-developer/answer/9866151",
+    "https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/screenshots-and-images"
+  ]
+}
