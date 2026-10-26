@@ -2,6 +2,7 @@
 #![recursion_limit = "256"]
 mod app_icon;
 pub mod audio;
+mod audio_import;
 mod content_io;
 mod fonts;
 mod sync;
@@ -16,6 +17,7 @@ fn launcher() -> AppLauncher<cranpose::AppFonts> {
         .with_title(TITLE)
         .with_application_id(APPLICATION_ID)
         .with_fonts(fonts::APP_FONTS)
+        .with_developer_inspector(cfg!(debug_assertions) && !cfg!(feature = "store"))
         // A skin's cursors are pixel art drawn at an exact size; enlarged with
         // the system pointer they turn into smeared blocks.
         .with_custom_cursor_size(CustomCursorSize::AsDrawn)
@@ -47,11 +49,11 @@ pub fn create_android_app() -> AppLauncher<cranpose::AppFonts> {
 }
 #[cfg(all(feature = "ios", feature = "renderer-wgpu", target_os = "ios"))]
 pub fn ios_entry_point() {
-    launcher().run(ios_root);
+    launcher().run(mobile_root);
 }
-#[cfg(all(feature = "ios", feature = "renderer-wgpu", target_os = "ios"))]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 #[cranpose::composable]
-fn ios_root() {
+fn mobile_root() {
     cranpose::Box(
         cranpose::Modifier::empty()
             .fill_max_size()
@@ -60,9 +62,10 @@ fn ios_root() {
         winamp::WinampStackedApp,
     );
 }
+#[cfg(not(all(feature = "studio-review", target_os = "android")))]
 cranpose::android_main! {
     launcher: create_android_app(),
-    content: winamp::WinampStackedApp,
+    content: mobile_root,
 }
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use wasm_bindgen::prelude::*;

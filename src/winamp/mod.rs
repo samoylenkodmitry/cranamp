@@ -2012,6 +2012,8 @@ pub fn WinampStackedApp() {
     let tab_state = remember_winamp_tab_state();
     let skin_state = remember_winamp_skin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
+    #[cfg(target_os = "android")]
+    AndroidPlayerWindow(tab_state.player);
     {
         WinampStudioSurface(tab_state.player, skin_state);
         if tab_state.player.get().studio_open {
@@ -2121,8 +2123,41 @@ impl StackedDrag {
 }
 #[cfg(target_os = "android")]
 #[composable]
+fn AndroidPlayerWindow(player: MutableState<WinampState>) {
+    let snapshot = player.get();
+    if snapshot.studio_open || android_floating_overlay_enabled() {
+        return;
+    }
+    let available = cranpose_services::host_surface_size();
+    let initial =
+        fullscreen_stacked_layout(available.width, available.height, &snapshot, ui_scale());
+    let window = rememberAndroidHostWindowState(
+        stacked_surface_width(initial),
+        stacked_surface_height(&snapshot, initial),
+    );
+    let actual = window.actual_size();
+    if actual.width > 0. && actual.height > 0. {
+        let layout = fullscreen_stacked_layout(actual.width, actual.height, &snapshot, ui_scale());
+        let wanted = Size::new(
+            stacked_surface_width(layout),
+            stacked_surface_height(&snapshot, layout),
+        );
+        cranpose_core::SideEffect(move || {
+            if window.requested_size_non_reactive() != wanted {
+                let _ = window.set_size(wanted);
+            }
+        });
+    }
+}
+
+#[cfg(target_os = "android")]
+#[composable]
 fn stacked_drag(layout: StackedLayout, snapshot: WinampState) -> StackedDrag {
     let overlay_enabled = android_floating_overlay_enabled();
+    if !overlay_enabled {
+        return StackedDrag::Fixed;
+    }
+
     let overlay_position = cranpose_core::rememberMutableStateOf(|| {
         Point::new(
             ANDROID_OVERLAY_INITIAL_X as f32,
@@ -2146,7 +2181,7 @@ fn stacked_drag(layout: StackedLayout, snapshot: WinampState) -> StackedDrag {
     };
     cranpose_core::SideEffect(move || {
         set_android_winamp_surface_origin(surface_origin);
-        if overlay_enabled && host_window.requested_size_non_reactive() != host_window_size {
+        if host_window.requested_size_non_reactive() != host_window_size {
             let _ = host_window.set_size(host_window_size);
         }
     });
@@ -2467,6 +2502,7 @@ struct StackedLayout {
     content_left_inset: f32,
     content_top_inset: f32,
 }
+#[cfg(target_os = "android")]
 fn resizable_stacked_layout(
     available_width: f32,
     available_height: f32,
@@ -2536,37 +2572,37 @@ fn resizable_stacked_layout(
         content_top_inset,
     }
 }
-#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
 fn fullscreen_stacked_layout(
     available_width: f32,
     available_height: f32,
     snapshot: &WinampState,
     fallback_scale: f32,
 ) -> StackedLayout {
-    // Include the playlist minimum when fitting the player. Width-only scaling
-    // clips its footer on tablets and short landscape surfaces.
-    resizable_stacked_layout(
-        available_width,
-        available_height,
-        0.0,
-        0.0,
-        snapshot,
-        fallback_scale,
-    )
+    let skin_height = stacked_skin_height(snapshot, PLAYLIST_HEIGHT);
+    let scale = if available_width.is_finite()
+        && available_height.is_finite()
+        && available_width > 0.
+        && available_height > 0.
+    {
+        (available_width / MAIN_WIDTH)
+            .min(available_height / skin_height)
+            .clamp(0.5, 4.)
+    } else {
+        fallback_scale
+    };
+    StackedLayout {
+        scale,
+        playlist_height: PLAYLIST_HEIGHT,
+        content_left_inset: ((available_width - MAIN_WIDTH * scale) / 2.).max(0.),
+        content_top_inset: 0.,
+    }
 }
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn web_stacked_layout(snapshot: &WinampState) -> StackedLayout {
     let fallback_height = stacked_skin_height(snapshot, PLAYLIST_HEIGHT);
     let available =
         web_current_surface_size().unwrap_or_else(|| Size::new(MAIN_WIDTH, fallback_height));
-    resizable_stacked_layout(
-        available.width,
-        available.height,
-        0.0,
-        0.0,
-        snapshot,
-        ui_scale(),
-    )
+    fullscreen_stacked_layout(available.width, available.height, snapshot, ui_scale())
 }
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn web_current_surface_size() -> Option<Size> {
@@ -2574,7 +2610,6 @@ fn web_current_surface_size() -> Option<Size> {
     (size.width.is_finite() && size.width > 0.0 && size.height.is_finite() && size.height > 0.0)
         .then(|| Size::new(size.width, size.height))
 }
-#[cfg(any(target_os = "android", all(feature = "web", target_arch = "wasm32")))]
 fn stacked_skin_height(snapshot: &WinampState, playlist_height: f32) -> f32 {
     main_height(snapshot.main_shaded)
         + if snapshot.eq_visible { EQ_HEIGHT } else { 0.0 }
@@ -2584,11 +2619,11 @@ fn stacked_skin_height(snapshot: &WinampState, playlist_height: f32) -> f32 {
             0.0
         }
 }
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn stacked_surface_width(layout: StackedLayout) -> f32 {
     MAIN_WIDTH * layout.scale
 }
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn stacked_surface_height(snapshot: &WinampState, layout: StackedLayout) -> f32 {
     stacked_skin_height(snapshot, layout.playlist_height) * layout.scale
 }
@@ -5032,6 +5067,7 @@ fn PlaylistEntries(
         },
     );
 }
+#[cfg(any(test, target_os = "android"))]
 fn playlist_min_height() -> f32 {
     145.0
 }

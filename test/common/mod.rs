@@ -69,6 +69,9 @@ pub fn pump(shell: &mut AppShell<HitGraphRenderer>) {
 }
 pub fn visible_texts(shell: &mut AppShell<HitGraphRenderer>) -> Vec<String> {
     fn collect(node: &cranpose_ui::SemanticsNode, out: &mut Vec<String>) {
+        if node.hidden {
+            return;
+        }
         if let cranpose_ui::SemanticsRole::Text { value } = &node.role {
             out.push(value.as_str().to_owned());
         } else if let Some(description) = &node.description {

@@ -1,0 +1,241 @@
+{
+  "version": "0.1.88",
+  "locale": "en-US",
+  "capture_date": "2026-10-25",
+  "product_source": "ef187f82d312800c119697e354eebdacb11f1694",
+  "image_processing": "Actual app pixels. Fully opaque alpha removed; RGB bytes verified unchanged. Mac captures omit the review navigation footer.",
+  "galleries": [
+    {
+      "family": "ios-small",
+      "store_slot": "iPhone with Face ID, medium display",
+      "layout": "Small phone",
+      "device": "iPhone 13 mini simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "screenshots/ios-small/01-studio-canvas.png",
+          "width": 1080,
+          "height": 2340,
+          "sha256": "8be69f12687e874f46c9a2b533b386b47d9a6371dc012ac4d5e9909471282a8a",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "screenshots/ios-small/02-window-shape.png",
+          "width": 1080,
+          "height": 2340,
+          "sha256": "2737d4593c826e054435a9557246145e605b8b2bb8053b13579229dc1938a36b",
+          "caption": "Edit the visible shape of each skin window."
+        }
+      ]
+    },
+    {
+      "family": "ios-6.9",
+      "store_slot": "iPhone, large display",
+      "layout": "Large phone",
+      "device": "iPhone 17 Pro Max simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "screenshots/ios-6.9/01-playback.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "f57509bf9d66568634af590ea120d07ed63a531079f9009063b301e0a026fab6",
+          "caption": "Play your music with playlists and an equalizer."
+        },
+        {
+          "file": "screenshots/ios-6.9/02-sprites.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "8cd7fa54eafc6a0f3ac49b20ef5d095daf63e0427454507c3343acef142c0efc",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "screenshots/ios-6.9/03-studio-canvas.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "22d51b33600406d5677a936592b29ee3c29f40f18281156f8202aad97d4e8bce",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "screenshots/ios-6.9/04-skin-colours.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "bc3a9f34b23bbaed5f41831f9db9a94bf0b5c7c7c47bbd03c142455c20b69b0e",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/ios-6.9/05-states.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "1c5ccfe2b28c39af7a0774f1302488d77d5479bfa1b715fee6342c5cf112b4d6",
+          "caption": "Compare released and pressed control artwork."
+        }
+      ]
+    },
+    {
+      "family": "ipad-11",
+      "store_slot": "iPad 11-inch",
+      "layout": "Tablet",
+      "device": "iPad Air 11-inch M3 simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "screenshots/ipad-11/01-studio-canvas.png",
+          "width": 1640,
+          "height": 2360,
+          "sha256": "58a25f664774d79ad5b4fdca958bda3e09c97f175bf168bd81d8b2a44f930b65",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "screenshots/ipad-11/02-bitmap-font.png",
+          "width": 1640,
+          "height": 2360,
+          "sha256": "a9f370393d3a40e633bfc67ea432849ed6e6d3eeb63bb2606443c3df88f1b610",
+          "caption": "Set font colours and edit the letters."
+        }
+      ]
+    },
+    {
+      "family": "ipad-13",
+      "store_slot": "iPad 13-inch",
+      "layout": "Wide tablet and desktop",
+      "device": "iPad Pro 13-inch M4 simulator",
+      "source_commit": "e09144b",
+      "status": "ready",
+      "images": [
+        {
+          "file": "screenshots/ipad-13/01-studio-canvas.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "108716fa762134fe3e4b96af887e9bab0b2b71b4d63205ef1f7d6a547c5ae328",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "screenshots/ipad-13/02-sprites.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "baeac8dcbadf3da766b1569b2ae8b7dcb6d43f52a5421fa42846548ba8213906",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "screenshots/ipad-13/03-skin-colours.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "b37e7c28b3406eb4e0ff37342ad2179293cd0982747f40dd39734bb3eb500390",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/ipad-13/04-states.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "fddf5d014e363595cd96aefe34af8355342ab415ae8f05fb0a3c8090a8b570bd",
+          "caption": "Compare released and pressed control artwork."
+        },
+        {
+          "file": "screenshots/ipad-13/05-player-preview.png",
+          "width": 2752,
+          "height": 2064,
+          "sha256": "bd6a35a35caf0964fa983f1efd0647ea5eaa6c45989051a5767e9a6627967fa8",
+          "caption": "Preview the skin in the player."
+        }
+      ]
+    },
+    {
+      "family": "macos",
+      "store_slot": "Mac",
+      "layout": "Desktop",
+      "device": "Native macOS GPU review launcher",
+      "source_commit": "160884e",
+      "status": "ready",
+      "images": [
+        {
+          "file": "screenshots/macos/01-studio-canvas.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "94cecc4a573722b0d721355a22185a4851e718dd59844a14fbf4e124ad55e3fa",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "screenshots/macos/02-sprites.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "507d04a9d5f1fe10be13ebd738c2056d38498f31a0e45c549598d280a2d88ff0",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "screenshots/macos/03-skin-colours.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "6beb30bea369894a66ba02d716ec0320d49290dd8fd8a118e33f05383b6a78d8",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/macos/04-states.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "298534ad80ce8afc610357fbfe659b75a5ecbe668825201258e996b0d595a4cb",
+          "caption": "Compare released and pressed control artwork."
+        }
+      ]
+    },
+    {
+      "family": "windows",
+      "store_slot": "Windows desktop",
+      "layout": "Desktop",
+      "device": "Native Windows app; Actions run 40232444953",
+      "source_commit": "160884e",
+      "status": "ready",
+      "images": [
+        {
+          "file": "screenshots/windows/01-player-preview.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "a728d444aba12d54c33d18739741aaf850a190fa541fbfc48617383f7485b4d5",
+          "caption": "Preview the skin in the player."
+        },
+        {
+          "file": "screenshots/windows/02-studio-canvas.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "e4a7e6f24780c50aac46d84dbd96ac65204ee057bdd59cabf48a0192eec2837e",
+          "caption": "Draw pixel artwork with tool settings beside the canvas."
+        },
+        {
+          "file": "screenshots/windows/03-sprites.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "35a8c872aa867eb283ca2925bf38ea454c400064a0ba41def95721d97c4129dd",
+          "caption": "Edit each control at pixel size."
+        },
+        {
+          "file": "screenshots/windows/04-skin-colours.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "b4f7c0030f9a207e9a635e9490fb1e2ef5fb2845c1ebc132f0f6e89e024430c8",
+          "caption": "Set exact skin colours and preview the result."
+        },
+        {
+          "file": "screenshots/windows/05-states.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "4ff4040738d0b503591926e00f2f627d69251887c14c9eea31e11d506bc76407",
+          "caption": "Compare released and pressed control artwork."
+        }
+      ]
+    }
+  ],
+  "pending": [
+    "Android phone screenshots",
+    "Android 7-inch tablet screenshots",
+    "Android 10-inch tablet screenshots",
+    "Android desktop screenshots"
+  ],
+  "references": [
+    "https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications/",
+    "https://support.google.com/googleplay/android-developer/answer/9866151",
+    "https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/screenshots-and-images"
+  ]
+}

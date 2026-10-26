@@ -4,30 +4,30 @@ A pixel editor for classic `.wsz` skins, built into Cranamp. It is driven
 by pointer, by touch, and by MCP; all three act on one document with one undo
 history.
 
-Open it from **Settings → Open Skin Studio** on desktop, Android or the web, or
+Open it from **Settings → Open Skin Studio** on desktop, Android, iOS or the web, or
 from the command line:
 
 ```sh
-cargo run -- --skin-studio
-cargo run -- --skin-studio '/absolute/path/skin.wsz'
-cargo run -- --skin-studio '/absolute/path/project.cstudio'
-cargo run -- --skin-studio-mcp          # stdio MCP relay into a running Studio
-cargo run -- --touch-preview --studio   # the editor at handset size
+cargo run --bin cranamp -- --skin-studio
+cargo run --bin cranamp -- --skin-studio '/absolute/path/skin.wsz'
+cargo run --bin cranamp -- --skin-studio '/absolute/path/project.cstudio'
+cargo run --bin cranamp -- --skin-studio-mcp          # stdio MCP relay into a running Studio
+cargo run --bin cranamp -- --touch-preview --studio   # the editor at handset size
 ```
 
-On desktop the editor opens in a separate native window. Android and the browser
+On desktop the editor opens in a separate native window. Android, iOS and the browser
 open it inside the running player. Playback continues in every case. With no path
 it opens the skin the player is wearing.
 
 ## Platform matrix
 
-| | Desktop | Android | Web |
+| | Desktop | Android / iOS | Web |
 | --- | --- | --- | --- |
-| Drawing engine, reports, materials, history | yes | yes | yes |
-| MCP server | yes | yes | no (no listening socket) |
+| Drawing engine and history | yes | yes | yes |
+| MCP server | yes | no | no |
 | `studio_screenshot` GPU capture | yes | no | no |
 | Live player preview | yes | yes | yes |
-| File open/export | path or picker | picker | `localStorage` + download |
+| File open/export | path or picker | picker | picker + download |
 
 The web build is checked with:
 
@@ -42,27 +42,30 @@ real `.wsz`.
 
 ## Layouts
 
-One editor at every size. A desktop window, a browser and a handset get the same
-composable, the same buttons with the same names in the same order, and the same
-panels with the same controls in them; only the arrangement changes.
+The [adaptive workspace guide](mobile-redesign/README.md) describes the native
+editor and its generated design boards. Logical width selects small phone below
+380, phone below 600, tablet below 900, wide tablet below 1280 and desktop above
+that threshold. Every platform uses the same rules.
 
-| What | Where there is room | Where there is not |
-| --- | --- | --- |
-| The two toolbar rows | one row each | wrapped at the same left margin |
-| The quick-access sidebar | beside the canvas | gone: everything on it is also in a panel — the edit scope reads there and is set in **Drawing tools** — and its zoom pills and **Fit whole skin** join the toolbar |
-| The tool column | docked beside the canvas | over the right of it, or over all of it |
-| The whole-skin preview | its own column, right of the canvas | the same column, reduced further to fit |
-| The sprite-state strip | one row and a slider | wrapped |
-| Pan | middle-button drag | a **Draw / Pan** switch, since a finger has no middle button |
+Phones use separate Projects, Canvas, Preview and Save screens. Secondary controls
+open as full-screen panels or bottom sheets. Tablets keep tools beside the canvas;
+wide tablets add a docked inspector. Desktop has Compose, Sprites, States and
+Preview workspaces with different scopes and inspectors.
 
-The sidebar appears at 900 logical points of width and up; the tool column docks
-whenever the canvas can keep 320 points beside it. Below 320×480 the layout
-clips rather than reflowing further.
+The canvas supports scrollbars, anchored zoom and two-finger pan/pinch. A second
+touch cancels tentative paint. Custom cursor artwork and hover hints help pointer
+and stylus users. Android cursor support is in the pinned Cranpose revision; the
+physical Galaxy Tab S7 check is pending. UIKit custom cursors remain unsupported.
 
-Hosted inside a player (Android, the web), the toolbar also carries **Player**,
-**Apply to player**, **Save draft** and **Restore last draft**, and **Open…** /
-**Export…** use the platform picker instead of a typed path. Android Back closes
-an open panel, and otherwise saves a recoverable draft and returns to playback.
+After a file opens, Studio returns to Canvas. The part picker stays one tap away. Invalid files and
+cancelled picks retain the current document. Before replacing edited work, Studio
+saves a recoverable draft; a failed draft save cancels replacement. Mobile pickers
+accept custom archive extensions without a MIME filter and validate the selected
+file contents after selection.
+
+Hosted inside a player, Projects offers return and draft recovery; Save and share
+offers **Apply to player**. Android Back closes an open panel, then
+saves a draft and returns to playback. Browser drafts use local browser storage.
 
 ## The canvas
 
@@ -286,22 +289,19 @@ and are drawn as unavailable at zero.
 
 ## Whole-skin preview
 
-A live render of the entire skin — every sheet, every painting plane, the whole
-joined canvas — sits in a column of its own at the top right of the canvas, at
-every size. The column is reserved before the canvas and the tool column divide
-what is left, so the preview is never over the artwork. It
-follows the document revision, so it is current after every stroke, undo, MCP
-transaction, option change and sheet edit, including while `studio_atlas` has a
-single sheet open and the canvas is showing that one sheet.
+Preview has one entry in each layout. It opens a separate workspace with the
+working player. Desktop keeps tool properties at the top of the editing inspector.
+The editor canvas and player preview follow the same document revision.
 
-| | |
-| --- | --- |
-| Column | 108 logical points, reserved beside the canvas at every size |
-| Scale | the smallest whole-number reduction 2..8 that fits the room, so the preview is the largest one made of whole pixels; the label reads `SKIN 1:3` |
-| Sampling | nearest neighbour |
-| Position | top of its own column, right of the canvas |
-| MCP equivalent | `Document::skin_render()` — the canvas surface, all planes composited |
-| Pointer | none: it registers no hit test, so a stroke under it lands on the canvas |
+The joined canvas has Active/Inactive and Released/Pressed controls. Desktop
+shows them above the canvas; smaller layouts use the Canvas state panel and show
+the current state in the header. Canvas state also sets slider frames and the
+states to which a stroke applies.
+
+Colour editing offers HEX and RGB fields beside a hue strip and a saturation/value
+field. Saved colours can be added, replaced or removed. Swatch changes have undo
+history and are stored in CSTUDIO projects. They are editor settings, separate
+from the palette files used by a classic skin.
 
 ## Panels
 
@@ -981,7 +981,7 @@ layers preserve the large silhouettes, individual characters and final join repa
 - [GPU preview](../../assets/skins/Catamp%20Catnip.png)
 - [Native Studio drawing recipe](../../tools/skin-studio/catnip.mjs)
 
-Open the project with `cargo run -- --skin-studio 'assets/skins/Catamp Catnip.cstudio'`.
+Open the project with `cargo run --bin cranamp -- --skin-studio 'assets/skins/Catamp Catnip.cstudio'`.
 With Studio running, `node tools/skin-studio/catnip.mjs` rebuilds it from the
 bundled Silverplay base using native MCP brushes, paths, stamps and text.
 The recipe checks for unsaved work first, then opens its base, paints all seven

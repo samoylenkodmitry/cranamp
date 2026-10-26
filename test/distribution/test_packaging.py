@@ -1,4 +1,6 @@
 import os
+import importlib.util
+import plistlib
 from pathlib import Path
 import sys
 import tempfile
@@ -13,6 +15,29 @@ from check_android_manifest import verify
 
 
 class PackagingTests(unittest.TestCase):
+    def test_ios_registers_framework_scene_lifecycle(self):
+        info = plistlib.loads((ROOT / "platform/ios/Info.plist").read_bytes())
+        scene = info["UIApplicationSceneManifest"]
+        self.assertFalse(scene["UIApplicationSupportsMultipleScenes"])
+        configs = scene["UISceneConfigurations"]["UIWindowSceneSessionRoleApplication"]
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0]["UISceneDelegateClassName"], "CranposeSceneDelegate")
+
+    def test_apple_bundle_uses_release_version_and_preserves_identity(self):
+        spec = importlib.util.spec_from_file_location("apple_version", ROOT / "scripts/distribution/apple-version.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "Info.plist"
+            original = {"CFBundleIdentifier": "io.cranamp.app", "CFBundleShortVersionString": "1.0", "CFBundleVersion": "1", "UIDeviceFamily": [1, 2]}
+            path.write_bytes(plistlib.dumps(original))
+            module.stamp(path, "0.1.88", "6")
+            actual = plistlib.loads(path.read_bytes())
+            self.assertEqual(actual, dict(original, CFBundleShortVersionString="0.1.88", CFBundleVersion="6"))
+            with self.assertRaises(ValueError):
+                module.stamp(path, "0.1.88", "0")
+            self.assertEqual(plistlib.loads(path.read_bytes()), actual)
+
     def check_manifest(self, entry):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "AndroidManifest.xml"

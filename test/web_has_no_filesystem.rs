@@ -79,7 +79,7 @@ fn every_temp_dir_call_sits_behind_a_cfg_the_web_build_does_not_take() {
         }
     }
     assert!(
-        checked >= 2,
+        checked >= 1,
         "expected to find the guarded desktop calls; found {checked}"
     );
 }

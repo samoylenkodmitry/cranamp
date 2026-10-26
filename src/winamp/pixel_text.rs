@@ -171,6 +171,11 @@ pub(crate) fn measure(text: &str, small: bool, scale: i32, spacing: i32) -> Text
         missing,
     }
 }
+// The desktop agent reports the full extent; the on-device toolbar needs only width.
+#[cfg_attr(
+    any(target_os = "ios", target_os = "android", target_arch = "wasm32"),
+    allow(dead_code)
+)]
 pub(crate) struct TextExtent {
     pub width: i32,
     pub height: i32,

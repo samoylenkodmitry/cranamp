@@ -836,13 +836,14 @@ dependencies = [
 
 [[package]]
 name = "cranamp"
-version = "0.1.87"
+version = "0.1.88"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "console_error_panic_hook",
  "coroflow",
  "cranpose",
+ "cranpose-animation",
  "cranpose-app-shell",
  "cranpose-capabilities",
  "cranpose-core",
@@ -852,15 +853,18 @@ dependencies = [
  "cranpose-services",
  "cranpose-ui",
  "cranpose-ui-graphics",
+ "cranpose-ui-layout",
  "embed-resource",
  "env_logger",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
  "image",
  "log",
+ "opus-pure",
  "rfd",
  "serde",
  "serde_json",
+ "symphonia",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",
@@ -1242,6 +1246,7 @@ dependencies = [
  "portable-atomic",
  "smallvec",
  "thiserror 2.0.21",
+ "tiny-skia",
  "unicode-segmentation",
  "web-time",
 ]
@@ -3195,6 +3200,11 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+
+[[package]]
+name = "opus-pure"
+version = "0.2.2"
+source = "git+https://github.com/samoylenkodmitry/opus-pure?rev=cc886594b6b1a4bd11f66a69e42d9c5ed9a8ecce#cc886594b6b1a4bd11f66a69e42d9c5ed9a8ecce"
 
 [[package]]
 name = "orbclient"

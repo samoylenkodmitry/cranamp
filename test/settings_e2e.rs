@@ -265,3 +265,46 @@ fn demo_track_for_handover() -> std::path::PathBuf {
         .find(|path| path.extension().is_some_and(|extension| extension == "mp3"))
         .expect("at least one bundled demo mp3")
 }
+
+#[test]
+fn opus_import_creates_a_durable_playable_copy_and_cleans_failed_imports() {
+    fn ready<T>(future: impl std::future::Future<Output = T>) -> T {
+        let mut future = std::pin::pin!(future);
+        let waker = std::task::Waker::noop();
+        match future
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(waker))
+        {
+            std::task::Poll::Ready(value) => value,
+            _ => panic!("short in-memory import must finish without waiting"),
+        }
+    }
+    let _application = TestApplication::new("opus-import");
+    for name in ["tone.opus", "tone.ogg", "tone.oga"] {
+        let content = cranpose_services::BytesContent::named(
+            name,
+            include_bytes!("fixtures/audio/tone.opus").to_vec(),
+        )
+        .handle();
+        let track = ready(cranamp::audio::track_from_picked_file(content))
+            .unwrap()
+            .unwrap();
+        let path = track.path.unwrap();
+        assert!(path.ends_with(".wav"));
+        let bytes = std::fs::read(path).unwrap();
+        assert_eq!(&bytes[..4], b"RIFF");
+        assert_eq!(bytes.len(), 44 + 5760 * 2 * 2);
+    }
+    let directory = cranpose_services::application_directories()
+        .unwrap()
+        .data
+        .join("imported-audio");
+    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 3);
+    let invalid = cranpose_services::BytesContent::named("bad.opus", vec![0; 128]).handle();
+    assert!(ready(cranamp::audio::track_from_picked_file(invalid)).is_err());
+    assert_eq!(
+        std::fs::read_dir(directory).unwrap().count(),
+        3,
+        "failed import left a partial file"
+    );
+}

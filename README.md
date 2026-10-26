@@ -12,7 +12,7 @@ A music player in Rust with WSZ skin support and a built-in Skin Studio, powered
 - **Classic skins** — Import and switch `.wsz` and `.zip` skins.
 - **Skin cursors** — Classic `.cur` pointers per region, wherever the platform has a cursor. Every bundled skin draws its own, and the Skin Studio draws and edits them like any other artwork.
 - **Web skin library** — Keep skins and your selection across browser reloads.
-- **Local music** — Open audio files and folders through platform file pickers.
+- **Local music** — Open audio files and folders through platform file pickers. See [audio format support](docs/audio-formats.md).
 - **Streaming** — Play audio URLs and your own radio streams.
 - **Playlists** — Import M3U/M3U8/PLS, export M3U, and open remote playlists.
 - **Playlist tools** — Search, multi-select, sort, randomize and remove tracks.
@@ -25,7 +25,7 @@ A music player in Rust with WSZ skin support and a built-in Skin Studio, powered
 - **Floating web player** — Open PiP explicitly in supported Chromium browsers.
 - **Sync** — Share listening progress and play counts through a chosen folder on native platforms.
 - **Android updates** — Direct APK builds can install new releases from Settings. Store builds use store updates.
-- **Skin Studio** — Open the editor from Settings on desktop, Android and the web.
+- **Skin Studio** — Open the editor from Settings on desktop, Android, iOS and the web. Layouts follow screen width, with current tool properties beside the canvas.
 - **Drawing** — Pencil, lines, curves, shapes, pixel stamps, fur strokes and glass tools.
 - **Layers** — Edit painting layers, masks and selected skin parts with undo/redo.
 - **Connected canvas** — Draw across main, equalizer and playlist with source-part guides.

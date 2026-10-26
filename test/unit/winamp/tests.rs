@@ -1274,3 +1274,16 @@ fn fullscreen_player_keeps_controls_inside_tablet_and_landscape_surfaces() {
         }
     }
 }
+
+#[test]
+fn player_stack_keeps_its_ratio_when_the_host_changes_shape() {
+    let state = initial_winamp_state();
+    let expected = MAIN_WIDTH / stacked_skin_height(&state, PLAYLIST_HEIGHT);
+    for (width, height) in [(360., 800.), (1200., 600.), (800., 1200.), (1400., 900.)] {
+        let layout = fullscreen_stacked_layout(width, height, &state, 2.);
+        let ratio = stacked_surface_width(layout) / stacked_surface_height(&state, layout);
+        assert!((ratio - expected).abs() < 0.001);
+        assert!(stacked_surface_width(layout) <= width + 0.01);
+        assert!(stacked_surface_height(&state, layout) <= height + 0.01);
+    }
+}

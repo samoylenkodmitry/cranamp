@@ -43,7 +43,9 @@ cranpose {
     // directories up (app -> android -> platform -> repo root).
     workspaceRoot.set("../../..")
     cargoPackage.set("cranamp")
-    features.set(listOf("android", "renderer-wgpu") + if (storeDistribution) listOf("store") else emptyList())
+    features.set(listOf("android", "renderer-wgpu") +
+        (if (storeDistribution) listOf("store") else emptyList()) +
+        (if (providers.gradleProperty("studioReview").orNull == "true") listOf("studio-review") else emptyList()))
     // The plugin builds debug variants for x86_64, which was the emulator's
     // architecture when every development machine was an Intel one. On an
     // Apple Silicon Mac both the emulator and the phone in the drawer are
@@ -52,14 +54,17 @@ cranpose {
     debugAbis.set(listOf("arm64-v8a"))
     releaseAbis.set(listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
     label.set("Cranamp")
+    theme.set("@style/CranampActivity")
 }
 
 android {
+    sourceSets.getByName("androidTest").java.srcDir("../../../test/android")
     namespace = "com.cranamp.app"
     compileSdk = 36
 
     defaultConfig {
         applicationId = "com.cranamp.app"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 26
         targetSdk = 36
         versionCode = releaseVersionCode()
@@ -115,4 +120,11 @@ android {
             }
         }
     }
+}
+
+
+dependencies {
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }
