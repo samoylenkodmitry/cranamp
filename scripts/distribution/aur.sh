@@ -32,6 +32,17 @@ prepare() {
 }
 build() {
   cd "cranamp-\$pkgver"
+  # AWS-LC compiles jitterentropy with -O0; makepkg's -O2 would override it.
+  # Keep the remaining C flags, including hardening flags.
+  local flag
+  local native_cflags=""
+  for flag in \$CFLAGS; do
+    case "\$flag" in
+      -O*) ;;
+      *) native_cflags+="\$flag " ;;
+    esac
+  done
+  export CFLAGS="\$native_cflags"
   cargo build --frozen --release --features store
 }
 package() {
