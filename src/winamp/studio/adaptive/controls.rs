@@ -88,9 +88,13 @@ pub(super) type Hints = cranpose_core::MutableState<Option<Hint>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Icon {
+    #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
     Agent,
+    #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
     Copy,
+    #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
     Power,
+    #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
     Test,
     Back,
     Add,
@@ -138,9 +142,13 @@ pub(super) enum Icon {
 }
 fn icon_source(icon: Icon) -> &'static [u8] {
     match icon {
+        #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
         Icon::Agent => include_bytes!("../../../../assets/studio/icons/agent.svg"),
+        #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
         Icon::Copy => include_bytes!("../../../../assets/studio/icons/copy.svg"),
+        #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
         Icon::Power => include_bytes!("../../../../assets/studio/icons/power.svg"),
+        #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
         Icon::Test => include_bytes!("../../../../assets/studio/icons/test.svg"),
         Icon::Canvas => include_bytes!("../../../../assets/studio/icons/canvas.svg"),
         Icon::Colour => include_bytes!("../../../../assets/studio/icons/colour.svg"),
