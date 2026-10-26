@@ -2,7 +2,7 @@
 mod common;
 use common::{pump, visible_texts, HitGraphRenderer};
 use cranamp::winamp::studio::{open_document, SharedDocument, SkinStudio};
-use cranpose_app_shell::{AppShell, PointerSource};
+use cranpose_app_shell::{AppShell, PointerId, PointerSource};
 use cranpose_core::location_key;
 use cranpose_ui::SemanticsNode;
 use cranpose_ui_graphics::Rect;
@@ -135,11 +135,11 @@ fn two_fingers_cancel_the_tentative_stroke_and_never_paint() {
     shell.set_cursor(p.0, p.1);
     shell.pointer_pressed();
     pump(&mut shell);
-    shell.secondary_pointer_pressed(7, p.0 + 60., p.1, Some(10));
+    shell.secondary_pointer_pressed(PointerId(7), p.0 + 60., p.1, Some(10));
     pump(&mut shell);
-    shell.secondary_pointer_moved(7, p.0 + 90., p.1 + 20., Some(20));
+    shell.secondary_pointer_moved(PointerId(7), p.0 + 90., p.1 + 20., Some(20));
     pump(&mut shell);
-    shell.secondary_pointer_released(7, p.0 + 90., p.1 + 20., Some(30));
+    shell.secondary_pointer_released(PointerId(7), p.0 + 90., p.1 + 20., Some(30));
     pump(&mut shell);
     shell.pointer_released();
     pump(&mut shell);
