@@ -24,17 +24,60 @@ fn desktop_agent_panel_explains_local_access_and_offers_connection_controls() {
     let mut shell = touch(document);
     let texts = visible_texts(&mut shell);
     for control in [
-        "AGENT CONNECTION",
-        "Stopped",
+        "MCP connection",
+        "Server off",
         "127.0.0.1:18765/mcp",
         "Start server",
         "Test connection",
-        "Copy connection details",
-        "local programs can edit this skin",
+        "Copy server URL",
+        "Local programs can edit this skin",
     ] {
         assert!(contains(&texts, control), "Missing {control}: {texts:?}");
     }
 }
+#[test]
+fn desktop_mcp_is_reachable_once_per_layout_and_stdio_is_disclosed_on_request() {
+    fn controls(node: &cranpose_ui::SemanticsNode, label: &str) -> usize {
+        if node.hidden {
+            return 0;
+        }
+        if node.description.as_deref() == Some(label) {
+            // A composed button can expose its label again on child nodes.
+            return 1;
+        }
+        node.children
+            .iter()
+            .map(|child| controls(child, label))
+            .sum()
+    }
+    for width in [320, 520, 900, 1440, 1920] {
+        let document = cranamp::winamp::studio::open_document(None).unwrap();
+        open(&document, "agent", "pencil");
+        let mut shell = touch(document);
+        shell.set_buffer_size(width, 900);
+        shell.set_viewport(width as f32, 900.);
+        pump(&mut shell);
+        assert!(!contains(&visible_texts(&mut shell), "Copy stdio command"));
+        click_text_at(&mut shell, (width, 900), "Use a stdio connection");
+        assert!(contains(&visible_texts(&mut shell), "Copy stdio command"));
+        click_text_at(&mut shell, (width, 900), "Close panel");
+        visible_texts(&mut shell);
+        assert_eq!(
+            controls(shell.semantics_tree().unwrap().root(), "Agent connection"),
+            usize::from(width >= 1280)
+        );
+        click_text_at(&mut shell, (width, 900), "Project actions");
+        visible_texts(&mut shell);
+        assert_eq!(
+            controls(shell.semantics_tree().unwrap().root(), "Agent connection"),
+            1,
+            "{width}"
+        );
+        click_text_at(&mut shell, (width, 900), "Agent connection");
+        assert!(contains(&visible_texts(&mut shell), "MCP connection"));
+    }
+}
+
 fn open(document: &cranamp::winamp::studio::SharedDocument, drawer: &str, brush: &str) {
     document
         .lock()
@@ -138,6 +181,9 @@ fn the_export_format_check_is_reachable_where_there_is_no_sidebar() {
 }
 
 fn click_text(shell: &mut AppShell<HitGraphRenderer>, label: &str) {
+    click_text_at(shell, WINDOW, label);
+}
+fn click_text_at(shell: &mut AppShell<HitGraphRenderer>, window: (u32, u32), label: &str) {
     fn find(node: &cranpose_ui::SemanticsNode, label: &str) -> Option<(f32, f32)> {
         if node.hidden {
             return None;
@@ -162,7 +208,7 @@ fn click_text(shell: &mut AppShell<HitGraphRenderer>, label: &str) {
     let (x, y) = find(shell.semantics_tree().unwrap().root(), label)
         .unwrap_or_else(|| panic!("Missing {label}"));
     assert!(
-        x >= 0. && x < WINDOW.0 as f32 && y >= 0. && y < WINDOW.1 as f32,
+        x >= 0. && x < window.0 as f32 && y >= 0. && y < window.1 as f32,
         "{label} is outside the screen at {x},{y}"
     );
     shell.set_cursor(x, y);

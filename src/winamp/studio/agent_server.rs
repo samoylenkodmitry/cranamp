@@ -1,5 +1,5 @@
 //! Desktop-only loopback transport. The editor commands remain shared with mobile/web.
-use super::{mcp::dispatch, note, SharedDocument};
+use super::{mcp::dispatch, SharedDocument};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::{
@@ -24,6 +24,8 @@ pub struct Status {
     pub stopping: bool,
     pub testing: bool,
     pub message: String,
+    pub tools: Option<usize>,
+    pub error: bool,
 }
 #[derive(Default)]
 struct Control {
@@ -32,6 +34,10 @@ struct Control {
     generation: u64,
 }
 static CONTROL: OnceLock<Mutex<Control>> = OnceLock::new();
+fn refresh(shared: &SharedDocument) {
+    shared.lock().unwrap().revision += 1;
+}
+
 fn control() -> &'static Mutex<Control> {
     CONTROL.get_or_init(Mutex::default)
 }
@@ -113,6 +119,8 @@ pub fn status() -> Status {
         state.server.take();
         state.status.running = false;
         state.status.message = "Server stopped unexpectedly. Try Start server.".into();
+        state.status.tools = None;
+        state.status.error = true;
     }
     state.status.clone()
 }
@@ -141,13 +149,14 @@ pub fn start(shared: SharedDocument) -> Result<()> {
             Err(error) => {
                 state.status = Status {
                     message: format!("{error:#}"),
+                    error: true,
                     ..Status::default()
                 };
                 Err(error)
             }
         }
     };
-    note(&shared, status().message);
+    refresh(&shared);
     result
 }
 pub fn stop_for(shared: &SharedDocument) {
@@ -168,7 +177,7 @@ pub fn stop_for(shared: &SharedDocument) {
         };
         state.server.take()
     };
-    note(shared, "Stopping agent server…".into());
+    refresh(shared);
     let shared = shared.clone();
     // An in-flight drawing/capture request may need the UI thread to finish.
     // Joining here on the UI thread would deadlock that request.
@@ -178,7 +187,7 @@ pub fn stop_for(shared: &SharedDocument) {
             message: "Stopped. Local agents cannot connect.".into(),
             ..Status::default()
         };
-        note(&shared, "Agent server stopped".into());
+        refresh(&shared);
     });
 }
 
@@ -189,16 +198,18 @@ pub fn test_connection(shared: SharedDocument) {
             return;
         }
         state.status.testing = true;
+        state.status.tools = None;
+        state.status.error = false;
         state.status.message = "Testing the local MCP connection…".into();
         state.generation
     };
-    note(&shared, "Testing agent connection…".into());
+    refresh(&shared);
     std::thread::spawn(move || {
         let result = probe(ADDRESS.parse().expect("fixed loopback address"));
+        let tools = result.as_ref().ok().map(|(_, count)| *count);
+        let error = result.is_err();
         let message = match result {
-            Ok((version, count)) => {
-                format!("Connection OK\nCranamp {version} · {count} tools available")
-            }
+            Ok((version, count)) => format!("Cranamp {version}: {count} tools available"),
             Err(error) => format!("Connection failed: {error:#}"),
         };
         let mut state = control().lock().unwrap();
@@ -206,9 +217,11 @@ pub fn test_connection(shared: SharedDocument) {
             return;
         }
         state.status.testing = false;
-        state.status.message = message.clone();
+        state.status.message = message;
+        state.status.tools = tools;
+        state.status.error = error;
         drop(state);
-        note(&shared, message.replace('\n', " · "));
+        refresh(&shared);
     });
 }
 fn request(address: SocketAddr, body: &str) -> Result<String> {

@@ -31,7 +31,7 @@ fn every_svg_icon_renders_visible_pixels() {
         );
         count += 1;
     }
-    assert_eq!(count, 43);
+    assert_eq!(count, 47);
 }
 
 #[test]

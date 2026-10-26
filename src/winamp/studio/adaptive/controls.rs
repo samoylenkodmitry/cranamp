@@ -88,6 +88,10 @@ pub(super) type Hints = cranpose_core::MutableState<Option<Hint>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Icon {
+    Agent,
+    Copy,
+    Power,
+    Test,
     Back,
     Add,
     Close,
@@ -134,6 +138,10 @@ pub(super) enum Icon {
 }
 fn icon_source(icon: Icon) -> &'static [u8] {
     match icon {
+        Icon::Agent => include_bytes!("../../../../assets/studio/icons/agent.svg"),
+        Icon::Copy => include_bytes!("../../../../assets/studio/icons/copy.svg"),
+        Icon::Power => include_bytes!("../../../../assets/studio/icons/power.svg"),
+        Icon::Test => include_bytes!("../../../../assets/studio/icons/test.svg"),
         Icon::Canvas => include_bytes!("../../../../assets/studio/icons/canvas.svg"),
         Icon::Colour => include_bytes!("../../../../assets/studio/icons/colour.svg"),
         Icon::Taper => include_bytes!("../../../../assets/studio/icons/taper.svg"),

@@ -433,7 +433,7 @@ pub(super) fn SheetPanel(ui: Ui, area: Area, sheet: Sheet, revision: u64) {
         Sheet::Advanced(6) => "Guides",
         Sheet::Advanced(9) => "Skin settings",
         Sheet::Advanced(10) => "Equalizer",
-        Sheet::Advanced(11) => "Agent connection",
+        Sheet::Advanced(11) => "MCP connection",
         Sheet::Advanced(_) => "Settings",
         Sheet::None => "",
     };
@@ -593,10 +593,10 @@ fn More(ui: Ui, area: Area) {
             );
         }
         #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
-        {
+        if layout.class != WidthClass::Desktop {
             let next = ui.clone();
             RowAction(
-                Icon::Settings,
+                Icon::Agent,
                 "Agent connection".into(),
                 "Connect a local agent to the shared document",
                 Area::new(8., items.len() as f32 * 48., area.w - 16., 44.),
@@ -639,7 +639,7 @@ fn Advanced(ui: Ui, area: Area, id: u8, revision: u64) {
                     ui.live,
                 ),
                 #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
-                11 => agent_connection::AgentConnection(ui.shared.clone(), revision, room),
+                11 => agent_connection::Panel(ui.clone(), Area::new(0., 0., area.w, area.h)),
                 3 => desktop::Sources(ui.clone(), Area::new(0., 0., area.w, area.h)),
                 _ => {}
             }

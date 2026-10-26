@@ -660,12 +660,30 @@ history.
 
 ## MCP
 
-Open **Agent connection → Start server** in desktop Studio to serve JSON-RPC
+Open **Agent connection** in the top toolbar of a wide desktop window. In a
+narrower desktop window, open **Project actions**, then **Agent connection**.
+Use the power control, **Start server**, to serve JSON-RPC
 at `http://127.0.0.1:18765/mcp`. The server is off by default and stops when
 Studio closes. While enabled, local programs can edit the document and use
 files available to the app. It binds only to loopback, validates the HTTP host,
 rejects browser `Origin` headers, and limits headers to 16 KiB and bodies to
 8 MiB. Run one Studio for that endpoint.
+
+**Copy server URL** copies the HTTP endpoint. **Test connection** verifies the
+server identity and tool list without changing the document. Its result appears
+in the panel. **Use a stdio connection** reveals a command-copy control for
+agents that need the relay. The running-state indicator remains visible in the
+wide desktop toolbar. Start and stop controls use the same animated surfaces,
+custom cursor and hover hints as the drawing controls.
+
+The transport modules and their UI entry points are compiled out on Android,
+iOS and WebAssembly. A desktop project with the agent panel selected opens
+without that panel on mobile. The optional desktop connection remains included
+in Store builds; self-update and installer features remain excluded.
+
+The [desktop MCP listing draft](../../store/previews/desktop-mcp/listing-en-US.json)
+and its screenshots describe the next build. They do not replace the submitted
+0.1.88 listing assets.
 
 ```json
 {

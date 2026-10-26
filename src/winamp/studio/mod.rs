@@ -1,7 +1,5 @@
 #![allow(unused_braces)]
 #[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
-mod agent_connection;
-#[cfg(not(any(target_os = "ios", target_os = "android", target_arch = "wasm32")))]
 mod agent_server;
 mod brush;
 pub(crate) mod cursor_art;

@@ -1,5 +1,30 @@
 use super::*;
 
+#[test]
+fn connection_feedback_does_not_replace_document_hints_or_create_toasts() {
+    let shared = crate::winamp::studio::open_document(None).unwrap();
+    let before = {
+        let doc = shared.lock().unwrap();
+        (
+            doc.message.clone(),
+            doc.notice.clone(),
+            doc.dirty,
+            doc.history_depth(),
+        )
+    };
+    refresh(&shared);
+    let doc = shared.lock().unwrap();
+    assert_eq!(
+        (
+            doc.message.clone(),
+            doc.notice.clone(),
+            doc.dirty,
+            doc.history_depth()
+        ),
+        before
+    );
+}
+
 fn server() -> (Server, SocketAddr) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
