@@ -33,8 +33,16 @@ docker compose exec cranamp-landing nginx -t
 ```
 
 Static file changes are visible immediately through the read-only bind mount.
-After changing `deploy/nginx.conf`, run
-`docker compose exec cranamp-landing nginx -s reload`.
+After changing `deploy/nginx.conf`, recreate the service so the single-file
+bind mount uses the new file, then validate the configuration:
+
+```sh
+docker compose up -d --force-recreate cranamp-landing
+docker compose exec cranamp-landing nginx -t
+```
+
+Keep the untracked `site/review/` directory during deployment. It holds review
+media and is separate from the landing page.
 
 Verify `/`, `/privacy/`, `/support/`, images and HTTPS after deploying. The
 download section links the App Store, Google Play, Microsoft Store and AUR
@@ -46,12 +54,23 @@ still retain operational logs as described by the privacy policy.
 
 ## Images
 
-- `site/assets/player.jpg`: actual v0.1.86 web player capture with the original
-  Catamp Silverplay skin and the project's generated demo music.
-- `site/assets/studio.png`: the existing real Studio GPU capture from
-  `docs/images/studio-layers.png`; no artwork was redrawn for the page.
-- `site/assets/icon.png`: original app icon from `assets/icon/icon-512.png`.
-- `site/assets/social.jpg`: the store feature graphic from `store/assets/`.
+The page uses unaltered PNG files copied from the
+[0.1.92 release gallery](../store/releases/0.1.92/screenshots.json). That manifest
+records source versions, capture methods and SHA-256 hashes.
+
+| Website asset in `site/assets/` | Source under `store/releases/0.1.92/screenshots/` |
+| --- | --- |
+| `player-0.1.92.png` | `macos/00-playback.png` |
+| `studio-desktop-0.1.92.png` | `macos/01-studio-canvas.png` |
+| `studio-phone-0.1.92.png` | `android-phone/02-studio-canvas.png` |
+| `studio-tablet-0.1.92.png` | `android-tablet-10/02-studio-canvas.png` |
+| `studio-colours-0.1.92.png` | `macos/03-skin-colours.png` |
+| `studio-mcp-0.1.92.png` | `macos/05-agent-connection.png` |
+
+The hero's SVG viewport hides the black side margins in the player capture.
+The linked full-size file keeps all source pixels. Studio images show the
+complete capture and open at full size when selected. The desktop canvas is
+also the Open Graph image. `icon.png` comes from `assets/icon/icon-512.png`.
 
 Preview the repository with `python3 -m http.server 8766 --bind 127.0.0.1` and open
-`http://127.0.0.1:8766/site/`.
+`http://127.0.0.1:8766/site/`. Check the page at phone, tablet and desktop widths.

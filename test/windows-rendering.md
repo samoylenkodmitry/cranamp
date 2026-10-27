@@ -17,7 +17,7 @@ For Firefox, start Mozilla's geckodriver on port 4444 in that desktop session.
 When driving it from another host over SSH, forward WebDriver and WebDriver BiDi:
 
 ```sh
-ssh -N -L 4444:127.0.0.1:4444 -L 9222:127.0.0.1:9222 samoy@192.168.50.28
+ssh -N -L 4444:127.0.0.1:4444 -L 9222:127.0.0.1:9222 windows-test-host
 CRANAMP_CHECK_PLAYBACK=1 node test/windows-firefox.mjs https://example.test/cranamp/ /tmp/cranamp-firefox
 ```
 

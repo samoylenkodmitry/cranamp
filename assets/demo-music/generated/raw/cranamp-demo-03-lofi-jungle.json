@@ -1,5 +1,5 @@
 {
-  "ace_step_source": "/home/s/develop/projects/musicgen/ACE-Step-1.5/gradio_outputs/cranamp-demo-raw/42fb38db-5976-6c17-961b-fa9885f0abfa.flac",
+  "ace_step_source": "ACE-Step-1.5/gradio_outputs/cranamp-demo-raw/42fb38db-5976-6c17-961b-fa9885f0abfa.flac",
   "bpm": null,
   "duration": 120,
   "extra_outputs": {
@@ -19,7 +19,7 @@
   "model": "ACE-Step 1.5 / acestep-v15-turbo",
   "output_stem": "cranamp-demo-03-lofi-jungle",
   "prompt": "lo-fi jungle drum and bass instrumental, old computer music vibe, soft pads, clean loopable ending, original melody, no vocals, no samples, no artist reference, 120 seconds",
-  "raw_file": "/home/s/develop/projects/cranamp/assets/demo-music/generated/raw/cranamp-demo-03-lofi-jungle.flac",
+  "raw_file": "assets/demo-music/generated/raw/cranamp-demo-03-lofi-jungle.flac",
   "reference_audio": null,
   "seed": 610003,
   "status_message": "Generation completed successfully!"

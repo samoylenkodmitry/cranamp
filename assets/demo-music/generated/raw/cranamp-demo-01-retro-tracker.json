@@ -1,5 +1,5 @@
 {
-  "ace_step_source": "/home/s/develop/projects/musicgen/ACE-Step-1.5/gradio_outputs/cranamp-demo-raw/6b4a5942-d6c4-c1b5-e68a-4cba1ef87d40.flac",
+  "ace_step_source": "ACE-Step-1.5/gradio_outputs/cranamp-demo-raw/6b4a5942-d6c4-c1b5-e68a-4cba1ef87d40.flac",
   "bpm": null,
   "duration": 100,
   "extra_outputs": {
@@ -19,7 +19,7 @@
   "model": "ACE-Step 1.5 / acestep-v15-turbo",
   "output_stem": "cranamp-demo-01-retro-tracker",
   "prompt": "retro 90s media player demo track, instrumental, tracker music, breakbeat, chiptune lead, warm bass, original melody, no vocals, no samples, no artist reference, 100 seconds",
-  "raw_file": "/home/s/develop/projects/cranamp/assets/demo-music/generated/raw/cranamp-demo-01-retro-tracker.flac",
+  "raw_file": "assets/demo-music/generated/raw/cranamp-demo-01-retro-tracker.flac",
   "reference_audio": null,
   "seed": 610001,
   "status_message": "Generation completed successfully!"

@@ -109,7 +109,7 @@ Direct Mac builds and signing run on a clean GitHub-hosted macOS runner. Run **R
 
 The store signing secrets and both Cranamp provisioning profiles were configured
 on October 2, 2026. The encrypted PKCS12 backup contains only the Apple Distribution
-and Mac Installer Distribution identities. Private material stays in Vault and
+and Mac Installer Distribution identities. Signing jobs receive private material through
 GitHub encrypted secrets. The local iOS 0.1.86 build 1 passed Apple's validation
 and uploaded successfully. Device testing and App Review are separate steps.
 
@@ -139,13 +139,13 @@ Windows x64 builds bundle DXC because the legacy FXC compiler failed to compile 
 
 `yay` installs recipes from the AUR. The AUR stores PKGBUILDs, not application binaries. The `cranamp` recipe builds the release source with Cargo's locked dependencies. The [cranamp-bin package](https://aur.archlinux.org/packages/cranamp-bin) installs the tested x86_64 store tarball and is available with `yay -S cranamp-bin`. CI generates both recipes and their `.SRCINFO` files using `makepkg`.
 
-The existing AUR maintainer account is `faceless33`. Its Cranamp SSH key is registered; the private key is stored in the owner’s mounted Vault. The source recipe disables debug symbols to keep Rust release builds within available memory and disables Arch's C/C++ LTO so the native TLS library links with Rust. Rust release LTO remains enabled. The source recipe removes inherited C optimization flags so AWS-LC can compile its entropy code with the required `-O0`. The remaining C flags are preserved. Both 0.1.88 recipes built in a fresh Arch container and passed `namcap` without errors. The warnings name GPU and window libraries that the app loads at runtime. The binary package also installed successfully and had no missing linked libraries. Runtime dependencies include the libraries loaded dynamically by winit and wgpu, which ELF dependency scanning does not detect.
+The existing AUR maintainer account is `faceless33`. Use its registered maintainer SSH key. The source recipe disables debug symbols to keep Rust release builds within available memory and disables Arch's C/C++ LTO so the native TLS library links with Rust. Rust release LTO remains enabled. The source recipe removes inherited C optimization flags so AWS-LC can compile its entropy code with the required `-O0`. The remaining C flags are preserved. Both 0.1.88 recipes built in a fresh Arch container and passed `namcap` without errors. The warnings name GPU and window libraries that the app loads at runtime. The binary package also installed successfully and had no missing linked libraries. Runtime dependencies include the libraries loaded dynamically by winit and wgpu, which ELF dependency scanning does not detect.
 
 For a tagged release:
 
 1. Attach `cranamp-VERSION-source.tar.gz` from the workflow artifact to the matching GitHub release. PKGBUILD already contains its checksum.
 2. Test the recipe in a clean Arch build environment (`extra-x86_64-build`) and run `namcap`.
-3. Use the registered `faceless33` account and its Vault SSH key.
+3. Use the `faceless33` maintainer account and its registered SSH key.
 4. Push only PKGBUILD and `.SRCINFO` to the matching `cranamp.git` or `cranamp-bin.git` repository at `ssh://aur@aur.archlinux.org/`.
 5. Users install with `yay -S cranamp-bin`, or `yay -S cranamp` for a source build once that recipe is published.
 
