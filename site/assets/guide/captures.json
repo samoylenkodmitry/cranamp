@@ -1,0 +1,267 @@
+{
+  "source_commit": "19e1546a48aff3994fbe0584b5747f6cd493c6a6",
+  "version": "0.1.92",
+  "capture_date": "2026-10-27",
+  "method": "Native GPU frames from the existing studio-review harness, compiled from the recorded commit. Each case sets the public editor controls on a temporary bundled-skin document. Only the separate review footer is excluded. RGB conversion removes an unused opaque alpha channel; artwork is unchanged.",
+  "images": [
+    {
+      "file": "projects.png",
+      "case": "projects",
+      "width": 1440,
+      "height": 900,
+      "sha256": "73801e1ae6a5c15777af5fefb84568d4f1e53fed6ddd2eb4feb91e8c517485ba"
+    },
+    {
+      "file": "save.png",
+      "case": "save",
+      "width": 1440,
+      "height": 900,
+      "sha256": "f345313897ee681c0a1e13c4286e815bc77c051826e1ef558084311334a65e28"
+    },
+    {
+      "file": "canvas-pencil-quick.png",
+      "case": "canvas-pencil-quick",
+      "width": 1440,
+      "height": 900,
+      "sha256": "78f283db37e52434bcef9ce47477f842307d2c9a756f59182d2afa64dfaf1af0"
+    },
+    {
+      "file": "canvas-pencil-settings.png",
+      "case": "canvas-pencil-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "0ca4cecd9fab6071e7c6e8e44ba3396aa676e81d74ea3080e34448c8454541ca"
+    },
+    {
+      "file": "canvas-line-settings.png",
+      "case": "canvas-line-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "47b4575032fa27a9e3d52dd0a1273dca0c0716b62e6e95fd30afe6933996bd1c"
+    },
+    {
+      "file": "rectangle-gradient-settings.png",
+      "case": "rectangle-gradient-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "2fb8c35da658986544abd12ad7a15aeb96f7e27323cb94853cf67b95972a6cfb"
+    },
+    {
+      "file": "ellipse-gradient-settings.png",
+      "case": "ellipse-gradient-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "0d51eb8e53b13d1d20abd6e8d344624c89a6693a8db6759032d063afa5b56d19"
+    },
+    {
+      "file": "lift-copied-settings.png",
+      "case": "lift-copied-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "3a0c2880eb6406f263d65bac5722bef790d1d85ae6d496a889bf5f0abef3ce26"
+    },
+    {
+      "file": "stamp-repeat-settings.png",
+      "case": "stamp-repeat-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "e541dca5752d6d13797a31ffadf29597fdb7821cb94f2cadb2da747708c0bff4"
+    },
+    {
+      "file": "canvas-text-settings.png",
+      "case": "canvas-text-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "21e2fb55cf414f7611b0e2a316a14595d59e1fbea20649eeb1fea100fd353e52"
+    },
+    {
+      "file": "curve-right-settings.png",
+      "case": "curve-right-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "a413f963f7708726fa84bd0686e46531dc71f9768d4d49717d376d8dc2f110dd"
+    },
+    {
+      "file": "glass-wide-settings.png",
+      "case": "glass-wide-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "34a50310d4ae5dc96a00f8aa6185d322b1e384bfe0316e177615f8af4b4d1a97"
+    },
+    {
+      "file": "taper-wide-settings.png",
+      "case": "taper-wide-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "0d8cb03f072fc075ece5bea8f1f76f4c55c267dd3a5801ccd7fc6cb80320a6de"
+    },
+    {
+      "file": "colour-full-palette.png",
+      "case": "colour-full-palette",
+      "width": 1440,
+      "height": 900,
+      "sha256": "d809fe01d41d2f24a04f911edfcab59521e4eb0567d79d5f82f0182b2383b7b4"
+    },
+    {
+      "file": "paint-layer-settings.png",
+      "case": "paint-layer-settings",
+      "width": 1440,
+      "height": 900,
+      "sha256": "753e7d60cc9ef948f375d01197d2fc1f35f8d15af6504023bf98f00fb85dcf95"
+    },
+    {
+      "file": "paint-mask.png",
+      "case": "paint-mask",
+      "width": 1440,
+      "height": 900,
+      "sha256": "bedac14b0d59958f12c2645ae6e9efa1e95adc32385748bb090e20e8ba384714"
+    },
+    {
+      "file": "state-current-active-released.png",
+      "case": "state-current-active-released",
+      "width": 1440,
+      "height": 900,
+      "sha256": "a78d2161d382f01ba902a4b4e3ff4d8cb7daa84581b8ffb8a8fe574878223300"
+    },
+    {
+      "file": "state-current-active-pressed.png",
+      "case": "state-current-active-pressed",
+      "width": 1440,
+      "height": 900,
+      "sha256": "1e017d5a9abab0b6a27806aafb7022efc751de6e429aa8fef173d50fb2d6ef86"
+    },
+    {
+      "file": "states.png",
+      "case": "states",
+      "width": 1440,
+      "height": 900,
+      "sha256": "bf07199868d2d101c5a1cf68ffba63caa5189658ecd00fff0551b221d8ad79f7"
+    },
+    {
+      "file": "sprite-pencil-quick.png",
+      "case": "sprite-pencil-quick",
+      "width": 1440,
+      "height": 900,
+      "sha256": "68dc1d471ae9c5fe97eb2587116f2a82e9f66d6d3b21d8d339f534835aca8c00"
+    },
+    {
+      "file": "skin-playlist.png",
+      "case": "skin-playlist",
+      "width": 1440,
+      "height": 900,
+      "sha256": "eb5c8daf9cfbb89a46e73b3335d891dd2b48a4f0b6af2f1f0c0b44f1eeadb088"
+    },
+    {
+      "file": "skin-font.png",
+      "case": "skin-font",
+      "width": 1440,
+      "height": 900,
+      "sha256": "70f75a704bdd100c9c5e10a186c04c58321c05428df3b19203a75bc6b013e817"
+    },
+    {
+      "file": "skin-shape.png",
+      "case": "skin-shape",
+      "width": 1440,
+      "height": 900,
+      "sha256": "c067d4ed485097a8484c97c56687f9a56d4b2b33165560f3462e5ba659e9ff5a"
+    },
+    {
+      "file": "skin-cursors-drawn.png",
+      "case": "skin-cursors-drawn",
+      "width": 1440,
+      "height": 900,
+      "sha256": "cca44cdd5679ca36f4e47fe72926111f3ca8d12ad02cb88b1105799722d4f610"
+    },
+    {
+      "file": "skin-format.png",
+      "case": "skin-format",
+      "width": 1440,
+      "height": 900,
+      "sha256": "0853bda43f097c42bdf1e40b0821ae88755c1b37bbab7bfc72cc1fec0112afc1"
+    },
+    {
+      "file": "preview.png",
+      "case": "preview",
+      "width": 1440,
+      "height": 900,
+      "sha256": "f8e2eb9344a26ec270a56ab04a9b6303cb82d136cabb39883e32871fc0aecb66"
+    },
+    {
+      "file": "equalizer.png",
+      "case": "equalizer",
+      "width": 1440,
+      "height": 900,
+      "sha256": "d86c772f79ad669b06b2ee0a2af92e18d97b8f7dba642567daa890ed85bd9cff"
+    },
+    {
+      "file": "project-actions.png",
+      "case": "project-actions",
+      "width": 1440,
+      "height": 900,
+      "sha256": "19cb177719e4f4d355fd8e468f5067bb9582ea3cbb6cc67dbc8b887c1bd018c5"
+    },
+    {
+      "file": "pixel-study.png",
+      "case": "pixel-study",
+      "width": 1440,
+      "height": 900,
+      "sha256": "ae9d3e84d163ae340af9fa9a13ff9d274fd65d1572fa22234ac3c9f3ff438b31"
+    },
+    {
+      "file": "tools.png",
+      "case": "tools",
+      "width": 1440,
+      "height": 900,
+      "sha256": "79eb54814935120433553cf0d8f25e608409342f2c8e1782e86a2039495fdd66"
+    },
+    {
+      "file": "new-project.png",
+      "case": "new-project",
+      "width": 1440,
+      "height": 900,
+      "sha256": "2297b5498ba6866f75b4f0666b00431460375e1f8f98db2610925568fb04d9e4"
+    },
+    {
+      "file": "state-current-inactive-released.png",
+      "case": "state-current-inactive-released",
+      "width": 1440,
+      "height": 900,
+      "sha256": "c3d9b833b8602df01c07a57efd0258593f3b82a4360d728fc52839afc6a4375e"
+    },
+    {
+      "file": "state-current-inactive-pressed.png",
+      "case": "state-current-inactive-pressed",
+      "width": 1440,
+      "height": 900,
+      "sha256": "c9d29b556b6ce9d3f66f9abd297d3b54b4659e40eb2e67a0c5625a67b0e93193"
+    },
+    {
+      "file": "phone-canvas.png",
+      "case": "canvas-pencil-quick",
+      "width": 390,
+      "height": 844,
+      "sha256": "88210bd887fb0c5957249d00a97df53707be7905e4d71f4b8a83999c70fbbaed"
+    },
+    {
+      "file": "phone-colour.png",
+      "case": "colour",
+      "width": 390,
+      "height": 844,
+      "sha256": "115686c91abb197a79fb1943835beb8d6d0e3eb40ca2bf48ed4896b45d05cfba"
+    },
+    {
+      "file": "phone-visualizer.png",
+      "case": "skin-visualizer",
+      "width": 390,
+      "height": 844,
+      "sha256": "19c94cbf9aaaf5e2101e208b34dc77fe62ad945ae2a5315563905aba17914a17"
+    },
+    {
+      "file": "tablet-canvas.png",
+      "case": "canvas-pencil-quick",
+      "width": 1024,
+      "height": 800,
+      "sha256": "26deefadd7312e5b7937de26102217bd340032f61d8d1fdd7f19ec3ef8c1a09e"
+    }
+  ]
+}
