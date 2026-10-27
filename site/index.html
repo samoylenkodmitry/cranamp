@@ -1,74 +1,571 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#102c32">
-  <title>Cranamp — Music player and Skin Studio</title>
-  <meta name="description" content="Play your music and edit classic Winamp skins. Cranamp includes Skin Studio on desktop, phones, tablets and the web.">
-  <link rel="canonical" href="https://cranamp.dmitrysamoylenko.in/">
-  <link rel="icon" href="assets/icon.png" type="image/png">
-  <meta property="og:title" content="Cranamp — Music player and Skin Studio">
-  <meta property="og:description" content="Local audio, classic skins and a built-in editor. See the player and current Studio layouts.">
-  <meta property="og:image" content="https://cranamp.dmitrysamoylenko.in/assets/studio-desktop-0.1.92.png">
-  <meta property="og:image:alt" content="Cranamp Skin Studio with a joined canvas, pencil properties and layers">
-  <meta property="og:url" content="https://cranamp.dmitrysamoylenko.in/">
-  <meta property="og:type" content="website">
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <a class="skip" href="#main">Skip to content</a>
-  <header class="header wrap">
-    <a class="brand" href="./" aria-label="Cranamp home"><img src="assets/icon.png" width="42" height="42" alt=""><span>cranamp<span class="brand-dot">.</span></span></a>
-    <nav aria-label="Main navigation"><a href="#studio">Skin Studio</a><a href="support/">Support</a><a class="source" href="https://github.com/samoylenkodmitry/cranamp">Source</a></nav>
-  </header>
-  <main id="main">
-    <section class="hero wrap" aria-labelledby="hero-title">
-      <div class="hero-copy">
-        <p class="eyebrow">MUSIC PLAYER + SKIN EDITOR</p>
-        <h1 id="hero-title">Your music.<br><span>Your own skin.</span></h1>
-        <p class="intro">Play your audio files in a classic Winamp skin. Open Skin Studio to change the colours or draw your own artwork.</p>
-        <div class="actions"><a class="button primary" href="https://samoylenkodmitry.github.io/cranamp/">Open web player</a><a class="button secondary" href="#download">Get Cranamp</a></div>
-        <p class="fine">No account or ads. Bring your own music.</p>
-      </div>
-      <figure class="player-stage">
-        <div class="stage-heading"><span>THE PLAYER</span><span>CATAMP / SILVERPLAY</span></div>
-        <a class="stage-body" href="assets/player-0.1.92.png" aria-label="View the full player screenshot"><svg class="player-image" viewBox="416 0 448 800" role="img" aria-labelledby="player-title"><title id="player-title">Cranamp player with playback controls, a ten-band equalizer and a demo playlist</title><image href="assets/player-0.1.92.png" width="1280" height="800"/></svg></a>
-        <figcaption>Player, equalizer and playlist. Actual app capture.</figcaption>
-      </figure>
-    </section>
-    <div class="platform-strip"><div class="wrap"><span>AVAILABLE ON</span><p>macOS · Windows · Linux · iOS · Android · Web</p></div></div>
-    <section class="features wrap" aria-label="Player features">
-      <article><p class="eyebrow">FILES AND STREAMS</p><h2>Play from the original file.</h2><p>Open audio files or add a folder. Cranamp keeps audio in its original location. You can also open stream URLs and import M3U, M3U8 or PLS playlists.</p><a href="https://github.com/samoylenkodmitry/cranamp/blob/main/docs/audio-formats.md">Audio formats and limits</a></article>
-      <article><p class="eyebrow">CLASSIC CONTROLS</p><h2>Keep your player familiar.</h2><p>Use the ten-band equalizer and preamp. Pick a bundled Catamp skin or open a WSZ skin. The player remembers your playlist and sound settings.</p><a href="support/">Playback help</a></article>
-    </section>
-    <section id="studio" class="studio-section" aria-labelledby="studio-title">
-      <div class="wrap">
-        <div class="section-heading"><div><p class="eyebrow">BUILT-IN SKIN STUDIO</p><h2 id="studio-title">Edit the whole skin.</h2></div><div><p>Draw across the joined player windows with layers and masks. Keep a layered CSTUDIO project, or export a classic WSZ skin.</p><p class="open-hint">Open Settings in the player, then choose <strong>Open Skin Studio</strong>.</p></div></div>
-        <figure class="capture"><a href="assets/studio-desktop-0.1.92.png"><img src="assets/studio-desktop-0.1.92.png" width="1440" height="900" loading="lazy" alt="Desktop Studio with skin parts, joined canvas, pencil settings, exact colour inputs and layers"></a><figcaption><strong>Desktop canvas</strong><span>Tool settings and layers stay beside the artwork.</span></figcaption></figure>
-        <div class="responsive-gallery">
-          <figure class="capture phone-capture"><a href="assets/studio-phone-0.1.92.png"><img src="assets/studio-phone-0.1.92.png" width="1080" height="1920" loading="lazy" alt="Phone Studio with the canvas above the palette, drawing tools, size and opacity controls"></a><figcaption><strong>Phone</strong><span>Drawing tools below the canvas.</span></figcaption></figure>
-          <div class="tablet-column"><div class="gallery-copy"><p class="eyebrow">LAYOUTS FOLLOW THE WINDOW WIDTH</p><h3>Room for the current tool.</h3><p>Compact screens keep drawing controls near the canvas. Wider screens show skin parts and tool properties alongside it.</p></div><figure class="capture"><a href="assets/studio-tablet-0.1.92.png"><img src="assets/studio-tablet-0.1.92.png" width="1920" height="1080" loading="lazy" alt="Wide tablet Studio with source bitmap previews on the left and pencil properties on the right"></a><figcaption><strong>Wide tablet</strong><span>Canvas, source parts and tool properties.</span></figcaption></figure></div>
-        </div>
-        <div class="detail-layout"><div><p class="eyebrow">SKIN SETTINGS</p><h3>Set the exact colour.</h3><p>Enter HEX or RGB values. Change playlist and visualizer colours with a preview. Skin settings also include bitmap fonts, window shapes and cursors.</p><a class="text-link" href="https://github.com/samoylenkodmitry/cranamp/tree/main/docs/skin-studio">Read the Studio guide</a></div><figure class="capture"><a href="assets/studio-colours-0.1.92.png"><img src="assets/studio-colours-0.1.92.png" width="1440" height="900" loading="lazy" alt="Skin settings with exact colour values, playlist text samples, visualizer bars and a full skin preview"></a><figcaption><strong>Skin colours</strong><span>Preview changes before export.</span></figcaption></figure></div>
-        <p class="capture-note">Actual app captures from the 0.1.92 release gallery. Select any image to view it at full size. Store versions may differ while an update is under review.</p>
-      </div>
-    </section>
-    <section class="agent-section wrap" aria-labelledby="agent-title">
-      <div class="detail-layout"><div><p class="eyebrow">DESKTOP ONLY / MCP</p><h2 id="agent-title">Connect your agent.</h2><p>Enable a local MCP server in Studio to let an agent use the same canvas and drawing history. The server is off by default and stops when Studio closes.</p><p>Connected programs can read or change the skin and access files within Cranamp’s permissions. The agent’s provider may receive data that it reads.</p><p class="fine">MCP is unavailable on Android, iOS and the web.</p></div><figure class="capture"><a href="assets/studio-mcp-0.1.92.png"><img src="assets/studio-mcp-0.1.92.png" width="1440" height="900" loading="lazy" alt="Desktop MCP panel showing server status, a localhost connection URL and the local access disclosure"></a><figcaption><strong>Agent connection</strong><span>Start, test or stop the local server.</span></figcaption></figure></div>
-    </section>
-    <section id="download" class="download wrap" aria-labelledby="download-title">
-      <div><p class="eyebrow">DOWNLOAD</p><h2 id="download-title">Choose your platform.</h2><p>Try Cranamp in your browser or install it on your device.</p><p class="fine">Audio support depends on the platform and storage provider. <a href="https://github.com/samoylenkodmitry/cranamp/blob/main/docs/audio-formats.md">Check supported formats</a>.</p></div>
-      <div class="download-options">
-        <a class="download-card" href="https://samoylenkodmitry.github.io/cranamp/"><h3>Web player and Studio</h3><p>Open in a modern browser.</p></a>
-        <a class="download-card" href="https://github.com/samoylenkodmitry/cranamp/releases/latest"><h3>GitHub releases</h3><p>Desktop builds and Android APKs.</p></a>
-        <a class="download-card" href="https://apps.apple.com/app/id6818451356"><h3>App Store</h3><p>iPhone, iPad and Mac.</p></a>
-        <a class="download-card" href="https://play.google.com/store/apps/details?id=com.cranamp.app"><h3>Google Play</h3><p>Android phones and tablets.</p></a>
-        <a class="download-card" href="https://apps.microsoft.com/detail/9N0XTC9PGM8X"><h3>Microsoft Store</h3><p>Windows.</p></a>
-        <a class="download-card" href="https://aur.archlinux.org/packages/cranamp-bin"><h3>Arch Linux / AUR</h3><p><code>yay -S cranamp-bin</code></p></a>
-      </div>
-    </section>
-  </main>
-  <footer class="wrap"><span>© 2026 Dmitrii Samoilenko</span><nav aria-label="Footer"><a href="privacy/">Privacy policy</a><a href="support/">Support</a><a href="https://github.com/samoylenkodmitry/cranamp/blob/main/LICENSE">License</a></nav></footer>
-</body>
-</html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101922">
+<title>Cranamp Skin Studio guide</title>
+<meta name="description" content="A step-by-step Skin Studio guide with screenshots of drawing tools, paint layers, sprite states, skin settings and export controls.">
+<link rel="canonical" href="https://cranamp.dmitrysamoylenko.in/">
+<link rel="icon" href="assets/icon.png" type="image/png">
+<meta property="og:title" content="Cranamp Skin Studio guide">
+<meta property="og:description" content="Learn how to open a skin, use the editor and save your work. Instructions with actual app screenshots.">
+<meta property="og:image" content="https://cranamp.dmitrysamoylenko.in/assets/guide/canvas-pencil-quick.png">
+<meta property="og:image:alt" content="Skin Studio canvas with skin parts and pencil properties">
+<meta property="og:url" content="https://cranamp.dmitrysamoylenko.in/"><meta property="og:type" content="website">
+<link rel="stylesheet" href="style.css">
+</head><body>
+<a class="skip" href="#main">Skip to guide</a>
+<header class="site-header">
+<div class="header-inner"><a class="brand" href="./"><img src="assets/icon.png" width="32" height="32" alt="">Cranamp</a><span class="header-label">Skin Studio guide</span>
+<nav aria-label="Site"><a href="https://samoylenkodmitry.github.io/cranamp/">Web player</a><a href="#download">Install</a><a href="support/">Support</a>
+</nav>
+</div>
+</header>
+<main id="main">
+<header class="guide-intro" id="studio">
+<p class="edition">SKIN STUDIO / VERSION 0.1.92</p>
+<h1>How to edit a skin</h1>
+<p>Start with a skin file or the skin in your player. Follow the steps below to edit it and save your work.</p>
+<p class="small">Screenshots show the actual editor. Select a screenshot to view it at full size. Store versions may differ while an update is under review.</p>
+</header>
+<details class="mobile-contents" id="mobile-contents">
+<summary>Jump to a section</summary>
+<nav aria-label="Guide contents on small screens">
+<ol>
+<li><a href="#open"><span>01</span>Open a skin</a>
+</li>
+<li><a href="#canvas"><span>02</span>Canvas and navigation</a>
+</li>
+<li><a href="#draw"><span>03</span>Drawing tools</a>
+</li>
+<li><a href="#colour"><span>04</span>Brush colour</a>
+</li>
+<li><a href="#layers"><span>05</span>Paint layers</a>
+</li>
+<li><a href="#states"><span>06</span>Sprites and states</a>
+</li>
+<li><a href="#skin-colours"><span>07</span>Skin colours</a>
+</li>
+<li><a href="#skin-details"><span>08</span>Font, shape and cursors</a>
+</li>
+<li><a href="#preview"><span>09</span>Preview and checks</a>
+</li>
+<li><a href="#save"><span>10</span>Save and export</a>
+</li>
+<li><a href="#agent"><span>11</span>Desktop agents</a>
+</li>
+</ol>
+</nav>
+</details>
+<div class="guide-layout">
+<aside class="contents" id="contents">
+<nav aria-label="Guide contents">
+<h2>In this guide</h2>
+<ol>
+<li><a href="#open"><span>01</span>Open a skin</a>
+</li>
+<li><a href="#canvas"><span>02</span>Canvas and navigation</a>
+</li>
+<li><a href="#draw"><span>03</span>Drawing tools</a>
+</li>
+<li><a href="#colour"><span>04</span>Brush colour</a>
+</li>
+<li><a href="#layers"><span>05</span>Paint layers</a>
+</li>
+<li><a href="#states"><span>06</span>Sprites and states</a>
+</li>
+<li><a href="#skin-colours"><span>07</span>Skin colours</a>
+</li>
+<li><a href="#skin-details"><span>08</span>Font, shape and cursors</a>
+</li>
+<li><a href="#preview"><span>09</span>Preview and checks</a>
+</li>
+<li><a href="#save"><span>10</span>Save and export</a>
+</li>
+<li><a href="#agent"><span>11</span>Desktop agents</a>
+</li>
+</ol>
+</nav>
+</aside>
+<article aria-label="Skin Studio instructions">
+<section id="open" class="chapter" aria-labelledby="open-title">
+<header class="chapter-heading"><span>01</span>
+<h2 id="open-title">Open a skin</h2>
+<a class="permalink" href="#open" aria-label="Link to Open a skin">#</a>
+</header>
+<div class="opening">
+<div>
+<ol>
+<li>Open Cranamp. Select the lower-right corner of the top player window to open <strong>Settings</strong>. The circle marks that area.</li>
+<li>Choose <strong>Open Skin Studio</strong>.</li>
+<li>Select <strong>Continue editing</strong> to edit the working skin. To load a file, choose <strong>Open skin or project</strong> and select a <code>.wsz</code>, <code>.zip</code> or <code>.cstudio</code> file.</li>
+</ol>
+</div>
+<figure class="player-location"><svg viewBox="416 0 448 187" role="img" aria-labelledby="settings-location"><title id="settings-location">Player screenshot with a circle around the Settings area in the lower-right corner</title><image href="assets/player-0.1.92.png" width="1280" height="800"/><circle cx="839" cy="153" r="14" fill="none" stroke="#ffbe79" stroke-width="3"/></svg>
+<figcaption>Open Settings in this corner of the player.</figcaption>
+</figure>
+</div>
+<figure class="shot"><a href="assets/guide/projects.png" aria-label="Open full-size screenshot: The project screen. Continue editing opens the skin shown in the preview."><img src="assets/guide/projects.png" width="1440" height="900" loading="lazy" decoding="async" alt="The project screen. Continue editing opens the skin shown in the preview."></a>
+<figcaption>The project screen. Continue editing opens the skin shown in the preview. <a href="assets/guide/projects.png">Full size</a>
+</figcaption>
+</figure>
+<p class="note"><strong>Keep an editable copy.</strong> A CSTUDIO file keeps paint layers. A WSZ file holds the finished player skin. Cancelling the file picker keeps the current document.</p>
+<details class="detail">
+<summary>Start from a blank project</summary>
+<div class="detail-body">
+<p>Choose <strong>New project</strong> on the project screen, then confirm <strong>Create blank project</strong>. This replaces the working document. Save your current project first.</p>
+<figure class="shot"><a href="assets/guide/new-project.png" aria-label="Open full-size screenshot: The confirmation screen before creating a blank skin."><img src="assets/guide/new-project.png" width="1440" height="900" loading="lazy" decoding="async" alt="The confirmation screen before creating a blank skin."></a>
+<figcaption>The confirmation screen before creating a blank skin. <a href="assets/guide/new-project.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+</section>
+<section id="canvas" class="chapter" aria-labelledby="canvas-title">
+<header class="chapter-heading"><span>02</span>
+<h2 id="canvas-title">Choose what you edit</h2>
+<a class="permalink" href="#canvas" aria-label="Link to Choose what you edit">#</a>
+</header>
+<p>Choose <strong>Canvas</strong> at the top of the editor. <strong>Joined canvas</strong> shows the player windows together. Select a window in <strong>Skin windows</strong> for a closer view. Select a file in <strong>Source bitmaps</strong> to edit its sheet directly.</p>
+<figure class="shot"><a href="assets/guide/canvas-pencil-quick.png" aria-label="Open full-size screenshot: Desktop canvas: skin parts on the left, drawing tools beside the canvas, and pencil properties on the right."><img src="assets/guide/canvas-pencil-quick.png" width="1440" height="900" loading="lazy" decoding="async" alt="Desktop canvas: skin parts on the left, drawing tools beside the canvas, and pencil properties on the right."></a>
+<figcaption>Desktop canvas: skin parts on the left, drawing tools beside the canvas, and pencil properties on the right. <a href="assets/guide/canvas-pencil-quick.png">Full size</a>
+</figcaption>
+</figure>
+<div class="two-columns">
+<div>
+<h3>Move and zoom</h3>
+<ul>
+<li>Use <strong>Pan canvas</strong>, the hand icon, to drag without painting.</li>
+<li>Use two fingers to pan or pinch to zoom. A second finger cancels a tentative stroke.</li>
+<li>Use the plus and minus zoom controls. <strong>Fit canvas</strong>, between them, shows the whole selected part.</li>
+<li>Scroll with the wheel, middle-button drag or the canvas scrollbars. Ctrl + wheel zooms around the pointer.</li>
+</ul>
+</div>
+<div>
+<h3>Find the same controls on a phone</h3>
+<p>The top icons select Canvas, Sprites, States, Skin and Preview. Drawing tools and quick settings sit below the canvas. Select the current part name to change the part. The sliders icon opens the selected tool’s full settings.</p>
+<p>On a wider window, the part list and tool properties appear beside the canvas. Layouts follow window width on every platform.</p>
+</div>
+</div>
+<details class="detail">
+<summary>Phone and tablet layouts</summary>
+<div class="detail-body">
+<div class="device-examples">
+<figure class="shot phone-shot"><a href="assets/guide/phone-canvas.png" aria-label="Open full-size screenshot: Phone canvas with the palette and tool settings below the artwork."><img src="assets/guide/phone-canvas.png" width="390" height="844" loading="lazy" decoding="async" alt="Phone canvas with the palette and tool settings below the artwork."></a>
+<figcaption>Phone canvas with the palette and tool settings below the artwork. <a href="assets/guide/phone-canvas.png">Full size</a>
+</figcaption>
+</figure>
+<figure class="shot"><a href="assets/guide/tablet-canvas.png" aria-label="Open full-size screenshot: Tablet canvas with the part selector above the artwork and tool properties on the right."><img src="assets/guide/tablet-canvas.png" width="1024" height="800" loading="lazy" decoding="async" alt="Tablet canvas with the part selector above the artwork and tool properties on the right."></a>
+<figcaption>Tablet canvas with the part selector above the artwork and tool properties on the right. <a href="assets/guide/tablet-canvas.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</div>
+</details>
+</section>
+<section id="draw" class="chapter" aria-labelledby="draw-title">
+<header class="chapter-heading"><span>03</span>
+<h2 id="draw-title">Draw with the selected tool</h2>
+<a class="permalink" href="#draw" aria-label="Link to Draw with the selected tool">#</a>
+</header>
+<ol>
+<li>Select a tool beside or below the canvas. Use <strong>Drawing tools</strong>, the three-dot control in the tool strip, to see tools that do not fit in the strip.</li>
+<li>Set the properties for that tool. The small sample shows the current stroke or shape. Open <strong>Tool settings</strong> with the sliders icon for more controls.</li>
+<li>Draw on the canvas. Use <strong>Undo</strong> in the top bar to remove the last edit. <strong>Redo</strong> restores it.</li>
+</ol>
+<details class="detail">
+<summary>Find a tool in Drawing tools</summary>
+<div class="detail-body">
+<figure class="shot"><a href="assets/guide/tools.png" aria-label="Open full-size screenshot: Drawing tools shows additional tools; the desktop example offers Glass lens and Taper."><img src="assets/guide/tools.png" width="1440" height="900" loading="lazy" decoding="async" alt="Drawing tools shows additional tools; the desktop example offers Glass lens and Taper."></a>
+<figcaption>Drawing tools shows additional tools; the desktop example offers Glass lens and Taper. <a href="assets/guide/tools.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<p class="small">Open a tool below for its steps and a screenshot of its settings.</p>
+<div class="tool-reference">
+<details class="detail">
+<summary>Pencil</summary>
+<div class="detail-body">
+<p>Choose <strong>Pencil</strong>. Set <strong>Size</strong> in skin pixels and <strong>Opacity</strong>, then drag to draw. Size 1 paints a one-pixel stroke.</p>
+<p>The full settings include mirroring and grain. Clean corners changes how diagonal strokes meet.</p>
+<figure class="shot"><a href="assets/guide/canvas-pencil-settings.png" aria-label="Open full-size screenshot: Pencil settings."><img src="assets/guide/canvas-pencil-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Pencil settings."></a>
+<figcaption>Pencil settings. <a href="assets/guide/canvas-pencil-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<details class="detail">
+<summary>Line</summary>
+<div class="detail-body">
+<p>Choose <strong>Line</strong>. Set Size and Opacity, then drag from the start point to the end point. Release to keep the line.</p>
+<p>A completed drag creates one undo step.</p>
+<figure class="shot"><a href="assets/guide/canvas-line-settings.png" aria-label="Open full-size screenshot: Line settings."><img src="assets/guide/canvas-line-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Line settings."></a>
+<figcaption>Line settings. <a href="assets/guide/canvas-line-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<details class="detail">
+<summary>Rectangle</summary>
+<div class="detail-body">
+<p>Choose <strong>Rectangle</strong> and drag between opposite corners. Turn <strong>Fill shape</strong> on for a filled rectangle; turn it off for an outline.</p>
+<p>For a gradient, choose Down or Across and enter the end colour in To. Solid uses the current brush colour.</p>
+<figure class="shot"><a href="assets/guide/rectangle-gradient-settings.png" aria-label="Open full-size screenshot: Rectangle settings."><img src="assets/guide/rectangle-gradient-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Rectangle settings."></a>
+<figcaption>Rectangle settings. <a href="assets/guide/rectangle-gradient-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<details class="detail">
+<summary>Ellipse</summary>
+<div class="detail-body">
+<p>Choose <strong>Ellipse</strong> and drag the bounding rectangle. Set Fill shape for a filled ellipse or use an outline.</p>
+<p>The gradient controls work like the Rectangle tool. The sample at the top shows the current settings.</p>
+<figure class="shot"><a href="assets/guide/ellipse-gradient-settings.png" aria-label="Open full-size screenshot: Ellipse settings."><img src="assets/guide/ellipse-gradient-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Ellipse settings."></a>
+<figcaption>Ellipse settings. <a href="assets/guide/ellipse-gradient-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<details class="detail">
+<summary>Curve</summary>
+<div class="detail-body">
+<p>Choose <strong>Curve</strong>. Set Size and Bend, then drag between the endpoints. Change the sign of Bend to curve in the other direction.</p>
+<p>Review the curve while dragging. Release to keep it.</p>
+<figure class="shot"><a href="assets/guide/curve-right-settings.png" aria-label="Open full-size screenshot: Curve settings."><img src="assets/guide/curve-right-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Curve settings."></a>
+<figcaption>Curve settings. <a href="assets/guide/curve-right-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<details class="detail">
+<summary>Text</summary>
+<div class="detail-body">
+<p>Choose <strong>Text</strong>. Enter the words in the <strong>Text</strong> field and set the text scale. Open the tool settings to choose the font and spacing, then drag to place the text.</p>
+<p>The text becomes painted pixels. Put it on its own layer so you can remove or replace it later. Changing the text field affects the next placement.</p>
+<figure class="shot"><a href="assets/guide/canvas-text-settings.png" aria-label="Open full-size screenshot: Text settings."><img src="assets/guide/canvas-text-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Text settings."></a>
+<figcaption>Text settings. <a href="assets/guide/canvas-text-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<details class="detail">
+<summary>Lift pixels</summary>
+<div class="detail-body">
+<p>Choose <strong>Lift pixels</strong> and drag a rectangle around the artwork to copy. The original pixels stay in place. Select <strong>Use copied pixels</strong> to switch to Stamp.</p>
+<p>The captured rectangle appears in the tool preview. This copies rendered artwork into a stamp.</p>
+<figure class="shot"><a href="assets/guide/lift-copied-settings.png" aria-label="Open full-size screenshot: Lift pixels settings."><img src="assets/guide/lift-copied-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Lift pixels settings."></a>
+<figcaption>Lift pixels settings. <a href="assets/guide/lift-copied-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<details class="detail">
+<summary>Stamp</summary>
+<div class="detail-body">
+<p>Capture a rectangle with Lift pixels, then choose <strong>Stamp</strong>. Set the flip or rotation controls and drag to place the copy.</p>
+<p>Repeat places several copies along the drag. Sweep states distributes repeated stamps through sprite states; leave it off for ordinary copying.</p>
+<figure class="shot"><a href="assets/guide/stamp-repeat-settings.png" aria-label="Open full-size screenshot: Stamp settings."><img src="assets/guide/stamp-repeat-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Stamp settings."></a>
+<figcaption>Stamp settings. <a href="assets/guide/stamp-repeat-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<details class="detail">
+<summary>Glass lens</summary>
+<div class="detail-body">
+<p>Choose <strong>Glass lens</strong>. Set Bevel and Refraction, then drag a rectangle over the artwork.</p>
+<p>Use the tool sample to check the effect and Undo to remove a placement.</p>
+<figure class="shot"><a href="assets/guide/glass-wide-settings.png" aria-label="Open full-size screenshot: Glass lens settings."><img src="assets/guide/glass-wide-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Glass lens settings."></a>
+<figcaption>Glass lens settings. <a href="assets/guide/glass-wide-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+<details class="detail">
+<summary>Taper</summary>
+<div class="detail-body">
+<p>Choose <strong>Taper</strong>. Set Size and Grain, then drag between the stroke endpoints.</p>
+<p>Adjust Grain size for the texture. The sample updates as you change the settings.</p>
+<figure class="shot"><a href="assets/guide/taper-wide-settings.png" aria-label="Open full-size screenshot: Taper settings."><img src="assets/guide/taper-wide-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="Taper settings."></a>
+<figcaption>Taper settings. <a href="assets/guide/taper-wide-settings.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+</div>
+<p class="note"><strong>Brush settings affect new strokes.</strong> To change an existing shape, undo it and draw it again, or edit its pixels on a separate paint layer.</p>
+</section>
+<section id="colour" class="chapter" aria-labelledby="colour-title">
+<header class="chapter-heading"><span>04</span>
+<h2 id="colour-title">Choose and save a brush colour</h2>
+<a class="permalink" href="#colour" aria-label="Link to Choose and save a brush colour">#</a>
+</header>
+<ol>
+<li>Select the palette icon, <strong>Brush colour</strong>. Wide windows also show the colour editor beside the canvas.</li>
+<li>Choose a hue and a point in the colour field, or enter an exact HEX value such as <code>#4a80c2</code>. RGB fields accept values from 0 to 255.</li>
+<li>Use <strong>Save colour</strong>, the plus icon, to add the current colour to Saved colours. To replace a swatch, select it, choose a new colour, then use <strong>Replace swatch</strong>, the pencil icon. The cross removes the selected swatch.</li>
+</ol>
+<figure class="shot"><a href="assets/guide/colour-full-palette.png" aria-label="Open full-size screenshot: Brush colour with exact values and editable saved swatches."><img src="assets/guide/colour-full-palette.png" width="1440" height="900" loading="lazy" decoding="async" alt="Brush colour with exact values and editable saved swatches."></a>
+<figcaption>Brush colour with exact values and editable saved swatches. <a href="assets/guide/colour-full-palette.png">Full size</a>
+</figcaption>
+</figure>
+<p>Right-click on the canvas to sample a colour from the artwork. Save a CSTUDIO project to retain the palette.</p>
+<details class="detail">
+<summary>Brush colour on a phone</summary>
+<div class="detail-body">
+<figure class="shot phone-shot"><a href="assets/guide/phone-colour.png" aria-label="Open full-size screenshot: The phone colour panel uses the same HEX and RGB controls."><img src="assets/guide/phone-colour.png" width="390" height="844" loading="lazy" decoding="async" alt="The phone colour panel uses the same HEX and RGB controls."></a>
+<figcaption>The phone colour panel uses the same HEX and RGB controls. <a href="assets/guide/phone-colour.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+</section>
+<section id="layers" class="chapter" aria-labelledby="layers-title">
+<header class="chapter-heading"><span>05</span>
+<h2 id="layers-title">Keep changes on paint layers</h2>
+<a class="permalink" href="#layers" aria-label="Link to Keep changes on paint layers">#</a>
+</header>
+<ol>
+<li>Open <strong>Painting layers</strong> with the stacked-sheets icon. Select the plus button to add a layer.</li>
+<li>Select the layer row before drawing. Its name appears beside <strong>Paint</strong>. The <strong>Source artwork</strong> row edits the original bitmap pixels directly.</li>
+<li>Use the eye to show or hide a layer and the lock to prevent edits. Select a layer to change its name or opacity. The arrows change its order.</li>
+</ol>
+<figure class="shot"><a href="assets/guide/paint-layer-settings.png" aria-label="Open full-size screenshot: A new Highlights layer is selected. Its name, opacity and order controls are above the layer list."><img src="assets/guide/paint-layer-settings.png" width="1440" height="900" loading="lazy" decoding="async" alt="A new Highlights layer is selected. Its name, opacity and order controls are above the layer list."></a>
+<figcaption>A new Highlights layer is selected. Its name, opacity and order controls are above the layer list. <a href="assets/guide/paint-layer-settings.png">Full size</a>
+</figcaption>
+</figure>
+<p><strong>Merge down</strong> combines the selected layer with the layer below. Delete removes it. Undo can restore either action during the current session. Save as CSTUDIO to keep layers for later work.</p>
+<details class="detail">
+<summary>Limit where new paint can land</summary>
+<div class="detail-body">
+<p>In Tool settings, <strong>Lock transparency</strong> limits paint to existing pixels on the selected paint layer. <strong>Paint only this colour</strong> restricts painting to matching pixels. In Painting layers, <strong>Clip to layer below</strong> uses the layer below as a mask.</p>
+<figure class="shot"><a href="assets/guide/paint-mask.png" aria-label="Open full-size screenshot: Pencil settings with a paint layer and paint limits enabled."><img src="assets/guide/paint-mask.png" width="1440" height="900" loading="lazy" decoding="async" alt="Pencil settings with a paint layer and paint limits enabled."></a>
+<figcaption>Pencil settings with a paint layer and paint limits enabled. <a href="assets/guide/paint-mask.png">Full size</a>
+</figcaption>
+</figure>
+<p class="note">If a stroke produces no visible change, check the selected layer, its eye and lock controls, and these paint limits.</p>
+</div>
+</details>
+</section>
+<section id="states" class="chapter" aria-labelledby="states-title">
+<header class="chapter-heading"><span>06</span>
+<h2 id="states-title">Edit sprites and their states</h2>
+<a class="permalink" href="#states" aria-label="Link to Edit sprites and their states">#</a>
+</header>
+<h3>Choose a control</h3>
+<p>Open <strong>Sprites</strong> and select the control to edit. A sprite is a skin image for a control, such as the Play button or a slider handle. The selected control limits the destination of new paint.</p>
+<figure class="shot"><a href="assets/guide/sprite-pencil-quick.png" aria-label="Open full-size screenshot: Sprites with the Play button selected for editing."><img src="assets/guide/sprite-pencil-quick.png" width="1440" height="900" loading="lazy" decoding="async" alt="Sprites with the Play button selected for editing."></a>
+<figcaption>Sprites with the Play button selected for editing. <a href="assets/guide/sprite-pencil-quick.png">Full size</a>
+</figcaption>
+</figure>
+<h3>Choose what you see and what you paint</h3>
+<ol>
+<li>Use <strong>Active</strong> or <strong>Inactive</strong> above the canvas to choose the window appearance. <strong>Released</strong> or <strong>Pressed</strong> chooses the button appearance. Open <strong>Canvas state</strong> with the two-state icon near those controls.</li>
+<li>Under <strong>Paint into</strong>, choose <strong>This state</strong> to change the displayed variant. Choose <strong>All states</strong> when the same edit should reach every variant.</li>
+</ol>
+<p class="note"><strong>Check both selections before drawing.</strong> Viewing a pressed button does not limit painting to its pressed artwork. The Paint into setting controls that scope.</p>
+<figure class="shot"><a href="assets/guide/state-current-active-released.png" aria-label="Open full-size screenshot: Active window, released controls, with Paint into set to This state."><img src="assets/guide/state-current-active-released.png" width="1440" height="900" loading="lazy" decoding="async" alt="Active window, released controls, with Paint into set to This state."></a>
+<figcaption>Active window, released controls, with Paint into set to This state. <a href="assets/guide/state-current-active-released.png">Full size</a>
+</figcaption>
+</figure>
+<details class="detail">
+<summary>Other window and button appearances</summary>
+<div class="detail-body">
+<div class="state-examples">
+<figure class="shot"><a href="assets/guide/state-current-active-pressed.png" aria-label="Open full-size screenshot: Active window with pressed controls."><img src="assets/guide/state-current-active-pressed.png" width="1440" height="900" loading="lazy" decoding="async" alt="Active window with pressed controls."></a>
+<figcaption>Active window with pressed controls. <a href="assets/guide/state-current-active-pressed.png">Full size</a>
+</figcaption>
+</figure>
+<figure class="shot"><a href="assets/guide/state-current-inactive-released.png" aria-label="Open full-size screenshot: Inactive window with released controls."><img src="assets/guide/state-current-inactive-released.png" width="1440" height="900" loading="lazy" decoding="async" alt="Inactive window with released controls."></a>
+<figcaption>Inactive window with released controls. <a href="assets/guide/state-current-inactive-released.png">Full size</a>
+</figcaption>
+</figure>
+<figure class="shot"><a href="assets/guide/state-current-inactive-pressed.png" aria-label="Open full-size screenshot: Inactive window with pressed controls."><img src="assets/guide/state-current-inactive-pressed.png" width="1440" height="900" loading="lazy" decoding="async" alt="Inactive window with pressed controls."></a>
+<figcaption>Inactive window with pressed controls. <a href="assets/guide/state-current-inactive-pressed.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</div>
+</details>
+<h3>Compare the variants</h3>
+<p>Open <strong>States</strong> to inspect the selected control’s artwork side by side. Check both button appearances. For sliders, inspect the low, middle and high positions before export.</p>
+<figure class="shot"><a href="assets/guide/states.png" aria-label="Open full-size screenshot: The States workspace compares the selected Play button’s variants."><img src="assets/guide/states.png" width="1440" height="900" loading="lazy" decoding="async" alt="The States workspace compares the selected Play button’s variants."></a>
+<figcaption>The States workspace compares the selected Play button’s variants. <a href="assets/guide/states.png">Full size</a>
+</figcaption>
+</figure>
+<details class="detail">
+<summary>Inspect equalizer frames</summary>
+<div class="detail-body">
+<p>Open <strong>Project actions</strong>, then <strong>EQ workbench</strong>. Choose a level under Level to paint and inspect its track and handle artwork. The equalizer uses shared source images, so an edit can affect several sliders.</p>
+<figure class="shot"><a href="assets/guide/equalizer.png" aria-label="Open full-size screenshot: Equalizer workbench for shared tracks, frames and handle artwork."><img src="assets/guide/equalizer.png" width="1440" height="900" loading="lazy" decoding="async" alt="Equalizer workbench for shared tracks, frames and handle artwork."></a>
+<figcaption>Equalizer workbench for shared tracks, frames and handle artwork. <a href="assets/guide/equalizer.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+</section>
+<section id="skin-colours" class="chapter" aria-labelledby="skin-colours-title">
+<header class="chapter-heading"><span>07</span>
+<h2 id="skin-colours-title">Change playlist and visualizer colours</h2>
+<a class="permalink" href="#skin-colours" aria-label="Link to Change playlist and visualizer colours">#</a>
+</header>
+<ol>
+<li>Open <strong>Skin</strong>, then <strong>Colours</strong>.</li>
+<li>Select the playlist item you want to change, such as Track text or Background. Enter its HEX or RGB value, or use the colour field.</li>
+<li>Select a visualizer swatch to change that slot. Check the playlist text samples and the visualizer preview.</li>
+</ol>
+<figure class="shot"><a href="assets/guide/skin-playlist.png" aria-label="Open full-size screenshot: Skin colours controls the playlist text and backgrounds, plus the visualizer palette."><img src="assets/guide/skin-playlist.png" width="1440" height="900" loading="lazy" decoding="async" alt="Skin colours controls the playlist text and backgrounds, plus the visualizer palette."></a>
+<figcaption>Skin colours controls the playlist text and backgrounds, plus the visualizer palette. <a href="assets/guide/skin-playlist.png">Full size</a>
+</figcaption>
+</figure>
+<p>These settings control the playlist’s filled area and runtime text. Drawing on the canvas changes bitmap artwork. Use this screen when you want to change the playlist background or text colour.</p>
+<details class="detail">
+<summary>Visualizer colours on a phone</summary>
+<div class="detail-body">
+<p>Open Skin, then Colours and choose Visualizer. Select a palette slot and set its colour.</p>
+<figure class="shot phone-shot"><a href="assets/guide/phone-visualizer.png" aria-label="Open full-size screenshot: Phone visualizer palette and its colour editor."><img src="assets/guide/phone-visualizer.png" width="390" height="844" loading="lazy" decoding="async" alt="Phone visualizer palette and its colour editor."></a>
+<figcaption>Phone visualizer palette and its colour editor. <a href="assets/guide/phone-visualizer.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+</section>
+<section id="skin-details" class="chapter" aria-labelledby="skin-details-title">
+<header class="chapter-heading"><span>08</span>
+<h2 id="skin-details-title">Edit the font, window shape or cursors</h2>
+<a class="permalink" href="#skin-details" aria-label="Link to Edit the font, window shape or cursors">#</a>
+</header>
+<p>Open <strong>Skin</strong> to reach these settings. Each has its own preview.</p>
+<h3>Player text font</h3>
+<p>Choose <strong>Text font</strong>. Set Font ink and Font background, then select <strong>Build classic text font</strong>. Use <strong>Edit font pixels</strong> to paint the bitmap letters directly. This changes the player’s font; the Text drawing tool places words on the artwork.</p>
+<figure class="shot"><a href="assets/guide/skin-font.png" aria-label="Open full-size screenshot: Text font with ink and background values, bitmap glyphs and a player preview."><img src="assets/guide/skin-font.png" width="1440" height="900" loading="lazy" decoding="async" alt="Text font with ink and background values, bitmap glyphs and a player preview."></a>
+<figcaption>Text font with ink and background values, bitmap glyphs and a player preview. <a href="assets/guide/skin-font.png">Full size</a>
+</figcaption>
+</figure>
+<details class="detail">
+<summary>Window shape</summary>
+<div class="detail-body">
+<p>Choose <strong>Window shape</strong>. Set Cutout colour to the colour along the outside edge, then select <strong>Cut edge</strong> for the player or equalizer. <strong>Reset</strong> restores that window’s rectangular shape.</p>
+<figure class="shot"><a href="assets/guide/skin-shape.png" aria-label="Open full-size screenshot: Window shape controls for the player and equalizer."><img src="assets/guide/skin-shape.png" width="1440" height="900" loading="lazy" decoding="async" alt="Window shape controls for the player and equalizer."></a>
+<figcaption>Window shape controls for the player and equalizer. <a href="assets/guide/skin-shape.png">Full size</a>
+</figcaption>
+</figure>
+<p class="note">The cutout affects the whole window, including any controls inside it. Magenta is ordinary artwork colour; it does not create a transparent hole in a sprite.</p>
+</div>
+</details>
+<details class="detail">
+<summary>Cursor artwork and click position</summary>
+<div class="detail-body">
+<p>Choose <strong>Cursors</strong> and select the cursor for a player region. Cursor X and Cursor Y set its hotspot: the pixel that acts as the click position. Choose <strong>Paint cursor</strong> to edit its artwork. If entries are missing, use <strong>Draw missing cursors</strong> to create them.</p>
+<figure class="shot"><a href="assets/guide/skin-cursors-drawn.png" aria-label="Open full-size screenshot: Cursor list with artwork previews and hotspot controls."><img src="assets/guide/skin-cursors-drawn.png" width="1440" height="900" loading="lazy" decoding="async" alt="Cursor list with artwork previews and hotspot controls."></a>
+<figcaption>Cursor list with artwork previews and hotspot controls. <a href="assets/guide/skin-cursors-drawn.png">Full size</a>
+</figcaption>
+</figure>
+<p>Cursor display depends on the platform and input device. Touch input has no pointer to display.</p>
+</div>
+</details>
+</section>
+<section id="preview" class="chapter" aria-labelledby="preview-title">
+<header class="chapter-heading"><span>09</span>
+<h2 id="preview-title">Preview and check the skin</h2>
+<a class="permalink" href="#preview" aria-label="Link to Preview and check the skin">#</a>
+</header>
+<ol>
+<li>Open <strong>Preview</strong> to see the skin rendered as a player.</li>
+<li>On desktop, select a thumbnail under <strong>State previews</strong> to inspect an alternate appearance. On smaller screens, use <strong>Pressed controls</strong> and <strong>Active window</strong>.</li>
+<li>Look for hard-to-read text and mismatched backgrounds around moving controls. Return to Canvas or Skin to make corrections.</li>
+</ol>
+<figure class="shot"><a href="assets/guide/preview.png" aria-label="Open full-size screenshot: Preview renders the current skin with player controls and text."><img src="assets/guide/preview.png" width="1440" height="900" loading="lazy" decoding="async" alt="Preview renders the current skin with player controls and text."></a>
+<figcaption>Preview renders the current skin with player controls and text. <a href="assets/guide/preview.png">Full size</a>
+</figcaption>
+</figure>
+<h3>Check the exported format</h3>
+<p>Open <strong>Skin</strong>, then <strong>Format check</strong>. Resolve reported problems before exporting a WSZ. A valid format does not confirm that the artwork looks correct, so inspect the preview as well.</p>
+<figure class="shot"><a href="assets/guide/skin-format.png" aria-label="Open full-size screenshot: Format check shows whether the skin is ready for WSZ export."><img src="assets/guide/skin-format.png" width="1440" height="900" loading="lazy" decoding="async" alt="Format check shows whether the skin is ready for WSZ export."></a>
+<figcaption>Format check shows whether the skin is ready for WSZ export. <a href="assets/guide/skin-format.png">Full size</a>
+</figcaption>
+</figure>
+<details class="detail">
+<summary>Inspect a small group of pixels</summary>
+<div class="detail-body">
+<p>Use <strong>Lift pixels</strong> to select an area, then open Project actions and choose <strong>Pixel study</strong>. Inspect the enlarged pixels in Color or Values mode. Include 4px surroundings adds context around the selection. Without a selection, the preview starts at the top-left.</p>
+<figure class="shot"><a href="assets/guide/pixel-study.png" aria-label="Open full-size screenshot: Pixel study displays an enlarged area of the artwork."><img src="assets/guide/pixel-study.png" width="1440" height="900" loading="lazy" decoding="async" alt="Pixel study displays an enlarged area of the artwork."></a>
+<figcaption>Pixel study displays an enlarged area of the artwork. <a href="assets/guide/pixel-study.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+</section>
+<section id="save" class="chapter" aria-labelledby="save-title">
+<header class="chapter-heading"><span>10</span>
+<h2 id="save-title">Save the project and export a skin</h2>
+<a class="permalink" href="#save" aria-label="Link to Save the project and export a skin">#</a>
+</header>
+<p>Select the save icon beside the canvas to open <strong>Save and share</strong>. You can also open Preview and select its share icon at the top-right.</p>
+<figure class="shot"><a href="assets/guide/save.png" aria-label="Open full-size screenshot: Save and share separates the editable project from the playable WSZ skin."><img src="assets/guide/save.png" width="1440" height="900" loading="lazy" decoding="async" alt="Save and share separates the editable project from the playable WSZ skin."></a>
+<figcaption>Save and share separates the editable project from the playable WSZ skin. <a href="assets/guide/save.png">Full size</a>
+</figcaption>
+</figure>
+<dl class="choices">
+<div>
+<dt>Save project</dt>
+<dd>Writes a <code>.cstudio</code> file with layers and editable sources. Use this file when you want to continue editing.</dd>
+</div>
+<div>
+<dt>Export WSZ skin</dt>
+<dd>Writes a <code>.wsz</code> file for a player. Visible artwork is combined into the classic skin files.</dd>
+</div>
+<div>
+<dt>Apply to player</dt>
+<dd>Uses the current skin in Cranamp when Studio was opened from the player. Save a project separately to keep your editable work.</dd>
+</div>
+<div>
+<dt>Save draft</dt>
+<dd>Keeps a recovery copy on this device. Return to the project screen and use Restore last draft to reopen it.</dd>
+</div>
+</dl>
+<p class="note">To test an exported WSZ, return to the player and open that skin file. Keep the CSTUDIO file for future edits. Browser exports download files; native apps use the system file picker.</p>
+<details class="detail">
+<summary>Find inspection tools from the canvas</summary>
+<div class="detail-body">
+<p>The three dots in the top bar open <strong>Project actions</strong>. This panel contains Edit history and Pixel study. It also provides Sprite rectangles and the EQ workbench.</p>
+<figure class="shot"><a href="assets/guide/project-actions.png" aria-label="Open full-size screenshot: Project actions contains inspection tools and edit history."><img src="assets/guide/project-actions.png" width="1440" height="900" loading="lazy" decoding="async" alt="Project actions contains inspection tools and edit history."></a>
+<figcaption>Project actions contains inspection tools and edit history. <a href="assets/guide/project-actions.png">Full size</a>
+</figcaption>
+</figure>
+</div>
+</details>
+</section>
+<section id="agent" class="chapter" aria-labelledby="agent-title">
+<header class="chapter-heading"><span>11</span>
+<h2 id="agent-title">Connect an agent on desktop</h2>
+<a class="permalink" href="#agent" aria-label="Link to Connect an agent on desktop">#</a>
+</header>
+<p>MCP lets a compatible agent use Studio’s drawing tools and edit history. It is available in desktop builds and is off by default. Android, iOS and the web do not include it.</p>
+<ol>
+<li>Open <strong>Agent connection</strong> from the top toolbar. In a narrow desktop window, find it in Project actions.</li>
+<li>Select <strong>Start server</strong>. Copy the HTTP server URL to your agent’s MCP settings. It is a localhost address on this computer.</li>
+<li>Select <strong>Test connection</strong>. Stop the server or close Studio when you finish.</li>
+</ol>
+<figure class="shot"><a href="assets/studio-mcp-0.1.92.png" aria-label="Open full-size screenshot: Desktop agent connection"><img src="assets/studio-mcp-0.1.92.png" width="1440" height="900" loading="lazy" alt="Desktop Agent connection panel with server controls and the local access disclosure"></a>
+<figcaption>Agent connection after the local server has started. <a href="assets/studio-mcp-0.1.92.png">Full size</a>
+</figcaption>
+</figure>
+<p class="note">While the server runs, connected programs can read or change the active skin and access files within Cranamp’s permissions. An agent may send the data it reads to its provider.</p>
+</section>
+</article>
+</div>
+<section id="download" class="install">
+<h2>Get Cranamp</h2>
+<p>Skin Studio is included in Cranamp. The web version opens in your browser.</p>
+<nav aria-label="Install Cranamp"><a href="https://samoylenkodmitry.github.io/cranamp/">Web player</a><a href="https://apps.apple.com/app/id6818451356">App Store</a><a href="https://play.google.com/store/apps/details?id=com.cranamp.app">Google Play</a><a href="https://apps.microsoft.com/detail/9N0XTC9PGM8X">Microsoft Store</a><a href="https://github.com/samoylenkodmitry/cranamp/releases/latest">GitHub releases</a><a href="https://aur.archlinux.org/packages/cranamp-bin">Arch Linux / AUR</a>
+</nav>
+</section>
+</main>
+<footer><span>© 2026 Dmitrii Samoilenko</span>
+<nav aria-label="Footer"><a href="privacy/">Privacy</a><a href="support/">Support</a><a href="https://github.com/samoylenkodmitry/cranamp">Source</a><a href="https://github.com/samoylenkodmitry/cranamp/blob/main/docs/website.md">Screenshot sources</a>
+</nav>
+</footer>
+</body></html>
