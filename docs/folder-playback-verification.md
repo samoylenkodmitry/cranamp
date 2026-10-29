@@ -11,7 +11,8 @@ skips a failed candidate and starts the next discovered track, even when the
 next batch or the rest of the tree is still pending. Adding a folder to a stopped
 playlist selects the first new track. Later batches preserve playback and Stop.
 New picker requests invalidate an older scan, and scan errors release the picker.
-New entries no longer trigger background duration reads for the whole playlist.
+Adding, restoring, or importing a playlist no longer triggers background duration
+reads for the whole playlist. Durations come from saved metadata or playback.
 
 | Platform | Result |
 | --- | --- |

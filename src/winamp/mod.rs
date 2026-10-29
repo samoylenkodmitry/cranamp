@@ -1248,7 +1248,6 @@ fn WinampRuntimeEffects(
 ) {
     PlaybackProgressEffect(state);
     WinampKeyboard(state);
-    PlaylistDurationHydrationEffect(state);
     DocumentPickerEffect(state);
     CranposePickerEffect(state);
     IncomingContentEffect(state);
@@ -1271,16 +1270,6 @@ fn LaunchArgPickEffect(state: MutableState<WinampState>) {
         }
     });
 }
-#[cfg(not(target_arch = "wasm32"))]
-#[composable]
-fn PlaylistDurationHydrationEffect(state: MutableState<WinampState>) {
-    cranpose_core::remember(move || {
-        hydrate_playlist_durations_background(state, 0);
-    });
-}
-#[cfg(target_arch = "wasm32")]
-#[composable]
-fn PlaylistDurationHydrationEffect(_state: MutableState<WinampState>) {}
 #[composable]
 fn DocumentPickerEffect(state: MutableState<WinampState>) {
     let import_playlist =
@@ -1407,7 +1396,6 @@ fn receive_incoming_tracks(state: MutableState<WinampState>, tracks: Vec<Track>)
     state.update(|s| {
         append_playlist_tracks(s, tracks);
     });
-    hydrate_playlist_durations_background(state, first_new);
     if idle {
         start_track(state, first_new);
     } else {
@@ -1445,7 +1433,6 @@ fn apply_imported_playlist(state: MutableState<WinampState>, text: &str, source:
         app.playback = PlaybackState::Stopped;
         app.status = format!("Imported {} Track(s)", app.playlist.len());
     });
-    hydrate_playlist_durations_background(state, 0);
 }
 #[composable]
 fn CranposePickerEffect(state: MutableState<WinampState>) {
@@ -7168,53 +7155,6 @@ fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>
     if should_start {
         start_track(state, first_added);
     }
-}
-fn hydrate_playlist_durations_background(state: MutableState<WinampState>, first: usize) {
-    let jobs = state
-        .get_non_reactive()
-        .playlist
-        .iter()
-        .enumerate()
-        .skip(first)
-        .filter(|(_, track)| track.duration_seconds.is_none())
-        .filter_map(|(index, track)| {
-            let path = track.path.as_ref()?;
-            cranpose_services::path_from_uri(path)?;
-            Some((index, path.clone()))
-        })
-        .collect::<Vec<_>>();
-    if jobs.is_empty() {
-        return;
-    }
-    launch_blocking(
-        move || {
-            jobs.into_iter()
-                .filter_map(|(index, path)| {
-                    let duration = audio::probe_track_duration_seconds(std::path::Path::new(&path))
-                        .ok()
-                        .flatten()?;
-                    Some((index, path, duration))
-                })
-                .collect::<Vec<_>>()
-        },
-        move |durations| {
-            let Ok(durations) = durations else { return };
-            if durations.is_empty() {
-                return;
-            }
-            state.update(|s| {
-                let tracks = playlist_tracks_mut(s);
-                for (index, path, duration) in durations {
-                    let Some(track) = tracks.get_mut(index) else {
-                        continue;
-                    };
-                    if track.duration_seconds.is_none() && track.path.as_deref() == Some(&path) {
-                        track.duration_seconds = Some(duration);
-                    }
-                }
-            });
-        },
-    );
 }
 fn replace_playlist_tracks(state: &mut WinampState, tracks: Vec<Track>) {
     set_playlist_tracks(state, tracks);
