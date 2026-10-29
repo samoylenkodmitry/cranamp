@@ -217,8 +217,13 @@ fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
 }
 pub const DESKTOP_LAYOUT_MIN: (f32, f32) = (1140., 820.);
 #[composable]
-pub fn AdaptiveSkinStudio(shared: SharedDocument, host: StudioHost) {
-    SkinStudio(shared, Some(host));
+pub fn AdaptiveSkinStudio(
+    shared: SharedDocument,
+    host: StudioHost,
+    visible: bool,
+    bottom_inset: f32,
+) {
+    adaptive::MountedSkinStudio(shared, Some(host), visible, bottom_inset);
 }
 pub fn open_document(path: Option<&str>) -> anyhow::Result<SharedDocument> {
     let document = initial_document(path)?;
@@ -262,6 +267,7 @@ pub fn run_touch_preview(editor: bool) {
     let document = new_mobile_document(None).expect("Bundled Studio document");
     let launcher = crate::create_surface_app()
         .with_title("Cranamp · Touch preview")
+        .with_developer_inspector(false)
         .with_size(393, 780);
     #[cfg(feature = "renderer-wgpu")]
     let launcher = launcher.with_test_driver(|robot| {
@@ -271,7 +277,7 @@ pub fn run_touch_preview(editor: bool) {
         if editor {
             SkinStudio(document.clone(), None);
         } else {
-            super::WinampStackedApp();
+            super::WinampMobileApp();
         }
     });
 }

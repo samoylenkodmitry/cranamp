@@ -13,17 +13,18 @@ import static org.junit.Assert.assertTrue;
 @RunWith(AndroidJUnit4.class)
 public final class WindowLayoutTest {
     @Test
-    public void playerRegistersItsWindowSizeDuringStartup() {
+    public void mobileShellUsesTheSystemWindowSize() {
         try (ActivityScenario<CranposeActivity> scenario = ActivityScenario.launch(CranposeActivity.class)) {
             final boolean[] sized = {false};
             for (int attempt = 0; attempt < 50 && !sized[0]; attempt++) {
                 scenario.onActivity(activity -> {
                     WindowManager.LayoutParams layout = activity.getWindow().getAttributes();
-                    sized[0] = layout.width > 0 && layout.height > 0;
+                    sized[0] = layout.width == WindowManager.LayoutParams.MATCH_PARENT
+                            && layout.height == WindowManager.LayoutParams.MATCH_PARENT;
                 });
                 if (!sized[0]) android.os.SystemClock.sleep(100);
             }
-            assertTrue("Player must request its skin dimensions during startup", sized[0]);
+            assertTrue("Mobile navigation must retain the system window dimensions", sized[0]);
         }
     }
 

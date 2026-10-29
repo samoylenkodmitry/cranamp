@@ -14,6 +14,8 @@ profiles="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 profile=""
 wildcard=""
 while IFS= read -r candidate; do
+  development="$(security cms -D -i "$candidate" 2>/dev/null | plutil -extract Entitlements.get-task-allow raw - 2>/dev/null || true)"
+  [ "$development" = "true" ] || continue
   candidate_id="$(security cms -D -i "$candidate" 2>/dev/null | plutil -extract Entitlements.application-identifier raw - 2>/dev/null || true)"
   case "$candidate_id" in
     *".$bundle_id") profile="$candidate" ;;

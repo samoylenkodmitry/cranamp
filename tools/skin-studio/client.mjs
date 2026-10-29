@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+import { connectionUrl } from './connection.mjs';
 import fs from 'node:fs';
 const name=process.argv[2]||'studio_status';
 const argument=process.argv[3];
 const args=argument?JSON.parse(argument.startsWith('@')?fs.readFileSync(argument.slice(1),'utf8'):argument):{};
-const response=await fetch('http://127.0.0.1:18765/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})});
+const response=await fetch(connectionUrl(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})});
 const body=await response.json();
 for(const item of body.result?.content||[]){
   if(item.type==='text')console.log(item.text);

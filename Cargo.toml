@@ -30,6 +30,11 @@ name = "cranamp-audio-audit"
 path = "test/audio_device_audit.rs"
 required-features = ["ios", "audio-audit"]
 
+[[bin]]
+name = "cranamp-playback-probe"
+path = "test/desktop_playback_probe.rs"
+required-features = ["desktop", "audio-audit"]
+
 [[test]]
 name = "studio_drawing_e2e"
 path = "test/studio_drawing_e2e.rs"
@@ -99,7 +104,7 @@ desktop-wayland = [
     "cranpose-services/http-native",
 ]
 android = ["cranpose/android", "cranpose/media", "cranpose-services/http-native"]
-ios = ["cranpose/ios", "renderer-wgpu", "cranpose-services/http-native"]
+ios = ["cranpose/ios", "cranpose/media", "renderer-wgpu", "cranpose-services/http-native"]
 web = [
     "cranpose/web",
     "cranpose-services/file-picker-web",
@@ -140,7 +145,7 @@ log = "0.4"
 web-time = "1.1.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
-[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))'.dependencies]
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 env_logger = { version = "0.11", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -179,27 +184,27 @@ embed-resource = "3.0.11"
 
 # Pin the Android window and stylus fixes until the next framework release.
 [patch.crates-io]
-coroflow = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-animation = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-app-shell = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-audio = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-capabilities = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-core = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-coroflow = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-foundation = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-gl-templates = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-liquid = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-macros = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-media = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-platform-android = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-platform-desktop-winit = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-platform-web = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-render-common = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-render-pixels = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-render-wgpu = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-runtime-std = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-services = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-ui = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-ui-graphics = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
-cranpose-ui-layout = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "03efd19e916c62caa0b2ad3ee8ae233251e02175" }
+coroflow = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-animation = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-app-shell = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-audio = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-capabilities = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-core = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-coroflow = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-foundation = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-gl-templates = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-liquid = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-macros = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-media = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-platform-android = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-platform-desktop-winit = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-platform-web = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-render-common = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-render-pixels = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-render-wgpu = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-runtime-std = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-services = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-ui = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-ui-graphics = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }
+cranpose-ui-layout = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "7a6396660826c55cec3d41f0d111a0386a557708" }

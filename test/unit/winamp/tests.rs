@@ -177,6 +177,194 @@ fn a_folder_publishes_its_first_track_before_the_next_entry_arrives() {
     );
     assert_eq!(snapshot.current_index, Some(0));
 }
+struct TestFolderStream {
+    entries: std::cell::RefCell<
+        std::collections::VecDeque<
+            Result<Option<cranpose_services::ContentHandle>, cranpose_services::ContentError>,
+        >,
+    >,
+}
+impl cranpose_services::ContentStream for TestFolderStream {
+    fn next(
+        &self,
+    ) -> cranpose_services::ContentFuture<
+        '_,
+        Result<Option<cranpose_services::ContentHandle>, cranpose_services::ContentError>,
+    > {
+        Box::pin(async move {
+            let entry = self.entries.borrow_mut().pop_front();
+            match entry {
+                Some(entry) => entry,
+                None => std::future::pending().await,
+            }
+        })
+    }
+}
+fn folder_test_entry() -> cranpose_services::ContentHandle {
+    cranpose_services::file_content(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/audio/tone.flac"),
+    )
+}
+fn poll_folder_scan(
+    future: std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
+) -> std::task::Poll<()> {
+    future.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+}
+#[test]
+fn adding_a_folder_to_a_stopped_playlist_starts_the_first_new_track() {
+    let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
+        cranpose_core::DefaultScheduler,
+    ));
+    let mut initial = WinampState::default();
+    replace_playlist_tracks(
+        &mut initial,
+        vec![audio::track_from_picked_file(folder_test_entry())
+            .unwrap()
+            .unwrap()],
+    );
+    let state = cranpose_core::OwnedMutableState::with_runtime(initial, runtime.handle());
+    let stream = Rc::new(TestFolderStream {
+        entries: std::cell::RefCell::new([Ok(Some(folder_test_entry()))].into()),
+    });
+    let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, true));
+    assert!(poll_folder_scan(scan.as_mut()).is_pending());
+    assert_eq!(state.get().playlist.len(), 2);
+    assert_eq!(
+        state.get().current_index,
+        Some(1),
+        "the first new track is selected while enumeration is pending"
+    );
+}
+#[test]
+fn a_folder_does_not_interrupt_playback_or_restart_after_stop() {
+    for playback in [PlaybackState::Playing, PlaybackState::Paused] {
+        let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
+            cranpose_core::DefaultScheduler,
+        ));
+        let mut initial = WinampState::default();
+        replace_playlist_tracks(
+            &mut initial,
+            vec![audio::track_from_picked_file(folder_test_entry())
+                .unwrap()
+                .unwrap()],
+        );
+        initial.playback = playback;
+        let state = cranpose_core::OwnedMutableState::with_runtime(initial, runtime.handle());
+        let stream = Rc::new(TestFolderStream {
+            entries: std::cell::RefCell::new(
+                [
+                    Ok(Some(folder_test_entry())),
+                    Ok(Some(folder_test_entry())),
+                    Ok(None),
+                ]
+                .into(),
+            ),
+        });
+        let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, true));
+        assert!(poll_folder_scan(scan.as_mut()).is_pending());
+        assert_eq!(state.get().current_index, Some(0));
+        state
+            .handle()
+            .update(|s| s.playback = PlaybackState::Stopped);
+        assert!(poll_folder_scan(scan.as_mut()).is_ready());
+        assert_eq!(state.get().playlist.len(), 3);
+        assert_eq!(
+            state.get().current_index,
+            Some(0),
+            "later batches must respect Stop"
+        );
+    }
+}
+#[test]
+fn a_failed_folder_releases_the_picker_for_another_attempt() {
+    let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
+        cranpose_core::DefaultScheduler,
+    ));
+    let state =
+        cranpose_core::OwnedMutableState::with_runtime(WinampState::default(), runtime.handle());
+    request_pick(state.handle(), true, true);
+    let stream = Rc::new(TestFolderStream {
+        entries: std::cell::RefCell::new(
+            [Err(cranpose_services::ContentError::Io(
+                "provider disconnected".into(),
+            ))]
+            .into(),
+        ),
+    });
+    let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, true));
+    assert!(poll_folder_scan(scan.as_mut()).is_ready());
+    assert!(state.get().pending_pick.is_none());
+    assert!(state.get().status.contains("provider disconnected"));
+}
+#[test]
+fn choosing_another_folder_discards_the_previous_scans_later_entries() {
+    let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
+        cranpose_core::DefaultScheduler,
+    ));
+    let state =
+        cranpose_core::OwnedMutableState::with_runtime(WinampState::default(), runtime.handle());
+    let stream = Rc::new(TestFolderStream {
+        entries: std::cell::RefCell::new(
+            [
+                Ok(Some(folder_test_entry())),
+                Ok(Some(folder_test_entry())),
+                Ok(None),
+            ]
+            .into(),
+        ),
+    });
+    let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, true));
+    assert!(poll_folder_scan(scan.as_mut()).is_pending());
+    request_pick(state.handle(), true, false);
+    assert!(poll_folder_scan(scan.as_mut()).is_ready());
+    assert_eq!(state.get().playlist.len(), 1);
+    assert!(
+        state.get().pending_pick.is_some(),
+        "the old scan must not clear the new picker"
+    );
+}
+#[test]
+fn folder_playback_skips_a_failed_codec_before_the_next_batch_arrives() {
+    let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
+        cranpose_core::DefaultScheduler,
+    ));
+    let state =
+        cranpose_core::OwnedMutableState::with_runtime(WinampState::default(), runtime.handle());
+    let stream = Rc::new(TestFolderStream {
+        entries: std::cell::RefCell::new(
+            [Ok(Some(folder_test_entry())), Ok(Some(folder_test_entry()))].into(),
+        ),
+    });
+    let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, false));
+    assert!(poll_folder_scan(scan.as_mut()).is_pending());
+    let rejected = state.get().playlist[0].clone();
+    finish_track_start(
+        state.handle(),
+        0,
+        &rejected,
+        Err("unsupported audio codec".into()),
+    );
+    assert!(poll_folder_scan(scan.as_mut()).is_pending());
+    assert_eq!(state.get().playlist.len(), 2);
+    assert_eq!(
+        state.get().current_index,
+        Some(1),
+        "the second discovered file must start without waiting for 24 entries"
+    );
+    sync_playback_failure(state.handle(), "stale error from the previous file");
+    assert_eq!(state.get().current_index, Some(1));
+    stop_playback(state.handle());
+    finish_track_start(
+        state.handle(),
+        1,
+        &rejected,
+        Err("unsupported audio codec".into()),
+    );
+    assert!(
+        state.get().folder_autoplay.is_none(),
+        "Stop cancels automatic retries"
+    );
+}
 fn test_playlist(tracks: Vec<Track>) -> Rc<Vec<Track>> {
     Rc::new(tracks)
 }

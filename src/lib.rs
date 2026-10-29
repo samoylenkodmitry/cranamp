@@ -6,7 +6,7 @@ mod content_io;
 mod fonts;
 mod sync;
 pub mod winamp;
-use cranpose::{AppLauncher, CustomCursorSize};
+use cranpose::AppLauncher;
 cranpose::app_capabilities!();
 const TITLE: &str = "Cranamp";
 const APPLICATION_ID: &str = "com.cranamp.app";
@@ -17,9 +17,6 @@ fn launcher() -> AppLauncher<cranpose::AppFonts> {
         .with_application_id(APPLICATION_ID)
         .with_fonts(fonts::APP_FONTS)
         .with_developer_inspector(cfg!(debug_assertions) && !cfg!(feature = "store"))
-        // A skin's cursors are pixel art drawn at an exact size; enlarged with
-        // the system pointer they turn into smeared blocks.
-        .with_custom_cursor_size(CustomCursorSize::AsDrawn)
 }
 fn desktop_launcher() -> AppLauncher<cranpose::AppFonts> {
     let launcher = launcher();
@@ -58,7 +55,7 @@ fn mobile_root() {
             .fill_max_size()
             .safe_area_padding(),
         cranpose::BoxSpec::default(),
-        winamp::WinampStackedApp,
+        winamp::WinampMobileApp,
     );
 }
 #[cfg(not(all(feature = "studio-review", target_os = "android")))]

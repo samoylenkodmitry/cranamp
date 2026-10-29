@@ -1,4 +1,4 @@
-const STACKED_APP: &str = "WinampStackedApp";
+const STACKED_APP: &str = "WinampMobileApp";
 #[test]
 fn android_and_ios_compose_the_same_player() {
     let lib = include_str!("../src/lib.rs");

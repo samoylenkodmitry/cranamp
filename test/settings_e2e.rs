@@ -153,9 +153,18 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
     let root_key = location_key(file!(), line!(), column!());
     let mut shell = AppShell::new(HitGraphRenderer::default(), root_key, move || {
         let captured = Rc::clone(&captured_for_app);
-        cranamp::winamp::PlaylistRowClickTarget(0.0, 0.0, 100.0, 20.0, 1.0, 0, move |modifiers| {
-            captured.borrow_mut().push(modifiers);
-        });
+        cranamp::winamp::PlaylistRowClickTarget(
+            "Test track".into(),
+            0.0,
+            0.0,
+            100.0,
+            20.0,
+            1.0,
+            0,
+            move |modifiers| {
+                captured.borrow_mut().push(modifiers);
+            },
+        );
     });
     shell.set_buffer_size(100, 100);
     shell.set_viewport(100.0, 100.0);
@@ -244,7 +253,16 @@ fn audio_handed_over_by_another_application_plays() {
         "direct builds keep the demo playlist; store builds start empty; visible={after:?}"
     );
     assert!(
-        after.first().is_some_and(|current| current == "tone"),
+        {
+            fn current_title(node: &cranpose_ui::SemanticsNode) -> bool {
+                if node.hidden {
+                    return false;
+                }
+                (node.description.as_deref() == Some("tone") && node.bounds.y < 138.0)
+                    || node.children.iter().any(current_title)
+            }
+            current_title(shell.semantics_tree().unwrap().root())
+        },
         "an idle player should start the handed-over track; visible={after:?}"
     );
 }
@@ -276,4 +294,99 @@ fn picked_audio_keeps_the_original_file_without_an_import_copy() {
     let virtual_file = cranpose_services::BytesContent::named("memory.opus", vec![0; 128]).handle();
     assert!(cranamp::audio::track_from_picked_file(virtual_file).is_err());
     assert!(!directory.exists());
+}
+
+fn mobile_control_bounds(shell: &mut AppShell<HitGraphRenderer>, label: &str) -> cranpose_ui::Rect {
+    fn find(node: &cranpose_ui::SemanticsNode, label: &str) -> Option<cranpose_ui::Rect> {
+        if node.hidden {
+            return None;
+        }
+        if node.description.as_deref() == Some(label)
+            && node.enabled
+            && !node.actions.is_empty()
+            && (!matches!(label, "Player" | "Skin Studio" | "Settings")
+                || node.widget_role == Some(cranpose_foundation::SemanticsWidgetRole::Tab))
+        {
+            return Some(node.bounds);
+        }
+        node.children.iter().find_map(|child| find(child, label))
+    }
+    shell.set_semantics_enabled(true);
+    find(shell.semantics_tree().unwrap().root(), label)
+        .unwrap_or_else(|| panic!("Missing control {label}"))
+}
+
+fn click_mobile(shell: &mut AppShell<HitGraphRenderer>, label: &str) {
+    let bounds = mobile_control_bounds(shell, label);
+    assert!(
+        bounds.width >= 44.0 && bounds.height >= 44.0,
+        "{label}: {bounds:?}"
+    );
+    fn action(
+        node: &cranpose_ui::SemanticsNode,
+        bounds: cranpose_ui::Rect,
+    ) -> Option<cranpose_foundation::SemanticsCustomAction> {
+        if node.bounds == bounds {
+            if let Some(action) = &node.on_click {
+                return Some(action.clone());
+            }
+        }
+        node.children.iter().find_map(|child| action(child, bounds))
+    }
+    if let Some(action) = action(shell.semantics_tree().unwrap().root(), bounds) {
+        action.invoke();
+        pump(shell);
+        return;
+    }
+    shell.set_cursor(bounds.x + bounds.width / 2., bounds.y + bounds.height / 2.);
+    shell.pointer_pressed();
+    pump(shell);
+    shell.pointer_released();
+    pump(shell);
+}
+
+#[test]
+fn mobile_tabs_keep_navigation_visible_and_studio_drafts_alive() {
+    let _application = TestApplication::new("mobile");
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_buffer_size(393, 780);
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    click_mobile(&mut shell, "Settings");
+    assert!(contains(&visible_texts(&mut shell), "Appearance"));
+    click_mobile(&mut shell, "Choose skin");
+    assert!(contains(&visible_texts(&mut shell), "Choose a skin"));
+    click_mobile(&mut shell, "Back to Settings");
+    click_mobile(&mut shell, "Skin Studio");
+    assert!(contains(&visible_texts(&mut shell), "New project"));
+    click_mobile(&mut shell, "New project");
+    let studio = visible_texts(&mut shell);
+    assert!(!contains(&studio, "Open working copy"), "{studio:?}");
+    click_mobile(&mut shell, "Settings");
+    click_mobile(&mut shell, "Skin Studio");
+    let returned = visible_texts(&mut shell);
+    assert!(
+        !contains(&returned, "Open working copy"),
+        "Draft lost: {returned:?}"
+    );
+    click_mobile(&mut shell, "Player");
+    assert!(contains(&visible_texts(&mut shell), "Play"));
+    for (width, height) in [(320., 568.), (844., 390.), (1024., 1366.)] {
+        shell.set_buffer_size(width as u32, height as u32);
+        shell.set_viewport(width, height);
+        pump(&mut shell);
+        for label in ["Player", "Skin Studio", "Settings"] {
+            let bounds = mobile_control_bounds(&mut shell, label);
+            assert!(
+                bounds.y >= 0. && bounds.y + bounds.height <= height,
+                "{label} outside {width}x{height}: {bounds:?}"
+            );
+        }
+        click_mobile(&mut shell, "Settings");
+        click_mobile(&mut shell, "Player");
+    }
 }

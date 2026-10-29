@@ -37,6 +37,263 @@ final class PickerProviders: XCTestCase {
         report(argument: "--open-picker=files", label: "FILES")
     }
 
+    func testTaildriveWebDAVEndpoint() {
+        let completed = expectation(description: "Taildrive directory response")
+        var request = URLRequest(url: URL(string: "http://100.100.100.100:8080/")!)
+        request.httpMethod = "PROPFIND"
+        request.setValue("0", forHTTPHeaderField: "Depth")
+        request.timeoutInterval = 10
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            defer { completed.fulfill() }
+            XCTAssertNil(error)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 207)
+            let preview = String(data: data ?? Data(), encoding: .utf8) ?? "<non-UTF8 response>"
+            print("TAILDRIVE RESPONSE: " + preview.prefix(300))
+        }.resume()
+        wait(for: [completed], timeout: 15)
+    }
+
+    func testMobileNavigation() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_MOBILE_NAV"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_MOBILE_NAV=1")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        func tab(_ name: String) {
+            let query = app.buttons.matching(identifier: name)
+            XCTAssertTrue(query.firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+            query.element(boundBy: query.count - 1).tap()
+        }
+        func capture(_ name: String) {
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = name
+            image.lifetime = .keepAlways
+            add(image)
+        }
+        tab("Player")
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        capture("mobile-player")
+        tab("Settings")
+        XCTAssertTrue(app.buttons["Choose skin"].waitForExistence(timeout: 10), app.debugDescription)
+        capture("mobile-settings")
+        app.buttons["Choose skin"].tap()
+        XCTAssertTrue(app.buttons["Back to Settings"].waitForExistence(timeout: 10))
+        app.buttons["Back to Settings"].tap()
+        tab("Skin Studio")
+        if app.buttons["Open working copy"].waitForExistence(timeout: 3) {
+            app.buttons["Open working copy"].tap()
+        }
+        XCTAssertTrue(app.buttons["Canvas"].waitForExistence(timeout: 10), app.debugDescription)
+        capture("mobile-studio")
+        tab("Settings")
+        tab("Skin Studio")
+        XCTAssertTrue(app.buttons["Canvas"].waitForExistence(timeout: 10), app.debugDescription)
+        tab("Player")
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 10))
+        print("MOBILE NAVIGATION: " + app.debugDescription)
+    }
+
+    func testNetworkMusicFolder() throws {
+        guard let address = ProcessInfo.processInfo.environment["CRANAMP_TEST_WEBDAV_URL"] else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_WEBDAV_URL to the original music folder URL")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        if ProcessInfo.processInfo.environment["CRANAMP_TEST_ATTACH"] == "1" {
+            app.activate()
+        } else {
+            app.launch()
+        }
+        XCTAssertTrue(app.images.firstMatch.waitForExistence(timeout: 20))
+        let clock = app.images["0:00"].firstMatch
+        XCTAssertTrue(clock.waitForExistence(timeout: 10))
+        app.buttons["Add music"].firstMatch.tap()
+        let network = app.images["ADD NETWORK"].firstMatch
+        XCTAssertTrue(network.waitForExistence(timeout: 5), app.debugDescription)
+        network.tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        field.tap()
+        let focusedField = app.textViews["Media URL"].firstMatch
+        XCTAssertTrue(focusedField.waitForExistence(timeout: 5), app.debugDescription)
+        focusedField.typeText(address)
+        let open = app.images["OPEN"].firstMatch
+        XCTAssertTrue(open.exists, app.debugDescription)
+        let started = Date()
+        open.tap()
+        waitForPlayback(app, timeout: 30)
+        func elapsed() -> Int {
+            let clocks = app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}"))
+            guard clocks.count > 0 else { return -1 }
+            let parts = clocks.element(boundBy: clocks.count - 1).label.split(separator: ":").compactMap { Int($0) }
+            return parts.count == 2 ? parts[0] * 60 + parts[1] : -1
+        }
+        let beforeTabs = elapsed()
+        let settings = app.buttons.matching(identifier: "Settings")
+        settings.element(boundBy: settings.count - 1).tap()
+        XCTAssertTrue(app.buttons["Choose skin"].waitForExistence(timeout: 10))
+        app.buttons["Skin Studio"].tap()
+        XCTAssertTrue(app.buttons["Open working copy"].waitForExistence(timeout: 10))
+        app.buttons["Player"].tap()
+        let continued = NSPredicate { _, _ in elapsed() > beforeTabs }
+        expectation(for: continued, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        print("NETWORK FOLDER observation after \(Date().timeIntervalSince(started)) seconds")
+        print(app.debugDescription)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "network-folder-playing"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    func testNextNetworkTrack() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_WEBDAV_URL"] != nil else {
+            throw XCTSkip("Run after testNetworkMusicFolder with an original music folder URL")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.activate()
+        let title = app.images.firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        let previous = title.label
+        let times = app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}"))
+        let timer = times.element(boundBy: times.count - 1)
+        let scale = app.frame.width / 275.0
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        origin.withOffset(CGVector(dx: 179 * scale, dy: timer.frame.midY)).tap()
+        let changed = NSPredicate { _, _ in app.images.firstMatch.label != previous }
+        expectation(for: changed, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        waitForPlayback(app, timeout: 15)
+        print("NEXT NETWORK TRACK: " + app.images.firstMatch.label)
+    }
+
+    func testMixedPlaylistRowAlignment() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_PLAYLIST_ALIGNMENT"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_PLAYLIST_ALIGNMENT=1 with mixed playlist titles visible")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.activate()
+        XCTAssertTrue(app.images.firstMatch.waitForExistence(timeout: 10))
+        let scale = app.frame.width / 275.0
+        let playlistTop = app.frame.height * 0.45
+        func playlistRows(_ node: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
+            let isRow = (node.elementType == .image || node.elementType == .staticText)
+                && node.frame.minY > playlistTop
+                && node.frame.width > 100 * scale
+                && !node.label.isEmpty
+            return (isRow ? [node] : []) + node.children.flatMap { playlistRows($0) }
+        }
+        var rows: [XCUIElementSnapshot] = []
+        for attempt in 0..<4 {
+            rows = playlistRows(try app.snapshot()).sorted { $0.frame.minY < $1.frame.minY }
+            if rows.contains(where: { $0.elementType == .staticText }) { break }
+            if attempt < 3, let first = rows.first, let last = rows.last {
+                let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                let fraction = CGFloat(attempt + 1) * 0.025
+                let thumbTop = first.frame.minY + 7 * scale
+                let trackBottom = last.frame.maxY - 7 * scale
+                origin.withOffset(CGVector(
+                    dx: 263 * scale,
+                    dy: thumbTop + fraction * (trackBottom - thumbTop)
+                )).tap()
+            }
+        }
+        print("PLAYLIST ROWS: " + rows.map { "\($0.elementType.rawValue) \($0.frame): \($0.label)" }.joined(separator: "\n"))
+        guard let bitmap = rows.first(where: { $0.elementType == .image }),
+              rows.contains(where: { $0.elementType == .staticText }) else {
+            throw XCTSkip("The visible playlist has no mixed bitmap and Unicode rows")
+        }
+        let pitch = 11.0 * scale
+        for row in rows {
+            let steps = ((row.frame.minY - bitmap.frame.minY) / pitch).rounded()
+            let expected = bitmap.frame.minY + steps * pitch
+            XCTAssertEqual(row.frame.minY, expected, accuracy: 0.75, row.label)
+        }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "playlist-row-alignment"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    private func waitForPlayback(_ app: XCUIApplication, timeout: TimeInterval) {
+        let advancing = NSPredicate { _, _ in
+            let clocks = app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}"))
+            guard clocks.count > 0 else { return false }
+            let parts = clocks.element(boundBy: clocks.count - 1).label.split(separator: ":").compactMap { Int($0) }
+            return parts.count == 2 && parts[0] * 60 + parts[1] >= 2 && parts[0] * 60 + parts[1] < 30
+        }
+        expectation(for: advancing, evaluatedWith: app)
+        waitForExpectations(timeout: timeout)
+    }
+
+    func testRemoteMusicFolder() {
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        XCTAssertTrue(app.images.firstMatch.waitForExistence(timeout: 20))
+        let scale = app.frame.width / 275.0
+        let clock = app.images["0:00"].firstMatch
+        XCTAssertTrue(clock.waitForExistence(timeout: 10))
+        let footerY = clock.frame.midY
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        origin.withOffset(CGVector(dx: 23 * scale, dy: footerY - 9 * scale)).tap()
+        origin.withOffset(CGVector(dx: 45 * scale, dy: footerY - 33 * scale)).tap()
+        let browse = app.buttons["Browse"]
+        if browse.waitForExistence(timeout: 20) && browse.isHittable { browse.tap() }
+        for _ in 0..<8 {
+            if app.cells["DOC.sidebar.item.Tailscale"].exists { break }
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            guard back.exists && back.isHittable && back.label != "Cancel" else { break }
+            back.tap()
+        }
+        let provider = app.cells["DOC.sidebar.item.Tailscale"]
+        guard provider.waitForExistence(timeout: 10) else {
+            XCTFail("Install and enable the Tailscale Files provider before this device test.")
+            return
+        }
+        provider.tap()
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "folder-provider-root"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let account = app.cells.matching(NSPredicate(format: "label CONTAINS %@", "@")).firstMatch
+        guard account.waitForExistence(timeout: 15) else {
+            XCTFail("The Tailscale provider did not open for folder selection; see folder-provider-root.")
+            return
+        }
+        account.tap()
+        for name in ["samarch", "huge", "music"] {
+            let entry = app.staticTexts[name].firstMatch
+            for _ in 0..<8 {
+                if entry.exists && entry.isHittable { break }
+                app.collectionViews.firstMatch.swipeUp()
+            }
+            XCTAssertTrue(entry.waitForExistence(timeout: 10), "Missing \(name): " + app.debugDescription)
+            guard entry.exists else { return }
+            entry.tap()
+        }
+        let done = app.buttons["Done"].firstMatch
+        let open = done.exists ? done : app.buttons["Open"].firstMatch
+        guard open.waitForExistence(timeout: 10) else {
+            XCTFail("The provider did not offer a folder selection button: " + app.debugDescription)
+            return
+        }
+        open.tap()
+        let times = app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}"))
+        let deadline = Date().addingTimeInterval(30)
+        var elapsed = "0:00"
+        var elapsedSeconds = 0
+        while Date() < deadline {
+            if times.count > 0 {
+                elapsed = times.element(boundBy: times.count - 1).label
+                let parts = elapsed.split(separator: ":").compactMap { Int($0) }
+                if parts.count == 2 { elapsedSeconds = parts[0] * 60 + parts[1] }
+                if elapsedSeconds >= 2 { break }
+            }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        XCTAssertGreaterThanOrEqual(elapsedSeconds, 2, "Playback did not advance: " + app.debugDescription)
+        print("REMOTE PLAYBACK elapsed: " + elapsed)
+    }
+
     private func report(argument: String, label: String) {
         let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
         app.launchArguments = [argument]
@@ -74,15 +331,6 @@ final class PickerProviders: XCTestCase {
 
         print("=== \(label) PICKER: element tree ===")
         print(app.debugDescription)
-
-        print("=== \(label) PICKER: rows ===")
-        for kind in [app.cells, app.buttons, app.staticTexts] {
-            for element in kind.allElementsBoundByIndex {
-                let title = element.label.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !title.isEmpty else { continue }
-                print("row: \(title) | enabled=\(element.isEnabled) | hittable=\(element.isHittable)")
-            }
-        }
 
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "\(label)-picker"

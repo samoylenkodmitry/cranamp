@@ -168,3 +168,34 @@ References: [Android bundles](https://developer.android.com/build/building-cmdli
 `store/listing-en-US.json` contains shared listing text and platform-specific additions. Mobile and desktop listings include Skin Studio. The desktop listing also explains agent connections. The landing page, privacy policy and support page are served at [cranamp.dmitrysamoylenko.in](https://cranamp.dmitrysamoylenko.in/) directly from `site/` in the VPS checkout; see [website deployment](website.md). Settings and store metadata use this domain. `site/privacy/` and `site/support/` are also copied into the Pages web-player build.
 
 The Apple privacy manifest declares file metadata access inside the app container (`C617.1`) and for user-selected files (`3B52.1`), plus elapsed-time measurement for playback and UI timers (`35F9.1`). The iOS release binary imports `stat`, `fstat`, `fstatat`, and `mach_absolute_time`. Preferences use Cranpose's file-backed store rather than UserDefaults. These declarations follow [Apple's required-reason API documentation](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api). Re-audit the binary when dependencies change.
+
+## Mobile navigation and Apple review follow-up, October 29
+
+The folder-stream-io branch adds shared Android/iOS Player, Skin Studio and Settings
+tabs. Settings uses Cranpose Liquid controls. The skin keeps its native sprite
+positions; the main transport receives expanded touch regions. Tab changes retain
+Studio navigation and its document. Skin-library scans use Cranpose `withBlocking`.
+
+The branch also adds Apple's local-network usage text, publishes accessible names
+and actions for the skinned player controls, exposes adjustable slider values, and
+allows system pointer enlargement. Desktop MCP now requires a random secret that
+changes on each server start. Copy server URL and Copy stdio command include it;
+Stop revokes it. The support and privacy sources describe the new connection.
+These changes address the concrete findings from the review against Apple's
+[review guidelines](https://developer.apple.com/app-store/review/guidelines/),
+[local-network privacy guidance](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)
+and [accessibility guidance](https://developer.apple.com/design/human-interface-guidelines/accessibility).
+
+The full native suite passed 482 tests before the final Settings width and
+background-scan changes; affected navigation and MCP tests passed afterward.
+Android navigation, Back and window-layout tests passed on the Galaxy Tab S7 in
+DeX. The small iPhone simulator passed the navigation and retained-editor test. It
+also opened the original network music folder and kept playback advancing while
+switching through Settings and Studio. The simulator app container held no audio
+files after that check.
+iOS device and simulator bundles build with `ios,store,logging`; store builds omit
+the Inspector and mobile MCP service. This records development checks, not Apple
+approval. The physical iPhone was unavailable during this pass. IPv6-only network
+validation and a signed replacement App Store submission remain release checks.
+The recorded 0.1.92/build 102 submission does not contain these fixes; do not use
+its existing screenshots or claim this branch has already been submitted.

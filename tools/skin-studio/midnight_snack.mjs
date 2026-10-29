@@ -1,3 +1,4 @@
+import { connectionUrl } from './connection.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -5,7 +6,7 @@ const ROOT=path.resolve(import.meta.dirname,'../..');
 const OUT=path.join(ROOT,'assets/skins/Catamp Midnight Snack');
 export const C={night:'#19182c',dark:'#26253c',shadow:'#38344f',teal:'#35616a',jade:'#86aca4',gold:'#f4bd68',light:'#ffe8b1',pink:'#cd879d',ink:'#322435'};
 export async function call(name,args={}){
- const r=await fetch('http://127.0.0.1:18765/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})});
+ const r=await fetch(connectionUrl(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})});
  const b=await r.json();if(!r.ok||b.error||b.result?.isError)throw Error(JSON.stringify(b));
  const t=b.result.content.find(p=>p.type==='text')?.text;try{return JSON.parse(t);}catch{return t;}
 }
