@@ -121,6 +121,7 @@ struct WinampState {
     eq_preset_menu_open: bool,
     settings_open: bool,
     studio_open: bool,
+    library_open: bool,
     main_shaded: bool,
     /// Winamp's main window can be closed on its own, Alt+W, while the
     /// equalizer or the playlist stays open.
@@ -173,6 +174,7 @@ impl PartialEq for WinampState {
             && self.eq_preset_menu_open == other.eq_preset_menu_open
             && self.settings_open == other.settings_open
             && self.studio_open == other.studio_open
+            && self.library_open == other.library_open
             && self.main_shaded == other.main_shaded
             && self.main_visible == other.main_visible
             && self.vis_mode == other.vis_mode
@@ -233,6 +235,7 @@ impl Default for WinampState {
             eq_preset_menu_open: false,
             settings_open: false,
             studio_open: false,
+            library_open: false,
             main_shaded: false,
             main_visible: true,
             vis_mode: vis::VisMode::default(),
@@ -7738,17 +7741,35 @@ fn sort_playlist_tracks_by_field(state: &mut WinampState, field: PlaylistSortFie
         state.status = "Playlist Sorted".to_string();
         return false;
     }
-    let current_track = state
-        .current_index
-        .and_then(|index| state.playlist.get(index))
-        .cloned();
-    let selected_tracks = selected_tracks_snapshot(state);
-    playlist_tracks_mut(state).sort_by(|left, right| {
+    let mut indexed: Vec<_> = std::mem::take(playlist_tracks_mut(state))
+        .into_iter()
+        .enumerate()
+        .collect();
+    indexed.sort_by(|(_, left), (_, right)| {
         compare_tracks_by_field(left, right, field)
             .then_with(|| left.title.cmp(&right.title))
             .then_with(|| left.path.cmp(&right.path))
     });
-    restore_current_and_selection_after_reorder(state, current_track, selected_tracks);
+    // Track values may repeat. Map original positions so sorting keeps the exact
+    // playing occurrence and does not expand a selection to its duplicates.
+    let mut remap = vec![0; indexed.len()];
+    for (new, (old, _)) in indexed.iter().enumerate() {
+        remap[*old] = new;
+    }
+    state.current_index = state
+        .current_index
+        .and_then(|index| remap.get(index).copied());
+    state.selected_indices = state
+        .selected_indices
+        .iter()
+        .filter_map(|index| remap.get(*index).copied())
+        .collect();
+    state.selection_anchor = state
+        .selection_anchor
+        .and_then(|index| remap.get(index).copied());
+    state.playlist_last_click_index = None;
+    set_playlist_tracks(state, indexed.into_iter().map(|(_, track)| track).collect());
+    normalize_playlist_selection(state);
     state.status = "Playlist Sorted".to_string();
     refresh_shuffle_order(state);
     true

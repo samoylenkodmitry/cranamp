@@ -102,7 +102,7 @@ public final class MobileNavigationTest {
         try (ActivityScenario<CranposeActivity> scenario = ActivityScenario.launch(CranposeActivity.class)) {
             click("Player");
             waitFor("Play");
-            for (String label : new String[]{"Player", "Skin Studio", "Settings"}) {
+            for (String label : new String[]{"Player", "Library", "Skin Studio", "Settings"}) {
                 AccessibilityNodeInfo tab = waitFor(label);
                 Rect bounds = new Rect(); tab.getBoundsInScreen(bounds);
                 System.out.println("Navigation bounds " + label + ": " + bounds);
@@ -139,6 +139,44 @@ public final class MobileNavigationTest {
             waitFor("Choose skin");
             click("Skin Studio");
             waitFor("Canvas");
+            click("Player");
+            waitFor("Play");
+        }
+    }
+
+    @Test public void librarySearchSheetsAndSelection() throws Exception {
+        try (ActivityScenario<CranposeActivity> scenario = ActivityScenario.launch(CranposeActivity.class)) {
+            click("Library");
+            waitFor("Search your playlist");
+            capture("library");
+            click("Add music");
+            waitFor("Choose a music folder");
+            capture("library-add");
+            click("Cancel");
+            click("Sort playlist");
+            waitFor("Track title");
+            capture("library-sort");
+            click("Cancel");
+            click("Select");
+            waitFor("Select results");
+            capture("library-selection");
+            assertTrue(ui.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK));
+            waitFor("Sort playlist");
+            click("Library options");
+            waitFor("Import a playlist");
+            click("Cancel");
+            AccessibilityNodeInfo search = waitFor("Search your playlist");
+            Bundle input = new Bundle();
+            input.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "cranamp-library-no-match-62983");
+            assertTrue(search.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, input));
+            waitFor("Clear search");
+            capture("library-search");
+            click("Finish search");
+            click("Settings");
+            waitFor("Choose skin");
+            click("Library");
+            waitFor("Clear search");
+            click("Clear search");
             click("Player");
             waitFor("Play");
         }

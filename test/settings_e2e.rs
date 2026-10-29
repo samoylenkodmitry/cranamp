@@ -42,6 +42,9 @@ impl TestApplication {
         std::fs::create_dir(&directory).expect("test storage");
         cranpose_services::set_application_id("cranamp-test").expect("test application id");
         cranpose_services::set_host_controller(std::sync::Arc::new(TestHost(directory.clone())));
+        cranpose_services::set_platform_preferences(std::sync::Arc::new(
+            cranpose_services::FilePreferences::new(),
+        ));
         Self {
             directory,
             _lock: lock,
@@ -51,6 +54,7 @@ impl TestApplication {
 impl Drop for TestApplication {
     fn drop(&mut self) {
         cranpose_services::clear_platform_uri_handler();
+        cranpose_services::clear_platform_preferences();
         cranpose_services::clear_host_controller();
         cranpose_services::clear_application_id();
         let _ = std::fs::remove_dir_all(&self.directory);
@@ -363,7 +367,7 @@ fn mobile_control_bounds(shell: &mut AppShell<HitGraphRenderer>, label: &str) ->
         if node.description.as_deref() == Some(label)
             && node.enabled
             && !node.actions.is_empty()
-            && (!matches!(label, "Player" | "Skin Studio" | "Settings")
+            && (!matches!(label, "Player" | "Library" | "Skin Studio" | "Settings")
                 || node.widget_role == Some(cranpose_foundation::SemanticsWidgetRole::Tab))
         {
             return Some(node.bounds);
@@ -393,7 +397,7 @@ fn click_mobile(shell: &mut AppShell<HitGraphRenderer>, label: &str) {
         node.children.iter().find_map(|child| action(child, bounds))
     }
     if let Some(action) = action(shell.semantics_tree().unwrap().root(), bounds) {
-        action.invoke();
+        shell.debug_enter_app_context(|| action.invoke());
         pump(shell);
         return;
     }
@@ -459,7 +463,7 @@ fn mobile_tabs_keep_navigation_visible_and_studio_drafts_alive() {
         shell.set_buffer_size(width as u32, height as u32);
         shell.set_viewport(width, height);
         pump(&mut shell);
-        for label in ["Player", "Skin Studio", "Settings"] {
+        for label in ["Player", "Library", "Skin Studio", "Settings"] {
             let bounds = mobile_control_bounds(&mut shell, label);
             assert!(
                 bounds.y >= 0. && bounds.y + bounds.height <= height,
@@ -469,4 +473,152 @@ fn mobile_tabs_keep_navigation_visible_and_studio_drafts_alive() {
         click_mobile(&mut shell, "Settings");
         click_mobile(&mut shell, "Player");
     }
+}
+
+fn seed_library(titles: &[&str]) {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/audio/tone.wav");
+    let hex = |text: &str| {
+        text.bytes()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    let mut saved = "version=1\ncurrent_index=0\n".to_owned();
+    for title in titles {
+        saved.push_str(&format!(
+            "track={}\t{}\t90\n",
+            hex(title),
+            hex(&path.to_string_lossy())
+        ));
+    }
+    cranpose_services::preferences()
+        .set("cranamp.player", &saved)
+        .unwrap();
+}
+
+#[test]
+fn mobile_library_search_selection_reorder_and_removal_share_the_player_playlist() {
+    let _application = TestApplication::new("library");
+    seed_library(&["Cats - Zebra", "Cats - Aurora", "Dogs - Moon"]);
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_buffer_size(393, 780);
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    click_mobile(&mut shell, "Library");
+    assert!(contains(&visible_texts(&mut shell), "3 tracks"));
+    click_mobile(&mut shell, "Track 1 options");
+    click_mobile(&mut shell, "Move down");
+    mobile_control_bounds(&mut shell, "Play track 2: Zebra");
+    click_mobile(&mut shell, "Sort playlist");
+    click_mobile(&mut shell, "Track title");
+    mobile_control_bounds(&mut shell, "Play track 1: Aurora");
+    let search = mobile_control_bounds(&mut shell, "Search your playlist");
+    shell.set_cursor(search.x + search.width / 2., search.y + search.height / 2.);
+    shell.pointer_pressed();
+    shell.pointer_released();
+    pump(&mut shell);
+    assert!(shell.on_paste("Aurora"));
+    pump(&mut shell);
+    assert!(contains(&visible_texts(&mut shell), "1 of 3 tracks"));
+    click_mobile(&mut shell, "Finish search");
+    assert!(shell.ime_editor_state().is_none());
+    click_mobile(&mut shell, "Settings");
+    click_mobile(&mut shell, "Library");
+    assert!(contains(&visible_texts(&mut shell), "1 of 3 tracks"));
+    click_mobile(&mut shell, "Select");
+    click_mobile(&mut shell, "Select results");
+    assert!(contains(&visible_texts(&mut shell), "1 selected"));
+    click_mobile(&mut shell, "Remove selected tracks");
+    click_mobile(&mut shell, "Cancel");
+    assert!(contains(&visible_texts(&mut shell), "3 tracks"));
+    click_mobile(&mut shell, "Remove selected tracks");
+    click_mobile(&mut shell, "Confirm remove tracks");
+    assert!(contains(&visible_texts(&mut shell), "No matching tracks"));
+    click_mobile(&mut shell, "Clear search");
+    assert!(contains(&visible_texts(&mut shell), "2 tracks"));
+    mobile_control_bounds(&mut shell, "Play track 1: Zebra");
+    click_mobile(&mut shell, "Player");
+    let player = visible_texts(&mut shell);
+    assert!(contains(&player, "Cats - Zebra"), "{player:?}");
+    assert!(!contains(&player, "Cats - Aurora"), "{player:?}");
+    assert!(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("test/fixtures/audio/tone.wav")
+        .is_file());
+}
+
+#[test]
+fn mobile_library_empty_state_and_actions_fit_small_phone_and_landscape() {
+    let _application = TestApplication::new("empty-library");
+    seed_library(&[]);
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    for (width, height) in [(320., 568.), (844., 390.), (1024., 1366.)] {
+        shell.set_buffer_size(width as u32, height as u32);
+        shell.set_viewport(width, height);
+        pump(&mut shell);
+        click_mobile(&mut shell, "Library");
+        if !cfg!(feature = "store") && width == 320. {
+            click_mobile(&mut shell, "Library options");
+            click_mobile(&mut shell, "Clear playlist");
+            click_mobile(&mut shell, "Confirm remove tracks");
+        }
+        assert!(contains(&visible_texts(&mut shell), "Add your music"));
+        for label in ["Add music", "Library options", "Search your playlist"] {
+            let rect = mobile_control_bounds(&mut shell, label);
+            assert!(
+                rect.x >= 0.
+                    && rect.y >= 0.
+                    && rect.x + rect.width <= width
+                    && rect.y + rect.height <= height - 86.,
+                "{label}: {rect:?}"
+            );
+        }
+        click_mobile(&mut shell, "Add music");
+        mobile_control_bounds(&mut shell, "Choose a music folder");
+        click_mobile(&mut shell, "Cancel");
+    }
+}
+
+#[test]
+fn mobile_library_keyboard_keeps_tabs_visible_and_tab_change_clears_focus() {
+    let _application = TestApplication::new("library-keyboard");
+    seed_library(&["Cats - Zebra"]);
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        || {
+            cranpose_core::CompositionLocalProvider(
+                vec![cranpose_ui::local_ime_insets()
+                    .provides(cranpose_ui::EdgeInsets::from_components(0., 0., 0., 300.))],
+                cranamp::winamp::WinampMobileApp,
+            );
+        },
+    );
+    shell.set_buffer_size(393, 780);
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    click_mobile(&mut shell, "Library");
+    let search = mobile_control_bounds(&mut shell, "Search your playlist");
+    shell.set_cursor(search.x + search.width / 2., search.y + search.height / 2.);
+    shell.pointer_pressed();
+    shell.pointer_released();
+    pump(&mut shell);
+    mobile_control_bounds(&mut shell, "Finish search");
+    assert!(shell.on_paste("Zebra"));
+    pump(&mut shell);
+    for label in ["Player", "Library", "Skin Studio", "Settings"] {
+        let bounds = mobile_control_bounds(&mut shell, label);
+        assert!(bounds.y + bounds.height <= 480., "{label}: {bounds:?}");
+    }
+    click_mobile(&mut shell, "Settings");
+    assert!(shell.ime_editor_state().is_none());
+    click_mobile(&mut shell, "Library");
+    mobile_control_bounds(&mut shell, "Clear search");
 }

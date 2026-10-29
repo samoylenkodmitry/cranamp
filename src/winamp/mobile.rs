@@ -1,6 +1,7 @@
 //! Shared phone and tablet navigation. The skin remains a separate, unmodified surface.
 use super::*;
 use cranpose::liquid::prelude::*;
+mod library;
 
 const NAV_HEIGHT: f32 = 86.0;
 const PLAY_ICON: &str = "M8 5v14l11-7z";
@@ -162,6 +163,7 @@ pub(super) fn TouchTransport(image: ImageBitmap, player: MutableState<WinampStat
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Destination {
     Player,
+    Library,
     Studio,
     Settings,
 }
@@ -172,6 +174,8 @@ impl Destination {
             Self::Settings
         } else if state.studio_open {
             Self::Studio
+        } else if state.library_open {
+            Self::Library
         } else {
             Self::Player
         }
@@ -180,13 +184,15 @@ impl Destination {
     fn select(self, state: &mut WinampState) {
         state.settings_open = self == Self::Settings;
         state.studio_open = self == Self::Studio;
+        state.library_open = self == Self::Library;
     }
 
     fn index(self) -> usize {
         match self {
             Self::Player => 0,
-            Self::Studio => 1,
-            Self::Settings => 2,
+            Self::Library => 1,
+            Self::Studio => 2,
+            Self::Settings => 3,
         }
     }
 }
@@ -203,6 +209,12 @@ pub fn WinampMobileApp() {
 
 #[composable]
 fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
+    let library = library::remember_library_ui();
+    let focus = cranpose_ui::local_focus_manager().current();
+    let insets = cranpose_ui::window_insets();
+    // The mobile host already consumes the system safe area. Only add the
+    // remaining keyboard obstruction here, so the tabs stay reachable.
+    let keyboard_bottom = (insets.ime.bottom - insets.safe_area.bottom).max(0.0);
     cranpose_services::BackHandler(
         Destination::from_state(&player.get()) != Destination::Player,
         move || player.update(|state| Destination::Player.select(state)),
@@ -211,7 +223,8 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
     BoxWithConstraints(
         Modifier::empty()
             .fill_max_size()
-            .background(colors.background),
+            .background(colors.background)
+            .padding_each(0.0, 0.0, 0.0, keyboard_bottom),
         move |scope| {
             let width = scope.max_width().0;
             let height = scope.max_height().0;
@@ -234,6 +247,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
                     match destination {
                         Destination::Studio => {}
                         Destination::Settings => MobileSettings(player, skin),
+                        Destination::Library => library::LibraryScreen(player, library),
                         Destination::Player => match skin.get() {
                             Ok(artwork) => MobilePlayer(artwork, player, skin),
                             Err(error) => WinampSkinError(error),
@@ -246,18 +260,21 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
                 Modifier::empty()
                     .absolute_offset((width - nav_width) * 0.5, nav_top + 10.0)
                     .width(nav_width),
-                LiquidTabBarSpec::new((nav_width - 8.0) / 3.0),
+                LiquidTabBarSpec::new((nav_width - 8.0) / 4.0),
                 destination.index(),
                 move |index| {
+                    focus.clear_focus();
                     let destination = match index {
-                        1 => Destination::Studio,
-                        2 => Destination::Settings,
+                        1 => Destination::Library,
+                        2 => Destination::Studio,
+                        3 => Destination::Settings,
                         _ => Destination::Player,
                     };
                     player.update(|state| destination.select(state));
                 },
                 |tabs| {
                     tabs.tab(PLAY_ICON, "Player");
+                    tabs.tab(icons::LIST, "Library");
                     tabs.tab(icons::EDIT, "Skin Studio");
                     tabs.tab(icons::SETTINGS, "Settings");
                 },

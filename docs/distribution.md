@@ -171,8 +171,12 @@ The Apple privacy manifest declares file metadata access inside the app containe
 
 ## Mobile navigation and Apple review follow-up, October 29
 
-The folder-stream-io branch adds shared Android/iOS Player, Skin Studio and Settings
-tabs. Settings uses Cranpose Liquid controls. The skin keeps its native sprite
+Android and iOS have four tabs: Player, Library, Skin Studio and Settings.
+Library and Settings use Cranpose Liquid controls. Library manages the player's
+existing playlist, with search, selection, sorting, per-track reordering and
+confirmed removal. It also exposes file/folder pickers and playlist import/export.
+Music stays at its original location. The list retains its search and scroll
+position across tab changes. The skin keeps its native sprite
 positions; the main transport receives expanded touch regions. Tab changes retain
 Studio navigation and its document. Skin-library scans use Cranpose `withBlocking`.
 

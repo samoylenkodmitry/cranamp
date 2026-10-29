@@ -16,7 +16,12 @@ fn launcher() -> AppLauncher<cranpose::AppFonts> {
         .with_title(TITLE)
         .with_application_id(APPLICATION_ID)
         .with_fonts(fonts::APP_FONTS)
-        .with_developer_inspector(cfg!(debug_assertions) && !cfg!(feature = "store"))
+        .with_developer_inspector(
+            cfg!(debug_assertions)
+                && !cfg!(feature = "store")
+                && (!cfg!(any(target_os = "ios", target_os = "android"))
+                    || std::env::args().any(|arg| arg == "--inspector")),
+        )
 }
 fn desktop_launcher() -> AppLauncher<cranpose::AppFonts> {
     let launcher = launcher();

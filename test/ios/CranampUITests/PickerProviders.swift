@@ -174,6 +174,67 @@ final class PickerProviders: XCTestCase {
         print("MOBILE NAVIGATION: " + app.debugDescription)
     }
 
+    func testMobileLibrary() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_LIBRARY"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_LIBRARY=1")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        func tab(_ name: String) {
+            let query = app.buttons.matching(identifier: name)
+            XCTAssertTrue(query.firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+            query.element(boundBy: query.count - 1).tap()
+        }
+        func capture(_ name: String) {
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = name
+            image.lifetime = .keepAlways
+            add(image)
+        }
+        tab("Library")
+        XCTAssertTrue(app.buttons["Add music"].waitForExistence(timeout: 10))
+        capture("library")
+        app.buttons["Add music"].tap()
+        XCTAssertTrue(app.buttons["Choose a music folder"].waitForExistence(timeout: 10))
+        capture("library-add")
+        app.buttons["Cancel"].tap()
+        app.buttons["Sort playlist"].tap()
+        XCTAssertTrue(app.buttons["Track title"].waitForExistence(timeout: 10))
+        capture("library-sort")
+        app.buttons["Cancel"].tap()
+        app.buttons["Select"].tap()
+        XCTAssertTrue(app.buttons["Select results"].waitForExistence(timeout: 10))
+        capture("library-selection")
+        app.buttons["Done"].tap()
+        let search = app.descendants(matching: .any).matching(identifier: "Search your playlist").firstMatch
+        XCTAssertTrue(search.exists, app.debugDescription)
+        search.tap()
+        XCTAssertTrue(app.buttons["Finish search"].waitForExistence(timeout: 5))
+        search.typeText("cranamp-library-no-match-62983")
+        XCTAssertTrue(app.buttons["Clear search"].waitForExistence(timeout: 10))
+        capture("library-search")
+        app.buttons["Finish search"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10))
+        tab("Settings")
+        XCTAssertTrue(app.buttons["Choose skin"].waitForExistence(timeout: 10))
+        tab("Library")
+        XCTAssertTrue(app.buttons["Clear search"].waitForExistence(timeout: 10))
+        app.buttons["Clear search"].tap()
+        let tracks = app.descendants(matching: .any).matching(identifier: "Library tracks").firstMatch
+        if tracks.exists {
+            let query = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play track "))
+            let before = query.allElementsBoundByIndex.map { $0.label }
+            tracks.swipeUp()
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                query.allElementsBoundByIndex.map { $0.label } != before
+            }, object: tracks)
+            XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
+            capture("library-scrolled")
+        }
+        tab("Player")
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 10))
+    }
+
     func testNetworkMusicFolder() throws {
         guard let address = ProcessInfo.processInfo.environment["CRANAMP_TEST_WEBDAV_URL"] else {
             throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_WEBDAV_URL to the original music folder URL")
