@@ -2558,7 +2558,7 @@ struct StackedLayout {
     content_left_inset: f32,
     content_top_inset: f32,
 }
-#[cfg(target_os = "android")]
+#[cfg(any(test, not(target_arch = "wasm32")))]
 fn resizable_stacked_layout(
     available_width: f32,
     available_height: f32,
@@ -5175,7 +5175,7 @@ fn PlaylistEntries(
         },
     );
 }
-#[cfg(any(test, target_os = "android"))]
+#[cfg(any(test, not(target_arch = "wasm32")))]
 fn playlist_min_height() -> f32 {
     145.0
 }

@@ -1517,6 +1517,21 @@ fn fullscreen_player_keeps_controls_inside_tablet_and_landscape_surfaces() {
 }
 
 #[test]
+fn portrait_mobile_player_uses_the_full_width_and_fits_above_navigation() {
+    for (width, height) in [(440., 774.), (393., 674.), (375., 610.), (320., 462.)] {
+        for eq_visible in [true, false] {
+            let mut state = initial_winamp_state();
+            state.eq_visible = eq_visible;
+            let layout = resizable_stacked_layout(width, height, 0., 0., &state, 2.);
+            assert_eq!(layout.content_left_inset, 0.);
+            assert!((MAIN_WIDTH * layout.scale - width).abs() < 0.001);
+            assert!((stacked_surface_height(&state, layout) - height).abs() < 0.001);
+            assert!(layout.playlist_height >= playlist_min_height());
+        }
+    }
+}
+
+#[test]
 fn player_stack_keeps_its_ratio_when_the_host_changes_shape() {
     let state = initial_winamp_state();
     let expected = MAIN_WIDTH / stacked_skin_height(&state, PLAYLIST_HEIGHT);

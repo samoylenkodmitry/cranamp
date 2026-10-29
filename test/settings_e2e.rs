@@ -85,9 +85,9 @@ fn mobile_about_has_offline_licenses_and_recovers_from_unavailable_link_apps() {
         &about,
         &format!("Version {}", env!("CARGO_PKG_VERSION"))
     ));
-    assert!(contains(&about, "trdmitriisamoilenko@gmail.com"));
+    assert!(contains(&about, "cranamp@dmitrysamoylenko.in"));
     click_mobile(&mut shell, "Contact support");
-    assert_eq!(&*opened.borrow(), &["mailto:trdmitriisamoilenko@gmail.com"]);
+    assert_eq!(&*opened.borrow(), &["mailto:cranamp@dmitrysamoylenko.in"]);
     assert!(contains(
         &visible_texts(&mut shell),
         "Could not open this link"
@@ -402,6 +402,27 @@ fn click_mobile(shell: &mut AppShell<HitGraphRenderer>, label: &str) {
     pump(shell);
     shell.pointer_released();
     pump(shell);
+}
+
+#[test]
+fn mobile_player_keeps_the_skin_edge_at_the_screen_edge() {
+    let _application = TestApplication::new("mobile-width");
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    for (width, height) in [(440., 860.), (393., 760.), (320., 548.)] {
+        shell.set_buffer_size(width as u32, height as u32);
+        shell.set_viewport(width, height);
+        pump(&mut shell);
+        let close = mobile_control_bounds(&mut shell, "Close player");
+        let right_border = 2.0 * width / 275.0;
+        assert!(
+            (close.x + close.width + right_border - width).abs() <= 1.0,
+            "Skin inset at {width}x{height}: close button {close:?}"
+        );
+    }
 }
 
 #[test]

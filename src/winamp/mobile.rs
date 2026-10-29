@@ -235,7 +235,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
                         Destination::Studio => {}
                         Destination::Settings => MobileSettings(player, skin),
                         Destination::Player => match skin.get() {
-                            Ok(artwork) => WinampStackedFill(artwork, player, skin),
+                            Ok(artwork) => MobilePlayer(artwork, player, skin),
                             Err(error) => WinampSkinError(error),
                         },
                     }
@@ -264,6 +264,21 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
             );
         },
     );
+}
+
+#[composable]
+fn MobilePlayer(artwork: WinampSkin, player: MutableState<WinampState>, skin: WinampSkinState) {
+    BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
+        let layout = resizable_stacked_layout(
+            scope.max_width().0,
+            scope.max_height().0,
+            0.0,
+            0.0,
+            &player.get(),
+            ui_scale(),
+        );
+        WinampStackedStage(artwork.clone(), player, skin, layout, StackedDrag::Fixed);
+    });
 }
 
 #[composable]

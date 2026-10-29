@@ -36,7 +36,7 @@ device="${DEVICE:-$(xcrun devicectl list devices 2>/dev/null \
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 unzip -q "$ipa" -d "$stage"
-app="$(find "$stage/Payload" -maxdepth 1 -name '*.app' | head -1)"
+app="$(find "$stage/Payload" -maxdepth 1 -type d -name '*.app' | head -1)"
 [ -n "$app" ] || { echo "$ipa holds no .app under Payload" >&2; exit 1; }
 
 cp "$profile" "$app/embedded.mobileprovision"

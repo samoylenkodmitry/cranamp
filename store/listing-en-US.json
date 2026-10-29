@@ -10,7 +10,7 @@
   "privacy_url": "https://cranamp.dmitrysamoylenko.in/privacy/",
   "support_url": "https://cranamp.dmitrysamoylenko.in/support/",
   "website": "https://cranamp.dmitrysamoylenko.in/",
-  "support_email": "trdmitriisamoilenko@gmail.com",
+  "support_email": "cranamp@dmitrysamoylenko.in",
   "copyright": "2026 Dmitrii Samoilenko",
   "release_notes": "Folder playback starts when the first track is found. Audio files play from their original location without import copies or WAV conversion. Added streaming Opus decoding.",
   "ios_audio": "On iOS, HLS streams use system playback and do not support the equalizer, balance or visualizer. These controls work with supported local files and direct audio streams."

@@ -3,7 +3,7 @@ use super::*;
 
 pub(super) const PRIVACY_URL: &str = "https://cranamp.dmitrysamoylenko.in/privacy/";
 pub(super) const SUPPORT_URL: &str = "https://cranamp.dmitrysamoylenko.in/support/";
-const CONTACT: &str = "trdmitriisamoilenko@gmail.com";
+const CONTACT: &str = "cranamp@dmitrysamoylenko.in";
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(super) enum Page {
@@ -147,7 +147,7 @@ pub(super) fn Content(page: MutableState<Page>, mobile: bool) {
             AboutText(format!("Support contact\n{CONTACT}"), mobile);
             AboutLink(
                 "Contact support",
-                "mailto:trdmitriisamoilenko@gmail.com",
+                "mailto:cranamp@dmitrysamoylenko.in",
                 mobile,
             );
             AboutText("Your mail app opens a draft. Include your app version and device model. Omit private files and secret URLs.", mobile);
