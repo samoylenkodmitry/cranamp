@@ -5,6 +5,7 @@ import android.accessibilityservice.AccessibilityService;
 import android.graphics.Bitmap;
 import android.graphics.Rect;
 import android.os.SystemClock;
+import android.os.Bundle;
 import android.view.accessibility.AccessibilityNodeInfo;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -53,6 +54,49 @@ public final class MobileNavigationTest {
         try (FileOutputStream stream = new FileOutputStream(new File(folder, name + ".png"))) {
             assertTrue(shot.compress(Bitmap.CompressFormat.PNG, 100, stream));
         } finally { shot.recycle(); }
+    }
+    @Test public void swipeScrollsPlaylist() throws Exception {
+        org.junit.Assume.assumeTrue("Pass -e playlistSwipe 1 with a populated playlist",
+                "1".equals(InstrumentationRegistry.getArguments().getString("playlistSwipe")));
+        try (ActivityScenario<CranposeActivity> scenario = ActivityScenario.launch(CranposeActivity.class)) {
+            click("Player");
+            AccessibilityNodeInfo scrollbar = waitFor("Playlist scroll position");
+            assertNotNull(scrollbar.getRangeInfo());
+            float original = scrollbar.getRangeInfo().getCurrent();
+            Bundle position = new Bundle();
+            position.putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 0.0f);
+            assertTrue(scrollbar.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.getId(), position));
+            try {
+                capture("playlist-before-swipe");
+                AccessibilityNodeInfo playlist = waitFor("Playlist");
+                Rect bounds = new Rect();
+                playlist.getBoundsInScreen(bounds);
+                int[] display = {0};
+                scenario.onActivity(activity -> display[0] = activity.getDisplay().getDisplayId());
+                String swipe = "input touchscreen -d " + display[0] + " swipe " + bounds.centerX() + " "
+                        + (bounds.top + bounds.height() * 3 / 4) + " " + bounds.centerX() + " "
+                        + (bounds.top + bounds.height() / 4) + " 160";
+                try (android.os.ParcelFileDescriptor command = ui.executeShellCommand(swipe);
+                     java.io.InputStream output = new android.os.ParcelFileDescriptor.AutoCloseInputStream(command)) {
+                    StringBuilder result = new StringBuilder();
+                    int value;
+                    while ((value = output.read()) != -1) result.append((char) value);
+                    assertFalse(result.toString(), result.toString().contains("Error"));
+                }
+                long deadline = SystemClock.uptimeMillis() + 5000;
+                float progress;
+                do {
+                    SystemClock.sleep(100);
+                    progress = waitFor("Playlist scroll position").getRangeInfo().getCurrent();
+                } while (progress <= 0.0f && SystemClock.uptimeMillis() < deadline);
+                assertTrue("A swipe must move the populated playlist", progress > 0.0f);
+                capture("playlist-after-swipe");
+            } finally {
+                position.putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, original);
+                waitFor("Playlist scroll position").performAction(
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.getId(), position);
+            }
+        }
     }
     @Test public void tabsSettingsBackAndStudioDraft() throws Exception {
         try (ActivityScenario<CranposeActivity> scenario = ActivityScenario.launch(CranposeActivity.class)) {

@@ -622,8 +622,18 @@ fn playlist_title_column_leaves_right_duration_gap() {
 }
 #[test]
 fn playlist_visible_row_capacity_uses_full_list_area() {
-    let default_list_height = PLAYLIST_HEIGHT - PLAYLIST_BOTTOM_LEFT_CORNER.3 - PLAYLIST_LIST_BG.1;
-    assert_eq!(playlist_visible_row_capacity(default_list_height), 18);
+    let mut shell = cranpose_app_shell::AppShell::new(
+        test_common::HitGraphRenderer::default(),
+        cranpose_core::location_key(file!(), line!(), column!()),
+        || {
+            let default_list_height =
+                PLAYLIST_HEIGHT - PLAYLIST_BOTTOM_LEFT_CORNER.3 - PLAYLIST_LIST_BG.1;
+            assert_eq!(playlist_visible_row_capacity(default_list_height, 1.0), 18);
+        },
+    );
+    shell.set_buffer_size(300, 300);
+    shell.set_viewport(300.0, 300.0);
+    test_common::pump(&mut shell);
 }
 #[test]
 fn slider_artwork_stays_on_native_pixel_grid_at_all_skin_frames() {
@@ -1279,24 +1289,6 @@ fn format_m3u_playlist_writes_extm3u_and_durations() {
     assert!(text.starts_with("#EXTM3U\n"));
     assert!(text.contains("#EXTINF:199,Broods - Heartlines\n"));
     assert!(text.contains("/home/s/Music/Broods - Heartlines.mp3\n"));
-}
-#[test]
-fn scroll_playlist_by_rows_clamps_to_available_rows() {
-    let mut state = WinampState {
-        playlist: test_playlist(
-            (0..20)
-                .map(|index| test_track(&format!("Track {index:02}")))
-                .collect(),
-        ),
-        playlist_visible_rows: 5,
-        ..WinampState::default()
-    };
-    scroll_playlist_by_rows_in_state(&mut state, 3);
-    assert!((state.playlist_scroll - (3.0 / 15.0)).abs() < f32::EPSILON);
-    scroll_playlist_by_rows_in_state(&mut state, 99);
-    assert_eq!(state.playlist_scroll, 1.0);
-    scroll_playlist_by_rows_in_state(&mut state, -99);
-    assert_eq!(state.playlist_scroll, 0.0);
 }
 #[test]
 fn a_track_the_backend_refuses_says_so_instead_of_stopping_the_clock() {

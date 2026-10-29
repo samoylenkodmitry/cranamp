@@ -2,8 +2,7 @@ use super::*;
 use cranpose_app_shell::AppShell;
 use cranpose_ui::{SemanticsNode, SemanticsRole};
 
-#[path = "../../common/mod.rs"]
-mod common;
+use super::test_common as common;
 
 const TITLES: [&str; 4] = [
     "07. E-Mantra - Distant Signals",

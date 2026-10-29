@@ -53,6 +53,49 @@ final class PickerProviders: XCTestCase {
         wait(for: [completed], timeout: 15)
     }
 
+    func testPlaylistSwipe() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_PLAYLIST_SWIPE"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_PLAYLIST_SWIPE=1 with a populated playlist")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        let tabs = app.buttons.matching(identifier: "Player")
+        XCTAssertTrue(tabs.firstMatch.waitForExistence(timeout: 20))
+        tabs.element(boundBy: tabs.count - 1).tap()
+        let playlist = app.descendants(matching: .any).matching(identifier: "Playlist").firstMatch
+        XCTAssertTrue(playlist.waitForExistence(timeout: 10), app.debugDescription)
+        let scrollbar = app.descendants(matching: .any).matching(identifier: "Playlist scroll position").firstMatch
+        scrollbar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)).tap()
+        func titles() -> [String] {
+            let bounds = playlist.frame
+            func collect(_ node: XCUIElementSnapshot) -> [String] {
+                if node.elementType == .button && bounds.contains(node.frame) {
+                    return [node.label]
+                }
+                return node.children.flatMap { collect($0) }
+            }
+            return collect(try! app.snapshot())
+        }
+        let before = titles()
+        print("PLAYLIST BEFORE: \(before)")
+        XCTAssertGreaterThan(before.count, 3, "This test needs the existing music playlist")
+        let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        image.name = "playlist-before-swipe"
+        image.lifetime = .keepAlways
+        add(image)
+        playlist.swipeUp(velocity: .fast)
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let after = titles()
+            return after.count > 3 && after != before
+        }, object: playlist)
+        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
+        print("PLAYLIST AFTER: \(titles())")
+        let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        after.name = "playlist-after-swipe"
+        after.lifetime = .keepAlways
+        add(after)
+    }
+
     func testMobileNavigation() throws {
         guard ProcessInfo.processInfo.environment["CRANAMP_TEST_MOBILE_NAV"] == "1" else {
             throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_MOBILE_NAV=1")

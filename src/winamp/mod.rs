@@ -25,6 +25,7 @@ use crate::audio::{self, Track};
 use cranpose::{rememberAndroidHostWindowState, AndroidHostWindowState};
 use cranpose::{rememberWindowState, WindowConfig, WindowModifierExt, WindowState};
 use cranpose_core::{self, MutableState};
+use cranpose_foundation::lazy::{rememberLazyListState, LazyItems, LazyListScope, LazyListState};
 use cranpose_foundation::text::{TextFieldState, TextRange};
 use cranpose_foundation::{Modifiers, PointerButton};
 use cranpose_ui::text::{FontFamily, ParagraphStyle, TextOverflow, TextUnit};
@@ -45,8 +46,6 @@ use std::rc::Rc;
 #[cfg(target_os = "android")]
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
 #[cfg(target_os = "android")]
 pub(crate) const ANDROID_OVERLAY_INITIAL_X: i32 = 26;
 #[cfg(target_os = "android")]
@@ -421,9 +420,28 @@ enum PlaylistFooterMenu {
 }
 #[derive(Clone, Copy, PartialEq)]
 struct PlaylistScrollHandles {
-    thumb: MutableState<f32>,
-    entries: MutableState<f32>,
+    list: LazyListState,
     dragging: MutableState<bool>,
+    max_start: usize,
+    row_height: f32,
+}
+impl PlaylistScrollHandles {
+    fn fraction(self) -> f32 {
+        let offset = self.list.first_visible_item_index() as f32 * self.row_height
+            + self.list.first_visible_item_scroll_offset();
+        if self.max_start == 0 {
+            0.0
+        } else {
+            (offset / (self.max_start as f32 * self.row_height)).clamp(0.0, 1.0)
+        }
+    }
+
+    fn scroll_to(self, fraction: f32) {
+        let row = fraction.clamp(0.0, 1.0) * self.max_start as f32;
+        self.list.stop_scroll_animation();
+        self.list
+            .scroll_to_item(row.floor() as usize, row.fract() * self.row_height);
+    }
 }
 #[derive(Clone, Copy)]
 struct PlaylistMenuItem {
@@ -453,8 +471,6 @@ const TITLE_MARQUEE_CHARS_PER_SECOND: f32 = 2.0;
 const VISUALIZER_REFRESH_MS: u64 = 66;
 const PLAYLIST_DOUBLE_CLICK_MS: u64 = 500;
 const DEFAULT_PLAYLIST_VISIBLE_ROWS: usize = 19;
-#[cfg(not(target_arch = "wasm32"))]
-const PLAYLIST_THUMB_SCROLL_FRAME_MS: u64 = 16;
 const PLAYLIST_SCROLL_HIT_PAD_X: f32 = 8.0;
 /// The square at the playlist's bottom-right corner that resizes the window.
 const PLAYLIST_RESIZE_HANDLE: f32 = 16.0;
@@ -4674,26 +4690,8 @@ fn PlaylistWindow(
     scale: f32,
 ) {
     let snapshot = state.get();
-    let playlist_scroll_state = cranpose_core::rememberMutableStateOf(|| snapshot.playlist_scroll);
-    let playlist_entries_scroll_state =
-        cranpose_core::rememberMutableStateOf(|| snapshot.playlist_scroll);
+    let playlist_list = rememberLazyListState();
     let playlist_scroll_dragging = cranpose_core::rememberMutableStateOf(|| false);
-    {
-        let local_scroll = playlist_scroll_state;
-        let local_entries_scroll = playlist_entries_scroll_state;
-        let local_dragging = playlist_scroll_dragging;
-        let saved_scroll = snapshot.playlist_scroll;
-        cranpose_core::SideEffect(move || {
-            if !local_dragging.get_non_reactive() {
-                if (local_scroll.get_non_reactive() - saved_scroll).abs() > f32::EPSILON {
-                    local_scroll.set(saved_scroll);
-                }
-                if (local_entries_scroll.get_non_reactive() - saved_scroll).abs() > f32::EPSILON {
-                    local_entries_scroll.set(saved_scroll);
-                }
-            }
-        });
-    }
     let search_field = cranpose_core::remember(|| TextFieldState::new("")).with(|field| *field);
     let url_field = cranpose_core::remember(|| TextFieldState::new("")).with(|field| *field);
     let window_size = window_size.get();
@@ -4705,6 +4703,13 @@ fn PlaylistWindow(
     let bottom_y = height - PLAYLIST_BOTTOM_LEFT_CORNER.3;
     let list_width = (right_x - PLAYLIST_LIST_BG.0).max(1.0);
     let list_height = (bottom_y - PLAYLIST_LIST_BG.1).max(1.0);
+    let visible_rows = playlist_visible_row_capacity(list_height, scale);
+    let playlist_scroll = PlaylistScrollHandles {
+        list: playlist_list,
+        dragging: playlist_scroll_dragging,
+        max_start: snapshot.playlist.len().saturating_sub(visible_rows),
+        row_height: scaled(WINAMP_PLAYLIST_LINE_HEIGHT, scale),
+    };
     let title_min_x = PLAYLIST_TOP_LEFT_CORNER.2;
     let title_max_x = (width - PLAYLIST_TOP_RIGHT_CORNER.2 - PLAYLIST_TITLE_BAR.2).max(title_min_x);
     let title_x = ((width - PLAYLIST_TITLE_BAR.2) * 0.5)
@@ -4845,19 +4850,14 @@ fn PlaylistWindow(
                 pledit.clone(),
                 scroll_track_x,
                 list_height,
-                state,
-                PlaylistScrollHandles {
-                    thumb: playlist_scroll_state,
-                    entries: playlist_entries_scroll_state,
-                    dragging: playlist_scroll_dragging,
-                },
+                playlist_scroll,
                 scale,
             );
             PlaylistEntries(
                 palette,
                 state,
                 snapshot.clone(),
-                playlist_entries_scroll_state,
+                playlist_scroll,
                 list_width,
                 list_height,
                 scale,
@@ -4890,14 +4890,6 @@ fn PlaylistWindow(
                     scale,
                 );
             }
-            PlaylistWheelScrollTarget(
-                state,
-                PLAYLIST_LIST_BG.0,
-                PLAYLIST_LIST_BG.1,
-                list_width,
-                list_height,
-                scale,
-            );
             WindowDragHandle(drag_target, (0.0, 0.0, width, PLAYLIST_DRAG_AREA.3), scale);
             PlaylistResizeHandle(
                 drag_target,
@@ -4930,11 +4922,10 @@ fn PlaylistScrollbar(
     pledit: ImageBitmap,
     scroll_track_x: f32,
     list_height: f32,
-    state: MutableState<WinampState>,
     playlist_scroll: PlaylistScrollHandles,
     scale: f32,
 ) {
-    let scroll = playlist_scroll.thumb.get();
+    let scroll = playlist_scroll.fraction();
     let scroll_y = PLAYLIST_LIST_BG.1
         + vertical_slider_thumb_y_down(scroll, list_height, PLAYLIST_SCROLL_HANDLE.3);
     let scroll_pressed = cranpose_core::rememberMutableStateOf(|| false);
@@ -4953,7 +4944,6 @@ fn PlaylistScrollbar(
     PlaylistScrollbarInput(
         scroll_track_x,
         list_height,
-        state,
         playlist_scroll,
         scroll_pressed,
         scale,
@@ -4963,92 +4953,88 @@ fn PlaylistScrollbar(
 fn PlaylistScrollbarInput(
     scroll_track_x: f32,
     list_height: f32,
-    state: MutableState<WinampState>,
     playlist_scroll: PlaylistScrollHandles,
     scroll_pressed: MutableState<bool>,
     scale: f32,
 ) {
-    #[cfg(not(target_arch = "wasm32"))]
-    let last_thumb_scroll_update = cranpose_core::remember(|| None::<Instant>);
-    let initial_scroll = playlist_scroll.thumb.get_non_reactive();
-    let latest_scroll = cranpose_core::remember(move || initial_scroll);
-    {
-        let scroll_change = playlist_scroll.thumb;
-        let entries_scroll_change = playlist_scroll.entries;
-        let scroll_commit = playlist_scroll.thumb;
-        let entries_scroll_commit = playlist_scroll.entries;
-        let drag_state = playlist_scroll.dragging;
-        let latest_scroll_change = latest_scroll.clone();
-        let latest_scroll_commit = latest_scroll;
-        #[cfg(not(target_arch = "wasm32"))]
-        let last_thumb_scroll_change = last_thumb_scroll_update.clone();
-        #[cfg(not(target_arch = "wasm32"))]
-        let last_thumb_scroll_drag = last_thumb_scroll_update;
-        VerticalDragSlider(
-            "Playlist scroll position",
-            ControlRect::new(
-                scroll_track_x - PLAYLIST_SCROLL_HIT_PAD_X,
-                PLAYLIST_LIST_BG.1,
-                PLAYLIST_SCROLL_TRACK.2 + PLAYLIST_SCROLL_HIT_PAD_X * 2.0,
-                list_height,
-                scale,
-            ),
-            initial_scroll,
-            PLAYLIST_SCROLL_HANDLE.3,
-            false,
-            move |fraction| {
-                latest_scroll_change.update(|latest| *latest = fraction);
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let now = Instant::now();
-                    let should_update_thumb = last_thumb_scroll_change.with(|last| {
-                        last.as_ref().is_none_or(|last| {
-                            now.duration_since(*last)
-                                >= Duration::from_millis(PLAYLIST_THUMB_SCROLL_FRAME_MS)
-                        })
-                    });
-                    if should_update_thumb {
-                        last_thumb_scroll_change.update(|last| *last = Some(now));
-                        scroll_change.set(fraction);
-                        entries_scroll_change.set(fraction);
-                    }
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    scroll_change.set(fraction);
-                    entries_scroll_change.set(fraction);
-                }
-            },
-            move |dragging| {
-                scroll_pressed.set(dragging);
-                drag_state.set(dragging);
-                set_playlist_scroll_drag_active(dragging);
-                if dragging {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    last_thumb_scroll_drag.update(|last| *last = None);
-                } else {
-                    let fraction = latest_scroll_commit.with(|latest| *latest);
-                    scroll_commit.set(fraction);
-                    entries_scroll_commit.set(fraction);
-                    state.update(|s| {
-                        s.playlist_scroll = fraction;
-                    });
-                }
-            },
-        );
-    }
+    VerticalDragSlider(
+        "Playlist scroll position",
+        ControlRect::new(
+            scroll_track_x - PLAYLIST_SCROLL_HIT_PAD_X,
+            PLAYLIST_LIST_BG.1,
+            PLAYLIST_SCROLL_TRACK.2 + PLAYLIST_SCROLL_HIT_PAD_X * 2.0,
+            list_height,
+            scale,
+        ),
+        playlist_scroll.fraction(),
+        PLAYLIST_SCROLL_HANDLE.3,
+        false,
+        move |fraction| playlist_scroll.scroll_to(fraction),
+        move |dragging| {
+            scroll_pressed.set(dragging);
+            playlist_scroll.dragging.set(dragging);
+        },
+    );
+}
+#[composable]
+fn PlaylistScrollSync(
+    state: MutableState<WinampState>,
+    saved_fraction: f32,
+    total_rows: usize,
+    visible_rows: usize,
+    scroll: PlaylistScrollHandles,
+) {
+    let last_saved = cranpose_core::remember(|| None::<f32>);
+    let fraction = scroll.fraction();
+    let last_fraction = cranpose_core::rememberUpdatedState(fraction);
+    cranpose_core::DisposableEffect(scroll.list, move |scope| {
+        scope.on_dispose(move || {
+            scroll.list.stop_scroll_animation();
+            if state.is_alive() && last_fraction.is_alive() {
+                state.update(|s| s.playlist_scroll = last_fraction.get_non_reactive());
+            }
+            set_playlist_scroll_drag_active(false);
+        })
+    });
+    let moving = scroll.list.is_scroll_in_progress() || scroll.dragging.get();
+    cranpose_core::SideEffect(move || {
+        set_playlist_scroll_drag_active(moving);
+        if state.get_non_reactive().playlist_visible_rows != visible_rows {
+            state.update(|s| s.playlist_visible_rows = visible_rows);
+        }
+        if last_saved.with(|last| *last != Some(saved_fraction)) {
+            last_saved.update(|last| *last = Some(saved_fraction));
+            scroll.scroll_to(saved_fraction);
+        } else if !moving
+            && scroll.list.total_items_count() == total_rows
+            && (fraction - saved_fraction).abs() > f32::EPSILON
+        {
+            last_saved.update(|last| *last = Some(fraction));
+            state.update(|s| s.playlist_scroll = fraction);
+        }
+    });
 }
 #[composable]
 fn PlaylistEntries(
     palette: SkinPalette,
     state: MutableState<WinampState>,
     snapshot: WinampState,
-    playlist_scroll: MutableState<f32>,
+    scroll: PlaylistScrollHandles,
     list_width: f32,
     list_height: f32,
     scale: f32,
 ) {
-    let playlist_scroll = playlist_scroll.get();
+    let visible_rows = playlist_visible_row_capacity(list_height, scale);
+    let top = scaled(WINAMP_PLAYLIST_TEXT_Y, scale);
+    let bottom =
+        (scaled(list_height, scale) - top - visible_rows as f32 * scroll.row_height).max(0.0);
+    PlaylistScrollSync(
+        state,
+        snapshot.playlist_scroll,
+        snapshot.playlist.len(),
+        visible_rows,
+        scroll,
+    );
     Box(
         Modifier::empty()
             .size_points(scaled(list_width, scale), scaled(list_height, scale))
@@ -5056,122 +5042,131 @@ fn PlaylistEntries(
                 scaled(PLAYLIST_LIST_BG.0, scale),
                 scaled(PLAYLIST_LIST_BG.1, scale),
             )
-            .clip_to_bounds(),
+            .clip_to_bounds()
+            .stable_semantics(|config| config.content_description = Some("Playlist".into())),
         BoxSpec::default(),
         move || {
-            let row_height = WINAMP_PLAYLIST_LINE_HEIGHT;
-            let max_rows = playlist_visible_row_capacity(list_height);
-            let x = WINAMP_PLAYLIST_TEXT_X;
-            let y = WINAMP_PLAYLIST_TEXT_Y;
-            cranpose_core::SideEffect(move || {
-                if state.get_non_reactive().playlist_visible_rows != max_rows {
-                    state.update(|s| s.playlist_visible_rows = max_rows);
-                }
-            });
             if snapshot.playlist.is_empty() {
                 PlaylistWinampText(
                     snapshot.status.clone(),
-                    x,
-                    y,
+                    WINAMP_PLAYLIST_TEXT_X,
+                    WINAMP_PLAYLIST_TEXT_Y,
                     (list_width - 8.0).max(1.0),
-                    row_height,
+                    WINAMP_PLAYLIST_LINE_HEIGHT,
                     scale,
                     palette.normal,
                 );
-                return;
             }
-            let max_start = snapshot.playlist.len().saturating_sub(max_rows);
-            let start = ((playlist_scroll * max_start as f32).round() as usize).min(max_start);
-            let line_width = (list_width - x - 4.0).max(1.0);
-            let visible_line_count =
-                visible_playlist_line_count(snapshot.playlist.len(), start, max_rows);
-            let selection_height = WINAMP_PLAYLIST_SELECTION_HEIGHT.min(row_height).max(1.0);
-            for row in start..start + visible_line_count {
-                if snapshot.selected_indices.contains(&row) {
-                    let row_offset = (row - start) as f32 * row_height;
-                    let selection_y = y
-                        + row_offset
-                        + (row_height - selection_height) * 0.5
-                        + WINAMP_PLAYLIST_SELECTION_Y_OFFSET;
-                    FilledRect(
-                        2.0,
-                        selection_y,
-                        list_width - 4.0,
-                        selection_height,
-                        scale,
-                        skin_color(palette.selected_bg),
-                    );
-                }
+            let snapshot = Rc::new(snapshot.clone());
+            cranpose_ui::LazyColumn(
+                Modifier::empty().fill_max_size(),
+                scroll.list,
+                cranpose_ui::LazyColumnSpec::default().content_padding(
+                    cranpose_ui::PaddingValues {
+                        top,
+                        bottom,
+                        ..Default::default()
+                    },
+                ),
+                move |scope| {
+                    scope.items(LazyItems::new(snapshot.playlist.len()), move |row| {
+                        PlaylistEntry(palette, state, snapshot.clone(), row, list_width, scale);
+                    });
+                },
+            );
+        },
+    );
+}
+#[composable]
+fn PlaylistEntry(
+    palette: SkinPalette,
+    state: MutableState<WinampState>,
+    snapshot: Rc<WinampState>,
+    row: usize,
+    list_width: f32,
+    scale: f32,
+) {
+    let track = &snapshot.playlist[row];
+    let current = snapshot.current_index == Some(row);
+    let selected = snapshot.selected_indices.contains(&row);
+    let row_height = WINAMP_PLAYLIST_LINE_HEIGHT;
+    let line_width = (list_width - WINAMP_PLAYLIST_TEXT_X - 4.0).max(1.0);
+    let color = if current {
+        palette.current
+    } else {
+        palette.normal
+    };
+    let duration = playlist_duration_text(track.duration_seconds);
+    let duration_width = duration
+        .as_deref()
+        .map(playlist_duration_column_width)
+        .unwrap_or(0.0);
+    let title_width = playlist_title_column_width(line_width, duration_width);
+    let title = if current && snapshot.playback == PlaybackState::Playing {
+        marquee_system_text(
+            track.display_title().to_string(),
+            title_width,
+            snapshot.title_marquee_phase,
+        )
+    } else {
+        track.display_title().to_string()
+    };
+    let label = track.display_title().to_string();
+    Box(
+        Modifier::empty().size_points(scaled(list_width, scale), scaled(row_height, scale)),
+        BoxSpec::default(),
+        move || {
+            if selected {
+                let selection_height = WINAMP_PLAYLIST_SELECTION_HEIGHT.min(row_height).max(1.0);
+                FilledRect(
+                    2.0,
+                    (row_height - selection_height) * 0.5 + WINAMP_PLAYLIST_SELECTION_Y_OFFSET,
+                    list_width - 4.0,
+                    selection_height,
+                    scale,
+                    skin_color(palette.selected_bg),
+                );
             }
-            for (row, track) in snapshot
-                .playlist
-                .iter()
-                .enumerate()
-                .skip(start)
-                .take(max_rows)
-            {
-                let current = snapshot.current_index == Some(row);
-                let row_offset = (row - start) as f32 * row_height;
-                let row_y = y + row_offset;
-                let color = if current {
-                    palette.current
+            PlaylistWinampText(
+                title.clone(),
+                WINAMP_PLAYLIST_TEXT_X,
+                0.0,
+                title_width,
+                row_height,
+                scale,
+                color,
+            );
+            if let Some(duration) = duration.clone() {
+                let background = if selected {
+                    palette.selected_bg
                 } else {
-                    palette.normal
+                    palette.normal_bg
                 };
-                let duration = playlist_duration_text(track.duration_seconds);
-                let duration_width = duration
-                    .as_deref()
-                    .map(playlist_duration_column_width)
-                    .unwrap_or(0.0);
-                let title_width = playlist_title_column_width(line_width, duration_width);
-                let title = if current && snapshot.playback == PlaybackState::Playing {
-                    marquee_system_text(
-                        track.display_title().to_string(),
-                        title_width,
-                        snapshot.title_marquee_phase,
-                    )
-                } else {
-                    track.display_title().to_string()
-                };
-                PlaylistWinampText(title, x, row_y, title_width, row_height, scale, color);
-                if let Some(duration) = duration {
-                    let background = if snapshot.selected_indices.contains(&row) {
-                        palette.selected_bg
-                    } else {
-                        palette.normal_bg
-                    };
-                    let mut secondary = color;
-                    for component in 0..3 {
-                        secondary[component] = ((color[component] as u16 * 4
-                            + background[component] as u16)
-                            / 5) as u8;
-                    }
-                    PlaylistWinampText(
-                        duration,
-                        x + line_width - duration_width,
-                        row_y,
-                        duration_width,
-                        row_height,
-                        scale,
-                        secondary,
-                    );
+                let mut secondary = color;
+                for component in 0..3 {
+                    secondary[component] =
+                        ((color[component] as u16 * 4 + background[component] as u16) / 5) as u8;
                 }
-                {
-                    let state_click = state;
-                    PlaylistRowClickTarget(
-                        track.display_title().to_string(),
-                        0.0,
-                        row_offset,
-                        list_width,
-                        row_height,
-                        scale,
-                        row,
-                        move |modifiers| {
-                            handle_playlist_row_click(state_click, row, modifiers);
-                        },
-                    );
-                }
+                PlaylistWinampText(
+                    duration,
+                    WINAMP_PLAYLIST_TEXT_X + line_width - duration_width,
+                    0.0,
+                    duration_width,
+                    row_height,
+                    scale,
+                    secondary,
+                );
             }
+            PlaylistRowClickTarget(
+                label.clone(),
+                0.0,
+                0.0,
+                list_width,
+                row_height,
+                scale,
+                row,
+                move |modifiers| handle_playlist_row_click(state, row, modifiers),
+            );
         },
     );
 }
@@ -5667,37 +5662,6 @@ fn PressableClickArea(
         || {},
     );
 }
-#[composable]
-fn PlaylistWheelScrollTarget(
-    state: MutableState<WinampState>,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    scale: f32,
-) {
-    Box(
-        Modifier::empty()
-            .size_points(scaled(width, scale), scaled(height, scale))
-            .absolute_offset(scaled(x, scale), scaled(y, scale))
-            .pointer_input((), move |scope: PointerInputScope| async move {
-                scope
-                    .await_pointer_event_scope(|await_scope| async move {
-                        loop {
-                            let event = await_scope.await_pointer_event().await;
-                            if event.kind == PointerEventKind::Scroll {
-                                let rows = if event.scroll_delta.y < 0.0 { 3 } else { -3 };
-                                scroll_playlist_by_rows(state, rows);
-                                event.consume();
-                            }
-                        }
-                    })
-                    .await;
-            }),
-        BoxSpec::default(),
-        || {},
-    );
-}
 fn playlist_footer_summary(state: &WinampState) -> String {
     let current = state
         .current_index
@@ -5726,13 +5690,11 @@ fn playlist_duration_text(duration_seconds: Option<f32>) -> Option<String> {
         .filter(|duration| *duration > 0.0)
         .map(format_duration_compact)
 }
-fn visible_playlist_line_count(total_rows: usize, start: usize, max_rows: usize) -> usize {
-    total_rows.saturating_sub(start).min(max_rows).max(1)
-}
-fn playlist_visible_row_capacity(list_height: f32) -> usize {
-    ((list_height - WINAMP_PLAYLIST_TEXT_Y) / WINAMP_PLAYLIST_LINE_HEIGHT)
-        .floor()
-        .max(1.0) as usize
+fn playlist_visible_row_capacity(list_height: f32, scale: f32) -> usize {
+    ((scaled(list_height, scale) - scaled(WINAMP_PLAYLIST_TEXT_Y, scale))
+        / scaled(WINAMP_PLAYLIST_LINE_HEIGHT, scale))
+    .floor()
+    .max(1.0) as usize
 }
 fn playlist_duration_column_width(duration: &str) -> f32 {
     (duration.chars().count() as f32 * WINAMP_PLAYLIST_ROW_CHAR_WIDTH)
@@ -8324,21 +8286,6 @@ fn format_m3u_playlist(playlist: &[Track]) -> String {
     }
     lines.join("\n") + "\n"
 }
-fn scroll_playlist_by_rows(state: MutableState<WinampState>, rows: i32) {
-    state.update(|s| scroll_playlist_by_rows_in_state(s, rows));
-}
-fn scroll_playlist_by_rows_in_state(state: &mut WinampState, rows: i32) {
-    let max_start = state
-        .playlist
-        .len()
-        .saturating_sub(state.playlist_visible_rows.max(1));
-    if max_start == 0 {
-        state.playlist_scroll = 0.0;
-    }
-    let start = (state.playlist_scroll.clamp(0.0, 1.0) * max_start as f32).round() as i32;
-    let next = (start + rows).clamp(0, max_start as i32);
-    state.playlist_scroll = next as f32 / max_start as f32;
-}
 fn scroll_playlist_to_track(state: &mut WinampState, index: usize) {
     state.playlist_scroll = playlist_scroll_for_track(
         index,
@@ -9722,9 +9669,17 @@ fn time_digits(elapsed_seconds: f32) -> [u8; 4] {
 mod tests;
 
 #[cfg(test)]
+#[path = "../../test/common/mod.rs"]
+mod test_common;
+
+#[cfg(test)]
 #[path = "../../test/unit/winamp/dock_tests.rs"]
 mod dock_tests;
 
 #[cfg(test)]
 #[path = "../../test/unit/winamp/playlist_text.rs"]
 mod playlist_text_tests;
+
+#[cfg(test)]
+#[path = "../../test/unit/winamp/playlist_scroll.rs"]
+mod playlist_scroll_tests;
