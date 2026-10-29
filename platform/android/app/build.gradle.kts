@@ -59,6 +59,8 @@ cranpose {
 
 android {
     sourceSets.getByName("androidTest").java.srcDir("../../../test/android")
+    sourceSets.getByName("debug").java.srcDir("../../../test/android-fixtures")
+    sourceSets.getByName("debug").manifest.srcFile("../../../test/android-fixtures/AndroidManifest.xml")
     namespace = "com.cranamp.app"
     compileSdk = 36
 

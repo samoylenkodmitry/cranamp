@@ -88,6 +88,12 @@ enum PlaybackState {
     Playing,
     Paused,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FolderAutoplay {
+    Opening(usize),
+    AwaitingAudio(usize),
+    Waiting(usize),
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct PendingPick {
     folder: bool,
@@ -144,6 +150,8 @@ struct WinampState {
     url_input_revision: u64,
     pending_document: Option<PendingDocument>,
     pending_pick: Option<PendingPick>,
+    folder_scan_revision: u64,
+    folder_autoplay: Option<FolderAutoplay>,
     pending_skin_pick: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pending_sync_folder_pick: bool,
@@ -191,6 +199,8 @@ impl PartialEq for WinampState {
             && self.url_input_revision == other.url_input_revision
             && self.pending_document == other.pending_document
             && self.pending_pick == other.pending_pick
+            && self.folder_scan_revision == other.folder_scan_revision
+            && self.folder_autoplay == other.folder_autoplay
             && self.pending_skin_pick == other.pending_skin_pick
             && self.pending_sync_pick_eq(other)
     }
@@ -249,6 +259,8 @@ impl Default for WinampState {
             url_input_revision: 0,
             pending_document: None,
             pending_pick: None,
+            folder_scan_revision: 0,
+            folder_autoplay: None,
             pending_skin_pick: false,
             #[cfg(not(target_arch = "wasm32"))]
             pending_sync_folder_pick: false,
@@ -1453,8 +1465,9 @@ fn CranposePickerEffect(state: MutableState<WinampState>) {
         cranpose_services::rememberOpenFilesLauncher("cranamp.open-files.append", move |result| {
             receive_files(state, result, true)
         });
-    let pending = state.get().pending_pick;
-    cranpose_core::LaunchedEffect(pending, move |_scope| {
+    let snapshot = state.get();
+    let pending = snapshot.pending_pick;
+    cranpose_core::LaunchedEffect((pending, snapshot.folder_scan_revision), move |_scope| {
         let Some(request) = pending else {
             return;
         };
@@ -1541,6 +1554,7 @@ async fn consume_folder_stream(
     stream: cranpose::ContentStreamRef,
     append: bool,
 ) {
+    let revision = state.get_non_reactive().folder_scan_revision;
     state.update(|s| s.status = "Scanning folder".to_string());
     log::info!(target: "cranamp::picker", "folder stream started (append={append})");
     const BATCH: usize = 24;
@@ -1557,15 +1571,32 @@ async fn consume_folder_stream(
         batch.sort_by(|a, b| a.display_title().cmp(b.display_title()));
         *total += batch.len();
         let ready = std::mem::take(batch);
-        if replace && !*started {
-            replace_playlist_and_play(state, ready);
-        } else {
-            append_playlist_and_play(state, ready);
-        }
+        let first_added = state.get_non_reactive().playlist.len();
+        let autoplay =
+            !*started && (replace || state.get_non_reactive().playback == PlaybackState::Stopped);
+        state.update(|s| {
+            if replace && !*started {
+                replace_playlist_tracks(s, ready);
+            } else {
+                append_playlist_tracks(s, ready);
+            }
+            if autoplay {
+                s.folder_autoplay = Some(FolderAutoplay::Waiting(if replace {
+                    0
+                } else {
+                    first_added
+                }));
+            }
+        });
+        resume_folder_autoplay(state);
         *started = true;
     };
     loop {
-        match stream.next().await {
+        let next = stream.next().await;
+        if state.get_non_reactive().folder_scan_revision != revision {
+            return;
+        }
+        match next {
             Ok(Some(entry)) => {
                 seen += 1;
                 let name = entry.metadata().name;
@@ -1576,7 +1607,13 @@ async fn consume_folder_stream(
                     }
                     Err(error) => failure = Some(error),
                 }
-                if !started || batch.len() >= BATCH {
+                if !started
+                    || matches!(
+                        state.get_non_reactive().folder_autoplay,
+                        Some(FolderAutoplay::Waiting(_))
+                    )
+                    || batch.len() >= BATCH
+                {
                     flush(&mut batch, &mut total, &mut started);
                     state.update(|s| s.status = format!("Scanning {total} tracks…"));
                     coroflow::yield_now().await;
@@ -1602,8 +1639,11 @@ async fn consume_folder_stream(
             }
             Err(error) => {
                 log::warn!(target: "cranamp::picker", "folder stream error: {error}");
-                state.update(move |s| s.status = format!("Scan error: {error}"));
                 flush(&mut batch, &mut total, &mut started);
+                state.update(move |s| {
+                    s.pending_pick = None;
+                    s.status = format!("Scan error: {error}");
+                });
                 break;
             }
         }
@@ -1869,6 +1909,16 @@ fn receive_sync_folder(
     });
 }
 fn sync_playback_failure(state: MutableState<WinampState>, error: &str) {
+    let snapshot = state.get_non_reactive();
+    if matches!(snapshot.folder_autoplay, Some(FolderAutoplay::Opening(_))) {
+        return;
+    }
+    if let Some(index) = snapshot.current_index {
+        if let Some(track) = snapshot.playlist.get(index) {
+            finish_track_start(state, index, track, Err(error.to_string()));
+            return;
+        }
+    }
     state.update(|s| apply_playback_failure_in_state(s, error));
 }
 fn apply_playback_failure_in_state(state: &mut WinampState, error: &str) {
@@ -1901,6 +1951,9 @@ fn sync_playback_progress(
                 let duration = reported_duration.or(s.duration_seconds);
                 let elapsed = normalized_elapsed_seconds(elapsed_seconds, duration);
                 s.elapsed_seconds = elapsed;
+                if elapsed > 0.0 {
+                    s.folder_autoplay = None;
+                }
                 s.duration_seconds = duration;
                 if let (Some(index), Some(duration)) = (s.current_index, duration) {
                     if let Some(track) = s
@@ -7071,6 +7124,8 @@ fn open_audio_files(state: MutableState<WinampState>) {
 fn request_pick(state: MutableState<WinampState>, folder: bool, append: bool) {
     let pick = PendingPick { folder, append };
     state.update(|s| {
+        s.folder_scan_revision = s.folder_scan_revision.wrapping_add(1);
+        s.folder_autoplay = None;
         s.pending_pick = Some(pick);
         s.status = if folder {
             "Opening folder picker"
@@ -7096,7 +7151,6 @@ fn replace_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track
     state.update(|s| {
         replace_playlist_tracks(s, tracks);
     });
-    hydrate_playlist_durations_background(state, 0);
     start_track(state, 0);
 }
 fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>) {
@@ -7107,13 +7161,12 @@ fn append_playlist_and_play(state: MutableState<WinampState>, tracks: Vec<Track>
         return;
     }
     let first_added = state.get_non_reactive().playlist.len();
-    let should_start = first_added == 0;
+    let should_start = state.get_non_reactive().playback == PlaybackState::Stopped;
     state.update(|s| {
         append_playlist_tracks(s, tracks);
     });
-    hydrate_playlist_durations_background(state, first_added);
     if should_start {
-        start_track(state, 0);
+        start_track(state, first_added);
     }
 }
 fn hydrate_playlist_durations_background(state: MutableState<WinampState>, first: usize) {
@@ -8309,6 +8362,7 @@ fn pause_playback(state: MutableState<WinampState>) {
     }
 }
 fn stop_playback(state: MutableState<WinampState>) {
+    state.update(|s| s.folder_autoplay = None);
     match audio::stop() {
         Ok(()) => {
             state.update(|s| {
@@ -8509,7 +8563,20 @@ fn playlist_entry_index(state: &WinampState, url: &str) -> Option<usize> {
         .iter()
         .position(|track| track.path.as_deref() == Some(url))
 }
+fn resume_folder_autoplay(state: MutableState<WinampState>) {
+    let snapshot = state.get_non_reactive();
+    if let Some(FolderAutoplay::Waiting(index)) = snapshot.folder_autoplay {
+        if index < snapshot.playlist.len() {
+            state.update(|s| s.folder_autoplay = Some(FolderAutoplay::Opening(index)));
+            start_track_inner(state, index);
+        }
+    }
+}
 fn start_track(state: MutableState<WinampState>, index: usize) {
+    state.update(|s| s.folder_autoplay = None);
+    start_track_inner(state, index);
+}
+fn start_track_inner(state: MutableState<WinampState>, index: usize) {
     #[cfg(not(target_arch = "wasm32"))]
     state.update(|s| {
         if !matches!(s.pending_resume, Some((cued, _)) if cued == index) {
@@ -8521,6 +8588,12 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         state.update(|s| s.status = "Track Missing".to_string());
         return;
     };
+    state.update(|s| {
+        s.current_index = Some(index);
+        set_playlist_selection(s, [index]);
+        scroll_playlist_to_track(s, index);
+        s.status = format!("Opening {}", track.display_title());
+    });
     if let Some(url) = playlist_entry_url(&track) {
         resolve_playlist_entry(state, index, url.to_string());
         return;
@@ -8564,66 +8637,65 @@ fn start_track(state: MutableState<WinampState>, index: usize) {
         let track_for_play = track.clone();
         launch_blocking(
             move || audio::play_track(&track_for_play, settings),
-            move |result| match result.and_then(|played| played) {
-                Ok(()) => {
-                    state.update(|s| {
-                        s.current_index = Some(index);
-                        set_playlist_selection(s, [index]);
-                        scroll_playlist_to_track(s, index);
-                        sync_shuffle_order_to_current(s, index);
-                        s.playback = PlaybackState::Playing;
-                        s.position = 0.0;
-                        s.elapsed_seconds = 0.0;
-                        s.duration_seconds = None;
-                        s.title_marquee_phase = 0.0;
-                        s.status = audio::playing_status(&track);
-                    });
-                }
-                Err(error) => state.update(|s| {
-                    s.current_index = Some(index);
-                    set_playlist_selection(s, [index]);
-                    scroll_playlist_to_track(s, index);
-                    s.playback = PlaybackState::Stopped;
-                    s.title_marquee_phase = 0.0;
-                    s.status = error;
-                }),
+            move |result| {
+                finish_track_start(state, index, &track, result.and_then(|played| played))
             },
         );
     }
     #[cfg(target_arch = "wasm32")]
-    match audio::play_track(
+    finish_track_start(
+        state,
+        index,
         &track,
-        audio::PlaybackSettings {
-            volume: snapshot.volume,
-            balance: snapshot.balance,
-            equalizer_enabled: snapshot.eq_enabled,
-            equalizer_values: snapshot.eq_values,
-        },
-    ) {
-        Ok(()) => {
-            state.update(|s| {
-                s.current_index = Some(index);
-                set_playlist_selection(s, [index]);
-                scroll_playlist_to_track(s, index);
-                sync_shuffle_order_to_current(s, index);
-                s.playback = PlaybackState::Playing;
-                s.position = 0.0;
-                s.elapsed_seconds = 0.0;
-                s.duration_seconds = None;
-                s.title_marquee_phase = 0.0;
-                s.status = audio::playing_status(&track);
-            });
-        }
-        Err(error) => state.update(|s| {
-            s.current_index = Some(index);
-            set_playlist_selection(s, [index]);
-            scroll_playlist_to_track(s, index);
-            s.playback = PlaybackState::Stopped;
+        audio::play_track(
+            &track,
+            audio::PlaybackSettings {
+                volume: snapshot.volume,
+                balance: snapshot.balance,
+                equalizer_enabled: snapshot.eq_enabled,
+                equalizer_values: snapshot.eq_values,
+            },
+        ),
+    );
+}
+fn finish_track_start(
+    state: MutableState<WinampState>,
+    index: usize,
+    track: &Track,
+    result: Result<(), String>,
+) {
+    let snapshot = state.get_non_reactive();
+    if snapshot.current_index != Some(index)
+        || snapshot.playlist.get(index).and_then(|t| t.path.as_ref()) != track.path.as_ref()
+    {
+        return;
+    }
+    match result {
+        Ok(()) => state.update(|s| {
+            if s.folder_autoplay == Some(FolderAutoplay::Opening(index)) {
+                s.folder_autoplay = Some(FolderAutoplay::AwaitingAudio(index));
+            }
+            sync_shuffle_order_to_current(s, index);
+            s.playback = PlaybackState::Playing;
+            s.position = 0.0;
+            s.elapsed_seconds = 0.0;
+            s.duration_seconds = None;
             s.title_marquee_phase = 0.0;
-            s.status = error;
+            s.status = audio::playing_status(track);
         }),
+        Err(error) => {
+            log::warn!(target: "cranamp::picker", "Cannot play {}: {error}", track.display_title());
+            state.update(|s| {
+                apply_playback_failure_in_state(s, &error);
+                if matches!(s.folder_autoplay, Some(FolderAutoplay::Opening(at) | FolderAutoplay::AwaitingAudio(at)) if at == index) {
+                    s.folder_autoplay = Some(FolderAutoplay::Waiting(index + 1));
+                }
+            });
+            resume_folder_autoplay(state);
+        }
     }
 }
+
 fn handle_playlist_row_click(state: MutableState<WinampState>, index: usize, modifiers: Modifiers) {
     let now_ms = current_time_ms();
     let should_play =

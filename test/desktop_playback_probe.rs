@@ -3,42 +3,96 @@ use cranpose::{composable, Modifier, Text, TextStyle};
 use std::time::Duration;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("path to original audio");
+    let mut args = std::env::args().skip(1);
+    let first = args
+        .next()
+        .expect("path to original audio, or --folder PATH");
+    let folder = first == "--folder";
+    let path = if folder {
+        args.next().expect("folder path")
+    } else {
+        first
+    };
     cranamp::create_surface_app()
         .with_application_id("com.cranamp.playback-probe")
         .with_title("Cranamp playback probe")
         .with_size(360, 120)
-        .run(move || Probe(path.clone()));
+        .run(move || Probe(path.clone(), folder));
 }
 
 #[composable]
-fn Probe(path: String) {
+fn Probe(path: String, folder: bool) {
     cranpose::LaunchedEffect((), move |_| {
-        cranpose_core::launchBlocking(
-            move || probe(path),
-            |result| {
-                match result
-                    .map_err(|error| error.to_string())
-                    .and_then(|result| result)
-                {
-                    Ok(()) => {
-                        println!("PLAYBACK PROBE: passed");
-                    }
-                    Err(error) => {
-                        println!(
-                            "PLAYBACK PROBE: failed: {}",
-                            error
-                                .rsplit_once(": ")
-                                .map_or(error.as_str(), |(_, reason)| reason)
-                        );
-                        let _ = cranamp::audio::stop();
-                        std::process::exit(1);
+        cranpose_core::spawn_ui_task(async move {
+            let started = std::time::Instant::now();
+            let track = if folder {
+                let stream = cranpose_services::folder_files(cranpose_services::file_folder(&path));
+                loop {
+                    match stream.next().await {
+                        Ok(Some(entry)) => match cranamp::audio::track_from_picked_file(entry) {
+                            Ok(Some(track)) => {
+                                println!(
+                                    "Candidate after {:?}; complete tree not enumerated",
+                                    started.elapsed()
+                                );
+                                let played = cranpose_core::withBlocking(move || probe(track))
+                                    .await
+                                    .expect("probe worker");
+                                match played {
+                                    Ok(()) => {
+                                        println!("PLAYBACK PROBE: passed");
+                                        cranpose_services::request_exit();
+                                        return;
+                                    }
+                                    Err(error) => println!("Skipped unplayable candidate: {error}"),
+                                }
+                            }
+                            Ok(None) => continue,
+                            Err(error) => panic!("folder entry: {error}"),
+                        },
+                        Ok(None) => panic!("folder has no supported audio"),
+                        Err(error) => panic!("folder scan: {error}"),
                     }
                 }
-                cranpose_services::request_exit();
-            },
-        )
-        .expect("probe worker");
+            } else {
+                let content =
+                    cranpose_services::IncomingContent::from_file(std::path::Path::new(&path))
+                        .content()
+                        .expect("cannot resolve incoming file");
+                cranamp::audio::track_from_picked_file(content)
+                    .expect("content reference")
+                    .expect("supported name")
+            };
+            println!(
+                "First track available after {:?}; complete tree not enumerated: {folder}",
+                started.elapsed()
+            );
+            cranpose_core::launchBlocking(
+                move || probe(track),
+                |result| {
+                    match result
+                        .map_err(|error| error.to_string())
+                        .and_then(|result| result)
+                    {
+                        Ok(()) => {
+                            println!("PLAYBACK PROBE: passed");
+                        }
+                        Err(error) => {
+                            println!(
+                                "PLAYBACK PROBE: failed: {}",
+                                error
+                                    .rsplit_once(": ")
+                                    .map_or(error.as_str(), |(_, reason)| reason)
+                            );
+                            let _ = cranamp::audio::stop();
+                            std::process::exit(1);
+                        }
+                    }
+                    cranpose_services::request_exit();
+                },
+            )
+            .expect("probe worker");
+        });
     });
     Text(
         "Checking original audio".to_string(),
@@ -47,11 +101,7 @@ fn Probe(path: String) {
     );
 }
 
-fn probe(path: String) -> Result<(), String> {
-    let content = cranpose_services::IncomingContent::from_file(std::path::Path::new(&path))
-        .content()
-        .ok_or("cannot resolve incoming file")?;
-    let track = cranamp::audio::track_from_picked_file(content)?.ok_or("unsupported name")?;
+fn probe(track: cranamp::audio::Track) -> Result<(), String> {
     println!("Media reference obtained");
     cranamp::audio::play_track(
         &track,

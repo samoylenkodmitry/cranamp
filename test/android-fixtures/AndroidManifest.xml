@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <provider android:name="com.cranamp.app.fixture.FolderProvider"
+            android:authorities="${applicationId}.folder-test"
+            android:exported="true" android:permission="android.permission.MANAGE_DOCUMENTS"
+            android:grantUriPermissions="true" />
+    </application>
+</manifest>

@@ -37,6 +37,75 @@ final class PickerProviders: XCTestCase {
         report(argument: "--open-picker=files", label: "FILES")
     }
 
+    func testRemoteMusicFolder() {
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        XCTAssertTrue(app.images.firstMatch.waitForExistence(timeout: 20))
+        let scale = app.frame.width / 275.0
+        let clock = app.images["0:00"].firstMatch
+        XCTAssertTrue(clock.waitForExistence(timeout: 10))
+        let footerY = clock.frame.midY
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        origin.withOffset(CGVector(dx: 23 * scale, dy: footerY - 9 * scale)).tap()
+        origin.withOffset(CGVector(dx: 45 * scale, dy: footerY - 33 * scale)).tap()
+        let browse = app.buttons["Browse"]
+        if browse.waitForExistence(timeout: 20) && browse.isHittable { browse.tap() }
+        for _ in 0..<8 {
+            if app.cells["DOC.sidebar.item.Tailscale"].exists { break }
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            guard back.exists && back.isHittable && back.label != "Cancel" else { break }
+            back.tap()
+        }
+        let provider = app.cells["DOC.sidebar.item.Tailscale"]
+        guard provider.waitForExistence(timeout: 10) else {
+            XCTFail("Install and enable the Tailscale Files provider before this device test.")
+            return
+        }
+        provider.tap()
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "folder-provider-root"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let account = app.cells.matching(NSPredicate(format: "label CONTAINS %@", "@")).firstMatch
+        guard account.waitForExistence(timeout: 15) else {
+            XCTFail("The Tailscale provider did not open for folder selection; see folder-provider-root.")
+            return
+        }
+        account.tap()
+        for name in ["samarch", "huge", "music"] {
+            let entry = app.staticTexts[name].firstMatch
+            for _ in 0..<8 {
+                if entry.exists && entry.isHittable { break }
+                app.collectionViews.firstMatch.swipeUp()
+            }
+            XCTAssertTrue(entry.waitForExistence(timeout: 10), "Missing \(name): " + app.debugDescription)
+            guard entry.exists else { return }
+            entry.tap()
+        }
+        let done = app.buttons["Done"].firstMatch
+        let open = done.exists ? done : app.buttons["Open"].firstMatch
+        guard open.waitForExistence(timeout: 10) else {
+            XCTFail("The provider did not offer a folder selection button: " + app.debugDescription)
+            return
+        }
+        open.tap()
+        let times = app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}"))
+        let deadline = Date().addingTimeInterval(30)
+        var elapsed = "0:00"
+        var elapsedSeconds = 0
+        while Date() < deadline {
+            if times.count > 0 {
+                elapsed = times.element(boundBy: times.count - 1).label
+                let parts = elapsed.split(separator: ":").compactMap { Int($0) }
+                if parts.count == 2 { elapsedSeconds = parts[0] * 60 + parts[1] }
+                if elapsedSeconds >= 2 { break }
+            }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        XCTAssertGreaterThanOrEqual(elapsedSeconds, 2, "Playback did not advance: " + app.debugDescription)
+        print("REMOTE PLAYBACK elapsed: " + elapsed)
+    }
+
     private func report(argument: String, label: String) {
         let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
         app.launchArguments = [argument]
@@ -74,15 +143,6 @@ final class PickerProviders: XCTestCase {
 
         print("=== \(label) PICKER: element tree ===")
         print(app.debugDescription)
-
-        print("=== \(label) PICKER: rows ===")
-        for kind in [app.cells, app.buttons, app.staticTexts] {
-            for element in kind.allElementsBoundByIndex {
-                let title = element.label.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !title.isEmpty else { continue }
-                print("row: \(title) | enabled=\(element.isEnabled) | hittable=\(element.isHittable)")
-            }
-        }
 
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "\(label)-picker"
