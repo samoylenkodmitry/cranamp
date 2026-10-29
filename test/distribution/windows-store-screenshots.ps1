@@ -7,7 +7,7 @@ $outputPath = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force $outputPath | Out-Null
 function Invoke-Studio([string]$Name, [hashtable]$Arguments = @{}) {
     $body = @{jsonrpc='2.0'; id=1; method='tools/call'; params=@{name=$Name; arguments=$Arguments}} | ConvertTo-Json -Depth 8
-    $reply = Invoke-RestMethod -Uri $env:CRANAMP_MCP_URL -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 60
+    $reply = Invoke-RestMethod -Uri $script:studioUrl -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 60
     if ($reply.error -or $reply.result.isError) { throw ($reply | ConvertTo-Json -Depth 8) }
     return $reply
 }
@@ -39,6 +39,16 @@ try {
     Invoke-StudioButton 'Open working copy'
     Invoke-StudioButton 'Agent connection'
     Invoke-StudioButton 'Start server'
+    $previousClipboard = Get-Clipboard -Raw
+    try {
+        Invoke-StudioButton 'Copy server URL'
+        $script:studioUrl = (Get-Clipboard -Raw).Trim()
+    } finally {
+        Set-Clipboard -Value ([string]$previousClipboard)
+    }
+    if ($script:studioUrl -notmatch '^http://127\.0\.0\.1:18765/mcp\?token=[0-9a-f]{64}$') {
+        throw 'Studio did not copy an authenticated session URL'
+    }
     $ready = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         $application.Refresh()
@@ -76,5 +86,6 @@ try {
         } finally { $image.Dispose() }
     }
 } finally {
+    $script:studioUrl = $null
     if (-not $application.HasExited) { Stop-Process -Id $application.Id }
 }
