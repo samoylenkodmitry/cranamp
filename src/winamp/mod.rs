@@ -522,10 +522,8 @@ const EQ_PRESET_MENU_COLUMNS: usize = 2;
 const EQ_PRESET_MENU_ROW_HEIGHT: f32 = 12.0;
 const WINAMP_SYSTEM_FONT_SIZE: f32 = 8.25;
 const WINAMP_SYSTEM_LINE_HEIGHT: f32 = 10.0;
-const WINAMP_SYSTEM_TEXT_Y_ADJUST: f32 = -2.25;
 const WINAMP_PLAYLIST_FONT_SIZE: f32 = 9.25;
 const WINAMP_PLAYLIST_LINE_HEIGHT: f32 = 11.0;
-const WINAMP_PLAYLIST_TEXT_Y_ADJUST: f32 = -2.5;
 const WINAMP_PLAYLIST_ROW_CHAR_WIDTH: f32 = 6.0;
 const WINAMP_PLAYLIST_TEXT_X: f32 = 4.0;
 const WINAMP_PLAYLIST_TEXT_Y: f32 = 1.0;
@@ -536,17 +534,14 @@ const WINAMP_SYSTEM_MARQUEE_CHAR_WIDTH: f32 = 5.0;
 struct SystemTextMetrics {
     font_size: f32,
     line_height: f32,
-    y_adjust: f32,
 }
 const WINAMP_SYSTEM_TEXT_METRICS: SystemTextMetrics = SystemTextMetrics {
     font_size: WINAMP_SYSTEM_FONT_SIZE,
     line_height: WINAMP_SYSTEM_LINE_HEIGHT,
-    y_adjust: WINAMP_SYSTEM_TEXT_Y_ADJUST,
 };
 const WINAMP_PLAYLIST_TEXT_METRICS: SystemTextMetrics = SystemTextMetrics {
     font_size: WINAMP_PLAYLIST_FONT_SIZE,
     line_height: WINAMP_PLAYLIST_LINE_HEIGHT,
-    y_adjust: WINAMP_PLAYLIST_TEXT_Y_ADJUST,
 };
 fn skin_color(rgba: [u8; 4]) -> Color {
     Color::from_rgba_u8(rgba[0], rgba[1], rgba[2], rgba[3])
@@ -5952,7 +5947,7 @@ fn StyledSystemWinampText(
         );
         return;
     }
-    let text_y = ((layout.height - metrics.line_height).max(0.0) * 0.5) + metrics.y_adjust;
+    let text_y = (layout.height - metrics.line_height).max(0.0) * 0.5;
     Box(
         Modifier::empty()
             .size_points(
@@ -9515,3 +9510,7 @@ mod tests;
 #[cfg(test)]
 #[path = "../../test/unit/winamp/dock_tests.rs"]
 mod dock_tests;
+
+#[cfg(test)]
+#[path = "../../test/unit/winamp/playlist_text.rs"]
+mod playlist_text_tests;

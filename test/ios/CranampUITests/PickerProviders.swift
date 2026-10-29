@@ -112,6 +112,54 @@ final class PickerProviders: XCTestCase {
         print("NEXT NETWORK TRACK: " + app.images.firstMatch.label)
     }
 
+    func testMixedPlaylistRowAlignment() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_PLAYLIST_ALIGNMENT"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_PLAYLIST_ALIGNMENT=1 with mixed playlist titles visible")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.activate()
+        XCTAssertTrue(app.images.firstMatch.waitForExistence(timeout: 10))
+        let scale = app.frame.width / 275.0
+        let playlistTop = app.frame.height * 0.45
+        func playlistRows(_ node: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
+            let isRow = (node.elementType == .image || node.elementType == .staticText)
+                && node.frame.minY > playlistTop
+                && node.frame.width > 100 * scale
+                && !node.label.isEmpty
+            return (isRow ? [node] : []) + node.children.flatMap { playlistRows($0) }
+        }
+        var rows: [XCUIElementSnapshot] = []
+        for attempt in 0..<4 {
+            rows = playlistRows(try app.snapshot()).sorted { $0.frame.minY < $1.frame.minY }
+            if rows.contains(where: { $0.elementType == .staticText }) { break }
+            if attempt < 3, let first = rows.first, let last = rows.last {
+                let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                let fraction = CGFloat(attempt + 1) * 0.025
+                let thumbTop = first.frame.minY + 7 * scale
+                let trackBottom = last.frame.maxY - 7 * scale
+                origin.withOffset(CGVector(
+                    dx: 263 * scale,
+                    dy: thumbTop + fraction * (trackBottom - thumbTop)
+                )).tap()
+            }
+        }
+        print("PLAYLIST ROWS: " + rows.map { "\($0.elementType.rawValue) \($0.frame): \($0.label)" }.joined(separator: "\n"))
+        guard let bitmap = rows.first(where: { $0.elementType == .image }),
+              rows.contains(where: { $0.elementType == .staticText }) else {
+            throw XCTSkip("The visible playlist has no mixed bitmap and Unicode rows")
+        }
+        let pitch = 11.0 * scale
+        for row in rows {
+            let steps = ((row.frame.minY - bitmap.frame.minY) / pitch).rounded()
+            let expected = bitmap.frame.minY + steps * pitch
+            XCTAssertEqual(row.frame.minY, expected, accuracy: 0.75, row.label)
+        }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "playlist-row-alignment"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     private func waitForPlayback(_ app: XCUIApplication, timeout: TimeInterval) {
         let advancing = NSPredicate { _, _ in
             let clocks = app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}"))
