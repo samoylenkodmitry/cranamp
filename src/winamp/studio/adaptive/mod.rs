@@ -139,6 +139,12 @@ impl Ui {
 }
 #[composable]
 pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
+    MountedSkinStudio(shared, host, true);
+}
+
+/// Keep editor navigation and the viewport while a host tab is hidden.
+#[composable]
+pub(super) fn MountedSkinStudio(shared: SharedDocument, host: Option<StudioHost>, visible: bool) {
     let ui = cranpose_core::rememberKeyed(shared.clone(), {
         let shared = shared.clone();
         move |_| Ui {
@@ -160,6 +166,9 @@ pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
             live: cranpose_core::mutableStateOf(false),
         }
     });
+    if !visible {
+        return;
+    }
     let poll = shared.clone();
     let tick = ui.tick;
     cranpose_core::LaunchedEffectAsync(shared.clone(), move |_| {

@@ -53,6 +53,46 @@ final class PickerProviders: XCTestCase {
         wait(for: [completed], timeout: 15)
     }
 
+    func testMobileNavigation() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_MOBILE_NAV"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_MOBILE_NAV=1")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        func tab(_ name: String) {
+            let query = app.buttons.matching(identifier: name)
+            XCTAssertTrue(query.firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+            query.element(boundBy: query.count - 1).tap()
+        }
+        func capture(_ name: String) {
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = name
+            image.lifetime = .keepAlways
+            add(image)
+        }
+        tab("Player")
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        capture("mobile-player")
+        tab("Settings")
+        XCTAssertTrue(app.buttons["Choose skin"].waitForExistence(timeout: 10), app.debugDescription)
+        capture("mobile-settings")
+        app.buttons["Choose skin"].tap()
+        XCTAssertTrue(app.buttons["Back to Settings"].waitForExistence(timeout: 10))
+        app.buttons["Back to Settings"].tap()
+        tab("Skin Studio")
+        if app.buttons["Open working copy"].waitForExistence(timeout: 3) {
+            app.buttons["Open working copy"].tap()
+        }
+        XCTAssertTrue(app.buttons["Canvas"].waitForExistence(timeout: 10), app.debugDescription)
+        capture("mobile-studio")
+        tab("Settings")
+        tab("Skin Studio")
+        XCTAssertTrue(app.buttons["Canvas"].waitForExistence(timeout: 10), app.debugDescription)
+        tab("Player")
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 10))
+        print("MOBILE NAVIGATION: " + app.debugDescription)
+    }
+
     func testNetworkMusicFolder() throws {
         guard let address = ProcessInfo.processInfo.environment["CRANAMP_TEST_WEBDAV_URL"] else {
             throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_WEBDAV_URL to the original music folder URL")
@@ -66,9 +106,7 @@ final class PickerProviders: XCTestCase {
         XCTAssertTrue(app.images.firstMatch.waitForExistence(timeout: 20))
         let clock = app.images["0:00"].firstMatch
         XCTAssertTrue(clock.waitForExistence(timeout: 10))
-        let scale = app.frame.width / 275.0
-        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-        origin.withOffset(CGVector(dx: 23 * scale, dy: clock.frame.midY - 9 * scale)).tap()
+        app.buttons["Add music"].firstMatch.tap()
         let network = app.images["ADD NETWORK"].firstMatch
         XCTAssertTrue(network.waitForExistence(timeout: 5), app.debugDescription)
         network.tap()
@@ -83,6 +121,22 @@ final class PickerProviders: XCTestCase {
         let started = Date()
         open.tap()
         waitForPlayback(app, timeout: 30)
+        func elapsed() -> Int {
+            let clocks = app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}"))
+            guard clocks.count > 0 else { return -1 }
+            let parts = clocks.element(boundBy: clocks.count - 1).label.split(separator: ":").compactMap { Int($0) }
+            return parts.count == 2 ? parts[0] * 60 + parts[1] : -1
+        }
+        let beforeTabs = elapsed()
+        let settings = app.buttons.matching(identifier: "Settings")
+        settings.element(boundBy: settings.count - 1).tap()
+        XCTAssertTrue(app.buttons["Choose skin"].waitForExistence(timeout: 10))
+        app.buttons["Skin Studio"].tap()
+        XCTAssertTrue(app.buttons["Open working copy"].waitForExistence(timeout: 10))
+        app.buttons["Player"].tap()
+        let continued = NSPredicate { _, _ in elapsed() > beforeTabs }
+        expectation(for: continued, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
         print("NETWORK FOLDER observation after \(Date().timeIntervalSince(started)) seconds")
         print(app.debugDescription)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

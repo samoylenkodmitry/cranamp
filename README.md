@@ -49,7 +49,7 @@ Actual release captures from [0.1.92](store/releases/0.1.92/screenshots.json). S
 - **Connected canvas** — Draw across main, equalizer and playlist with source-part guides.
 - **Sprite states** — Preview pressed controls and every slider position at integer zoom.
 - **Projects** — Save layered `.cstudio` projects and export classic `.wsz` skins.
-- **MCP** — Connect an agent to the desktop editor through a local MCP server. It is off by default and unavailable on mobile and web. Agents use the same tools and history; their providers may receive data that they read.
+- **MCP** — Connect an agent to the desktop editor through a local MCP server. It is off by default and unavailable on mobile and web. The copied connection carries a secret for the current session. Agents use the same tools and history; their providers may receive data that they read.
 
 
 

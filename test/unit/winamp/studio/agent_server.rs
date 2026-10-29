@@ -43,15 +43,29 @@ fn real_connection_probe_is_read_only_and_port_can_be_restarted() {
     let (server, address) = server();
     let shared = server.document.lock().unwrap().clone();
     let before = shared.lock().unwrap().status();
-    let (version, count) = probe(address).unwrap();
+    let (version, count) = probe(address, &server.token).unwrap();
     assert_eq!(version, env!("CARGO_PKG_VERSION"));
     assert!(count > 10);
     assert_eq!(shared.lock().unwrap().status(), before);
+    let old_token = server.token.clone();
     drop(server);
     assert!(TcpStream::connect(address).is_err());
     let restarted = Server::bind(TcpListener::bind(address).unwrap(), shared).unwrap();
-    assert!(probe(address).is_ok());
+    assert_ne!(restarted.token, old_token);
+    assert!(probe(address, &old_token).is_err());
+    assert!(probe(address, &restarted.token).is_ok());
     drop(restarted);
+}
+
+#[test]
+fn commands_require_the_session_secret_before_dispatch() {
+    let (server, address) = server();
+    let shared = server.document.lock().unwrap().clone();
+    let before = shared.lock().unwrap().status();
+    assert!(probe(address, "").is_err());
+    assert!(probe(address, &"0".repeat(64)).is_err());
+    assert_eq!(shared.lock().unwrap().status(), before);
+    assert!(probe(address, &server.token).is_ok());
 }
 
 #[test]

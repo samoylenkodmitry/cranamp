@@ -7,6 +7,10 @@ pub mod cursors;
 mod eq_graph;
 mod inline_windows;
 mod keys;
+#[cfg(not(target_arch = "wasm32"))]
+mod mobile;
+#[cfg(not(target_arch = "wasm32"))]
+pub use mobile::WinampMobileApp;
 mod pixel_grid;
 mod pixel_text;
 mod playlist_size;
@@ -1089,15 +1093,19 @@ fn ensure_skins_library_dir() -> std::io::Result<std::path::PathBuf> {
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
-fn list_library_skins() -> Vec<LibrarySkin> {
-    let mut skins: Vec<LibrarySkin> = BUNDLED_SKINS
+fn bundled_library_skins() -> Vec<LibrarySkin> {
+    BUNDLED_SKINS
         .iter()
         .enumerate()
         .map(|(i, skin)| LibrarySkin {
             label: skin.label.to_string(),
             path: (i > 0).then(|| std::path::PathBuf::from(format!("{BUNDLED_PREFIX}{}", skin.id))),
         })
-        .collect();
+        .collect()
+}
+
+fn list_library_skins() -> Vec<LibrarySkin> {
+    let mut skins = bundled_library_skins();
     #[cfg(not(target_arch = "wasm32"))]
     if let Ok(entries) = std::fs::read_dir(skins_library_dir()) {
         let mut files: Vec<std::path::PathBuf> = entries
@@ -1993,11 +2001,11 @@ fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinS
         std::collections::BTreeMap::<Option<String>, studio::SharedDocument>::new()
     });
     let snapshot = state.get();
-    if !snapshot.studio_open {
-        return;
-    }
     let key = studio_skin_path(snapshot.skin_path.clone());
     let cached = sessions.with(|all| all.get(&key).cloned());
+    if cached.is_none() && !snapshot.studio_open {
+        return;
+    }
     let opened = cached
         .map(Ok)
         .unwrap_or_else(|| studio::new_mobile_document(key.as_deref()));
@@ -2029,6 +2037,7 @@ fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinS
                         },
                     ),
                 },
+                snapshot.studio_open,
             );
         }
         Err(error) => {
@@ -3224,6 +3233,7 @@ fn MainWindowFace(
         let position_drag_commit = position_drag;
         let snapshot_duration = snapshot.duration_seconds;
         DragSlider(
+            "Playback position",
             ControlRect::new(POS_POSBAR.0, POS_POSBAR.1, POSBAR_BG.2, POSBAR_BG.3, scale),
             display_position,
             POSBAR_THUMB.2,
@@ -3276,6 +3286,7 @@ fn MainWindowFace(
         let volume_drag_change = volume_drag;
         let volume_drag_commit = volume_drag;
         DragSlider(
+            "Volume",
             ControlRect::new(
                 POS_VOLUME.0,
                 POS_VOLUME.1,
@@ -3338,6 +3349,7 @@ fn MainWindowFace(
         let balance_drag_change = balance_drag;
         let balance_drag_commit = balance_drag;
         DragSlider(
+            "Balance",
             ControlRect::new(
                 POS_BALANCE.0,
                 POS_BALANCE.1,
@@ -3378,6 +3390,7 @@ fn MainWindowFace(
     {
         let state_click = state;
         PressableSprite(
+            "Shuffle",
             skin.shufrep.clone(),
             shuffle_normal,
             shuffle_pressed,
@@ -3414,6 +3427,7 @@ fn MainWindowFace(
     {
         let state_click = state;
         PressableSprite(
+            "Repeat",
             skin.shufrep.clone(),
             repeat_normal,
             repeat_pressed,
@@ -3445,6 +3459,7 @@ fn MainWindowFace(
     {
         let state_click = state;
         PressableSprite(
+            "Show equalizer",
             skin.shufrep.clone(),
             eq_normal,
             eq_pressed,
@@ -3479,6 +3494,7 @@ fn MainWindowFace(
     {
         let state_click = state;
         PressableSprite(
+            "Show playlist",
             skin.shufrep.clone(),
             pl_normal,
             pl_pressed,
@@ -3500,6 +3516,7 @@ fn MainWindowFace(
     {
         let state_click = state;
         ClickTarget(
+            "Settings",
             MAIN_SKIN_CHOOSER_HIT_AREA.0,
             MAIN_SKIN_CHOOSER_HIT_AREA.1,
             MAIN_SKIN_CHOOSER_HIT_AREA.2,
@@ -3544,6 +3561,7 @@ fn MainTitleButtons(
 ) {
     let shaded = state.get().main_shaded;
     PressableSprite(
+        "Open skin file",
         titlebar.clone(),
         MAIN_OPTIONS_BUTTON,
         MAIN_OPTIONS_BUTTON_SELECTED,
@@ -3553,6 +3571,7 @@ fn MainTitleButtons(
         move || open_skin_file(state, skin_state),
     );
     PressableSprite(
+        "Minimize player",
         titlebar.clone(),
         MAIN_MINIMIZE_BUTTON,
         MAIN_MINIMIZE_BUTTON_SELECTED,
@@ -3567,6 +3586,7 @@ fn MainTitleButtons(
         (MAIN_SHADE_BUTTON, MAIN_SHADE_BUTTON_SELECTED)
     };
     PressableSprite(
+        "Toggle window shade",
         titlebar.clone(),
         shade,
         shade_pressed,
@@ -3576,6 +3596,7 @@ fn MainTitleButtons(
         move || toggle_main_shade(state, drag_target),
     );
     PressableSprite(
+        "Close player",
         titlebar,
         MAIN_CLOSE_BUTTON,
         MAIN_CLOSE_BUTTON_SELECTED,
@@ -3673,8 +3694,23 @@ fn MainShadeStrip(
         vis::SHADE_WIDTH,
         scale,
     );
-    for (area, action) in SHADE_TRANSPORT {
-        ClickTarget(area.0, area.1, area.2, area.3, scale, move || action(state));
+    for (index, (area, action)) in SHADE_TRANSPORT.into_iter().enumerate() {
+        ClickTarget(
+            [
+                "Previous track",
+                "Play",
+                "Pause",
+                "Stop",
+                "Next track",
+                "Open audio files",
+            ][index],
+            area.0,
+            area.1,
+            area.2,
+            area.3,
+            scale,
+            move || action(state),
+        );
     }
     Sprite(
         skin.shade_titlebar.clone(),
@@ -3695,6 +3731,7 @@ fn MainShadeStrip(
     );
     let duration = snapshot.duration_seconds;
     DragSlider(
+        "Playback position",
         ControlRect::new(
             POS_SHADE_POSBAR.0,
             POS_SHADE_POSBAR.1,
@@ -3763,6 +3800,7 @@ fn EqualizerWindow(
             {
                 let state_click = state;
                 PressableSprite(
+                    "Hide equalizer",
                     skin.eqmain.clone(),
                     EQ_CLOSE_BUTTON,
                     EQ_CLOSE_BUTTON_SELECTED,
@@ -3791,6 +3829,7 @@ fn EqualizerWindow(
             {
                 let state_click = state;
                 PressableSpriteHitArea(
+                    "Enable equalizer",
                     skin.eqmain.clone(),
                     eq_on_normal,
                     eq_on_pressed,
@@ -3829,6 +3868,7 @@ fn EqualizerWindow(
             {
                 let state_click = state;
                 PressableSpriteHitArea(
+                    "Automatic equalizer",
                     skin.eqmain.clone(),
                     eq_auto_normal,
                     eq_auto_pressed,
@@ -3853,6 +3893,7 @@ fn EqualizerWindow(
             {
                 let state_click = state;
                 PressableSpriteHitArea(
+                    "Equalizer presets",
                     skin.eqmain.clone(),
                     EQ_PRESETS_BUTTON,
                     EQ_PRESETS_BUTTON_SELECTED,
@@ -3908,6 +3949,11 @@ fn EqualizerWindow(
                 let state_drag = state;
                 let state_commit = state;
                 VerticalDragSlider(
+                    if index == 0 {
+                        "Preamp".to_string()
+                    } else {
+                        format!("Equalizer band {index}")
+                    },
                     ControlRect::new(
                         slider_x,
                         EQ_SLIDER_BG_Y,
@@ -3997,6 +4043,7 @@ fn EqPresetMenu(state: MutableState<WinampState>, display_text_color: [u8; 4], s
         );
         let state_click = state;
         ClickTarget(
+            preset.label,
             row_x,
             row_y,
             EQ_PRESET_MENU_COLUMN_WIDTH,
@@ -4680,6 +4727,7 @@ fn PlaylistWindow(
             {
                 let state_click = state;
                 PressableSpriteHitArea(
+                    "Hide playlist",
                     pledit.clone(),
                     PLAYLIST_TOP_RIGHT_CORNER,
                     PLAYLIST_TOP_RIGHT_CORNER,
@@ -4920,6 +4968,7 @@ fn PlaylistScrollbarInput(
         #[cfg(not(target_arch = "wasm32"))]
         let last_thumb_scroll_drag = last_thumb_scroll_update;
         VerticalDragSlider(
+            "Playlist scroll position",
             ControlRect::new(
                 scroll_track_x - PLAYLIST_SCROLL_HIT_PAD_X,
                 PLAYLIST_LIST_BG.1,
@@ -5093,6 +5142,7 @@ fn PlaylistEntries(
                 {
                     let state_click = state;
                     PlaylistRowClickTarget(
+                        track.display_title().to_string(),
                         0.0,
                         row_offset,
                         list_width,
@@ -5233,11 +5283,19 @@ fn PlaylistSearchOverlay(
     );
     {
         let state_click = state;
-        ClickTarget(x + width - 38.0, y, 38.0, 15.0, scale, move || {
-            state_click.update(|s| {
-                s.playlist_search_visible = false;
-            });
-        });
+        ClickTarget(
+            "Close search",
+            x + width - 38.0,
+            y,
+            38.0,
+            15.0,
+            scale,
+            move || {
+                state_click.update(|s| {
+                    s.playlist_search_visible = false;
+                });
+            },
+        );
     }
 }
 #[composable]
@@ -5329,19 +5387,35 @@ fn UrlInputOverlay(
     {
         let state_open = state;
         let field = url_field;
-        ClickTarget(x + width - 72.0, y, 34.0, 15.0, scale, move || {
-            if state_open.get_non_reactive().url_input_mode == Some(UrlInputMode::Folder) {
-                open_network_folder(state_open, field.text());
-            } else {
-                open_url(state_open, field.text());
-            }
-        });
+        ClickTarget(
+            "Open URL",
+            x + width - 72.0,
+            y,
+            34.0,
+            15.0,
+            scale,
+            move || {
+                if state_open.get_non_reactive().url_input_mode == Some(UrlInputMode::Folder) {
+                    open_network_folder(state_open, field.text());
+                } else {
+                    open_url(state_open, field.text());
+                }
+            },
+        );
     }
     {
         let state_close = state;
-        ClickTarget(x + width - 38.0, y, 38.0, 15.0, scale, move || {
-            state_close.update(|s| s.url_input_mode = None);
-        });
+        ClickTarget(
+            "Cancel URL",
+            x + width - 38.0,
+            y,
+            38.0,
+            15.0,
+            scale,
+            move || {
+                state_close.update(|s| s.url_input_mode = None);
+            },
+        );
     }
 }
 #[composable]
@@ -5356,31 +5430,56 @@ fn PlaylistFooterControls(
     let on_right = |area: SpriteRect| (area.0 + right_shift, area.1, area.2, area.3);
     {
         let menu_state = state;
-        PlaylistFooterClickTarget(PLAYLIST_ADD_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Add);
-        });
-    }
-    {
-        let menu_state = state;
-        PlaylistFooterClickTarget(PLAYLIST_REM_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Remove);
-        });
-    }
-    {
-        let menu_state = state;
-        PlaylistFooterClickTarget(PLAYLIST_SEL_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Select);
-        });
-    }
-    {
-        let menu_state = state;
-        PlaylistFooterClickTarget(PLAYLIST_MISC_BUTTON_HIT_AREA, bottom_y, scale, move || {
-            toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Misc);
-        });
+        PlaylistFooterClickTarget(
+            "Add music",
+            PLAYLIST_ADD_BUTTON_HIT_AREA,
+            bottom_y,
+            scale,
+            move || {
+                toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Add);
+            },
+        );
     }
     {
         let menu_state = state;
         PlaylistFooterClickTarget(
+            "Remove tracks",
+            PLAYLIST_REM_BUTTON_HIT_AREA,
+            bottom_y,
+            scale,
+            move || {
+                toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Remove);
+            },
+        );
+    }
+    {
+        let menu_state = state;
+        PlaylistFooterClickTarget(
+            "Select tracks",
+            PLAYLIST_SEL_BUTTON_HIT_AREA,
+            bottom_y,
+            scale,
+            move || {
+                toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Select);
+            },
+        );
+    }
+    {
+        let menu_state = state;
+        PlaylistFooterClickTarget(
+            "Playlist options",
+            PLAYLIST_MISC_BUTTON_HIT_AREA,
+            bottom_y,
+            scale,
+            move || {
+                toggle_playlist_footer_menu(menu_state, PlaylistFooterMenu::Misc);
+            },
+        );
+    }
+    {
+        let menu_state = state;
+        PlaylistFooterClickTarget(
+            "Playlist files",
             on_right(PLAYLIST_LIST_BUTTON_HIT_AREA),
             bottom_y,
             scale,
@@ -5392,6 +5491,7 @@ fn PlaylistFooterControls(
     {
         let state_click = state;
         PlaylistFooterClickTarget(
+            "Previous track",
             on_right(PLAYLIST_PREV_BUTTON_HIT_AREA),
             bottom_y,
             scale,
@@ -5404,6 +5504,7 @@ fn PlaylistFooterControls(
     {
         let state_click = state;
         PlaylistFooterClickTarget(
+            "Play",
             on_right(PLAYLIST_PLAY_BUTTON_HIT_AREA),
             bottom_y,
             scale,
@@ -5416,6 +5517,7 @@ fn PlaylistFooterControls(
     {
         let state_click = state;
         PlaylistFooterClickTarget(
+            "Pause",
             on_right(PLAYLIST_PAUSE_BUTTON_HIT_AREA),
             bottom_y,
             scale,
@@ -5428,6 +5530,7 @@ fn PlaylistFooterControls(
     {
         let state_click = state;
         PlaylistFooterClickTarget(
+            "Stop",
             on_right(PLAYLIST_STOP_BUTTON_HIT_AREA),
             bottom_y,
             scale,
@@ -5440,6 +5543,7 @@ fn PlaylistFooterControls(
     {
         let state_click = state;
         PlaylistFooterClickTarget(
+            "Next track",
             on_right(PLAYLIST_NEXT_BUTTON_HIT_AREA),
             bottom_y,
             scale,
@@ -5452,6 +5556,7 @@ fn PlaylistFooterControls(
     {
         let state_click = state;
         PlaylistFooterClickTarget(
+            "Open audio files",
             on_right(PLAYLIST_EJECT_BUTTON_HIT_AREA),
             bottom_y,
             scale,
@@ -5501,6 +5606,7 @@ fn PopupMenuDismissLayer(state: MutableState<WinampState>) {
 }
 #[composable]
 fn PlaylistFooterClickTarget(
+    label: impl Into<String>,
     area: SpriteRect,
     bottom_y: f32,
     scale: f32,
@@ -5519,15 +5625,17 @@ fn PlaylistFooterClickTarget(
             Color(0.0, 0.0, 0.0, 0.4),
         );
     }
-    PressableClickArea(area, interaction_source, on_click);
+    PressableClickArea(label, area, interaction_source, on_click);
 }
 #[composable]
 fn PressableClickArea(
+    label: impl Into<String>,
     area: ControlRect,
     interaction_source: cranpose_ui::MutableInteractionSource,
     on_click: impl Fn() + 'static,
 ) {
-    let on_click = Rc::new(on_click);
+    let on_click: Rc<dyn Fn()> = Rc::new(on_click);
+    let semantics = button_semantics(label.into(), on_click.clone());
     let w = area.scaled_width();
     let h = area.scaled_height();
     Box(
@@ -5535,6 +5643,8 @@ fn PressableClickArea(
             .size_points(w, h)
             .absolute_offset(area.scaled_x(), area.scaled_y())
             .press_interaction_source(interaction_source)
+            .stable_semantics(semantics)
+            .focusable()
             .clickable(move |_| on_click()),
         BoxSpec::default(),
         || {},
@@ -5667,7 +5777,7 @@ fn PlaylistMenu(
             palette.normal,
         );
         let state_click = state;
-        ClickTarget(x, row_y, width, row_height, scale, move || {
+        ClickTarget(item.label, x, row_y, width, row_height, scale, move || {
             close_playlist_menu(state_click);
             (item.action)(state_click);
         });
@@ -6279,8 +6389,22 @@ fn TiledSprite(
         Sprite(image.clone(), cell, x + dx, y + dy, scale);
     }
 }
+fn button_semantics(
+    label: String,
+    on_click: Rc<dyn Fn()>,
+) -> impl Fn(&mut cranpose_foundation::SemanticsConfiguration) {
+    let action = cranpose_foundation::SemanticsCustomAction::new("", move || on_click());
+    move |config| {
+        config.role = Some(cranpose_foundation::SemanticsWidgetRole::Button);
+        config.content_description = Some(label.clone());
+        config.on_click = Some(action.clone());
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 #[composable]
 fn PressableSprite(
+    label: impl Into<String>,
     image: ImageBitmap,
     normal: SpriteRect,
     pressed: SpriteRect,
@@ -6290,6 +6414,7 @@ fn PressableSprite(
     on_click: impl Fn() + 'static,
 ) {
     PressableSpriteHitArea(
+        label,
         image,
         normal,
         pressed,
@@ -6304,6 +6429,7 @@ fn PressableSprite(
 }
 #[composable]
 fn PressableSpriteHitArea(
+    label: impl Into<String>,
     image: ImageBitmap,
     normal: SpriteRect,
     pressed: SpriteRect,
@@ -6313,7 +6439,8 @@ fn PressableSpriteHitArea(
 ) {
     let interaction_source = cranpose_ui::rememberMutableInteractionSource();
     let is_pressed = cranpose_ui::collect_is_pressed_as_state(&interaction_source);
-    let on_click = Rc::new(on_click);
+    let on_click: Rc<dyn Fn()> = Rc::new(on_click);
+    let semantics = button_semantics(label.into(), on_click.clone());
     let current = if is_pressed.get() { pressed } else { normal };
     let bounds = pixel_grid::rect(
         layout.sprite_x,
@@ -6347,27 +6474,42 @@ fn PressableSpriteHitArea(
                 scaled(layout.hit_area.1, scale),
             )
             .press_interaction_source(interaction_source)
+            .stable_semantics(semantics)
+            .focusable()
             .clickable(move |_| on_click()),
         BoxSpec::default(),
         || {},
     );
 }
 #[composable]
-fn ClickTarget(x: f32, y: f32, width: f32, height: f32, scale: f32, on_click: impl Fn() + 'static) {
-    let on_click = Rc::new(on_click);
+fn ClickTarget(
+    label: impl Into<String>,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    scale: f32,
+    on_click: impl Fn() + 'static,
+) {
+    let on_click: Rc<dyn Fn()> = Rc::new(on_click);
+    let semantics = button_semantics(label.into(), on_click.clone());
     let w = scaled(width, scale);
     let h = scaled(height, scale);
     Box(
         Modifier::empty()
             .size_points(w, h)
             .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .stable_semantics(semantics)
+            .focusable()
             .clickable(move |_| on_click()),
         BoxSpec::default(),
         || {},
     );
 }
+#[allow(clippy::too_many_arguments)]
 #[composable]
 pub fn PlaylistRowClickTarget(
+    label: String,
     x: f32,
     y: f32,
     width: f32,
@@ -6377,12 +6519,17 @@ pub fn PlaylistRowClickTarget(
     on_click: impl Fn(Modifiers) + 'static,
 ) {
     let modifiers = cranpose_core::rememberMutableStateOf(|| Modifiers::NONE);
+    let on_click = Rc::new(on_click);
+    let activate = on_click.clone();
+    let semantics = button_semantics(label, Rc::new(move || activate(Modifiers::NONE)));
     let w = scaled(width, scale);
     let h = scaled(height, scale);
     Box(
         Modifier::empty()
             .size_points(w, h)
             .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .stable_semantics(semantics)
+            .focusable()
             .pointer_input(row_key, move |scope: PointerInputScope| async move {
                 scope
                     .await_pointer_event_scope(|await_scope| async move {
@@ -6398,14 +6545,37 @@ pub fn PlaylistRowClickTarget(
         || {},
     );
 }
+fn player_slider_semantics(
+    label: String,
+    value: f32,
+    on_change: Rc<dyn Fn(f32)>,
+    on_drag_state: Rc<dyn Fn(bool)>,
+) -> impl Fn(&mut cranpose_foundation::SemanticsConfiguration) {
+    move |config| {
+        config.content_description = Some(label.clone());
+        config.state_description = Some(format!("{}%", (value * 100.0).round()));
+        config.progress = Some(cranpose_ui::ProgressBarRangeInfo::new(value, 0.0, 1.0, 0));
+        let change = on_change.clone();
+        let drag = on_drag_state.clone();
+        config.set_progress = Some(cranpose_ui::SemanticsSetProgress::new(move |next: f32| {
+            drag(true);
+            change(next.clamp(0.0, 1.0));
+            drag(false);
+            true
+        }));
+    }
+}
+
 #[composable]
 fn DragSlider(
+    label: impl Into<String>,
     area: ControlRect,
     value: f32,
     thumb_width: f32,
     on_change: impl Fn(f32) + 'static,
     on_drag_state: impl Fn(bool) + 'static,
 ) {
+    let label = label.into();
     let on_change = Rc::new(on_change);
     let on_drag_state = Rc::new(on_drag_state);
     let dragging = cranpose_core::rememberMutableStateOf(|| false);
@@ -6413,6 +6583,13 @@ fn DragSlider(
     let on_drag_input = Rc::clone(&on_drag_state);
     cranpose_ui::Slider(
         Modifier::empty()
+            .stable_semantics(player_slider_semantics(
+                label,
+                value,
+                on_change.clone(),
+                on_drag_state.clone(),
+            ))
+            .focusable()
             .size_points(area.scaled_width(), area.scaled_height())
             .absolute_offset(area.scaled_x(), area.scaled_y()),
         value,
@@ -6435,6 +6612,7 @@ fn DragSlider(
 }
 #[composable]
 fn VerticalDragSlider(
+    label: impl Into<String>,
     area: ControlRect,
     value: f32,
     thumb_extent: f32,
@@ -6442,6 +6620,7 @@ fn VerticalDragSlider(
     on_change: impl Fn(f32) + 'static,
     on_drag_state: impl Fn(bool) + 'static,
 ) {
+    let label = label.into();
     let on_change = Rc::new(on_change);
     let on_drag_state = Rc::new(on_drag_state);
     let dragging = cranpose_core::rememberMutableStateOf(|| false);
@@ -6449,6 +6628,13 @@ fn VerticalDragSlider(
     let on_drag_input = Rc::clone(&on_drag_state);
     cranpose_ui::Slider(
         Modifier::empty()
+            .stable_semantics(player_slider_semantics(
+                label,
+                value,
+                on_change.clone(),
+                on_drag_state.clone(),
+            ))
+            .focusable()
             .size_points(area.scaled_width(), area.scaled_height())
             .absolute_offset(area.scaled_x(), area.scaled_y()),
         value,
@@ -7000,9 +7186,15 @@ fn PlaylistResizeHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: 
 }
 #[composable]
 fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, scale: f32) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if mobile::touch_controls_enabled() {
+        mobile::TouchTransport(cbuttons, state, scale);
+        return;
+    }
     {
         let state_click = state;
         PressableSprite(
+            "Previous track",
             cbuttons.clone(),
             PREV_BUTTON,
             PREV_BUTTON_ACTIVE,
@@ -7017,6 +7209,7 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
     {
         let state_click = state;
         PressableSprite(
+            "Play",
             cbuttons.clone(),
             PLAY_BUTTON,
             PLAY_BUTTON_ACTIVE,
@@ -7031,6 +7224,7 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
     {
         let state_click = state;
         PressableSprite(
+            "Pause",
             cbuttons.clone(),
             PAUSE_BUTTON,
             PAUSE_BUTTON_ACTIVE,
@@ -7045,6 +7239,7 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
     {
         let state_click = state;
         PressableSprite(
+            "Stop",
             cbuttons.clone(),
             STOP_BUTTON,
             STOP_BUTTON_ACTIVE,
@@ -7059,6 +7254,7 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
     {
         let state_click = state;
         PressableSprite(
+            "Next track",
             cbuttons.clone(),
             NEXT_BUTTON,
             NEXT_BUTTON_ACTIVE,
@@ -7073,6 +7269,7 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
     {
         let state_click = state;
         PressableSprite(
+            "Open audio files",
             cbuttons,
             EJECT_BUTTON,
             EJECT_BUTTON_ACTIVE,

@@ -11,7 +11,7 @@ from the command line:
 cargo run --bin cranamp -- --skin-studio
 cargo run --bin cranamp -- --skin-studio '/absolute/path/skin.wsz'
 cargo run --bin cranamp -- --skin-studio '/absolute/path/project.cstudio'
-cargo run --bin cranamp -- --skin-studio-mcp          # stdio MCP relay into a running Studio
+cargo run --bin cranamp -- --skin-studio-mcp "$CRANAMP_MCP_TOKEN" # authenticated stdio relay
 cargo run --bin cranamp -- --touch-preview --studio   # the editor at handset size
 ```
 
@@ -286,6 +286,20 @@ A switch names the state the editor is in now, not the state pressing it would
 move to. **New blank** and **Delete** ask a second time before acting. Refusals
 are coloured in the status line. **Undo**/**Redo** count their steps (`Undo 3`)
 and are drawn as unavailable at zero.
+
+## Agent authentication
+
+Start the desktop server, then use **Copy server URL** or **Copy stdio command**.
+The copied connection contains a secret that changes each time the server starts.
+Only clients with that secret can use the document or files within Cranamp's
+permissions. Stop server revokes access. Never commit or publish the secret.
+For repository tools, set `CRANAMP_MCP_URL` to the copied URL, or set
+`CRANAMP_MCP_TOKEN` to its token value. The service remains unavailable on mobile
+and web.
+
+On Android and iOS, the **Skin Studio** tab below the player opens the editor.
+The **Settings** tab opens appearance, playback and sync controls. Switching tabs
+preserves the Studio document and leaves playback running.
 
 ## Whole-skin preview
 

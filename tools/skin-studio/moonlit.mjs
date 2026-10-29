@@ -1,9 +1,10 @@
+import { connectionUrl } from './connection.mjs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 export const ROOT = path.resolve(import.meta.dirname, '../..');
 export async function call(name, args = {}) {
-  const response = await fetch('http://127.0.0.1:18765/mcp', {
+  const response = await fetch(connectionUrl(), {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
   });

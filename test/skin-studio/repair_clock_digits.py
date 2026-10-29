@@ -4,6 +4,7 @@ Run against an isolated Studio MCP session. Outputs stay in the supplied review
 directory until the editor and GPU review is complete. No bitmap writer is used.
 """
 import argparse
+import os
 from collections import Counter
 import json
 from pathlib import Path
@@ -18,7 +19,7 @@ SEGMENTS = ["abcdef", "bc", "abdeg", "abcdg", "bcfg", "acdfg", "acdefg", "abc", 
 
 def call(name, arguments):
     request = urllib.request.Request(
-        "http://127.0.0.1:18765/mcp",
+        os.environ["CRANAMP_MCP_URL"],
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                     "params": {"name": name, "arguments": arguments}}).encode(),
         headers={"Content-Type": "application/json"},

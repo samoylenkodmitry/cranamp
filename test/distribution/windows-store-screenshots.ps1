@@ -7,7 +7,7 @@ $outputPath = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force $outputPath | Out-Null
 function Invoke-Studio([string]$Name, [hashtable]$Arguments = @{}) {
     $body = @{jsonrpc='2.0'; id=1; method='tools/call'; params=@{name=$Name; arguments=$Arguments}} | ConvertTo-Json -Depth 8
-    $reply = Invoke-RestMethod -Uri 'http://127.0.0.1:18765/mcp' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 60
+    $reply = Invoke-RestMethod -Uri $env:CRANAMP_MCP_URL -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 60
     if ($reply.error -or $reply.result.isError) { throw ($reply | ConvertTo-Json -Depth 8) }
     return $reply
 }

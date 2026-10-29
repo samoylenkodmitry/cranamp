@@ -22,6 +22,8 @@
     <string>1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Play music and browse folders on a local server you choose.</string>
     <!-- HTTPS uses native-tls and Security.framework in the iOS dependency graph. -->
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>

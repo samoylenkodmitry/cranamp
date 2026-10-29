@@ -183,11 +183,13 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                             "Paste into your agent's HTTP server settings".into(),
                             Area::new(width - 48., 4., 44., 44.),
                             false,
-                            clipboard.has_system_clipboard(),
+                            clipboard.has_system_clipboard() && connection.running,
                             false,
                             hints,
                             move || {
-                                clipboard.set_text(agent_server::ENDPOINT);
+                                if let Some(url) = agent_server::connection_url() {
+                                    clipboard.set_text(&url);
+                                }
                                 copied.set(1);
                             },
                         );
@@ -195,7 +197,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 },
             );
             Label(
-                "Add this URL in your agent's MCP settings.\nChoose HTTP as the connection type."
+                "The copied URL includes a secret for this session.\nShare it only with an agent you trust."
                     .into(),
                 16.,
                 296.,
@@ -226,13 +228,17 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                     "Copy the Cranamp executable path and --skin-studio-mcp".into(),
                     Area::new(area.w - 60., 376., 44., 44.),
                     false,
-                    clipboard.has_system_clipboard(),
+                    clipboard.has_system_clipboard() && connection.running,
                     false,
                     hints,
                     move || {
-                        if let Ok(path) = std::env::current_exe() {
-                            clipboard
-                                .set_text(&format!("\"{}\" --skin-studio-mcp", path.display()));
+                        if let (Ok(path), Some(token)) =
+                            (std::env::current_exe(), agent_server::connection_token())
+                        {
+                            clipboard.set_text(&format!(
+                                "\"{}\" --skin-studio-mcp {token}",
+                                path.display()
+                            ));
                             copied.set(2);
                         }
                     },
@@ -278,7 +284,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 );
             }
             Label(
-            "Local programs can edit this skin and use files\nCranamp can access. Closing Studio stops the server.\nYour agent runs separately from Cranamp.".into(),
+            "Agents with your session secret can use files\nCranamp can access. Stop revokes the secret.\nYour agent runs separately from Cranamp.".into(),
             16., access_y + 78., width, 12., DIM,
         );
         },

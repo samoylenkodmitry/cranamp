@@ -1,3 +1,4 @@
+import { connectionUrl } from './connection.mjs';
 /** One-time migration of Cranamp's bundled artwork. Every edit uses Skin Studio's pen.
  * Static key holes inherit the continuous underlying illustration. Moving cells get
  * explicitly designed track cross-sections; they never capture a local background.
@@ -9,7 +10,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const run = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '../..');
-const endpoint = 'http://127.0.0.1:18765/mcp';
+const endpoint = connectionUrl();
 let serial = 1;
 export async function studio(name, args = {}) {
   const response = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({jsonrpc:'2.0',id:serial++,method:'tools/call',params:{name,arguments:args}})});

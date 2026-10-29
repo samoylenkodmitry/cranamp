@@ -15,6 +15,13 @@ from check_android_manifest import verify
 
 
 class PackagingTests(unittest.TestCase):
+    def test_apple_network_playback_declares_its_local_network_use(self):
+        for platform in ("ios", "macos"):
+            with self.subTest(platform=platform):
+                info = plistlib.loads((ROOT / f"platform/{platform}/Info.plist").read_bytes())
+                self.assertEqual(info["NSLocalNetworkUsageDescription"],
+                                 "Play music and browse folders on a local server you choose.")
+
     def test_ios_registers_framework_scene_lifecycle(self):
         info = plistlib.loads((ROOT / "platform/ios/Info.plist").read_bytes())
         scene = info["UIApplicationSceneManifest"]

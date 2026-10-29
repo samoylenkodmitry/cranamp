@@ -47,6 +47,7 @@ struct Server {
     cancelled: Arc<AtomicBool>,
     connection: Arc<Mutex<Option<TcpStream>>>,
     worker: Option<JoinHandle<()>>,
+    token: String,
 }
 impl Server {
     fn bind(listener: TcpListener, shared: SharedDocument) -> Result<Self> {
@@ -55,6 +56,11 @@ impl Server {
             "MCP requires a loopback address"
         );
         listener.set_nonblocking(true)?;
+        let mut secret = [0u8; 32];
+        getrandom::fill(&mut secret)
+            .map_err(|error| anyhow::anyhow!("Cannot secure agent session: {error}"))?;
+        let token: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
+        let worker_token = token.clone();
         let document = Arc::new(Mutex::new(shared));
         let cancelled = Arc::new(AtomicBool::new(false));
         let connection = Arc::new(Mutex::new(None));
@@ -78,7 +84,7 @@ impl Server {
                             let _ = stream.set_read_timeout(Some(TIMEOUT));
                             let _ = stream.set_write_timeout(Some(TIMEOUT));
                             let shared = doc.lock().unwrap().clone();
-                            let _ = serve(&mut stream, &shared);
+                            let _ = serve(&mut stream, &shared, &worker_token);
                             current.lock().unwrap().take();
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -93,6 +99,7 @@ impl Server {
             cancelled,
             connection,
             worker: Some(worker),
+            token,
         })
     }
 }
@@ -191,7 +198,27 @@ pub fn stop_for(shared: &SharedDocument) {
     });
 }
 
+pub fn connection_url() -> Option<String> {
+    let state = control().lock().unwrap();
+    state
+        .server
+        .as_ref()
+        .map(|server| format!("{ENDPOINT}?token={}", server.token))
+}
+
+pub fn connection_token() -> Option<String> {
+    control()
+        .lock()
+        .unwrap()
+        .server
+        .as_ref()
+        .map(|server| server.token.clone())
+}
+
 pub fn test_connection(shared: SharedDocument) {
+    let Some(token) = connection_token() else {
+        return;
+    };
     let generation = {
         let mut state = control().lock().unwrap();
         if !state.status.running || state.status.testing {
@@ -205,7 +232,7 @@ pub fn test_connection(shared: SharedDocument) {
     };
     refresh(&shared);
     std::thread::spawn(move || {
-        let result = probe(ADDRESS.parse().expect("fixed loopback address"));
+        let result = probe(ADDRESS.parse().expect("fixed loopback address"), &token);
         let tools = result.as_ref().ok().map(|(_, count)| *count);
         let error = result.is_err();
         let message = match result {
@@ -224,12 +251,12 @@ pub fn test_connection(shared: SharedDocument) {
         refresh(&shared);
     });
 }
-fn request(address: SocketAddr, body: &str) -> Result<String> {
+fn request(address: SocketAddr, body: &str, token: &str) -> Result<String> {
     let mut stream = TcpStream::connect_timeout(&address, TIMEOUT)
         .context("Open Skin Studio and start its agent server")?;
     stream.set_read_timeout(Some(Duration::from_secs(60)))?;
     stream.set_write_timeout(Some(TIMEOUT))?;
-    write!(stream, "POST /mcp HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())?;
+    write!(stream, "POST /mcp?token={token} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())?;
     let mut response = String::new();
     stream
         .take(16 * 1024 * 1024)
@@ -243,10 +270,11 @@ fn request(address: SocketAddr, body: &str) -> Result<String> {
     );
     Ok(body.to_owned())
 }
-fn probe(address: SocketAddr) -> Result<(String, usize)> {
+fn probe(address: SocketAddr, token: &str) -> Result<(String, usize)> {
     let initialize: Value = serde_json::from_str(&request(
         address,
         &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}).to_string(),
+        token,
     )?)?;
     anyhow::ensure!(
         initialize["result"]["serverInfo"]["name"] == "cranamp-skin-studio",
@@ -259,6 +287,7 @@ fn probe(address: SocketAddr) -> Result<(String, usize)> {
     let tools: Value = serde_json::from_str(&request(
         address,
         &json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}).to_string(),
+        token,
     )?)?;
     let tools = tools["result"]["tools"]
         .as_array()
@@ -270,12 +299,25 @@ fn probe(address: SocketAddr) -> Result<(String, usize)> {
     Ok((version, tools.len()))
 }
 pub fn bridge() {
+    let token = std::env::var("CRANAMP_MCP_TOKEN")
+        .ok()
+        .or_else(|| std::env::args().nth(2));
+    let Some(token) =
+        token.filter(|token| token.len() == 64 && token.bytes().all(|c| c.is_ascii_hexdigit()))
+    else {
+        eprintln!("Copy a new authenticated command from Studio Agent connection.");
+        return;
+    };
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
             continue;
         }
-        match request(ADDRESS.parse().expect("fixed loopback address"), &line) {
+        match request(
+            ADDRESS.parse().expect("fixed loopback address"),
+            &line,
+            &token,
+        ) {
             Ok(response) if !response.is_empty() => println!("{response}"),
             Ok(_) => {}
             Err(error) => {
@@ -295,13 +337,14 @@ pub fn bridge() {
     }
 }
 
-fn serve(stream: &mut TcpStream, shared: &SharedDocument) -> Result<()> {
+fn serve(stream: &mut TcpStream, shared: &SharedDocument, token: &str) -> Result<()> {
     let mut reader = std::io::BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     let mut consumed = (&mut reader)
         .take(HEADER_LIMIT as u64)
         .read_line(&mut line)?;
-    let mut valid = line == "POST /mcp HTTP/1.1\r\n";
+    let authenticated = line == format!("POST /mcp?token={token} HTTP/1.1\r\n");
+    let mut valid = line.starts_with("POST /mcp") && line.ends_with(" HTTP/1.1\r\n");
     let mut length = None;
     let mut host = false;
     let local = stream.local_addr()?;
@@ -346,6 +389,12 @@ fn serve(stream: &mut TcpStream, shared: &SharedDocument) -> Result<()> {
     {
         stream.write_all(
             b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )?;
+        return Ok(());
+    }
+    if !authenticated {
+        stream.write_all(
+            b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         )?;
         return Ok(());
     }
