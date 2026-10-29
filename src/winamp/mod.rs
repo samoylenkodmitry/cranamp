@@ -1997,6 +1997,15 @@ pub fn WinampWidgetApp() {
 }
 #[composable]
 fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinState) {
+    WinampStudioSurfaceWithInset(state, skin_state, 0.0);
+}
+
+#[composable]
+fn WinampStudioSurfaceWithInset(
+    state: MutableState<WinampState>,
+    skin_state: WinampSkinState,
+    bottom_inset: f32,
+) {
     let sessions = cranpose_core::remember(|| {
         std::collections::BTreeMap::<Option<String>, studio::SharedDocument>::new()
     });
@@ -2038,6 +2047,7 @@ fn WinampStudioSurface(state: MutableState<WinampState>, skin_state: WinampSkinS
                     ),
                 },
                 snapshot.studio_open,
+                bottom_inset,
             );
         }
         Err(error) => {

@@ -217,8 +217,13 @@ fn initial_document(path: Option<&str>) -> anyhow::Result<Document> {
 }
 pub const DESKTOP_LAYOUT_MIN: (f32, f32) = (1140., 820.);
 #[composable]
-pub fn AdaptiveSkinStudio(shared: SharedDocument, host: StudioHost, visible: bool) {
-    adaptive::MountedSkinStudio(shared, Some(host), visible);
+pub fn AdaptiveSkinStudio(
+    shared: SharedDocument,
+    host: StudioHost,
+    visible: bool,
+    bottom_inset: f32,
+) {
+    adaptive::MountedSkinStudio(shared, Some(host), visible, bottom_inset);
 }
 pub fn open_document(path: Option<&str>) -> anyhow::Result<SharedDocument> {
     let document = initial_document(path)?;

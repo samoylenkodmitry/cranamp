@@ -215,8 +215,13 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
         move |scope| {
             let width = scope.max_width().0;
             let height = scope.max_height().0;
-            let content_height = (height - NAV_HEIGHT).max(1.0);
+            let nav_top = (height - NAV_HEIGHT).max(0.0);
             let destination = Destination::from_state(&player.get());
+            let content_height = if destination == Destination::Player {
+                nav_top.max(1.0)
+            } else {
+                height
+            };
             Box(
                 Modifier::empty()
                     .size_points(width, content_height)
@@ -225,7 +230,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
                 move || {
                     // This call remains mounted across tabs so its shared documents and
                     // undo histories survive a visit to Settings or the player.
-                    WinampStudioSurface(player, skin);
+                    WinampStudioSurfaceWithInset(player, skin, NAV_HEIGHT);
                     match destination {
                         Destination::Studio => {}
                         Destination::Settings => MobileSettings(player, skin),
@@ -239,7 +244,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
             let nav_width = (width - 24.0).clamp(1.0, 560.0);
             LiquidTabBar(
                 Modifier::empty()
-                    .absolute_offset((width - nav_width) * 0.5, content_height + 10.0)
+                    .absolute_offset((width - nav_width) * 0.5, nav_top + 10.0)
                     .width(nav_width),
                 LiquidTabBarSpec::new((nav_width - 8.0) / 3.0),
                 destination.index(),
@@ -293,7 +298,7 @@ fn MobileSettingsContent(player: MutableState<WinampState>, skin: WinampSkinStat
         Modifier::empty()
             .fill_max_size()
             .vertical_scroll(scroll, false)
-            .padding(20.0),
+            .padding_each(20.0, 20.0, 20.0, 20.0 + NAV_HEIGHT),
         ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(20.0)),
         move || {
             if choose_skin.get() {
