@@ -8,6 +8,7 @@ use std::{env, fs, path::PathBuf};
 use cranpose_capabilities::{declare, Use};
 
 fn main() {
+    embed_license_catalog();
     let mut capabilities = vec![Use::media(), Use::network()];
     if env::var_os("CARGO_FEATURE_STORE").is_none() {
         capabilities.push(Use::update());
@@ -16,6 +17,21 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         embed_windows_resources();
     }
+}
+
+fn embed_license_catalog() {
+    println!("cargo::rerun-if-env-changed=CRANAMP_NOTICE_CATALOG");
+    let catalog = if let Some(path) = env::var_os("CRANAMP_NOTICE_CATALOG") {
+        let path = PathBuf::from(path);
+        println!("cargo::rerun-if-changed={}", path.display());
+        fs::read_to_string(path).expect("read generated release license catalog")
+    } else {
+        // Local builds retain the app and font licenses. Packaging supplies the
+        // dependency catalog for the exact target and feature set it builds.
+        "[]".into()
+    };
+    let out = PathBuf::from(env::var_os("OUT_DIR").expect("cargo build output"));
+    fs::write(out.join("notices.json"), catalog).expect("embed license catalog");
 }
 
 fn embed_windows_resources() {

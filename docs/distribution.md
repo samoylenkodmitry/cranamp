@@ -199,3 +199,24 @@ approval. The physical iPhone was unavailable during this pass. IPv6-only networ
 validation and a signed replacement App Store submission remain release checks.
 The recorded 0.1.92/build 102 submission does not contain these fixes; do not use
 its existing screenshots or claim this branch has already been submitted.
+
+Settings now has an About page on mobile, desktop and web, with the installed
+version, support contact, privacy link and source link. Its license reader works
+offline. Store packaging embeds the dependency notices generated for its target
+and features, including the additional Windows compiler notices. Source packages
+carry that catalog into their build. Local development builds without a generated
+catalog show the app and bundled-font licenses. Failed browser or mail actions
+show the address beside the affected control.
+The updated native suite passes 483 tests, and the notice/packaging tests pass 12.
+About navigation and the offline reader passed on the small iPhone simulator and
+Galaxy Tab S7; Android Back returns through the legal pages to Settings and Player.
+
+The current feature set has no app accounts, purchases or tracking, so account
+deletion, purchase restoration and App Tracking Transparency prompts do not apply.
+The system file picker grants selected-file access. Local-network access uses the
+OS prompt with the app's purpose string. Folder sync explains its shared data before
+the opt-in switch; desktop agent access explains file access before Start server.
+These checks do not establish approval for every possible review concern. The
+signed package, current listing and artwork rights still require release review;
+the AAC licensing assessment above remains separate. Do not submit these changes
+to stores without a new instruction from the user.

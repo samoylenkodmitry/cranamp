@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 #![cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
+mod about;
 mod bitmap_font;
 #[cfg(any(target_arch = "wasm32", test))]
 mod browser_skins;
@@ -4509,7 +4510,11 @@ fn SettingsPanel(
     scale: f32,
 ) {
     let _ = text_color;
+    let page = cranpose_core::rememberMutableStateOf(about::Page::default);
+    let link_error = cranpose_core::rememberMutableStateOf(String::new);
     let scroll = cranpose_ui::rememberScrollState!(0.0);
+    let reset_scroll = scroll;
+    cranpose_core::LaunchedEffect(page.get(), move |_| reset_scroll.scroll_to(0.0));
     Box(
         Modifier::empty()
             .fill_max_size()
@@ -4532,6 +4537,10 @@ fn SettingsPanel(
                 ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(12.0)),
                 move || {
                     SettingsHeader(state);
+                    if page.get() != about::Page::Settings {
+                        about::Content(page, false);
+                        return;
+                    }
                     SettingsSkinsSection(state, skin_state);
                     SettingsActionButton("Open Skin Studio".into(), SETTINGS_CARD, move || {
                         #[cfg(not(any(
@@ -4568,15 +4577,13 @@ fn SettingsPanel(
                     SettingsSyncSection(state);
                     #[cfg(not(feature = "store"))]
                     SettingsUpdateSection(state);
-                    SettingsActionButton("Privacy policy".into(), SETTINGS_CARD, || {
-                        let _ = cranpose_services::default_uri_handler()
-                            .open_uri("https://cranamp.dmitrysamoylenko.in/privacy/");
+                    SettingsActionButton("Privacy policy".into(), SETTINGS_CARD, move || {
+                        about::open_link(about::PRIVACY_URL, link_error);
                     });
-                    Text(
-                        format!("Cranamp v{} · cranpose", env!("CARGO_PKG_VERSION")),
-                        Modifier::empty(),
-                        settings_text_style(10.0, SETTINGS_TEXT_DIM),
-                    );
+                    about::LinkError(link_error, false);
+                    SettingsActionButton("About Cranamp".into(), SETTINGS_CARD, move || {
+                        page.set(about::Page::About);
+                    });
                 },
             );
         },

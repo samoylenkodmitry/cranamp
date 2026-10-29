@@ -79,6 +79,44 @@ final class PickerProviders: XCTestCase {
         app.buttons["Choose skin"].tap()
         XCTAssertTrue(app.buttons["Back to Settings"].waitForExistence(timeout: 10))
         app.buttons["Back to Settings"].tap()
+        func reveal(_ label: String) -> XCUIElement {
+            let button = app.buttons[label]
+            for _ in 0..<6 {
+                let navigation = app.buttons.matching(identifier: "Settings")
+                let bottom = navigation.element(boundBy: navigation.count - 1).frame.minY
+                if button.exists && button.isHittable &&
+                    button.frame.minY >= app.frame.minY + 44 && button.frame.maxY < bottom {
+                    // Cranpose owns scroll inertia, so XCTest's UIKit-idle wait
+                    // alone can finish while the button is still moving.
+                    var previous = button.frame
+                    var lastChange = Date()
+                    let settled = NSPredicate { _, _ in
+                        let current = button.frame
+                        if abs(current.minY - previous.minY) > 0.5 {
+                            previous = current
+                            lastChange = Date()
+                        }
+                        return Date().timeIntervalSince(lastChange) >= 0.5
+                    }
+                    let expectation = XCTNSPredicateExpectation(predicate: settled, object: button)
+                    XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 5), .completed)
+                    return button
+                }
+                app.swipeUp()
+            }
+            XCTAssertTrue(button.isHittable, "Cannot reach \(label)")
+            return button
+        }
+        reveal("About Cranamp").tap()
+        XCTAssertTrue(app.buttons["Contact support"].waitForExistence(timeout: 10))
+        capture("mobile-about")
+        reveal("Open source licenses").tap()
+        app.buttons["Cranamp — Apache License 2.0"].tap()
+        XCTAssertTrue(app.buttons["Back to Licenses"].waitForExistence(timeout: 10))
+        capture("mobile-license")
+        app.buttons["Back to Licenses"].tap()
+        app.buttons["Back to About"].tap()
+        app.buttons["Back to Settings"].tap()
         tab("Skin Studio")
         if app.buttons["Open working copy"].waitForExistence(timeout: 3) {
             app.buttons["Open working copy"].tap()

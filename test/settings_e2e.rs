@@ -50,10 +50,69 @@ impl TestApplication {
 }
 impl Drop for TestApplication {
     fn drop(&mut self) {
+        cranpose_services::clear_platform_uri_handler();
         cranpose_services::clear_host_controller();
         cranpose_services::clear_application_id();
         let _ = std::fs::remove_dir_all(&self.directory);
     }
+}
+
+struct UnavailableLinkHandler(Rc<RefCell<Vec<String>>>);
+impl cranpose_services::UriHandler for UnavailableLinkHandler {
+    fn open_uri(&self, uri: &str) -> Result<(), cranpose_services::UriHandlerError> {
+        self.0.borrow_mut().push(uri.into());
+        Err(cranpose_services::UriHandlerError::NoWindow)
+    }
+}
+
+#[test]
+fn mobile_about_has_offline_licenses_and_recovers_from_unavailable_link_apps() {
+    let _application = TestApplication::new("about");
+    let opened = Rc::new(RefCell::new(Vec::new()));
+    cranpose_services::set_platform_uri_handler(Rc::new(UnavailableLinkHandler(opened.clone())));
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_buffer_size(320, 568);
+    shell.set_viewport(320., 568.);
+    pump(&mut shell);
+    click_mobile(&mut shell, "Settings");
+    click_mobile(&mut shell, "About Cranamp");
+    let about = visible_texts(&mut shell);
+    assert!(contains(
+        &about,
+        &format!("Version {}", env!("CARGO_PKG_VERSION"))
+    ));
+    assert!(contains(&about, "trdmitriisamoilenko@gmail.com"));
+    click_mobile(&mut shell, "Contact support");
+    assert_eq!(&*opened.borrow(), &["mailto:trdmitriisamoilenko@gmail.com"]);
+    assert!(contains(
+        &visible_texts(&mut shell),
+        "Could not open this link"
+    ));
+    click_mobile(&mut shell, "Open source licenses");
+    click_mobile(&mut shell, "Cranamp — Apache License 2.0");
+    assert!(contains(
+        &visible_texts(&mut shell),
+        "Grant of Copyright License"
+    ));
+    // Legal screens stay above the navigation controls and remain usable offline.
+    let back = mobile_control_bounds(&mut shell, "Back to Licenses");
+    assert!(back.y >= 0. && back.y + back.height < 568. - 86.);
+    click_mobile(&mut shell, "Back to Licenses");
+    click_mobile(&mut shell, "Liberation Sans — SIL Open Font License");
+    assert!(contains(
+        &visible_texts(&mut shell),
+        "SIL OPEN FONT LICENSE"
+    ));
+    click_mobile(&mut shell, "Back to Licenses");
+    click_mobile(&mut shell, "Back to About");
+    click_mobile(&mut shell, "Back to Settings");
+    assert!(contains(&visible_texts(&mut shell), "Appearance"));
+    click_mobile(&mut shell, "Player");
+    assert!(contains(&visible_texts(&mut shell), "Play"));
 }
 fn contains(texts: &[String], needle: &str) -> bool {
     texts.iter().any(|text| text.contains(needle))

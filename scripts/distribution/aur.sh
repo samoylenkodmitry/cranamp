@@ -9,6 +9,7 @@ source_dir=$(mktemp -d)
 trap 'rm -rf "$source_dir"' EXIT
 git archive --format=tar --prefix="cranamp-${version}/" HEAD | tar -xf - -C "$source_dir"
 cp target/distribution/THIRD-PARTY.html "$source_dir/cranamp-${version}/docs/third-party/THIRD-PARTY.html"
+cp target/distribution/THIRD-PARTY.json "$source_dir/cranamp-${version}/docs/third-party/THIRD-PARTY.json"
 tar -czf "$out/$source_name" -C "$source_dir" "cranamp-${version}"
 digest=$(sha256sum "$out/$source_name" | cut -d' ' -f1)
 cat > "$out/aur/PKGBUILD" <<EOF
@@ -43,6 +44,7 @@ build() {
     esac
   done
   export CFLAGS="\$native_cflags"
+  export CRANAMP_NOTICE_CATALOG="\$PWD/docs/third-party/THIRD-PARTY.json"
   cargo build --frozen --release --features store
 }
 package() {

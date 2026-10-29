@@ -283,6 +283,8 @@ fn MobileSettings(player: MutableState<WinampState>, skin: WinampSkinState) {
 #[composable]
 fn MobileSettingsContent(player: MutableState<WinampState>, skin: WinampSkinState) {
     let choose_skin = cranpose_core::rememberMutableStateOf(|| false);
+    let page = cranpose_core::rememberMutableStateOf(about::Page::default);
+    let link_error = cranpose_core::rememberMutableStateOf(String::new);
     let library = cranpose_core::rememberMutableStateOf(bundled_library_skins);
     cranpose_core::LaunchedEffectAsync((choose_skin.get(), player.get().skin_path), move |_| {
         Box::pin(async move {
@@ -292,7 +294,14 @@ fn MobileSettingsContent(player: MutableState<WinampState>, skin: WinampSkinStat
         })
     });
     cranpose_services::BackHandler(choose_skin.get(), move || choose_skin.set(false));
+    cranpose_services::BackHandler(page.get() != about::Page::Settings, move || {
+        page.set(page.get().parent());
+    });
     let scroll = cranpose_ui::rememberScrollState!(0.0);
+    let reset_scroll = scroll;
+    cranpose_core::LaunchedEffect((choose_skin.get(), page.get()), move |_| {
+        reset_scroll.scroll_to(0.0);
+    });
     let colors = liquid_colors();
     Column(
         Modifier::empty()
@@ -301,6 +310,10 @@ fn MobileSettingsContent(player: MutableState<WinampState>, skin: WinampSkinStat
             .padding_each(20.0, 20.0, 20.0, 20.0 + NAV_HEIGHT),
         ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(20.0)),
         move || {
+            if page.get() != about::Page::Settings {
+                about::Content(page, true);
+                return;
+            }
             if choose_skin.get() {
                 GlassAction("Back to Settings", move || choose_skin.set(false));
                 Heading("Choose a skin");
@@ -432,18 +445,15 @@ fn MobileSettingsContent(player: MutableState<WinampState>, skin: WinampSkinStat
             });
             MobileSyncSettings(player);
             SettingsCard("Help and privacy", move || {
-                GlassAction("Privacy policy", || {
-                    open_help("https://cranamp.dmitrysamoylenko.in/privacy/")
+                GlassAction("Privacy policy", move || {
+                    about::open_link(about::PRIVACY_URL, link_error)
                 });
-                GlassAction("Help with Cranamp", || {
-                    open_help("https://cranamp.dmitrysamoylenko.in/support/")
+                GlassAction("Help with Cranamp", move || {
+                    about::open_link(about::SUPPORT_URL, link_error)
                 });
+                about::LinkError(link_error, true);
                 Text("Audio plays from its original location. Cranamp does not copy your music library.", Modifier::empty().fill_max_width(), settings_text_style(14.0, colors.secondary_label));
-                Text(
-                    format!("Cranamp {}", env!("CARGO_PKG_VERSION")),
-                    Modifier::empty(),
-                    settings_text_style(14.0, colors.secondary_label),
-                );
+                GlassAction("About Cranamp", move || page.set(about::Page::About));
             });
         },
     );
@@ -486,10 +496,6 @@ fn MobileSyncSettings(player: MutableState<WinampState>) {
     });
 }
 
-fn open_help(url: &str) {
-    let _ = cranpose_services::default_uri_handler().open_uri(url);
-}
-
 #[composable]
 fn Heading(title: &'static str) {
     Text(
@@ -525,7 +531,7 @@ fn SettingsCard(title: &'static str, content: impl FnMut() + 'static) {
 }
 
 #[composable]
-fn GlassAction(label: impl Into<String>, action: impl Fn() + 'static) {
+pub(super) fn GlassAction(label: impl Into<String>, action: impl Fn() + 'static) {
     let label = label.into();
     GlassButton(
         Modifier::empty()
