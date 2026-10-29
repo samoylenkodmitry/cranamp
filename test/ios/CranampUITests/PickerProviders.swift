@@ -175,6 +175,8 @@ final class PickerProviders: XCTestCase {
         let continued = NSPredicate { _, _ in elapsed() > beforeTabs }
         expectation(for: continued, evaluatedWith: app)
         waitForExpectations(timeout: 10)
+        // Let the tab bar's own animation finish before reviewing its GPU pixels.
+        Thread.sleep(forTimeInterval: 5)
         print("NETWORK FOLDER observation after \(Date().timeIntervalSince(started)) seconds")
         print(app.debugDescription)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

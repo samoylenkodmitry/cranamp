@@ -211,6 +211,17 @@ The updated native suite passes 483 tests, and the notice/packaging tests pass 1
 About navigation and the offline reader passed on the small iPhone simulator and
 Galaxy Tab S7; Android Back returns through the legal pages to Settings and Player.
 
+The physical iPhone 17 Pro Max (iOS 27.0.1) subsequently passed About, offline
+licenses and retained-Studio navigation, plus playback from the original network
+music folder across tab changes. The device used 0.1.92 build 115 from
+[run 40903361303](https://github.com/samoylenkodmitry/cranamp/actions/runs/40903361303),
+commit `546f85a`, with the release binary re-signed for local development installation.
+Both tests passed, and a repeated playback run also passed. Container inventories
+before and after the repeated run showed no new files or changed audio files;
+five existing picker-cache audio files remained untouched. A capture after the
+tab animation settled showed all three labels. This covers the physical-device
+check above; distribution signing and IPv6-only validation remain separate checks.
+
 The current feature set has no app accounts, purchases or tracking, so account
 deletion, purchase restoration and App Tracking Transparency prompts do not apply.
 The system file picker grants selected-file access. Local-network access uses the
