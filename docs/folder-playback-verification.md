@@ -21,7 +21,7 @@ reads for the whole playlist. Durations come from saved metadata or playback.
 | Android | Galaxy Tab S7 provider test reached Playing and an advancing clock through the existing remote folder grant. Cranamp audio cache growth was zero. A separate provider regression verified recovery from a transient null cursor and errors for persistent null/loading responses. |
 | Web | Chrome selected the original mounted directory through `showDirectoryPicker`. Playback advanced while the library populated; 2,077 audio entries among 2,732 files. Tracks use Blob URLs. Browser fallback directory inputs depend on the browser completing its own enumeration before it returns a FileList. |
 | iOS | Installed and launched the updated build on the paired iPhone. The picker uses `UTTypeFolder` with `asCopy: false`. The system disables the installed Tailscale and ES File Explorer providers for folder selection. The same remote folder test is blocked at that provider boundary. |
-| Windows | The configured Windows host refused SSH on port 22. Live folder playback remains unverified. |
+| Windows | After the host booted, the real media probe played its existing demo folder. First candidate at 40 ms, decoded sample peak 0.4645, state Playing, clock 1.79 seconds, exit code 0. The original library remains untested on Windows: Windows and its Linux file server share one machine through dual boot, so the network source is offline during the Windows run. |
 
 Native and web extension filters differ, so their discovered counts differ.
 Build checks do not replace the device results above.
@@ -40,3 +40,7 @@ Build checks do not replace the device results above.
   without creating or reading audio files.
 - `test/ios/CranampUITests/PickerProviders.swift` drives Add Folder, retains a
   provider screenshot, and requires at least two seconds of playback progress.
+- `test/windows-folder-playback.ps1` runs the desktop probe in the signed-in
+  Windows session through a temporary scheduled task. It opens an existing folder,
+  checks decoded samples and process completion, and removes its task afterward.
+  Use `-Schedule -Executable PATH -Folder PATH -OutputDirectory NEW_PATH` over SSH.
