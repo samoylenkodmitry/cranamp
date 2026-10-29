@@ -6,10 +6,10 @@ fn adding_a_provider_track_does_not_open_or_copy_its_audio() {
     use cranpose_services::{
         Content, ContentError, ContentFuture, ContentMetadata, ContentReaderRef,
     };
-    struct ProviderTrack;
+    struct ProviderTrack(String);
     impl Content for ProviderTrack {
         fn metadata(&self) -> ContentMetadata {
-            let mut metadata = ContentMetadata::named("remote.flac")
+            let mut metadata = ContentMetadata::named(&self.0)
                 .with_identifier("content://test.provider/document/remote.flac");
             metadata.len = Some(5 * 1024 * 1024 * 1024);
             metadata
@@ -21,13 +21,33 @@ fn adding_a_provider_track_does_not_open_or_copy_its_audio() {
             panic!("adding a track must not open its audio");
         }
     }
-    let track = super::track_from_picked_file(std::rc::Rc::new(ProviderTrack))
+    for extension in super::supported_audio_extensions() {
+        let track = super::track_from_picked_file(std::rc::Rc::new(ProviderTrack(format!(
+            "remote.{extension}"
+        ))))
         .expect("keep the provider reference")
         .expect("supported audio");
-    assert_eq!(
-        track.path.as_deref(),
-        Some("content://test.provider/document/remote.flac")
-    );
+        assert_eq!(
+            track.path.as_deref(),
+            Some("content://test.provider/document/remote.flac")
+        );
+    }
+}
+#[test]
+fn a_provider_without_a_media_reference_is_not_copied() {
+    use cranpose_services::{
+        Content, ContentError, ContentFuture, ContentMetadata, ContentReaderRef,
+    };
+    struct ProviderTrack;
+    impl Content for ProviderTrack {
+        fn metadata(&self) -> ContentMetadata {
+            ContentMetadata::named("remote.opus")
+        }
+        fn open(&self) -> ContentFuture<'_, Result<ContentReaderRef, ContentError>> {
+            panic!("a missing media reference must not trigger a file copy");
+        }
+    }
+    assert!(super::track_from_picked_file(std::rc::Rc::new(ProviderTrack)).is_err());
 }
 #[test]
 fn extensions_include_common_winamp_formats() {
