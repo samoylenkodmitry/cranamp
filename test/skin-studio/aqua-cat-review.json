@@ -1,0 +1,42 @@
+{
+  "skin": "Catamp Aqua Mischief",
+  "date": "2026-10-29",
+  "reference": "platform/ios/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+  "authoring": {
+    "method": "Blank Studio project; shared native pen through studio_draw",
+    "recipe": "test/skin-studio/aqua-cat.mjs",
+    "optional_atlas": "seed-optional-atlas.py repackages the existing blank Studio base bitmap as eq_ex.bmp. Studio paints every pixel of the new sheet.",
+    "layers": 9,
+    "existing_skins_modified": false
+  },
+  "artwork": {
+    "main": "Silver tabby wears oversized cyan glasses. Fish swim inside the lenses. The left fish is covered by the analyzer during playback.",
+    "equalizer": "The icon cat steals a fish, with its tongue out and its tail curled beside the preamp gap.",
+    "controls": "Silver Aqua chrome, blue glass transport buttons, pressed states, paw cursors, and matching collapsed windows.",
+    "playlist": "The Fish List, with a Do Not Feed the DJ caption and labelled popup sprites."
+  },
+  "review": {
+    "cranamp_gpu": ["active/released", "active/pressed", "inactive/released", "inactive/pressed", "slider endpoints and middle", "EQ flat, ramp and alternating", "playlist heights 145, 159, 173 and 174", "standalone WSZ reopen"],
+    "webamp": ["2.3.1", "normal windows", "silent fixture playback", "mixed EQ positions and response curve", "400-pixel playlist", "main, EQ and playlist shades"],
+    "editor": ["325- and 400-pixel footer joins", "popup labels and pressed states", "windowshade seek control"],
+    "source_checks": {"identical_playlist_rail_rows": 29, "identical_eq_track_frames": 28},
+    "flat_area_review": [
+      "The EQ paper is continuous around the cat and shared tracks. Its 24x24 flat area is intentional.",
+      "The main shell uses continuous pale silver around the cat silhouette. Its largest 17x17 flat area is intentional.",
+      "The dark sunglass lenses contain the live readouts and fish. The largest flat lens squares are 22x22 and 23x23.",
+      "The 9x9 playlist frame area matches the list palette. The footer readout areas are 9x9 and 10x10."
+    ],
+    "format": {"profile": "classic-winamp-v1", "exportable": true, "warnings": 0, "alpha_pixels": 0},
+    "not_tested": ["Winamp native", "Audacious"],
+    "runtime_differences": ["Playlist fonts", "EQ curve interpolation", "Analyzer animation"],
+    "evidence_directory": "target/aqua-cat-studio",
+    "gpu_deliverable": "assets/skins/Catamp Aqua Mischief.png"
+  },
+  "validation": {
+    "rust_unit_suite": "432 passed; socket shutdown test failed once with macOS EINVAL and passed its isolated rerun",
+    "bundled_skin_unit_tests": "11 passed after final export",
+    "portable_skin_tests": "2 passed after final export",
+    "format_and_state_holder_gate": "passed"
+  },
+  "extra_sprite_reference": "https://unpkg.com/webamp@2.3.1/built/webamp.bundle.min.js"
+}

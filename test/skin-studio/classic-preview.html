@@ -5,6 +5,7 @@
 <script>
 const names=["Catamp Fish Hat.wsz","Catamp Cardboard.wsz","Catamp Cat Scan.wsz","Catamp Catnip.wsz","Catamp Feral Night.wsz","Catamp Freefall.wsz","Catamp Midnight Snack.wsz","Catamp Moon Garden.wsz","Catamp Moonlit.wsz","Catamp Purr Chaos Font Fixed.wsz","Catamp Purr Chaos Polished.wsz","Catamp Purr Chaos.wsz","Catamp Purrmission Atelier.wsz","Catamp Purrmission Pixel Edition.wsz","Catamp Purrmission.wsz","Catamp Salvage.wsz","Catamp Sampler.wsz","Catamp Seance.wsz","Catamp Silverplay.wsz"];
 const picker=document.querySelector('#skin'),status=document.querySelector('#status');
+names.unshift('Catamp Aqua Mischief.wsz');
 for(const name of names)picker.add(new Option(name,name));
 picker.value='Catamp Purr Chaos Font Fixed.wsz';
 const url=name=>'/assets/skins/'+encodeURIComponent(name)+'?review='+Date.now();

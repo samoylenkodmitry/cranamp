@@ -1077,6 +1077,11 @@ const BUNDLED_SKINS: &[BundledSkin] = &[
         label: "Catamp Purr Chaos (Bundled)",
         bytes: include_bytes!("../../assets/skins/Catamp Purr Chaos Font Fixed.wsz"),
     },
+    BundledSkin {
+        id: "aqua-mischief",
+        label: "Catamp Aqua Mischief (Bundled)",
+        bytes: include_bytes!("../../assets/skins/Catamp Aqua Mischief.wsz"),
+    },
 ];
 const BUNDLED_PREFIX: &str = "bundled:";
 fn bundled_skin_entry(path: &str) -> Option<&'static BundledSkin> {
