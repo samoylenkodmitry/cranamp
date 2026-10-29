@@ -1,7 +1,7 @@
 # Audio format support
 
 Playback requires a decoder for the audio inside a file. Native Cranamp uses
-Symphonia 0.6.1 with all bundled codecs and an Opus decoder. Selected files stay
+Symphonia 0.6.1 with all bundled codecs, an Opus decoder and an AC-3/E-AC-3 decoder. Selected files stay
 in their original location. Cranamp does not copy or convert them during import.
 
 | Audio | Native files and direct streams | Browser files and URLs |
@@ -11,12 +11,18 @@ in their original location. Cranamp does not copy or convert them during import.
 | FLAC, Vorbis | Shared decoder | Browser support |
 | PCM, ADPCM in WAV, AIFF/AIFC or CAF | Shared decoder | Browser support |
 | Opus in Ogg or WebM | Shared decoder | Browser support |
-| Audio in MP4 or MKV | Requires a supported audio codec | Browser support |
+| AC-3 in MKV, E-AC-3 in MKV or MP4 | Shared decoder | Browser support |
+| Other audio in MP4 or MKV | Requires a supported audio codec | Browser support |
 
 Native Opus playback uses opus-pure with a pinned portability fix. It decodes
 packets during playback and applies header gain and packet trimming. Standard
 mono, stereo and family-1 surround layouts are accepted. Other channel mappings
 are rejected. Chained streams are not certified.
+
+Native Dolby playback decodes packets in memory. Stereo and 5.1 AC-3 are
+covered by playback fixtures. E-AC-3 supports the primary independent stream;
+dependent surround extensions, adaptive hybrid transforms and enhanced coupling
+remain unsupported. Container duration is used when the audio track has none.
 
 Android references selected documents through their provider URIs. Apple uses
 bookmarks so the decoder retains access to selected files. Seekable sources use
@@ -28,7 +34,12 @@ through a provider that exposes only a forward stream.
 Folder discovery publishes the first audio track immediately and continues in
 batches. It does not open every provider track to discover its duration. Browser
 picks create object URLs for the original files; these references last for the
-page session. Browser playback depends on the browser's codecs. iOS HLS uses
+page session. Add > ADD NETWORK opens a WebDAV folder URL through Cranpose's
+shared content and HTTP APIs. Directory requests fetch metadata; playback reads
+the original media URL in byte ranges. This also provides iOS folder access when
+an installed Files provider disables folder selection. Authenticated servers
+must expose access through their network client, such as Tailscale Taildrive.
+Browser servers must allow WebDAV requests through CORS. Browser playback depends on the browser's codecs. iOS HLS uses
 AVPlayer and does not support the shared equalizer or visualizer.
 
 WMA, Monkey's Audio, WavPack, DSD and tracker modules are outside the native
@@ -36,7 +47,7 @@ decoder set. HE-AAC requires a platform decoder that supports it. Protected file
 are unsupported.
 
 Framework integration tests play generated WAV, AIFF, FLAC, ALAC, MP2 and Opus
-fixtures, plus Opus audio from a WebM video. A provider-pipe test checks that
+fixtures, plus Opus audio from a WebM video and Dolby audio from MKV and MP4. A provider-pipe test checks that
 paused playback does not download the full file. Cranamp tests verify that
 selection keeps the source reference and that a delayed folder scan publishes
 its first track. The Galaxy Tab test uses the real RoundSync folder and checks

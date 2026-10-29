@@ -37,6 +37,92 @@ final class PickerProviders: XCTestCase {
         report(argument: "--open-picker=files", label: "FILES")
     }
 
+    func testTaildriveWebDAVEndpoint() {
+        let completed = expectation(description: "Taildrive directory response")
+        var request = URLRequest(url: URL(string: "http://100.100.100.100:8080/")!)
+        request.httpMethod = "PROPFIND"
+        request.setValue("0", forHTTPHeaderField: "Depth")
+        request.timeoutInterval = 10
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            defer { completed.fulfill() }
+            XCTAssertNil(error)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 207)
+            let preview = String(data: data ?? Data(), encoding: .utf8) ?? "<non-UTF8 response>"
+            print("TAILDRIVE RESPONSE: " + preview.prefix(300))
+        }.resume()
+        wait(for: [completed], timeout: 15)
+    }
+
+    func testNetworkMusicFolder() throws {
+        guard let address = ProcessInfo.processInfo.environment["CRANAMP_TEST_WEBDAV_URL"] else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_WEBDAV_URL to the original music folder URL")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        if ProcessInfo.processInfo.environment["CRANAMP_TEST_ATTACH"] == "1" {
+            app.activate()
+        } else {
+            app.launch()
+        }
+        XCTAssertTrue(app.images.firstMatch.waitForExistence(timeout: 20))
+        let clock = app.images["0:00"].firstMatch
+        XCTAssertTrue(clock.waitForExistence(timeout: 10))
+        let scale = app.frame.width / 275.0
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        origin.withOffset(CGVector(dx: 23 * scale, dy: clock.frame.midY - 9 * scale)).tap()
+        let network = app.images["ADD NETWORK"].firstMatch
+        XCTAssertTrue(network.waitForExistence(timeout: 5), app.debugDescription)
+        network.tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        field.tap()
+        let focusedField = app.textViews["Media URL"].firstMatch
+        XCTAssertTrue(focusedField.waitForExistence(timeout: 5), app.debugDescription)
+        focusedField.typeText(address)
+        let open = app.images["OPEN"].firstMatch
+        XCTAssertTrue(open.exists, app.debugDescription)
+        let started = Date()
+        open.tap()
+        waitForPlayback(app, timeout: 30)
+        print("NETWORK FOLDER observation after \(Date().timeIntervalSince(started)) seconds")
+        print(app.debugDescription)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "network-folder-playing"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    func testNextNetworkTrack() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_WEBDAV_URL"] != nil else {
+            throw XCTSkip("Run after testNetworkMusicFolder with an original music folder URL")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.activate()
+        let title = app.images.firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        let previous = title.label
+        let times = app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}"))
+        let timer = times.element(boundBy: times.count - 1)
+        let scale = app.frame.width / 275.0
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        origin.withOffset(CGVector(dx: 179 * scale, dy: timer.frame.midY)).tap()
+        let changed = NSPredicate { _, _ in app.images.firstMatch.label != previous }
+        expectation(for: changed, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        waitForPlayback(app, timeout: 15)
+        print("NEXT NETWORK TRACK: " + app.images.firstMatch.label)
+    }
+
+    private func waitForPlayback(_ app: XCUIApplication, timeout: TimeInterval) {
+        let advancing = NSPredicate { _, _ in
+            let clocks = app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}"))
+            guard clocks.count > 0 else { return false }
+            let parts = clocks.element(boundBy: clocks.count - 1).label.split(separator: ":").compactMap { Int($0) }
+            return parts.count == 2 && parts[0] * 60 + parts[1] >= 2 && parts[0] * 60 + parts[1] < 30
+        }
+        expectation(for: advancing, evaluatedWith: app)
+        waitForExpectations(timeout: timeout)
+    }
+
     func testRemoteMusicFolder() {
         let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
         app.launch()

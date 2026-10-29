@@ -7,7 +7,8 @@ fn main() {
     let first = args
         .next()
         .expect("path to original audio, or --folder PATH");
-    let folder = first == "--folder";
+    let folder = first == "--folder" || first == "--webdav";
+    let webdav = first == "--webdav";
     let path = if folder {
         args.next().expect("folder path")
     } else {
@@ -17,16 +18,26 @@ fn main() {
         .with_application_id("com.cranamp.playback-probe")
         .with_title("Cranamp playback probe")
         .with_size(360, 120)
-        .run(move || Probe(path.clone(), folder));
+        .run(move || Probe(path.clone(), folder, webdav));
 }
 
 #[composable]
-fn Probe(path: String, folder: bool) {
+fn Probe(path: String, folder: bool, webdav: bool) {
     cranpose::LaunchedEffect((), move |_| {
         cranpose_core::spawn_ui_task(async move {
             let started = std::time::Instant::now();
             let track = if folder {
-                let stream = cranpose_services::folder_files(cranpose_services::file_folder(&path));
+                let selected = if webdav {
+                    cranpose_services::WebDavFolder::new(
+                        &path,
+                        cranpose_services::default_http_client(),
+                    )
+                    .expect("WebDAV URL")
+                    .handle()
+                } else {
+                    cranpose_services::file_folder(&path)
+                };
+                let stream = cranpose_services::folder_files(selected);
                 loop {
                     match stream.next().await {
                         Ok(Some(entry)) => match cranamp::audio::track_from_picked_file(entry) {

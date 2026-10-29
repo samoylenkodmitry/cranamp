@@ -146,7 +146,7 @@ struct WinampState {
     playlist_menu: Option<PlaylistFooterMenu>,
     playlist_search_query: String,
     playlist_search_revision: u64,
-    url_input_visible: bool,
+    url_input_mode: Option<UrlInputMode>,
     url_input_revision: u64,
     pending_document: Option<PendingDocument>,
     pending_pick: Option<PendingPick>,
@@ -195,7 +195,7 @@ impl PartialEq for WinampState {
             && self.playlist_menu == other.playlist_menu
             && self.playlist_search_query == other.playlist_search_query
             && self.playlist_search_revision == other.playlist_search_revision
-            && self.url_input_visible == other.url_input_visible
+            && self.url_input_mode == other.url_input_mode
             && self.url_input_revision == other.url_input_revision
             && self.pending_document == other.pending_document
             && self.pending_pick == other.pending_pick
@@ -255,7 +255,7 @@ impl Default for WinampState {
             playlist_menu: None,
             playlist_search_query: String::new(),
             playlist_search_revision: 0,
-            url_input_visible: false,
+            url_input_mode: None,
             url_input_revision: 0,
             pending_document: None,
             pending_pick: None,
@@ -4820,7 +4820,7 @@ fn PlaylistWindow(
                     scale,
                 );
             }
-            if snapshot.url_input_visible {
+            if snapshot.url_input_mode.is_some() {
                 UrlInputOverlay(
                     palette,
                     state,
@@ -5280,10 +5280,15 @@ fn UrlInputOverlay(
         Color(0.12, 0.20, 0.24, 1.0),
     );
     SystemWinampText(
-        "URL".to_string(),
+        if snapshot.url_input_mode == Some(UrlInputMode::Folder) {
+            "FOLDER URL"
+        } else {
+            "URL"
+        }
+        .to_string(),
         x + 6.0,
         y + 5.0,
-        44.0,
+        width - 80.0,
         WINAMP_SYSTEM_LINE_HEIGHT,
         scale,
         palette.normal,
@@ -5318,7 +5323,8 @@ fn UrlInputOverlay(
         url_field,
         Modifier::empty()
             .size_points(scaled(width - 16.0, scale), scaled(12.0, scale))
-            .absolute_offset(scaled(x + 8.0, scale), scaled(y + 18.0, scale)),
+            .absolute_offset(scaled(x + 8.0, scale), scaled(y + 18.0, scale))
+            .content_description("Media URL"),
         TextStyle::from_span_style(SpanStyle {
             color: Some(Color(0.72, 0.86, 0.94, 1.0)),
             font_size: TextUnit::Sp(10.0),
@@ -5329,13 +5335,17 @@ fn UrlInputOverlay(
         let state_open = state;
         let field = url_field;
         ClickTarget(x + width - 72.0, y, 34.0, 15.0, scale, move || {
-            open_url(state_open, field.text());
+            if state_open.get_non_reactive().url_input_mode == Some(UrlInputMode::Folder) {
+                open_network_folder(state_open, field.text());
+            } else {
+                open_url(state_open, field.text());
+            }
         });
     }
     {
         let state_close = state;
         ClickTarget(x + width - 38.0, y, 38.0, 15.0, scale, move || {
-            state_close.update(|s| s.url_input_visible = false);
+            state_close.update(|s| s.url_input_mode = None);
         });
     }
 }
@@ -5679,6 +5689,10 @@ fn playlist_footer_menu_items(menu: PlaylistFooterMenu) -> Vec<PlaylistMenuItem>
                 label: "ADD FOLDER",
                 action: add_audio_folder,
             },
+            PlaylistMenuItem {
+                label: "ADD NETWORK",
+                action: open_network_folder_prompt,
+            },
         ],
         PlaylistFooterMenu::Remove => vec![
             PlaylistMenuItem {
@@ -5779,7 +5793,8 @@ fn playlist_footer_menu_width(menu: PlaylistFooterMenu) -> f32 {
         PlaylistFooterMenu::Misc => 78.0,
         PlaylistFooterMenu::Remove => 78.0,
         PlaylistFooterMenu::List => 76.0,
-        PlaylistFooterMenu::Select | PlaylistFooterMenu::Add => 72.0,
+        PlaylistFooterMenu::Select => 72.0,
+        PlaylistFooterMenu::Add => 88.0,
     }
 }
 fn playlist_footer_menu_x(menu: PlaylistFooterMenu, window_width: f32, menu_width: f32) -> f32 {
@@ -7730,9 +7745,45 @@ fn import_playlist(state: MutableState<WinampState>) {
         app.status = "Importing Playlist".to_string();
     });
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UrlInputMode {
+    Media,
+    Folder,
+}
+
+fn open_network_folder_prompt(state: MutableState<WinampState>) {
+    state.update(|s| {
+        s.url_input_mode = Some(UrlInputMode::Folder);
+        s.url_input_revision = s.url_input_revision.wrapping_add(1);
+        s.status = "Enter A WebDAV Folder URL".to_string();
+    });
+}
+
+fn open_network_folder(state: MutableState<WinampState>, address: String) {
+    let folder = match cranpose_services::WebDavFolder::new(
+        address.trim(),
+        cranpose_services::default_http_client(),
+    ) {
+        Ok(folder) => folder.handle(),
+        Err(error) => {
+            state.update(|s| s.status = error.to_string());
+            return;
+        }
+    };
+    state.update(|s| {
+        s.url_input_mode = None;
+        s.folder_scan_revision = s.folder_scan_revision.wrapping_add(1);
+        s.folder_autoplay = None;
+        s.pending_pick = None;
+    });
+    cranpose_core::spawn_ui_task(async move {
+        consume_folder_stream(state, cranpose::folder_files(folder), true).await;
+    });
+}
+
 fn open_url_prompt(state: MutableState<WinampState>) {
     state.update(|s| {
-        s.url_input_visible = true;
+        s.url_input_mode = Some(UrlInputMode::Media);
         s.url_input_revision = s.url_input_revision.wrapping_add(1);
         s.status = "Enter A URL".to_string();
     });
@@ -7786,7 +7837,7 @@ fn open_url(state: MutableState<WinampState>, url: String) {
         return;
     }
     state.update(|s| {
-        s.url_input_visible = false;
+        s.url_input_mode = None;
         s.status = "Opening URL".to_string();
     });
     cranpose_core::spawn_ui_task(async move {
