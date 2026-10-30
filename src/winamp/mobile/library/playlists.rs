@@ -30,6 +30,7 @@ pub(super) struct Ui {
     name_session: MutableState<u64>,
     selected: MutableState<BTreeSet<usize>>,
     candidates: MutableState<Rc<Vec<Track>>>,
+    import_requested: MutableState<bool>,
 }
 impl Ui {
     pub(super) fn new() -> Self {
@@ -46,6 +47,7 @@ impl Ui {
             name_session: cranpose_core::mutableStateOf(0),
             selected: cranpose_core::mutableStateOf(BTreeSet::new()),
             candidates: cranpose_core::mutableStateOf(Rc::new(Vec::new())),
+            import_requested: cranpose_core::mutableStateOf(false),
         }
     }
     fn edit<T>(&self, action: impl FnOnce(&mut Collection) -> Result<T, String>) -> Option<T> {
@@ -86,6 +88,34 @@ impl Ui {
 
 #[composable]
 pub(super) fn Effects(player: MutableState<WinampState>, ui: Ui) {
+    let importer = cranpose_services::rememberOpenFileLauncher(
+        "cranamp.import-saved-playlist",
+        move |result| match result {
+            Ok(Some(entry)) => {
+                cranpose_core::spawn_ui_task(async move {
+                    match read_playlist(&entry).await {
+                        Ok(tracks) => {
+                            let name = entry.metadata().name;
+                            let name = name
+                                .rsplit_once('.')
+                                .map_or(name.as_str(), |(stem, _)| stem);
+                            ui.name_playlist(None, Rc::new(tracks));
+                            ui.name.set(name.chars().take(80).collect());
+                        }
+                        Err(error) => ui.message.set(error),
+                    }
+                });
+            }
+            Ok(None) => {}
+            Err(error) => ui.message.set(error.to_string()),
+        },
+    );
+    cranpose_core::LaunchedEffect(ui.import_requested.get(), move |_| {
+        if ui.import_requested.get_non_reactive() {
+            ui.import_requested.set(false);
+            importer.launch(playlist_picker_options());
+        }
+    });
     cranpose_core::LaunchedEffectAsync(ui.load_attempt.get(), move |_| {
         let store = cranpose_services::preferences();
         Box::pin(async move {
@@ -470,6 +500,36 @@ pub(super) fn Screen(player: MutableState<WinampState>, ui: LibraryUi) {
                             if !picker {
                                 LibraryTabs(ui);
                             }
+                            if picker {
+                                if let Some(id) = id {
+                                    SelectionControls(ui, id);
+                                }
+                            } else if id.is_none() && ui.saved.loaded.get() {
+                                Row(
+                                    Modifier::empty().fill_max_width(),
+                                    RowSpec::default()
+                                        .horizontal_arrangement(LinearArrangement::SpaceBetween),
+                                    move || {
+                                        TextButton(
+                                            "Save current playlist as new",
+                                            "Save current playlist".into(),
+                                            GlassButtonSpec::glass(),
+                                            move || {
+                                                ui.saved.name_playlist(
+                                                    None,
+                                                    player.get_non_reactive().playlist,
+                                                );
+                                            },
+                                        );
+                                        TextButton(
+                                            "Import playlist",
+                                            "Import".into(),
+                                            GlassButtonSpec::plain(),
+                                            move || ui.saved.import_requested.set(true),
+                                        );
+                                    },
+                                );
+                            }
                             if let Some(list) = list_header
                                 .clone()
                                 .filter(|list| !compact && !picker && !list.tracks.is_empty())
@@ -784,6 +844,73 @@ fn Overview(player: MutableState<WinampState>, ui: LibraryUi, data: Rc<Collectio
 }
 
 #[composable]
+fn SelectionControls(ui: LibraryUi, id: u64) {
+    let tracks = ui.saved.candidates.get();
+    let data = ui.saved.data.get();
+    let query = ui.query.text();
+    let matching = cranpose_core::rememberKeyed(
+        (tracks.clone(), data.clone(), query.clone(), id),
+        move |_| {
+            let existing: HashSet<&str> = data
+                .get(id)
+                .into_iter()
+                .flat_map(|list| &list.tracks)
+                .map(model::track_key)
+                .collect();
+            let rows = FilterCache::default().project(&tracks, &query);
+            Rc::new(
+                rows.iter()
+                    .copied()
+                    .filter(|&index| !existing.contains(model::track_key(&tracks[index])))
+                    .collect::<BTreeSet<_>>(),
+            )
+        },
+    );
+    let selected = ui.saved.selected.get();
+    let all = !matching.is_empty() && matching.is_subset(&selected);
+    Row(
+        Modifier::empty().fill_max_width(),
+        RowSpec::default()
+            .horizontal_arrangement(LinearArrangement::SpaceBetween)
+            .vertical_alignment(VerticalAlignment::CenterVertically),
+        move || {
+            chrome::Label(
+                format!("{} selected", selected.len()),
+                Modifier::empty(),
+                14.,
+                liquid_colors().secondary_label,
+                false,
+            );
+            let matching = matching.clone();
+            TextButton(
+                if all {
+                    "Deselect all playlist tracks"
+                } else {
+                    "Select all playlist tracks"
+                },
+                if all {
+                    "Deselect all".into()
+                } else if ui.query.text().is_empty() {
+                    "Select all".into()
+                } else {
+                    "Select all results".into()
+                },
+                GlassButtonSpec::plain(),
+                move || {
+                    ui.saved.selected.update(|selected| {
+                        if all {
+                            selected.retain(|index| !matching.contains(index));
+                        } else {
+                            selected.extend(matching.iter().copied());
+                        }
+                    });
+                },
+            );
+        },
+    );
+}
+
+#[composable]
 fn TrackList(
     player: MutableState<WinampState>,
     ui: LibraryUi,
@@ -1039,9 +1166,17 @@ fn DialogContents(player: MutableState<WinampState>, ui: LibraryUi) {
             SheetAction("New playlist", move || {
                 ui.saved.name_playlist(None, Rc::new(Vec::new()))
             });
-            SheetAction("Save current queue", move || {
+            SheetAction("Save current playlist as new", move || {
                 ui.saved
                     .name_playlist(None, player.get_non_reactive().playlist)
+            });
+            SheetAction("Import playlist", move || {
+                ui.saved.dialog.set(Dialog::None);
+                ui.saved.import_requested.set(true);
+            });
+            SheetAction("Export current playlist", move || {
+                ui.saved.dialog.set(Dialog::None);
+                export_playlist(player);
             });
         }
         Dialog::Name { id, tracks } => {
@@ -1113,6 +1248,11 @@ fn DialogContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 SheetAction("Shuffle playlist", move || {
                     ui.saved.dialog.set(Dialog::None);
                     play(player, &shuffled, 0, true);
+                });
+                let exported = list.clone();
+                SheetAction("Export playlist", move || {
+                    ui.saved.dialog.set(Dialog::None);
+                    export_playlist_tracks(player, &exported.tracks);
                 });
             }
             SheetAction("Rename playlist", move || {

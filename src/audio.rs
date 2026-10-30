@@ -175,7 +175,7 @@ const EQUALIZER_MAX_GAIN_DB: f32 = 12.0;
 fn equalizer_value_gain_db(value: f32) -> f32 {
     (value.clamp(0.0, 1.0) - 0.5) * 2.0 * EQUALIZER_MAX_GAIN_DB
 }
-fn media_item(track: &Track) -> Option<MediaItem> {
+pub(crate) fn media_item(track: &Track) -> Option<MediaItem> {
     let path = track.path.as_deref()?;
     let uri = if cfg!(target_arch = "wasm32") || has_uri_scheme(path) {
         path.to_string()
@@ -183,10 +183,9 @@ fn media_item(track: &Track) -> Option<MediaItem> {
         cranpose_services::uri_for_path(std::path::Path::new(path))
     };
     let indexed = crate::library::record(track);
-    let mut metadata =
-        MediaMetadata::titled(indexed.title.as_deref().unwrap_or(track.display_title()))
-            .artist(indexed.artist.unwrap_or_default())
-            .album(indexed.album.unwrap_or_default());
+    let mut metadata = MediaMetadata::titled(crate::library::title(track))
+        .artist(crate::library::artist(track))
+        .album(indexed.album.unwrap_or_default());
     if let Some(duration) = indexed
         .duration
         .or(track.duration_seconds)
@@ -227,6 +226,9 @@ pub fn playing_status(track: &Track) -> String {
 }
 pub fn play_track(track: &Track, settings: PlaybackSettings) -> Result<(), String> {
     let item = media_item(track).ok_or_else(|| "track has no source".to_string())?;
+    play_item(item, settings)
+}
+pub(crate) fn play_item(item: MediaItem, settings: PlaybackSettings) -> Result<(), String> {
     cranpose_services::set_media_volume(settings.volume);
     cranpose_services::set_media_looping(false);
     cranpose_services::open_media(item).map_err(|error| error.to_string())?;

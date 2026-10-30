@@ -178,6 +178,38 @@ final class PickerProviders: XCTestCase {
         print("MOBILE NAVIGATION: " + app.debugDescription)
     }
 
+    func testMediaNotificationArtwork() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_LIBRARY"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_LIBRARY=1 with a populated library")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        let tabs = app.buttons.matching(identifier: "Player")
+        XCTAssertTrue(tabs.firstMatch.waitForExistence(timeout: 20))
+        tabs.element(boundBy: tabs.count - 1).tap()
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["Play"].firstMatch.tap()
+        let player = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        player.name = "media-player"
+        player.lifetime = .keepAlways
+        add(player)
+        XCUIDevice.shared.press(.home)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let start = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.01))
+        let end = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.75))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        // Select Control Center's Now Playing page from its right-hand rail.
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.50)).tap()
+        let visible = springboard.buttons["Pause"].firstMatch
+        _ = visible.waitForExistence(timeout: 5)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "media-control-center"
+        shot.lifetime = .keepAlways
+        add(shot)
+        print("MEDIA CONTROL CENTER: " + springboard.debugDescription)
+        app.activate()
+    }
+
     func testAlbumNavigation() throws {
         guard ProcessInfo.processInfo.environment["CRANAMP_TEST_LIBRARY"] == "1" else { throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_LIBRARY=1") }
         let app = XCUIApplication(bundleIdentifier: Self.appBundleId)

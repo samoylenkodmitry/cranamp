@@ -8,6 +8,125 @@ use std::cell::RefCell;
 use std::rc::Rc;
 static APP_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+struct MetadataPlayer(std::sync::Arc<std::sync::Mutex<cranpose_services::MediaMetadata>>);
+impl cranpose_services::MediaPlayer for MetadataPlayer {
+    fn capabilities(&self) -> cranpose_services::MediaCapabilities {
+        cranpose_services::MediaCapabilities {
+            session: true,
+            ..Default::default()
+        }
+    }
+    fn prepare(
+        &self,
+        _: &cranpose_services::MediaItem,
+    ) -> Result<(), cranpose_services::MediaError> {
+        cranpose_services::publish_playback_state(cranpose_services::PlaybackState::Paused);
+        Ok(())
+    }
+    fn play(&self) -> Result<(), cranpose_services::MediaError> {
+        cranpose_services::publish_playback_state(cranpose_services::PlaybackState::Playing);
+        Ok(())
+    }
+    fn pause(&self) {
+        cranpose_services::publish_playback_state(cranpose_services::PlaybackState::Paused);
+    }
+    fn stop(&self) {}
+    fn set_volume(&self, _: f32) {}
+    fn set_session_metadata(&self, metadata: &cranpose_services::MediaMetadata) {
+        *self.0.lock().unwrap() = metadata.clone();
+    }
+}
+
+#[test]
+fn playing_track_receives_its_folder_album_cover_and_next_track_clears_it() {
+    let press = |shell: &mut AppShell<HitGraphRenderer>, label: &str| {
+        let bounds = mobile_control_bounds(shell, label);
+        shell.set_cursor(bounds.x + bounds.width / 2., bounds.y + bounds.height / 2.);
+        shell.pointer_pressed();
+        pump(shell);
+        shell.pointer_released();
+        pump(shell);
+    };
+    let app = TestApplication::new("media-metadata");
+    let metadata = std::sync::Arc::new(std::sync::Mutex::new(
+        cranpose_services::MediaMetadata::default(),
+    ));
+    cranpose_services::set_platform_media_player(std::sync::Arc::new(MetadataPlayer(
+        metadata.clone(),
+    )));
+    let hex = |text: &str| text.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/audio/tone.wav");
+    let mut saved = "version=1\ncurrent_index=0\n".to_owned();
+    for (album, title) in [
+        ("First album", "01 - Alice - Song"),
+        ("Second album", "02 - Bob - Other"),
+    ] {
+        let folder = app.directory.join(album);
+        std::fs::create_dir(&folder).unwrap();
+        let source = folder.join(format!("{title}.wav"));
+        std::fs::copy(&fixture, &source).unwrap();
+        saved.push_str(&format!(
+            "track={}\t{}\t90\n",
+            hex(title),
+            hex(&source.to_string_lossy())
+        ));
+    }
+    image::RgbaImage::from_pixel(32, 32, image::Rgba([10, 60, 180, 255]))
+        .save(app.directory.join("First album/cover.png"))
+        .unwrap();
+    cranpose_services::preferences()
+        .set("cranamp.player", &saved)
+        .unwrap();
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_buffer_size(393, 780);
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    press(&mut shell, "Play");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while metadata.lock().unwrap().artwork.is_none() && std::time::Instant::now() < deadline {
+        shell.update();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    {
+        let first = metadata.lock().unwrap();
+        assert_eq!(first.title, "Song");
+        assert_eq!(first.artist, "Alice");
+        assert_eq!(first.album, "First album");
+        let cover = first
+            .artwork
+            .as_ref()
+            .expect("late folder artwork reaches the playing session");
+        assert_eq!(
+            image::load_from_memory(&cover.bytes)
+                .unwrap()
+                .to_rgba8()
+                .get_pixel(0, 0)
+                .0,
+            [10, 60, 180, 255]
+        );
+    }
+    press(&mut shell, "Next track");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while metadata.lock().unwrap().title != "Other" && std::time::Instant::now() < deadline {
+        shell.update();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let next = metadata.lock().unwrap().clone();
+    assert_eq!(next.title, "Other");
+    assert_eq!(next.album, "Second album");
+    assert!(
+        next.artwork.is_none(),
+        "an uncovered track must not keep the previous album's art"
+    );
+    cranpose_services::stop_media();
+    cranpose_services::clear_platform_media_player();
+}
+
 struct TestHost(std::path::PathBuf);
 impl cranpose_services::HostController for TestHost {
     fn set_keep_screen_on(&self, _: bool) {}
@@ -53,12 +172,120 @@ impl TestApplication {
 }
 impl Drop for TestApplication {
     fn drop(&mut self) {
+        cranpose_services::clear_platform_file_picker();
         cranpose_services::clear_platform_uri_handler();
         cranpose_services::clear_platform_preferences();
         cranpose_services::clear_host_controller();
         cranpose_services::clear_application_id();
         let _ = std::fs::remove_dir_all(&self.directory);
     }
+}
+
+struct PlaylistPicker {
+    input: std::path::PathBuf,
+    output: std::path::PathBuf,
+}
+impl cranpose_services::FilePicker for PlaylistPicker {
+    fn pick_file(
+        &self,
+        _: cranpose_services::FilePickerOptions,
+    ) -> cranpose_services::PickerFuture<
+        Result<Option<cranpose_services::ContentHandle>, cranpose_services::FilePickerError>,
+    > {
+        let content = cranpose_services::file_content(self.input.clone());
+        Box::pin(async move { Ok(Some(content)) })
+    }
+    fn pick_folder(
+        &self,
+        _: cranpose_services::FilePickerOptions,
+    ) -> cranpose_services::PickerFuture<
+        Result<Option<cranpose_services::ContentFolderRef>, cranpose_services::FilePickerError>,
+    > {
+        Box::pin(async { Ok(None) })
+    }
+    fn save_document(
+        &self,
+        _: cranpose_services::SaveDocumentRequest,
+    ) -> cranpose_services::PickerFuture<
+        Result<Option<cranpose_services::ContentSinkRef>, cranpose_services::FilePickerError>,
+    > {
+        let sink = cranpose_services::FileSink::create(self.output.clone())
+            .unwrap()
+            .handle();
+        Box::pin(async move { Ok(Some(sink)) })
+    }
+}
+
+#[test]
+fn saved_playlist_import_and_export_use_original_track_references_without_replacing_playback() {
+    let app = TestApplication::new("playlist-documents");
+    seed_library(&["Current - Keep this queue"]);
+    let before = cranpose_services::preferences()
+        .get("cranamp.player")
+        .unwrap();
+    let input = app.directory.join("Imported mix.pls");
+    let output = app.directory.join("exported.m3u");
+    std::fs::write(&input, "[playlist]\nFile1=relative song.flac\nTitle1=First song\nLength1=123\nFile2=https://example.test/music/other.mp3\nTitle2=Other song\nLength2=234\nNumberOfEntries=2\nVersion=2\n").unwrap();
+    cranpose_services::set_platform_file_picker(Rc::new(PlaylistPicker {
+        input,
+        output: output.clone(),
+    }));
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_buffer_size(393, 780);
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    wait_for_saved_playlists(&mut shell, |v| {
+        v["available"]
+            .as_array()
+            .is_some_and(|items| items.len() == 1)
+    });
+    click_mobile(&mut shell, "Library");
+    click_mobile(&mut shell, "Library Playlists tab");
+    click_mobile(&mut shell, "Import playlist");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !contains(&visible_texts(&mut shell), "Save playlist")
+        && std::time::Instant::now() < deadline
+    {
+        shell.update();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    click_mobile(&mut shell, "Save playlist");
+    let saved = wait_for_saved_playlists(&mut shell, |v| {
+        v["lists"].as_array().is_some_and(|lists| lists.len() == 1)
+    });
+    assert_eq!(saved["lists"][0]["name"], "Imported mix");
+    assert_eq!(
+        saved["lists"][0]["tracks"][0]["path"],
+        app.directory
+            .join("relative song.flac")
+            .to_string_lossy()
+            .as_ref()
+    );
+    click_mobile(&mut shell, "Saved playlist options");
+    click_mobile(&mut shell, "Export playlist");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !output.exists() && std::time::Instant::now() < deadline {
+        shell.update();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let exported = std::fs::read_to_string(output).unwrap();
+    assert!(exported.starts_with("#EXTM3U"));
+    assert!(exported.contains("#EXTINF:123,First song"));
+    assert!(exported.contains("https://example.test/music/other.mp3"));
+    let after = cranpose_services::preferences()
+        .get("cranamp.player")
+        .unwrap();
+    let queue = |text: &str| {
+        text.lines()
+            .filter(|line| line.starts_with("track="))
+            .map(|line| line.split('\t').take(2).collect::<Vec<_>>().join("\t"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(queue(&before), queue(&after));
 }
 
 struct UnavailableLinkHandler(Rc<RefCell<Vec<String>>>);
@@ -909,6 +1136,10 @@ fn saved_playlists_create_pick_reorder_rename_play_and_survive_restart() {
     enter_mobile_text(&mut shell, "Playlist name", "Night Drive");
     click_mobile(&mut shell, "Save playlist");
     click_mobile(&mut shell, "Add tracks to playlist");
+    click_mobile(&mut shell, "Select all playlist tracks");
+    assert!(contains(&visible_texts(&mut shell), "3 selected"));
+    click_mobile(&mut shell, "Deselect all playlist tracks");
+    assert!(contains(&visible_texts(&mut shell), "0 selected"));
     click_mobile(&mut shell, "Choose track 1: Sunrise");
     click_mobile(&mut shell, "Choose track 3: River");
     click_mobile(&mut shell, "Add selected tracks");
@@ -1000,6 +1231,19 @@ fn saved_playlists_create_pick_reorder_rename_play_and_survive_restart() {
         v["lists"].as_array().is_some_and(|a| a.len() == 1)
     });
     assert_eq!(saved["lists"][0]["name"], "After Dark");
+    click_mobile(&mut shell, "Library Tracks tab");
+    click_mobile(&mut shell, "Library Playlists tab");
+    click_mobile(&mut shell, "Save current playlist as new");
+    enter_mobile_text(&mut shell, "Playlist name", "Current playback");
+    click_mobile(&mut shell, "Save playlist");
+    let saved = wait_for_saved_playlists(&mut shell, |v| {
+        v["lists"].as_array().is_some_and(|lists| lists.len() == 2)
+    });
+    assert_eq!(saved["lists"][1]["name"], "Current playback");
+    assert_eq!(
+        saved["lists"][1]["tracks"], saved["lists"][0]["tracks"],
+        "Save current playlist includes the complete playing queue in its current order"
+    );
     click_mobile(&mut shell, "Library Tracks tab");
     click_mobile(&mut shell, "Select");
     click_mobile(&mut shell, "Select results");

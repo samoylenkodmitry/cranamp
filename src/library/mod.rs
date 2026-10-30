@@ -1,7 +1,6 @@
 //! A local metadata index. Audio stays at its original URI; only thumbnails are cached.
 use crate::audio::Track;
 use coroflow::MutableStateFlow;
-#[cfg(not(target_arch = "wasm32"))]
 use coroflow::StateFlow;
 use cranpose_services::{ContentHandle, ContentMetadata};
 use serde::{Deserialize, Serialize};
@@ -165,7 +164,6 @@ pub(crate) fn begin_scan() {
 pub(crate) fn indexing() -> bool {
     runtime().borrow().running
 }
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn revision() -> StateFlow<u64> {
     runtime().borrow().revision.as_state_flow()
 }
@@ -200,13 +198,11 @@ pub(crate) fn record(track: &Track) -> Record {
     }
     result
 }
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn title(track: &Track) -> String {
     record(track)
         .title
         .unwrap_or_else(|| filename_title(&track.title))
 }
-#[cfg(not(target_arch = "wasm32"))]
 fn filename_title(name: &str) -> String {
     let original = name;
     let name =
@@ -221,7 +217,6 @@ fn filename_title(name: &str) -> String {
         title.to_owned()
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn artist(track: &Track) -> String {
     let meta = record(track);
     meta.artist
@@ -876,18 +871,14 @@ fn prune_thumbnails(root: &std::path::Path, index: &Index) {
         }
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn artwork(key: String) -> Option<cranpose_ui::ImageBitmap> {
+pub(crate) async fn encoded_artwork(key: String) -> Option<cranpose_services::MediaArtwork> {
     let rt = runtime();
-    if let Some((_, image)) = rt.borrow().images.iter().find(|(id, _)| *id == key) {
-        return Some(image.clone());
-    }
     if !valid_key(&key) {
         return None;
     }
     let root = rt.borrow().root.clone();
     let read_key = key.clone();
-    let image = background(move || {
+    background(move || {
         #[cfg(not(target_arch = "wasm32"))]
         let bytes = {
             use std::io::Read;
@@ -907,7 +898,31 @@ pub(crate) async fn artwork(key: String) -> Option<cranpose_ui::ImageBitmap> {
                 .decode(cranpose_services::preferences().get(&format!("cranamp.thumb.{read_key}"))?)
                 .ok()?
         };
-        let rgba = crate::content_io::decode_image(&bytes).ok()?;
+        Some(cranpose_services::MediaArtwork::new(bytes, "image/png"))
+    })
+    .await
+    .flatten()
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) fn artwork_uri(key: &str) -> Option<String> {
+    if !valid_key(key) {
+        return None;
+    }
+    let root = runtime().borrow().root.clone()?;
+    let path = root.join(format!("{key}.png"));
+    Some(cranpose_services::uri_for_path(&path))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn artwork(key: String) -> Option<cranpose_ui::ImageBitmap> {
+    let rt = runtime();
+    if let Some((_, image)) = rt.borrow().images.iter().find(|(id, _)| *id == key) {
+        return Some(image.clone());
+    }
+    let encoded = encoded_artwork(key.clone()).await?;
+    let image = background(move || {
+        let rgba = crate::content_io::decode_image(&encoded.bytes).ok()?;
         cranpose_ui::ImageBitmap::from_rgba8(rgba.width(), rgba.height(), rgba.into_raw()).ok()
     })
     .await

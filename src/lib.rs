@@ -8,6 +8,8 @@ mod content_io;
 mod fonts;
 mod library;
 mod sync;
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+mod system_media;
 pub mod winamp;
 use cranpose::AppLauncher;
 cranpose::app_capabilities!();
@@ -28,6 +30,8 @@ fn launcher() -> AppLauncher<cranpose::AppFonts> {
 }
 fn desktop_launcher() -> AppLauncher<cranpose::AppFonts> {
     let launcher = launcher();
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    let launcher = launcher.with_desktop_integration(system_media::Session::default());
     match app_icon::window_icon() {
         Ok(icon) => launcher.with_window_icon(icon),
         Err(error) => {

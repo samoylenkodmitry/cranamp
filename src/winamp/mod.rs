@@ -8,6 +8,7 @@ pub mod cursors;
 mod eq_graph;
 mod inline_windows;
 mod keys;
+mod media_metadata;
 #[cfg(not(target_arch = "wasm32"))]
 mod mobile;
 #[cfg(not(target_arch = "wasm32"))]
@@ -1280,6 +1281,7 @@ fn WinampRuntimeEffects(
     CranposePickerEffect(state);
     IncomingContentEffect(state);
     LibraryIndexEffect(state);
+    media_metadata::MetadataEffect(state);
     LaunchArgPickEffect(state);
     SkinPickerEffect(state, skin_state);
     WebSurfaceSizeEffect(state);
@@ -1313,10 +1315,7 @@ fn DocumentPickerEffect(state: MutableState<WinampState>) {
     cranpose_core::LaunchedEffect(pending.clone(), move |_scope| match pending {
         None => {}
         Some(PendingDocument::ImportPlaylist) => {
-            let options = cranpose::FilePickerOptions::default()
-                .with_title("Import playlist")
-                .with_filter(cranpose::FileFilter::new("Playlist", &["m3u", "m3u8"]));
-            import_playlist.launch(options);
+            import_playlist.launch(playlist_picker_options());
         }
         Some(PendingDocument::ExportPlaylist(_)) => {
             let request = cranpose::SaveDocumentRequest::new("playlist.m3u", "audio/x-mpegurl");
@@ -1331,15 +1330,8 @@ fn receive_playlist_import(
     match result {
         Ok(Some(entry)) => {
             cranpose_core::spawn_ui_task(async move {
-                let source = entry.metadata().identifier;
-                match crate::content_io::read_content(&entry, 1024 * 1024).await {
-                    Ok(bytes) => match String::from_utf8(bytes) {
-                        Ok(text) => apply_imported_playlist(state, &text, &source),
-                        Err(error) => state.update(|app| {
-                            app.pending_document = None;
-                            app.status = format!("Playlist is not UTF-8: {error}");
-                        }),
-                    },
+                match read_playlist(&entry).await {
+                    Ok(tracks) => apply_playlist_tracks(state, tracks),
                     Err(error) => state.update(|app| {
                         app.pending_document = None;
                         app.status = error.to_string();
@@ -1443,7 +1435,10 @@ fn receive_incoming_tracks(state: MutableState<WinampState>, tracks: Vec<Track>)
     }
 }
 fn playlist_source_directory(source: &str) -> Option<std::path::PathBuf> {
-    let path = std::path::Path::new(source);
+    let decoded = cranpose_services::path_from_uri(source);
+    let path = decoded
+        .as_deref()
+        .unwrap_or_else(|| std::path::Path::new(source));
     if !path.is_absolute() {
         return None;
     }
@@ -1451,14 +1446,45 @@ fn playlist_source_directory(source: &str) -> Option<std::path::PathBuf> {
         .filter(|parent| parent.is_dir())
         .map(std::path::Path::to_path_buf)
 }
-fn apply_imported_playlist(state: MutableState<WinampState>, text: &str, source: &str) {
+fn playlist_picker_options() -> cranpose::FilePickerOptions {
+    cranpose::FilePickerOptions::default()
+        .with_title("Import playlist")
+        .with_filter(cranpose::FileFilter::new(
+            "Playlist",
+            &["m3u", "m3u8", "pls"],
+        ))
+}
+async fn read_playlist(entry: &cranpose::ContentHandle) -> Result<Vec<Track>, String> {
+    let info = entry.metadata();
+    let bytes = crate::content_io::read_content(entry, 1024 * 1024)
+        .await
+        .map_err(|error| error.to_string())?;
+    let text =
+        String::from_utf8(bytes).map_err(|error| format!("Playlist is not UTF-8: {error}"))?;
+    let extension = info
+        .name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let format = playlist_format_for_extension(&extension).unwrap_or(PlaylistFormat::M3u);
+    let tracks = imported_tracks(&text, &info.identifier, format);
+    if tracks.is_empty() {
+        return Err("No playlist tracks".into());
+    }
+    Ok(tracks)
+}
+fn imported_tracks(text: &str, source: &str, format: PlaylistFormat) -> Vec<Track> {
     let base_directory = playlist_source_directory(source);
-    let tracks = parse_m3u_playlist(
+    parse_playlist(
         text,
+        format,
         base_directory
             .as_deref()
             .map_or(PlaylistBase::None, PlaylistBase::Directory),
-    );
+    )
+}
+fn apply_playlist_tracks(state: MutableState<WinampState>, tracks: Vec<Track>) {
     if tracks.is_empty() {
         state.update(|app| {
             app.pending_document = None;
@@ -8156,11 +8182,14 @@ fn describe_http_error(error: cranpose_services::HttpError) -> String {
 }
 fn export_playlist(state: MutableState<WinampState>) {
     let snapshot = state.get_non_reactive();
-    if snapshot.playlist.is_empty() {
+    export_playlist_tracks(state, snapshot.playlist.as_slice());
+}
+fn export_playlist_tracks(state: MutableState<WinampState>, tracks: &[Track]) {
+    if tracks.is_empty() {
         state.update(|s| s.status = "Playlist Empty".to_string());
         return;
     }
-    let text = format_m3u_playlist(snapshot.playlist.as_slice());
+    let text = format_m3u_playlist(tracks);
     state.update(|app| {
         app.pending_document = Some(PendingDocument::ExportPlaylist(text));
         app.status = "Exporting Playlist".to_string();
@@ -8836,9 +8865,14 @@ fn start_track_inner(state: MutableState<WinampState>, index: usize) {
             equalizer_enabled: snapshot.eq_enabled,
             equalizer_values: snapshot.eq_values,
         };
-        let track_for_play = track.clone();
+        // The library index belongs to the UI thread. Carry its metadata into
+        // the worker that opens the original audio source.
+        let item = audio::media_item(&track);
         launch_blocking(
-            move || audio::play_track(&track_for_play, settings),
+            move || {
+                item.ok_or_else(|| "track has no source".to_string())
+                    .and_then(|item| audio::play_item(item, settings))
+            },
             move |result| {
                 finish_track_start(state, index, &track, result.and_then(|played| played))
             },
