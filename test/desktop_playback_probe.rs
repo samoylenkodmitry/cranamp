@@ -40,27 +40,31 @@ fn Probe(path: String, folder: bool, webdav: bool) {
                 let stream = cranpose_services::folder_files(selected);
                 loop {
                     match stream.next().await {
-                        Ok(Some(entry)) => match cranamp::audio::track_from_picked_file(entry) {
-                            Ok(Some(track)) => {
-                                println!(
-                                    "Candidate after {:?}; complete tree not enumerated",
-                                    started.elapsed()
-                                );
-                                let played = cranpose_core::withBlocking(move || probe(track))
-                                    .await
-                                    .expect("probe worker");
-                                match played {
-                                    Ok(()) => {
-                                        println!("PLAYBACK PROBE: passed");
-                                        cranpose_services::request_exit();
-                                        return;
+                        Ok(Some(entry)) => {
+                            match cranamp::audio::track_from_picked_file(entry).await {
+                                Ok(Some(track)) => {
+                                    println!(
+                                        "Candidate after {:?}; complete tree not enumerated",
+                                        started.elapsed()
+                                    );
+                                    let played = cranpose_core::withBlocking(move || probe(track))
+                                        .await
+                                        .expect("probe worker");
+                                    match played {
+                                        Ok(()) => {
+                                            println!("PLAYBACK PROBE: passed");
+                                            cranpose_services::request_exit();
+                                            return;
+                                        }
+                                        Err(error) => {
+                                            println!("Skipped unplayable candidate: {error}")
+                                        }
                                     }
-                                    Err(error) => println!("Skipped unplayable candidate: {error}"),
                                 }
+                                Ok(None) => continue,
+                                Err(error) => panic!("folder entry: {error}"),
                             }
-                            Ok(None) => continue,
-                            Err(error) => panic!("folder entry: {error}"),
-                        },
+                        }
                         Ok(None) => panic!("folder has no supported audio"),
                         Err(error) => panic!("folder scan: {error}"),
                     }
@@ -71,6 +75,7 @@ fn Probe(path: String, folder: bool, webdav: bool) {
                         .content()
                         .expect("cannot resolve incoming file");
                 cranamp::audio::track_from_picked_file(content)
+                    .await
                     .expect("content reference")
                     .expect("supported name")
             };

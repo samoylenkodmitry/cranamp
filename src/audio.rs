@@ -136,12 +136,12 @@ fn demo_music_directory_has_tracks(directory: &std::path::Path) -> bool {
         .iter()
         .any(|track| directory.join(track.file_name).is_file())
 }
-pub fn tracks_from_picked_entry(
+pub async fn tracks_from_picked_entry(
     entry: cranpose_services::ContentHandle,
 ) -> Result<Vec<Track>, String> {
-    Ok(track_from_picked_file(entry)?.into_iter().collect())
+    Ok(track_from_picked_file(entry).await?.into_iter().collect())
 }
-pub fn track_from_picked_file(
+pub async fn track_from_picked_file(
     entry: cranpose_services::ContentHandle,
 ) -> Result<Option<Track>, String> {
     if !is_audio_name(&entry.metadata().name) {
@@ -155,7 +155,8 @@ pub fn track_from_picked_file(
         .unwrap_or(&name)
         .to_string();
     let location = entry
-        .media_uri()
+        .media_uri_async()
+        .await
         .map_err(|error| format!("Cannot open {name}: {error}"))?;
     Ok(Some(track_from_title_path(title, location)))
 }

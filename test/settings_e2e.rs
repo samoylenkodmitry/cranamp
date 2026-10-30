@@ -565,7 +565,7 @@ fn picked_audio_keeps_the_original_file_without_an_import_copy() {
             .join("test/fixtures/audio")
             .join(name);
         let content = cranpose_services::file_content(&source);
-        let track = cranamp::audio::track_from_picked_file(content)
+        let track = futures_lite::future::block_on(cranamp::audio::track_from_picked_file(content))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -582,7 +582,10 @@ fn picked_audio_keeps_the_original_file_without_an_import_copy() {
         "selecting audio must not create an import cache"
     );
     let virtual_file = cranpose_services::BytesContent::named("memory.opus", vec![0; 128]).handle();
-    assert!(cranamp::audio::track_from_picked_file(virtual_file).is_err());
+    assert!(
+        futures_lite::future::block_on(cranamp::audio::track_from_picked_file(virtual_file))
+            .is_err()
+    );
     assert!(!directory.exists());
 }
 

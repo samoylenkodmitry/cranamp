@@ -1408,7 +1408,7 @@ fn IncomingContentEffect(state: MutableState<WinampState>) {
             return;
         };
         cranpose_core::spawn_ui_task(async move {
-            let tracks = match audio::tracks_from_picked_entry(content) {
+            let tracks = match audio::tracks_from_picked_entry(content).await {
                 Ok(tracks) => tracks,
                 Err(error) => {
                     state.update(|s| s.status = error);
@@ -1579,10 +1579,10 @@ fn receive_files(
                 let mut tracks = Vec::new();
                 let mut failure = None;
                 for entry in entries {
-                    match audio::tracks_from_picked_entry(entry.clone()) {
+                    match audio::tracks_from_picked_entry(entry.clone()).await {
                         Ok(added) => {
                             for track in &added {
-                                crate::library::observe(entry.clone(), Some(track));
+                                crate::library::observe(entry.clone(), Some(track)).await;
                             }
                             tracks.extend(added);
                         }
@@ -1663,16 +1663,19 @@ async fn consume_folder_stream(
             Ok(Some(entry)) => {
                 seen += 1;
                 let name = entry.metadata().name;
-                match audio::track_from_picked_file(entry.clone()) {
+                match audio::track_from_picked_file(entry.clone()).await {
                     Ok(Some(track)) => {
-                        crate::library::observe(entry, Some(&track));
+                        crate::library::observe(entry, Some(&track)).await;
                         batch.push(track);
                     }
                     Ok(None) => {
-                        crate::library::observe(entry, None);
+                        crate::library::observe(entry, None).await;
                         log::info!(target: "cranamp::picker", "skipped non-audio entry: {name:?}")
                     }
                     Err(error) => failure = Some(error),
+                }
+                if state.get_non_reactive().folder_scan_revision != revision {
+                    return;
                 }
                 if !started
                     || matches!(

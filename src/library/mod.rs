@@ -306,18 +306,19 @@ fn image_rank(name: &str) -> Option<(u8, String)> {
 }
 
 /// Called from folder discovery before dropping provider handles. Never reads audio here.
-pub(crate) fn observe(entry: ContentHandle, track: Option<&Track>) {
+pub(crate) async fn observe(entry: ContentHandle, track: Option<&Track>) {
     let metadata = entry.metadata();
     let image = image_rank(&metadata.name).is_some();
     if track.is_none() && !image {
         return;
     }
-    let uri = match track
-        .and_then(|track| track.path.clone())
-        .or_else(|| entry.media_uri().ok())
-    {
-        Some(uri) => uri,
-        None => return,
+    let uri = if let Some(uri) = track.and_then(|track| track.path.clone()) {
+        uri
+    } else {
+        match entry.media_uri_async().await {
+            Ok(uri) => uri,
+            Err(_) => return,
+        }
     };
     let identifier = if metadata.identifier.contains('/') || metadata.identifier.contains('\\') {
         &metadata.identifier
@@ -629,7 +630,7 @@ async fn discover_network_covers(uri: &str) {
         for entry in entries {
             if let cranpose_services::ContentEntry::File(content) = entry {
                 if image_rank(&content.metadata().name).is_some() {
-                    observe(content, None);
+                    observe(content, None).await;
                 }
             }
         }

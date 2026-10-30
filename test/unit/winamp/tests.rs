@@ -128,12 +128,7 @@ use super::*;
 #[test]
 fn a_folder_publishes_its_first_track_before_the_next_entry_arrives() {
     use cranpose_services::{ContentError, ContentFuture, ContentHandle, ContentStream};
-    use std::{
-        cell::Cell,
-        future::Future,
-        rc::Rc,
-        task::{Context, Poll, Waker},
-    };
+    use std::{cell::Cell, rc::Rc, task::Poll};
     struct DelayedFolder {
         first: Cell<bool>,
         path: std::path::PathBuf,
@@ -162,7 +157,7 @@ fn a_folder_publishes_its_first_track_before_the_next_entry_arrives() {
     });
     let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, false));
     assert!(matches!(
-        scan.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+        poll_folder_until(scan.as_mut(), || state.get().playlist.len() == 1),
         Poll::Pending
     ));
     let snapshot = state.get();
@@ -210,6 +205,74 @@ fn poll_folder_scan(
 ) -> std::task::Poll<()> {
     future.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
 }
+fn poll_folder_until(
+    mut future: std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
+    ready: impl Fn() -> bool,
+) -> std::task::Poll<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let polled = poll_folder_scan(future.as_mut());
+        if polled.is_ready() || ready() {
+            return polled;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "folder scan did not progress"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn cancelling_a_folder_during_a_slow_access_grant_does_not_publish_old_tracks() {
+    use cranpose_services::{
+        Content, ContentError, ContentFuture, ContentMetadata, ContentReaderRef,
+    };
+    struct SlowReference(Rc<Cell<bool>>);
+    impl Content for SlowReference {
+        fn metadata(&self) -> ContentMetadata {
+            ContentMetadata::named("slow.flac")
+        }
+        fn media_uri(&self) -> Result<String, ContentError> {
+            panic!("must use async reference")
+        }
+        fn media_uri_async(&self) -> ContentFuture<'_, Result<String, ContentError>> {
+            Box::pin(std::future::poll_fn(move |_| {
+                if self.0.get() {
+                    std::task::Poll::Ready(Ok("content://slow.flac".into()))
+                } else {
+                    std::task::Poll::Pending
+                }
+            }))
+        }
+        fn open(&self) -> ContentFuture<'_, Result<ContentReaderRef, ContentError>> {
+            panic!("adding a track does not open its audio")
+        }
+    }
+    let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
+        cranpose_core::DefaultScheduler,
+    ));
+    let state =
+        cranpose_core::OwnedMutableState::with_runtime(WinampState::default(), runtime.handle());
+    let ready = Rc::new(Cell::new(false));
+    let stream = Rc::new(TestFolderStream {
+        entries: RefCell::new(
+            [Ok(Some(
+                Rc::new(SlowReference(ready.clone())) as cranpose_services::ContentHandle
+            ))]
+            .into(),
+        ),
+    });
+    let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, false));
+    assert!(poll_folder_scan(scan.as_mut()).is_pending());
+    assert!(state.get().playlist.is_empty());
+    state
+        .handle()
+        .update(|state| state.folder_scan_revision += 1);
+    ready.set(true);
+    assert!(poll_folder_scan(scan.as_mut()).is_ready());
+    assert!(state.get().playlist.is_empty());
+}
 #[test]
 fn adding_a_folder_to_a_stopped_playlist_starts_the_first_new_track() {
     let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
@@ -218,16 +281,18 @@ fn adding_a_folder_to_a_stopped_playlist_starts_the_first_new_track() {
     let mut initial = WinampState::default();
     replace_playlist_tracks(
         &mut initial,
-        vec![audio::track_from_picked_file(folder_test_entry())
-            .unwrap()
-            .unwrap()],
+        vec![
+            futures_lite::future::block_on(audio::track_from_picked_file(folder_test_entry()))
+                .unwrap()
+                .unwrap(),
+        ],
     );
     let state = cranpose_core::OwnedMutableState::with_runtime(initial, runtime.handle());
     let stream = Rc::new(TestFolderStream {
         entries: std::cell::RefCell::new([Ok(Some(folder_test_entry()))].into()),
     });
     let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, true));
-    assert!(poll_folder_scan(scan.as_mut()).is_pending());
+    assert!(poll_folder_until(scan.as_mut(), || state.get().playlist.len() == 2).is_pending());
     assert_eq!(state.get().playlist.len(), 2);
     assert_eq!(
         state.get().current_index,
@@ -244,9 +309,11 @@ fn a_folder_does_not_interrupt_playback_or_restart_after_stop() {
         let mut initial = WinampState::default();
         replace_playlist_tracks(
             &mut initial,
-            vec![audio::track_from_picked_file(folder_test_entry())
-                .unwrap()
-                .unwrap()],
+            vec![futures_lite::future::block_on(
+                audio::track_from_picked_file(folder_test_entry()),
+            )
+            .unwrap()
+            .unwrap()],
         );
         initial.playback = playback;
         let state = cranpose_core::OwnedMutableState::with_runtime(initial, runtime.handle());
@@ -261,12 +328,12 @@ fn a_folder_does_not_interrupt_playback_or_restart_after_stop() {
             ),
         });
         let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, true));
-        assert!(poll_folder_scan(scan.as_mut()).is_pending());
+        assert!(poll_folder_until(scan.as_mut(), || state.get().playlist.len() == 2).is_pending());
         assert_eq!(state.get().current_index, Some(0));
         state
             .handle()
             .update(|s| s.playback = PlaybackState::Stopped);
-        assert!(poll_folder_scan(scan.as_mut()).is_ready());
+        assert!(poll_folder_until(scan.as_mut(), || false).is_ready());
         assert_eq!(state.get().playlist.len(), 3);
         assert_eq!(
             state.get().current_index,
@@ -314,7 +381,7 @@ fn choosing_another_folder_discards_the_previous_scans_later_entries() {
         ),
     });
     let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, true));
-    assert!(poll_folder_scan(scan.as_mut()).is_pending());
+    assert!(poll_folder_until(scan.as_mut(), || state.get().playlist.len() == 1).is_pending());
     request_pick(state.handle(), true, false);
     assert!(poll_folder_scan(scan.as_mut()).is_ready());
     assert_eq!(state.get().playlist.len(), 1);
@@ -336,7 +403,7 @@ fn folder_playback_skips_a_failed_codec_before_the_next_batch_arrives() {
         ),
     });
     let mut scan = std::pin::pin!(consume_folder_stream(state.handle(), stream, false));
-    assert!(poll_folder_scan(scan.as_mut()).is_pending());
+    assert!(poll_folder_until(scan.as_mut(), || state.get().playlist.len() == 1).is_pending());
     let rejected = state.get().playlist[0].clone();
     finish_track_start(
         state.handle(),
@@ -344,7 +411,7 @@ fn folder_playback_skips_a_failed_codec_before_the_next_batch_arrives() {
         &rejected,
         Err("unsupported audio codec".into()),
     );
-    assert!(poll_folder_scan(scan.as_mut()).is_pending());
+    assert!(poll_folder_until(scan.as_mut(), || state.get().playlist.len() == 2).is_pending());
     assert_eq!(state.get().playlist.len(), 2);
     assert_eq!(
         state.get().current_index,
