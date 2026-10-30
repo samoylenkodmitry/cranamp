@@ -209,6 +209,7 @@ embed-resource = "3.0.11"
 
 # Pin the Android window and stylus fixes until the next framework release.
 [patch.crates-io]
+winit-x11 = { path = "vendor/winit-x11" }
 coroflow = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6bbc06b30898c8afa04e39fb12d155b7ee23142" }
 cranpose = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6bbc06b30898c8afa04e39fb12d155b7ee23142" }
 cranpose-animation = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "f6bbc06b30898c8afa04e39fb12d155b7ee23142" }
