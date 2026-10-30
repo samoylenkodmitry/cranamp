@@ -694,7 +694,7 @@ fn Overview(player: MutableState<WinampState>, ui: LibraryUi, data: Rc<Collectio
         return;
     }
     let colors = liquid_colors();
-    cranpose_ui::LazyColumn(
+    scroll::List(
         Modifier::empty()
             .fill_max_size()
             .content_description("Saved playlists"),
@@ -705,6 +705,8 @@ fn Overview(player: MutableState<WinampState>, ui: LibraryUi, data: Rc<Collectio
             bottom: chrome::bottom_inset(&player.get()) + 20.,
             ..Default::default()
         }),
+        lists.len(),
+        88.,
         move |scope| {
             let lists = lists.clone();
             let keys = lists.clone();
@@ -841,7 +843,7 @@ fn TrackList(
             .map(|track| model::track_key(track).into())
             .collect(),
     );
-    cranpose_ui::LazyColumn(
+    scroll::List(
         Modifier::empty()
             .fill_max_size()
             .content_description(if picker {
@@ -856,6 +858,8 @@ fn TrackList(
             bottom: chrome::bottom_inset(&player.get()) + 20.,
             ..Default::default()
         }),
+        rows.len(),
+        72.,
         move |scope| {
             let rows = rows.clone();
             let tracks = tracks.clone();
@@ -1012,23 +1016,15 @@ pub(super) fn Sheet(player: MutableState<WinampState>, ui: LibraryUi) {
             ui.saved.dialog.set(Dialog::None);
         },
         move || {
-            let scroll = cranpose_ui::rememberScrollState!(0.);
-            Column(
-                Modifier::empty()
-                    .fill_max_width()
-                    .vertical_scroll(scroll, false)
-                    .padding_each(20., 8., 20., 32.),
-                ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(10.)),
-                move || {
-                    DialogContents(player, ui);
-                    Status(ui.saved);
-                    chrome::Divider();
-                    SmallAction("Cancel", GlassButtonSpec::plain(), move || {
-                        focus.clear_focus();
-                        ui.saved.dialog.set(Dialog::None);
-                    });
-                },
-            );
+            scroll::SheetColumn(move || {
+                DialogContents(player, ui);
+                Status(ui.saved);
+                chrome::Divider();
+                SmallAction("Cancel", GlassButtonSpec::plain(), move || {
+                    focus.clear_focus();
+                    ui.saved.dialog.set(Dialog::None);
+                });
+            });
         },
     );
 }

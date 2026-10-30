@@ -324,6 +324,20 @@ final class PickerProviders: XCTestCase {
         XCTAssertTrue(app.buttons["Clear search"].waitForExistence(timeout: 10))
         app.buttons["Clear search"].tap()
         let tracks = app.descendants(matching: .any).matching(identifier: "Library tracks").firstMatch
+        let scrollbar = app.descendants(matching: .any).matching(identifier: "Library scrollbar").firstMatch
+        if scrollbar.waitForExistence(timeout: 5) {
+            let rows = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play track "))
+            let before = rows.allElementsBoundByIndex.map { $0.label }
+            let top = scrollbar.coordinate(withNormalizedOffset: CGVector(dx: 0.82, dy: 0.03))
+            let bottom = scrollbar.coordinate(withNormalizedOffset: CGVector(dx: 0.82, dy: 0.97))
+            top.press(forDuration: 0.1, thenDragTo: bottom)
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                rows.allElementsBoundByIndex.map { $0.label } != before
+            }, object: scrollbar)
+            XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
+            capture("library-scrollbar-end")
+            bottom.press(forDuration: 0.1, thenDragTo: top)
+        }
         if tracks.exists {
             let query = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Play track "))
             let before = query.allElementsBoundByIndex.map { $0.label }

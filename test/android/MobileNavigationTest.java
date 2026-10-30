@@ -237,6 +237,19 @@ public final class MobileNavigationTest {
             click("Library");
             waitFor("Clear search");
             click("Clear search");
+            AccessibilityNodeInfo scrollbar = find(ui.getRootInActiveWindow(), "Library scrollbar");
+            if (scrollbar != null) {
+                assertNotNull(scrollbar.getRangeInfo());
+                Bundle position = new Bundle();
+                position.putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 1.0f);
+                assertTrue(scrollbar.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.getId(), position));
+                SystemClock.sleep(700);
+                assertTrue(waitFor("Library scrollbar").getRangeInfo().getCurrent() > 0.99f);
+                capture("library-scrollbar-end");
+                position.putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 0.0f);
+                assertTrue(waitFor("Library scrollbar").performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.getId(), position));
+                SystemClock.sleep(500);
+            }
             click("Player");
             waitFor("Play");
         }

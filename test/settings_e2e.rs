@@ -606,6 +606,200 @@ fn enter_mobile_text(shell: &mut AppShell<HitGraphRenderer>, label: &str, value:
     pump(shell);
 }
 
+fn library_scrollbar(shell: &mut AppShell<HitGraphRenderer>) -> Option<cranpose_ui::SemanticsNode> {
+    fn find(node: &cranpose_ui::SemanticsNode) -> Option<cranpose_ui::SemanticsNode> {
+        if node.hidden {
+            return None;
+        }
+        if node.description.as_deref() == Some("Library scrollbar") && node.enabled {
+            return Some(node.clone());
+        }
+        node.children.iter().rev().find_map(find)
+    }
+    shell.set_semantics_enabled(true);
+    find(shell.semantics_tree().unwrap().root())
+}
+
+fn seek_library(shell: &mut AppShell<HitGraphRenderer>, progress: f32) {
+    let bar = library_scrollbar(shell).expect("scrollbar for a long list");
+    shell.debug_enter_app_context(|| {
+        assert!(bar.details().set_progress.clone().unwrap().invoke(progress))
+    });
+    pump(shell);
+}
+
+#[test]
+fn library_scrollbars_jump_swipe_filter_and_fit_every_list() {
+    let app = TestApplication::new("library-scrollbars");
+    let hex = |text: &str| text.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+    let mut saved = "version=1\ncurrent_index=0\n".to_owned();
+    let tracks: Vec<_> = (0..1000)
+        .map(|i| {
+            let title = if i == 0 {
+                "Unique Needle".into()
+            } else {
+                format!("Song {i:04}")
+            };
+            let path = app
+                .directory
+                .join(format!("Album {:02}/{title}.wav", i / 25));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::hard_link(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("test/fixtures/audio/tone.wav"),
+                &path,
+            )
+            .unwrap();
+            saved.push_str(&format!(
+                "track={}\t{}\t90\n",
+                hex(&title),
+                hex(&path.to_string_lossy())
+            ));
+            serde_json::json!({"title": title, "path": path, "duration_seconds": 90.})
+        })
+        .collect();
+    let lists: Vec<_> = (1..=60)
+        .map(|i| serde_json::json!({"id":i,"name":format!("List {i:02}"),"tracks":if i == 1 { &tracks[..] } else { &tracks[..1] }}))
+        .collect();
+    let preferences = cranpose_services::preferences();
+    preferences.set("cranamp.player", &saved).unwrap();
+    preferences
+        .set(
+            "cranamp.playlists.v1",
+            &serde_json::json!({"version":1,"next_id":61,"lists":lists,"available":tracks})
+                .to_string(),
+        )
+        .unwrap();
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_buffer_size(393, 852);
+    shell.set_viewport(393., 852.);
+    pump(&mut shell);
+    click_mobile(&mut shell, "Library");
+    let bar = library_scrollbar(&mut shell)
+        .unwrap_or_else(|| panic!("Missing bar: {:?}", visible_texts(&mut shell)));
+    assert_eq!(bar.bounds.width, 44.);
+    assert!(bar.bounds.x > 340.);
+    assert!(bar.bounds.y + bar.bounds.height <= 852. - 152.);
+    let options = mobile_control_bounds(&mut shell, "Track 1 options");
+    assert!(
+        options.x + options.width <= bar.bounds.x + 0.5,
+        "row buttons overlap scrollbar: {options:?} / {:?}",
+        bar.bounds
+    );
+    // Drag the bar, then return through its accessibility action.
+    shell.set_cursor(bar.bounds.x + 36., bar.bounds.y + 12.);
+    shell.pointer_pressed();
+    for step in 1..=8 {
+        shell.set_cursor(
+            bar.bounds.x + 36.,
+            bar.bounds.y + 12. + step as f32 * (bar.bounds.height - 28.) / 8.,
+        );
+        pump(&mut shell);
+    }
+    shell.pointer_released();
+    pump(&mut shell);
+    assert!(
+        library_scrollbar(&mut shell)
+            .unwrap()
+            .details()
+            .progress
+            .unwrap()
+            .current
+            > 0.8
+    );
+    seek_library(&mut shell, 1.);
+    mobile_control_bounds(&mut shell, "Play track 1000: Song 0999");
+    seek_library(&mut shell, 0.);
+    mobile_control_bounds(&mut shell, "Play track 1: Unique Needle");
+    // A normal content swipe must also move the thumb.
+    shell.set_cursor(180., 520.);
+    shell.pointer_pressed();
+    for y in [480., 440., 400., 360., 320.] {
+        shell.set_cursor(180., y);
+        pump(&mut shell);
+    }
+    shell.pointer_released();
+    pump(&mut shell);
+    assert!(
+        library_scrollbar(&mut shell)
+            .unwrap()
+            .details()
+            .progress
+            .unwrap()
+            .current
+            > 0.
+    );
+    seek_library(&mut shell, 0.);
+    enter_mobile_text(&mut shell, "Search your playlist", "Unique Needle");
+    click_mobile(&mut shell, "Finish search");
+    assert!(
+        library_scrollbar(&mut shell).is_none(),
+        "Filtered list: {:?}; bar: {:?}",
+        visible_texts(&mut shell),
+        library_scrollbar(&mut shell).map(|n| n.bounds)
+    );
+    click_mobile(&mut shell, "Clear search");
+    assert!(library_scrollbar(&mut shell).is_some());
+    click_mobile(&mut shell, "Library Albums tab");
+    seek_library(&mut shell, 1.);
+    mobile_control_bounds(&mut shell, "Open album Album 39");
+    click_mobile(&mut shell, "Open album Album 39");
+    seek_library(&mut shell, 1.);
+    mobile_control_bounds(&mut shell, "Play track 1000: Song 0999");
+    click_mobile(&mut shell, "Library Playlists tab");
+    wait_for_saved_playlists(&mut shell, |v| {
+        v["lists"].as_array().is_some_and(|v| v.len() == 60)
+    });
+    seek_library(&mut shell, 1.);
+    mobile_control_bounds(&mut shell, "Open playlist List 01");
+    click_mobile(&mut shell, "Open playlist List 01");
+    seek_library(&mut shell, 1.);
+    mobile_control_bounds(&mut shell, "Saved track 1000 options");
+    click_mobile(&mut shell, "Add tracks to playlist");
+    seek_library(&mut shell, 1.);
+    assert!(contains(&visible_texts(&mut shell), "Song 0999"));
+    for (width, height) in [(320., 568.), (844., 390.), (768., 1024.)] {
+        shell.set_viewport(width, height);
+        pump(&mut shell);
+        let bounds = library_scrollbar(&mut shell).unwrap().bounds;
+        assert!(bounds.width >= 44. && bounds.height > 0.);
+        assert!(bounds.x >= 0. && bounds.x + bounds.width <= width);
+        assert!(
+            bounds.y + bounds.height <= height - 152.,
+            "bar under dock: {bounds:?}"
+        );
+        seek_library(&mut shell, 0.);
+        seek_library(&mut shell, 1.);
+    }
+    shell.set_viewport(393., 852.);
+    pump(&mut shell);
+    click_mobile(&mut shell, "Cancel adding tracks");
+    click_mobile(&mut shell, "Library Tracks tab");
+    seek_library(&mut shell, 0.);
+    click_mobile(&mut shell, "Track 1 options");
+    click_mobile(&mut shell, "Add to saved playlist");
+    // This sheet contains 60 destinations and must scroll independently.
+    seek_library(&mut shell, 1.);
+    assert!(contains(&visible_texts(&mut shell), "List 01"));
+    let bar = library_scrollbar(&mut shell).unwrap();
+    assert!(bar.details().progress.unwrap().current > 0.99);
+    click_mobile(&mut shell, "Cancel");
+    // Scrolling must not select or replace the user's playing queue.
+    let current = preferences.get("cranamp.player").unwrap();
+    assert!(current.contains("current_index=0"));
+    assert_eq!(
+        current
+            .lines()
+            .filter(|line| line.starts_with("track="))
+            .count(),
+        1000
+    );
+}
+
 #[test]
 fn saved_playlists_create_pick_reorder_rename_play_and_survive_restart() {
     let app = TestApplication::new("saved-playlists");

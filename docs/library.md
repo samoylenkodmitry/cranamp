@@ -8,6 +8,8 @@ A valid embedded picture takes priority over folder artwork. Front-cover picture
 
 The Albums tab opens each album's tracks in disc and track order. Search includes embedded metadata and inferred album names. Indexing never rewrites the player's playlist titles or source locations.
 
+Long Library lists have a scrollbar on the right. Dragging its thumb jumps through tracks, albums or saved playlists while rows remain lazy. The thumb follows normal swipe scrolling and supports accessibility progress actions. Its touch area is 44 points wide and stays clear of row actions and the player dock. Short lists hide the scrollbar. Long playlist chooser sheets have their own scrollbar.
+
 Native editions store `index.json` and SHA-256-addressed PNG thumbnails under the application's `cache/library-v1` directory. Identical pictures share one thumbnail. Thumbnail dimensions fit within 320 by 320 pixels without stretching. Encoded source pictures are limited to 8 MiB and decoded pictures to 4096 pixels per side and 64 MiB. The metadata reader has a 12 MiB read budget per audio file. HTTP reads use validated 64 KiB ranges with an eight-second timeout per request. Metadata parsing does not decode audio packets.
 
 Known file size and modification time invalidate cached records. Sources without a modification time are rechecked in the background when reopened. The index appears immediately after startup. Restored local and WebDAV playlists also check their containing folders for cover images. Corrupt caches are ignored. Missing thumbnails are rebuilt from the original source. Orphan thumbnails are removed after indexing; the native thumbnail cache is limited to 256 MiB. The index is limited to 100,000 records and 32 MiB. Cache eviction does not remove music.

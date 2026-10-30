@@ -3,6 +3,7 @@ use super::*;
 
 use super::chrome::{self, MUSIC};
 mod playlists;
+mod scroll;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Sheet {
@@ -619,7 +620,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                     } else {
                                         let rows = rows_list.clone();
                                         let snapshot = snapshot_list.clone();
-                                        cranpose_ui::LazyColumn(
+                                        scroll::List(
                                             Modifier::empty()
                                                 .fill_max_size()
                                                 .content_description("Library tracks"),
@@ -637,6 +638,8 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                     ..Default::default()
                                                 },
                                             ),
+                                            rows.len(),
+                                            60.5,
                                             move |scope| {
                                                 let rows = rows.clone();
                                                 let keys = rows.clone();
@@ -970,27 +973,19 @@ fn LibrarySheet(player: MutableState<WinampState>, ui: LibraryUi) {
         sheet,
         move || ui.sheet.set(Sheet::None),
         move || {
-            let scroll = cranpose_ui::rememberScrollState!(0.0);
-            Column(
-                Modifier::empty()
-                    .fill_max_width()
-                    .vertical_scroll(scroll, false)
-                    .padding_each(20.0, 8.0, 20.0, 32.0),
-                ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(10.0)),
-                move || {
-                    SheetContents(player, ui);
-                    chrome::Divider();
-                    GlassButton(
-                        Modifier::empty()
-                            .fill_max_width()
-                            .height(48.)
-                            .content_description("Cancel"),
-                        GlassButtonSpec::plain(),
-                        move || ui.sheet.set(Sheet::None),
-                        || GlassButtonLabel("Cancel".into(), GlassButtonSpec::plain()),
-                    );
-                },
-            );
+            scroll::SheetColumn(move || {
+                SheetContents(player, ui);
+                chrome::Divider();
+                GlassButton(
+                    Modifier::empty()
+                        .fill_max_width()
+                        .height(48.)
+                        .content_description("Cancel"),
+                    GlassButtonSpec::plain(),
+                    move || ui.sheet.set(Sheet::None),
+                    || GlassButtonLabel("Cancel".into(), GlassButtonSpec::plain()),
+                );
+            });
         },
     );
 }
@@ -1371,7 +1366,7 @@ fn AlbumList(
 ) {
     let colors = liquid_colors();
     let snapshot = player.get();
-    cranpose_ui::LazyColumn(
+    scroll::List(
         Modifier::empty()
             .fill_max_size()
             .content_description("Library albums"),
@@ -1382,6 +1377,8 @@ fn AlbumList(
             bottom: chrome::bottom_inset(&snapshot) + 16.,
             ..Default::default()
         }),
+        albums.len(),
+        86.,
         move |scope| {
             let albums = albums.clone();
             let snapshot = snapshot.clone();
