@@ -859,6 +859,7 @@ dependencies = [
  "getrandom 0.3.4",
  "getrandom 0.4.3",
  "image",
+ "jni",
  "log",
  "rfd",
  "serde",

@@ -258,6 +258,45 @@ final class PickerProviders: XCTestCase {
         app.buttons["Library Tracks tab"].tap()
     }
 
+    func testAppearanceThemes() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        func tab(_ title: String) {
+            let tabs = app.buttons.matching(identifier: title)
+            XCTAssertTrue(tabs.firstMatch.waitForExistence(timeout: 20))
+            tabs.element(boundBy: tabs.count - 1).tap()
+        }
+        func capture(_ name: String) {
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = name
+            image.lifetime = .keepAlways
+            add(image)
+        }
+        tab("Settings")
+        app.buttons["Theme"].tap()
+        let choices = ["Day", "Night", "Auto", "From skin background"]
+        let original = choices.first { app.buttons["Use \($0) theme"].isSelected } ?? "Auto"
+        for title in choices {
+            let option = app.buttons["Use \(title) theme"]
+            XCTAssertTrue(option.waitForExistence(timeout: 5))
+            option.tap()
+            XCTAssertTrue(option.isSelected)
+            capture("theme-" + title)
+        }
+        app.buttons["Back to Settings"].tap()
+        capture("theme-skin-settings")
+        tab("Library")
+        capture("theme-skin-library")
+        tab("Skin Studio")
+        capture("theme-skin-studio")
+        tab("Settings")
+        app.buttons["Theme"].tap()
+        app.buttons["Use \(original) theme"].tap()
+        app.buttons["Back to Settings"].tap()
+        tab("Player")
+    }
+
     func testMobileLibrary() throws {
         guard ProcessInfo.processInfo.environment["CRANAMP_TEST_LIBRARY"] == "1" else {
             throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_LIBRARY=1")

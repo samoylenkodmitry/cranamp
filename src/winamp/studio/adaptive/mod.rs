@@ -392,11 +392,14 @@ pub(super) fn MountedSkinStudio(
         },
     );
     let hosted = host.is_some();
+    #[cfg(not(target_arch = "wasm32"))]
+    let mobile_palette = crate::winamp::mobile::theme::colors;
+    #[cfg(target_arch = "wasm32")]
+    let mobile_palette = cranpose::liquid::liquid_colors;
     cranpose_core::CompositionLocalProvider(
         vec![
             controls::hint_context().provides(Some(ui.hints)),
-            design::palette_local()
-                .provides((bottom_inset > 0.0).then(cranpose::liquid::liquid_colors)),
+            design::palette_local().provides((bottom_inset > 0.0).then(mobile_palette)),
         ],
         move || {
             BoxWithConstraints(

@@ -606,6 +606,74 @@ fn enter_mobile_text(shell: &mut AppShell<HitGraphRenderer>, label: &str, value:
     pump(shell);
 }
 
+fn theme_selected(shell: &mut AppShell<HitGraphRenderer>, label: &str) -> bool {
+    fn find(node: &cranpose_ui::SemanticsNode, label: &str) -> bool {
+        !node.hidden
+            && ((node.description.as_deref() == Some(label) && node.selected == Some(true))
+                || node.children.iter().any(|child| find(child, label)))
+    }
+    shell.set_semantics_enabled(true);
+    find(shell.semantics_tree().unwrap().root(), label)
+}
+
+#[test]
+fn mobile_theme_choice_is_saved_and_restored_after_rapid_changes() {
+    let _application = TestApplication::new("theme-choice");
+    let preferences = cranpose_services::preferences();
+    preferences
+        .set("cranamp.appearance.v1", "unknown-future-mode")
+        .unwrap();
+    let launch = || {
+        let mut shell = AppShell::new(
+            HitGraphRenderer::default(),
+            location_key(file!(), line!(), column!()),
+            cranamp::winamp::WinampMobileApp,
+        );
+        shell.set_viewport(393., 852.);
+        pump(&mut shell);
+        click_mobile(&mut shell, "Settings");
+        click_mobile(&mut shell, "Theme");
+        shell
+    };
+    let mut shell = launch();
+    assert!(theme_selected(&mut shell, "Use Auto theme"));
+    for label in [
+        "Day",
+        "Night",
+        "Auto",
+        "From skin background",
+        "Day",
+        "Night",
+    ] {
+        click_mobile(&mut shell, &format!("Use {label} theme"));
+        assert!(theme_selected(&mut shell, &format!("Use {label} theme")));
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    while preferences.get("cranamp.appearance.v1").as_deref() != Some("night") {
+        assert!(std::time::Instant::now() < deadline, "Theme was not saved");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        shell.update();
+        pump(&mut shell);
+    }
+    drop(shell);
+    let mut shell = launch();
+    while !theme_selected(&mut shell, "Use Night theme") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Theme was not restored"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        shell.update();
+        pump(&mut shell);
+    }
+    click_mobile(&mut shell, "Back to Settings");
+    assert!(contains(&visible_texts(&mut shell), "Night"));
+    click_mobile(&mut shell, "Library");
+    click_mobile(&mut shell, "Settings");
+    click_mobile(&mut shell, "Theme");
+    assert!(theme_selected(&mut shell, "Use Night theme"));
+}
+
 fn library_scrollbar(shell: &mut AppShell<HitGraphRenderer>) -> Option<cranpose_ui::SemanticsNode> {
     fn find(node: &cranpose_ui::SemanticsNode) -> Option<cranpose_ui::SemanticsNode> {
         if node.hidden {

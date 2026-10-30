@@ -189,6 +189,46 @@ public final class MobileNavigationTest {
         }
     }
 
+    @Test public void appearanceThemes() throws Exception {
+        try (ActivityScenario<CranposeActivity> scenario = ActivityScenario.launch(CranposeActivity.class)) {
+            click("Settings");
+            click("Theme");
+            String[] choices = {"Day", "Night", "Auto", "From skin background"};
+            String original = "Auto";
+            for (String title : choices) if (waitFor("Use " + title + " theme").isSelected()) original = title;
+            for (String title : choices) {
+                click("Use " + title + " theme");
+                assertTrue(waitFor("Use " + title + " theme").isSelected());
+                if ("Day".equals(title) || "Night".equals(title)) {
+                    scenario.onActivity(activity -> {
+                        int flag;
+                        int appearance;
+                        if (android.os.Build.VERSION.SDK_INT >= 30) {
+                            flag = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
+                            appearance = activity.getWindow().getInsetsController().getSystemBarsAppearance();
+                        } else {
+                            flag = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                            appearance = activity.getWindow().getDecorView().getSystemUiVisibility();
+                        }
+                        assertEquals("Status bar contrast for " + title, "Day".equals(title), (appearance & flag) != 0);
+                    });
+                }
+                capture("theme-" + title);
+            }
+            click("Back to Settings");
+            capture("theme-skin-settings");
+            click("Library");
+            capture("theme-skin-library");
+            click("Skin Studio");
+            capture("theme-skin-studio");
+            click("Settings");
+            click("Theme");
+            click("Use " + original + " theme");
+            click("Back to Settings");
+            click("Player");
+        }
+    }
+
     @Test public void librarySearchSheetsAndSelection() throws Exception {
         try (ActivityScenario<CranposeActivity> scenario = ActivityScenario.launch(CranposeActivity.class)) {
             click("Library");

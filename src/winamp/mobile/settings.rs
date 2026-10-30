@@ -4,6 +4,7 @@ use super::*;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     Main,
+    Theme,
     Skins,
     Playback,
     Sync,
@@ -74,7 +75,11 @@ fn load_previews() -> Vec<SkinPreview> {
 }
 
 #[composable]
-pub(super) fn SettingsScreen(player: MutableState<WinampState>, skin: WinampSkinState) {
+pub(super) fn SettingsScreen(
+    player: MutableState<WinampState>,
+    skin: WinampSkinState,
+    appearance: theme::Ui,
+) {
     let page = cranpose_core::rememberMutableStateOf(|| Page::Main);
     let legal = cranpose_core::rememberMutableStateOf(about::Page::default);
     let error = cranpose_core::rememberMutableStateOf(String::new);
@@ -127,6 +132,7 @@ pub(super) fn SettingsScreen(player: MutableState<WinampState>, skin: WinampSkin
                 if page.get() != Page::Main {
                     let title = match page.get() {
                         Page::Skins => "Skins",
+                        Page::Theme => "Theme",
                         Page::Playback => "Playback",
                         Page::Sync => "Folder sync",
                         Page::Main => "Settings",
@@ -215,10 +221,15 @@ pub(super) fn SettingsScreen(player: MutableState<WinampState>, skin: WinampSkin
                         );
                         SkinGrid(player, skin, previews.get(), query.text(), width - 32.);
                     }
+                    Page::Theme => ThemeChoices(appearance),
                     Page::Playback => PlaybackSettings(player),
                     Page::Sync => MobileSyncSettings(player),
                     Page::Main => {
                         chrome::Section("Appearance", move || {
+                            NavigationRow("Theme", appearance.mode.get().label(), move || {
+                                page.set(Page::Theme)
+                            });
+                            chrome::Divider();
                             let current = player.get().skin_path;
                             let selected = previews.get().into_iter().find(|preview| {
                                 current
@@ -362,6 +373,88 @@ pub(super) fn SettingsScreen(player: MutableState<WinampState>, skin: WinampSkin
             },
         );
     });
+}
+
+#[composable]
+fn ThemeChoices(appearance: theme::Ui) {
+    let colors = liquid_colors();
+    Text(
+        "Choose the appearance of the interface around your player.",
+        Modifier::empty().fill_max_width(),
+        settings_text_style(15., colors.secondary_label),
+    );
+    Column(
+        Modifier::empty().fill_max_width(),
+        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(10.)),
+        move || {
+            for mode in theme::Mode::ALL {
+                let selected = appearance.mode.get() == mode;
+                GlassButton(
+                    Modifier::empty()
+                        .fill_max_width()
+                        .height(80.)
+                        .content_description(format!("Use {} theme", mode.label()))
+                        .semantics(move |config| config.selected = Some(selected)),
+                    GlassButtonSpec::glass(),
+                    move || appearance.choose(mode),
+                    move || {
+                        Row(
+                            Modifier::empty()
+                                .fill_max_size()
+                                .padding_symmetric(16., 10.),
+                            RowSpec::default()
+                                .vertical_alignment(VerticalAlignment::CenterVertically),
+                            move || {
+                                Column(
+                                    Modifier::empty().weight(1.),
+                                    ColumnSpec::default()
+                                        .vertical_arrangement(LinearArrangement::SpacedBy(5.)),
+                                    move || {
+                                        Label(
+                                            mode.label(),
+                                            Modifier::empty().fill_max_width(),
+                                            16.,
+                                            colors.label,
+                                            selected,
+                                        );
+                                        Text(
+                                            mode.description(),
+                                            Modifier::empty().fill_max_width(),
+                                            settings_text_style(12., colors.secondary_label),
+                                        );
+                                    },
+                                );
+                                Box(
+                                    Modifier::empty().size_points(32., 44.),
+                                    BoxSpec::default().content_alignment(Alignment::CENTER),
+                                    move || {
+                                        if selected {
+                                            icons::Icon(icons::CHECK, None, 22., colors.accent);
+                                        }
+                                    },
+                                );
+                            },
+                        );
+                    },
+                );
+            }
+        },
+    );
+    if !appearance.error.get().is_empty() {
+        Text(
+            appearance.error.get(),
+            Modifier::empty().fill_max_width(),
+            settings_text_style(14., colors.destructive),
+        );
+        GlassButton(
+            Modifier::empty()
+                .height(48.)
+                .content_description("Retry saving theme"),
+            GlassButtonSpec::glass(),
+            move || appearance.choose(appearance.mode.get_non_reactive()),
+            || GlassButtonLabel("Retry".into(), GlassButtonSpec::glass()),
+        );
+    }
 }
 
 #[composable]

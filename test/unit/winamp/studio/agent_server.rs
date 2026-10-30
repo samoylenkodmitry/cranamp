@@ -72,6 +72,9 @@ fn commands_require_the_session_secret_before_dispatch() {
 fn stopping_disconnects_a_client_stalled_in_http_headers() {
     let (server, address) = server();
     let mut client = TcpStream::connect(address).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
     client.write_all(b"POST /mcp HTTP/1.1\r\n").unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while server.connection.lock().unwrap().is_none() {
@@ -82,9 +85,6 @@ fn stopping_disconnects_a_client_stalled_in_http_headers() {
     drop(server);
     assert!(before.elapsed() < Duration::from_secs(1));
     let mut byte = [0];
-    client
-        .set_read_timeout(Some(Duration::from_secs(1)))
-        .unwrap();
     assert!(matches!(client.read(&mut byte), Ok(0) | Err(_)));
     assert!(TcpListener::bind(address).is_ok());
 }

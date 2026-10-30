@@ -1,5 +1,7 @@
 #![deny(unsafe_code)]
 #![recursion_limit = "256"]
+#[cfg(target_os = "android")]
+mod android_appearance;
 mod app_icon;
 pub mod audio;
 mod content_io;

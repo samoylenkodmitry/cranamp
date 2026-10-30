@@ -5,6 +5,8 @@ mod chrome;
 mod library;
 mod reflection;
 mod settings;
+pub(super) mod theme;
+use theme::colors as liquid_colors;
 
 const NAV_HEIGHT: f32 = 86.0;
 const PLAY_ICON: &str = "M8 5v14l11-7z";
@@ -205,13 +207,14 @@ pub fn WinampMobileApp() {
     let tabs = remember_winamp_tab_state();
     let skin = remember_winamp_skin(tabs.player);
     WinampRuntimeEffects(tabs.player, tabs.peer_windows, skin);
-    LiquidTheme(LiquidThemeSpec::default(), move || {
-        MobileShell(tabs.player, skin)
+    let appearance = theme::remember_theme();
+    theme::Theme(appearance, skin, move || {
+        MobileShell(tabs.player, skin, appearance)
     });
 }
 
 #[composable]
-fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
+fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appearance: theme::Ui) {
     let library = library::remember_library_ui();
     library::PlaylistEffects(player, library);
     let focus = cranpose_ui::local_focus_manager().current();
@@ -231,6 +234,10 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
     } else {
         colors.background
     };
+    #[cfg(target_os = "android")]
+    cranpose_core::LaunchedEffect(background, move |_| {
+        crate::android_appearance::set_dark_system_bar_icons(!theme::prefers_dark(background));
+    });
     BoxWithConstraints(
         Modifier::empty()
             .fill_max_size()
@@ -257,7 +264,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
                     WinampStudioSurfaceWithInset(player, skin, NAV_HEIGHT);
                     match destination {
                         Destination::Studio => {}
-                        Destination::Settings => MobileSettings(player, skin),
+                        Destination::Settings => MobileSettings(player, skin, appearance),
                         Destination::Library => library::LibraryScreen(player, library),
                         Destination::Player => match skin.get() {
                             Ok(artwork) => MobilePlayer(artwork, player, skin),
@@ -325,8 +332,8 @@ fn MobilePlayer(artwork: WinampSkin, player: MutableState<WinampState>, skin: Wi
 }
 
 #[composable]
-fn MobileSettings(player: MutableState<WinampState>, skin: WinampSkinState) {
-    settings::SettingsScreen(player, skin);
+fn MobileSettings(player: MutableState<WinampState>, skin: WinampSkinState, appearance: theme::Ui) {
+    settings::SettingsScreen(player, skin, appearance);
 }
 
 #[composable]
