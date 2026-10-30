@@ -3,11 +3,6 @@ use super::*;
 use cranpose_ui_graphics::{RuntimeShader, RUNTIME_SHADER_PRELUDE_WGSL};
 
 use super::super::navigation::{PLAYER_GAP, REFLECTION_GAP, SIDE_MARGIN, TOP_MARGIN};
-// The plane widens toward the viewer and shears to the left. At its contact
-// edge it has exactly the player's width and position.
-const SPREAD: f32 = 0.24;
-const SKEW: f32 = -0.18;
-
 pub(super) fn player_layout(width: f32, height: f32, state: &WinampState) -> StackedLayout {
     let visible = state.navigation.visible();
     let side = if visible { SIDE_MARGIN } else { 0. };
@@ -87,10 +82,8 @@ fn shader(area: ReflectionBounds, background: Color) -> RuntimeShader {
     shader.set_float(3, area.depth);
     shader.set_float4(4, background.0, background.1, background.2, 1.);
     shader.set_float(8, area.source_width);
-    shader.set_float(9, SPREAD);
-    shader.set_float(10, SKEW);
-    shader.set_float(11, area.source_left);
-    shader.set_float(12, REFLECTION_GAP);
+    shader.set_float(9, area.source_left);
+    shader.set_float(10, REFLECTION_GAP);
     shader
 }
 

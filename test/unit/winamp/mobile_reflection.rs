@@ -92,18 +92,19 @@ fn reflection_captures_the_lower_third_even_when_the_floor_is_shallow() {
 }
 
 #[test]
-fn centered_player_reflection_can_extend_left_of_the_skin() {
+fn centered_player_reflection_has_room_to_expand_on_both_sides() {
     let state = WinampState {
         navigation: Navigation::Mobile(true),
         ..WinampState::default()
     };
-    let layout = player_layout(844., 390., &state);
-    let area = bounds(player_bounds(&state, layout), 844., 424., 3.);
-    assert!(area.source_left > 0.);
-    let near_left = area.source_left + area.source_width * (SKEW - SPREAD / 2.);
-    let near_right = area.source_left + area.source_width * (1. + SKEW + SPREAD / 2.);
-    assert!(near_left < area.source_left);
-    assert!(near_right < area.source_left + area.source_width);
+    for (width, height) in [(393., 780.), (844., 390.), (1024., 1366.)] {
+        let layout = player_layout(width, height, &state);
+        let area = bounds(player_bounds(&state, layout), width, height + 34., 3.);
+        let right_margin = area.width - area.source_left - area.source_width;
+        assert!(area.source_left >= 24. && right_margin >= 24. - 0.34);
+        assert!((area.source_left - right_margin).abs() <= 0.34);
+        assert_eq!(area.width, width);
+    }
 }
 
 #[test]

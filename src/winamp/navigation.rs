@@ -2,8 +2,8 @@ use super::*;
 
 pub(super) const HEIGHT: f32 = 86.;
 pub(super) const TOP_INSET: f32 = 10.;
-pub(super) const SIDE_MARGIN: f32 = 12.;
-pub(super) const TOP_MARGIN: f32 = 8.;
+pub(super) const SIDE_MARGIN: f32 = 24.;
+pub(super) const TOP_MARGIN: f32 = 16.;
 pub(super) const PLAYER_GAP: f32 = 6.;
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) const REFLECTION_GAP: f32 = 4.;

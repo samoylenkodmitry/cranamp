@@ -10,25 +10,24 @@ fn effect_fs(input: VertexOutput) -> @location(0) vec4<f32> {
     if distance < 0.0 {
         return textureSampleLevel(input_texture, input_sampler, input.uv, 0.0);
     }
-    let gap = u[3].x;
+    let gap = u[2].z;
     if distance < gap {
         return vec4<f32>(u[1].rgb, 1.0);
     }
     let floor_distance = distance - gap;
     let t = clamp(floor_distance / max(depth - gap, 0.001), 0.0, 1.0);
     let source_width = u[2].x;
-    let spread = u[2].y;
-    let skew = u[2].z;
-    let source_left = u[2].w;
-    // Invert the floor's projective transform. The entire lower third is
-    // mirrored into the plane, with a shared contact edge and a wider near edge.
-    let width_scale = 1.0 + spread * t;
-    let mirrored_x = (local.x - source_left - source_width * (0.5 + skew * t)) / width_scale
-        + source_width * 0.5;
+    let source_left = u[2].y;
+    // Widen from the player's bottom edge to both viewport corners. The
+    // centered player stays centered throughout the mirrored floor projection.
+    let plane_left = mix(source_left, 0.0, t);
+    let plane_width = mix(source_width, size.x, t);
+    let width_scale = plane_width / source_width;
+    let mirrored_x = (local.x - plane_left) / width_scale;
     if mirrored_x < 0.0 || mirrored_x > source_width {
         return vec4<f32>(u[1].rgb, 1.0);
     }
-    let source_fraction = t * (1.0 + spread) / width_scale;
+    let source_fraction = t * size.x / plane_width;
     let mirrored_y = source_height * (1.0 - source_fraction);
     let sample_px = effect.xy + vec2<f32>(source_left + mirrored_x, mirrored_y) * effect.zw / size;
     let safe_px = clamp(sample_px, effect.xy + 0.5, effect.xy + effect.zw - 0.5);
