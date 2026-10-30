@@ -6,7 +6,7 @@ pub(super) const SIDE_MARGIN: f32 = 24.;
 pub(super) const TOP_MARGIN: f32 = 16.;
 pub(super) const PLAYER_GAP: f32 = SIDE_MARGIN * 1.5;
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) const REFLECTION_GAP: f32 = 4.;
+pub(super) const REFLECTION_GAP: f32 = 8.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Navigation {

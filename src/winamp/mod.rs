@@ -2941,7 +2941,14 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
     let main_visible = snapshot.main_visible;
     let display_text_color = skin.display_text_color;
     let background = if navigation_visible {
-        skin_corner_color(&skin)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            mobile::theme::colors().background
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            skin_corner_color(&skin)
+        }
     } else {
         Color::TRANSPARENT
     };

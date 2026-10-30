@@ -247,14 +247,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
         Destination::from_state(&player.get()) != Destination::Player,
         move || player.update(|state| Destination::Player.select(state)),
     );
-    let colors = liquid_colors();
-    let background = if Destination::from_state(&player.get()) == Destination::Player {
-        skin.get()
-            .map(|artwork| skin_corner_color(&artwork))
-            .unwrap_or(colors.background)
-    } else {
-        colors.background
-    };
+    let background = liquid_colors().background;
     #[cfg(target_os = "android")]
     cranpose_core::LaunchedEffect(background, move |_| {
         crate::android_appearance::set_dark_system_bar_icons(!theme::prefers_dark(background));
@@ -369,7 +362,7 @@ fn MobilePlayer(
         WinampStackedStage(artwork.clone(), player, skin, layout, StackedDrag::Fixed);
         if snapshot.navigation.visible() {
             reflection::FloorReflection(
-                skin_corner_color(&artwork),
+                liquid_colors().background,
                 reflection::player_bounds(&snapshot, layout),
                 scope.max_width().0,
                 scope.max_height().0 + bottom_inset,
