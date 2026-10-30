@@ -354,7 +354,7 @@ pub(super) fn EditorCanvas(
                     origin[1] + *y as f32 * view.scale + 5.,
                     (*w as f32 * view.scale - 16.).max(1.),
                     12.,
-                    FG,
+                    studio_fg(),
                 );
             }
             if grid && view.scale >= 4. {
@@ -405,7 +405,7 @@ pub(super) fn EditorCanvas(
                         .background(Color(0.03, 0.05, 0.08, 0.85))
                         .rounded_corners(4.),
                     BoxSpec::default(),
-                    move || Label(format!("x {x}  y {y}"), 6., 5., 92., 11., FG),
+                    move || Label(format!("x {x}  y {y}"), 6., 5., 92., 11., studio_fg()),
                 );
             }
         },
@@ -432,7 +432,7 @@ fn Scrollbar(axis: usize, area: Area, state: CanvasState, hints: Hints) {
         0.
     };
     let hover = cranpose_core::rememberMutableStateOf(|| false);
-    Box(Modifier::empty().absolute_offset(area.x,area.y).size_points(area.w,area.h).background(BG)
+    Box(Modifier::empty().absolute_offset(area.x,area.y).size_points(area.w,area.h).background(studio_bg())
         .content_description(if axis==0 {"Canvas horizontal scrollbar"}else{"Canvas vertical scrollbar"})
         .pointer_icon(control_cursor())
         .pointer_input((axis,area.w.to_bits(),area.h.to_bits()),move |scope:PointerInputScope|async move {
@@ -460,6 +460,6 @@ fn Scrollbar(axis: usize, area: Area, state: CanvasState, hints: Hints) {
             }).await;
         }),BoxSpec::default(),move || {
             Box(Modifier::empty().absolute_offset(if axis==0 {offset}else{8.},if axis==0 {8.}else{offset})
-                .size_points(if axis==0 {thumb}else{4.},if axis==0 {4.}else{thumb}).rounded_corners(6.).background(if view.limits()[axis] <= 0. {Color(0.,0.,0.,0.)} else if hover.get(){FG}else{DIM}),BoxSpec::default(),||{});
+                .size_points(if axis==0 {thumb}else{4.},if axis==0 {4.}else{thumb}).rounded_corners(6.).background(if view.limits()[axis] <= 0. {Color(0.,0.,0.,0.)} else if hover.get(){studio_fg()}else{studio_dim()}),BoxSpec::default(),||{});
         });
 }

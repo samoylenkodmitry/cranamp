@@ -393,10 +393,14 @@ pub(super) fn MountedSkinStudio(
     );
     let hosted = host.is_some();
     cranpose_core::CompositionLocalProvider(
-        vec![controls::hint_context().provides(Some(ui.hints))],
+        vec![
+            controls::hint_context().provides(Some(ui.hints)),
+            design::palette_local()
+                .provides((bottom_inset > 0.0).then(cranpose::liquid::liquid_colors)),
+        ],
         move || {
             BoxWithConstraints(
-                Modifier::empty().fill_max_size().background(BG),
+                Modifier::empty().fill_max_size().background(studio_bg()),
                 move |scope| {
                     Workspace(
                         ui.clone(),
@@ -594,7 +598,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
     Box(
         Modifier::empty()
             .size_points(layout.width, layout.height)
-            .background(BG)
+            .background(studio_bg())
             .content_description(format!("Skin Studio {} layout", layout.class.label())),
         BoxSpec::default(),
         move || {
@@ -780,7 +784,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                             y + 14.,
                                             80.,
                                             12.,
-                                            DIM,
+                                            studio_dim(),
                                         );
                                     }
                                 }
@@ -827,7 +831,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                             layout.height / 2.,
                             layout.width - 48.,
                             18.,
-                            FG,
+                            studio_fg(),
                         )
                     },
                 );
@@ -912,7 +916,7 @@ fn Header(ui: Ui, layout: Layout, name: String, dirty: bool) {
         10.,
         title_width,
         14.,
-        FG,
+        studio_fg(),
     );
     if matches!(
         screen,
@@ -946,7 +950,7 @@ fn Header(ui: Ui, layout: Layout, name: String, dirty: bool) {
             30.,
             title_width,
             10.,
-            DIM,
+            studio_dim(),
         );
         let (undo, redo) = ui.shared.lock().unwrap().history_depth();
         let header_items = vec![

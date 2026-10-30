@@ -456,7 +456,7 @@ fn ReviewCases(width: f32, height: f32, start: usize, automatic: bool) {
                 12.,
                 width - 64.,
                 10.,
-                FG,
+                studio_fg(),
             );
             Button(
                 Modifier::empty()
@@ -466,7 +466,7 @@ fn ReviewCases(width: f32, height: f32, start: usize, automatic: bool) {
                 ButtonSpec::default(),
                 move || index.set((at + 1) % count),
                 || {
-                    Text("Next", Modifier::empty(), text_style(12., FG));
+                    Text("Next", Modifier::empty(), text_style(12., studio_fg()));
                 },
             );
         },

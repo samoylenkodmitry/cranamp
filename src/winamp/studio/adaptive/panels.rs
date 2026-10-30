@@ -64,9 +64,9 @@ pub(super) fn ScrollArea(area: Area, height: f32, content: impl FnMut() + 'stati
             cranpose_ui::widgets::ScrollbarSpec::default()
                 .thickness(6.)
                 .colors(cranpose_ui::widgets::ScrollbarColors {
-                    track: CARD,
-                    thumb: DIM,
-                    dragged_thumb: ACCENT_LIT,
+                    track: studio_card(),
+                    thumb: studio_dim(),
+                    dragged_thumb: studio_accent_lit(),
                 }),
         );
     }
@@ -172,7 +172,7 @@ pub(super) fn Projects(ui: Ui, actions: Actions, layout: Layout, hosted: bool) {
                                 card_h - 34.,
                                 card_w - 32.,
                                 14.,
-                                FG,
+                                studio_fg(),
                             );
                         },
                     );
@@ -223,7 +223,7 @@ pub(super) fn Projects(ui: Ui, actions: Actions, layout: Layout, hosted: bool) {
                     action_y + 248.,
                     action_w - 24.,
                     12.,
-                    DIM,
+                    studio_dim(),
                 );
             }
         },
@@ -291,7 +291,12 @@ pub(super) fn PartList(ui: Ui, area: Area, grid: bool) {
                                         Modifier::empty()
                                             .absolute_offset(30., 22.)
                                             .size_points(24., 24.),
-                                        move |scope| controls::draw_icon(scope, Icon::Hand, FG),
+                                        {
+                                            let color = studio_fg();
+                                            move |scope| {
+                                                controls::draw_icon(scope, Icon::Hand, color)
+                                            }
+                                        },
                                     );
                                 }
                                 Label(
@@ -300,7 +305,7 @@ pub(super) fn PartList(ui: Ui, area: Area, grid: bool) {
                                     16.,
                                     cell - 92.,
                                     12.,
-                                    if on { ACCENT_LIT } else { FG },
+                                    if on { studio_accent_lit() } else { studio_fg() },
                                 );
                                 if h > 0. {
                                     Label(
@@ -309,7 +314,7 @@ pub(super) fn PartList(ui: Ui, area: Area, grid: bool) {
                                         38.,
                                         cell - 92.,
                                         10.,
-                                        DIM,
+                                        studio_dim(),
                                     );
                                 }
                             },
@@ -472,7 +477,7 @@ pub(super) fn SheetPanel(ui: Ui, area: Area, sheet: Sheet, revision: u64) {
             .then(enter),
         BoxSpec::default(),
         move || {
-            desktop::RowLabel(heading.clone(), 12., 16., area.w - 64., 16., FG);
+            desktop::RowLabel(heading.clone(), 12., 16., area.w - 64., 16., studio_fg());
             let close = ui.clone();
             Control(
                 Icon::Close,
@@ -745,7 +750,7 @@ pub(super) fn SaveScreen(ui: Ui, actions: Actions, layout: Layout, hosted: bool)
                 4.,
                 width - 16.,
                 14.,
-                DIM,
+                studio_dim(),
             );
             let save = actions.project.clone();
             controls::PrimaryAction(
@@ -760,7 +765,7 @@ pub(super) fn SaveScreen(ui: Ui, actions: Actions, layout: Layout, hosted: bool)
                 94.,
                 width - 48.,
                 12.,
-                DIM,
+                studio_dim(),
             );
             let export = actions.export.clone();
             RowAction(
@@ -777,7 +782,7 @@ pub(super) fn SaveScreen(ui: Ui, actions: Actions, layout: Layout, hosted: bool)
                 174.,
                 width - 48.,
                 12.,
-                DIM,
+                studio_dim(),
             );
             if hosted {
                 let apply = actions.apply.clone();
@@ -814,7 +819,7 @@ pub(super) fn ConfirmBlank(ui: Ui, layout: Layout) {
         88.,
         layout.width - 48.,
         15.,
-        FG,
+        studio_fg(),
     );
     let next = ui.clone();
     RowAction(
@@ -852,7 +857,7 @@ fn History(ui: Ui, area: Area) {
             10.,
             area.w - 24.,
             12.,
-            DIM,
+            studio_dim(),
         );
         for (index, entry) in entries.iter().enumerate() {
             let cursor = entry["cursor"].as_u64().unwrap_or(0) as usize;

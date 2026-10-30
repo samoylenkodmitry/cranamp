@@ -147,7 +147,14 @@ pub(super) fn ToolProperties(ui: Ui, area: Area) {
             }
             y += 48.;
         }
-        Label("Stroke".into(), 12., y + 4., area.w - 24., 11., DIM);
+        Label(
+            "Stroke".into(),
+            12.,
+            y + 4.,
+            area.w - 24.,
+            11.,
+            studio_dim(),
+        );
         y += 24.;
         let toggles = switches(&v);
         for (index, (label, key, on)) in toggles.iter().copied().enumerate() {
@@ -165,7 +172,14 @@ pub(super) fn ToolProperties(ui: Ui, area: Area) {
             );
         }
         y += toggles.len().div_ceil(columns) as f32 * 44.;
-        Label("Texture".into(), 12., y + 4., area.w - 24., 11., DIM);
+        Label(
+            "Texture".into(),
+            12.,
+            y + 4.,
+            area.w - 24.,
+            11.,
+            studio_dim(),
+        );
         y += 24.;
         for (i, (label, key, value, range, suffix)) in [
             ("Grain", "grain", v.grain, [0, 64], ""),
@@ -191,7 +205,14 @@ pub(super) fn ToolProperties(ui: Ui, area: Area) {
         }
         y += if columns == 2 { 68. } else { 136. };
         if gradient(&v) {
-            Label("Gradient".into(), 12., y + 4., area.w - 24., 11., DIM);
+            Label(
+                "Gradient".into(),
+                12.,
+                y + 4.,
+                area.w - 24.,
+                11.,
+                studio_dim(),
+            );
             for (i, (axis, name)) in [("", "Solid"), ("down", "Down"), ("across", "Across")]
                 .into_iter()
                 .enumerate()
@@ -230,7 +251,7 @@ pub(super) fn ToolProperties(ui: Ui, area: Area) {
             }
             y += 72.;
             if let Some(to) = &v.ramp_to {
-                Label("To".into(), 12., y + 12., 32., 12., DIM);
+                Label("To".into(), 12., y + 12., 32., 12., studio_dim());
                 let next = ui.clone();
                 colour::ExactField(
                     "Gradient colour",

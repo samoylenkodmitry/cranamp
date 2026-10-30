@@ -26,7 +26,7 @@ fn Cell(label: String, x: f32, y: f32, width: f32, on: bool, action: impl Fn() +
             Text(
                 label.clone(),
                 Modifier::empty().padding(10.),
-                text_style(12., FG),
+                text_style(12., studio_fg()),
             );
         },
     );
@@ -80,7 +80,7 @@ pub(super) fn EqualizerChooser(
                         8.,
                         width,
                         12.,
-                        DIM,
+                        studio_dim(),
                     );
                     for (i, (mode, label, on)) in [
                         ("controls", "Visible controls", !artwork),
@@ -109,7 +109,14 @@ pub(super) fn EqualizerChooser(
                             move || perform(&d, json!({"action":"set_mode","mode":mode})),
                         );
                     }
-                    Label("Level to paint".into(), 12., grid_y - 24., width, 12., DIM);
+                    Label(
+                        "Level to paint".into(),
+                        12.,
+                        grid_y - 24.,
+                        width,
+                        12.,
+                        studio_dim(),
+                    );
                     for n in 0..28u8 {
                         let d = shared.clone();
                         Cell(
@@ -131,7 +138,7 @@ pub(super) fn EqualizerChooser(
                         after_grid + 4.,
                         width,
                         11.,
-                        DIM,
+                        studio_dim(),
                     );
                     for (i, (value, label)) in [("current", "This frame"), ("all", "All 28 frames")]
                         .into_iter()
@@ -196,7 +203,7 @@ pub(super) fn EqualizerChooser(
                         preview_y - 24.,
                         width,
                         12.,
-                        DIM,
+                        studio_dim(),
                     );
                     for (i, (pattern, label)) in [
                         ("flat", "Same level"),
@@ -260,7 +267,7 @@ pub(super) fn EqualizerChooser(
                         preview_y + 244.,
                         width,
                         11.,
-                        DIM,
+                        studio_dim(),
                     );
                 },
             );

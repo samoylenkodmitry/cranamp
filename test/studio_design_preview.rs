@@ -27,17 +27,26 @@ pub fn DesignSystem(width: f32, height: f32) {
         vec![controls::hint_context().provides(Some(ui.hints))],
         move || {
             Box(
-                Modifier::empty().size_points(width, height).background(BG),
+                Modifier::empty()
+                    .size_points(width, height)
+                    .background(studio_bg()),
                 BoxSpec::default(),
                 move || {
-                    Label("Studio controls".into(), 20., 18., width - 40., 20., FG);
+                    Label(
+                        "Studio controls".into(),
+                        20.,
+                        18.,
+                        width - 40.,
+                        20.,
+                        studio_fg(),
+                    );
                     Label(
                         "Shared styles from the two supplied references".into(),
                         20.,
                         48.,
                         width - 40.,
                         12.,
-                        DIM,
+                        studio_dim(),
                     );
                     let ui = ui.clone();
                     let hints = ui.hints;
@@ -75,7 +84,7 @@ pub fn DesignSystem(width: f32, height: f32) {
                                             16.,
                                             card_w - 32.,
                                             16.,
-                                            FG,
+                                            studio_fg(),
                                         );
                                         match section {
                                             0 => {
@@ -158,14 +167,28 @@ pub fn DesignSystem(width: f32, height: f32) {
                                                 );
                                             }
                                             1 => {
-                                                Label("Name".into(), 16., 62., 64., 13., DIM);
+                                                Label(
+                                                    "Name".into(),
+                                                    16.,
+                                                    62.,
+                                                    64.,
+                                                    13.,
+                                                    studio_dim(),
+                                                );
                                                 colour::ExactField(
                                                     "Layer name",
                                                     "Highlights".into(),
                                                     Area::new(88., 52., card_w - 104., 40.),
                                                     |_| true,
                                                 );
-                                                Label("HEX".into(), 16., 116., 64., 13., DIM);
+                                                Label(
+                                                    "HEX".into(),
+                                                    16.,
+                                                    116.,
+                                                    64.,
+                                                    13.,
+                                                    studio_dim(),
+                                                );
                                                 colour::ExactField(
                                                     "HEX colour",
                                                     "#7DDCFF".into(),
@@ -194,7 +217,7 @@ pub fn DesignSystem(width: f32, height: f32) {
                                                     292.,
                                                     card_w - 32.,
                                                     12.,
-                                                    DIM,
+                                                    studio_dim(),
                                                 );
                                             }
                                             2 => {
@@ -270,7 +293,7 @@ pub fn DesignSystem(width: f32, height: f32) {
                                                                 13.,
                                                                 card_w - 48.,
                                                                 13.,
-                                                                FG,
+                                                                studio_fg(),
                                                             );
                                                         },
                                                     );
@@ -293,7 +316,7 @@ pub fn DesignSystem(width: f32, height: f32) {
                                                             13.,
                                                             card_w - 48.,
                                                             13.,
-                                                            FG,
+                                                            studio_fg(),
                                                         );
                                                     },
                                                 );

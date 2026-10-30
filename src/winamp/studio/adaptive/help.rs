@@ -143,7 +143,7 @@ pub(super) fn HelpScreen(ui: Ui, layout: Layout) {
                         Text(
                             "All help topics",
                             Modifier::empty(),
-                            text_style(14., ACCENT_LIT),
+                            text_style(14., studio_accent_lit()),
                         );
                     },
                 );
@@ -151,19 +151,19 @@ pub(super) fn HelpScreen(ui: Ui, layout: Layout) {
             Text(
                 TOPICS[index].title,
                 Modifier::empty().width(width).padding_symmetric(0., 12.),
-                text_style(20., FG),
+                text_style(20., studio_fg()),
             );
             for (i, step) in TOPICS[index].steps.iter().enumerate() {
                 Text(
                     format!("{}. {step}", i + 1),
                     Modifier::empty().width(width).padding_symmetric(0., 10.),
-                    text_style(15., FG),
+                    text_style(15., studio_fg()),
                 );
             }
             Text(
                 TOPICS[index].note,
                 Modifier::empty().width(width).padding_symmetric(0., 16.),
-                text_style(14., DIM),
+                text_style(14., studio_dim()),
             );
         },
     );

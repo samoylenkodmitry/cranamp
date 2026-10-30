@@ -91,7 +91,11 @@ pub(super) fn ListRow(
             hints.set(None);
         }
     });
-    let fg = motion::colour(if selected || hovered { ACCENT_LIT } else { FG });
+    let fg = motion::colour(if selected || hovered {
+        studio_accent_lit()
+    } else {
+        studio_fg()
+    });
     Button(
         Modifier::empty()
             .absolute_offset(area.x, area.y)
@@ -158,7 +162,7 @@ pub(super) fn ListRow(
                                 (area.h - 14.) / 2.,
                                 meta_w - 4.,
                                 11.,
-                                DIM,
+                                studio_dim(),
                             );
                         }
                     }
@@ -205,7 +209,14 @@ pub(super) fn Sources(ui: Ui, area: Area) {
     };
     ScrollArea(area, sheets.len() as f32 * 48. + heading, move || {
         if heading > 0. {
-            Label("Source bitmaps".into(), 12., 10., area.w - 24., 12., DIM);
+            Label(
+                "Source bitmaps".into(),
+                12.,
+                10.,
+                area.w - 24.,
+                12.,
+                studio_dim(),
+            );
         }
         for (i, (name, detail, image)) in sheets.iter().enumerate() {
             let next = ui.clone();
@@ -264,7 +275,14 @@ pub(super) fn Parts(ui: Ui, area: Area, editing: bool) {
     ScrollArea(Area::new(area.x, area.y, area.w, part_h), 368., {
         let ui = ui.clone();
         move || {
-            Label("Skin windows".into(), 12., 10., area.w - 24., 12., DIM);
+            Label(
+                "Skin windows".into(),
+                12.,
+                10.,
+                area.w - 24.,
+                12.,
+                studio_dim(),
+            );
             for (i, (part, label, _, _)) in PARTS.into_iter().enumerate() {
                 let next = ui.clone();
                 let detail = if part == "canvas" {
@@ -307,8 +325,15 @@ pub(super) fn StateDetails(ui: Ui, area: Area) {
         .find(|layer| layer.id == id);
     if let Some(layer) = layer {
         ScrollArea(area, 268. + layer.variants.len() as f32 * 48., move || {
-            Label("SELECTED SPRITE".into(), 12., 12., area.w - 24., 11., DIM);
-            Label(layer.id.clone(), 12., 36., area.w - 24., 13., FG);
+            Label(
+                "SELECTED SPRITE".into(),
+                12.,
+                12.,
+                area.w - 24.,
+                11.,
+                studio_dim(),
+            );
+            Label(layer.id.clone(), 12., 36., area.w - 24., 13., studio_fg());
             Label(
                 format!(
                     "{}\n{} × {} px\nCanvas position {}, {}",
@@ -322,9 +347,16 @@ pub(super) fn StateDetails(ui: Ui, area: Area) {
                 68.,
                 area.w - 24.,
                 12.,
-                DIM,
+                studio_dim(),
             );
-            Label("SOURCE STATES".into(), 12., 144., area.w - 24., 11., DIM);
+            Label(
+                "SOURCE STATES".into(),
+                12.,
+                144.,
+                area.w - 24.,
+                11.,
+                studio_dim(),
+            );
             for (i, rect) in layer.variants.iter().enumerate() {
                 let label = layer.labels.get(i).map(String::as_str).unwrap_or("Variant");
                 Label(
@@ -333,7 +365,7 @@ pub(super) fn StateDetails(ui: Ui, area: Area) {
                     172. + i as f32 * 48.,
                     area.w - 24.,
                     12.,
-                    FG,
+                    studio_fg(),
                 );
                 Label(
                     format!("x {}   y {}", rect[0], rect[1]),
@@ -341,7 +373,7 @@ pub(super) fn StateDetails(ui: Ui, area: Area) {
                     190. + i as f32 * 48.,
                     area.w - 24.,
                     11.,
-                    DIM,
+                    studio_dim(),
                 );
             }
         });
@@ -420,7 +452,7 @@ fn CompactLayers(ui: Ui, area: Area) {
     let planes = info["layers"].as_array().cloned().unwrap_or_default();
     let selected = info["active"].as_str().unwrap_or("base").to_owned();
     ScrollArea(area, 100. + planes.len() as f32 * 48., move || {
-        Label("Layers".into(), 12., 16., area.w - 80., 11., DIM);
+        Label("Layers".into(), 12., 16., area.w - 80., 11., studio_dim());
         let next = ui.clone();
         Control(
             Icon::Add,
@@ -506,7 +538,7 @@ pub(super) fn PreviewInspector(ui: Ui, area: Area, revision: u64) {
             states_h + 24.,
             area.w - 32.,
             12.,
-            DIM,
+            studio_dim(),
         );
         let text = if report["exportable"] == true {
             "Classic format check passed.".to_owned()
@@ -529,7 +561,7 @@ pub(super) fn PreviewInspector(ui: Ui, area: Area, revision: u64) {
                 })
                 .unwrap_or_else(|| "Review source sheets before export.".into())
         };
-        Label(text, 16., states_h + 48., area.w - 32., 13., FG);
+        Label(text, 16., states_h + 48., area.w - 32., 13., studio_fg());
     });
 }
 
@@ -561,7 +593,14 @@ pub(super) fn SpriteTargets(ui: Ui, area: Area, screen: Screen) {
             .size_points(area.w, area.h),
         BoxSpec::default(),
         move || {
-            Label("SPRITE TARGETS".into(), 16., 12., area.w - 32., 12., DIM);
+            Label(
+                "SPRITE TARGETS".into(),
+                16.,
+                12.,
+                area.w - 32.,
+                12.,
+                studio_dim(),
+            );
             let feedback = controls::feedback("Filter sprite names".into());
             cranpose_ui::BasicTextField(
                 filter,
@@ -572,7 +611,7 @@ pub(super) fn SpriteTargets(ui: Ui, area: Area, screen: Screen) {
                     .content_description("Filter sprite names")
                     .then(feedback)
                     .padding_symmetric(8., 6.),
-                text_style(14., FG),
+                text_style(14., studio_fg()),
             );
             if query.is_empty() {
                 Label(
@@ -581,7 +620,7 @@ pub(super) fn SpriteTargets(ui: Ui, area: Area, screen: Screen) {
                     43.,
                     area.w - 40.,
                     12.,
-                    DIM,
+                    studio_dim(),
                 );
             }
             let ui = ui.clone();

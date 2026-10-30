@@ -56,13 +56,7 @@ pub fn ios_entry_point() {
 #[cfg(any(target_os = "ios", target_os = "android"))]
 #[cranpose::composable]
 fn mobile_root() {
-    cranpose::Box(
-        cranpose::Modifier::empty()
-            .fill_max_size()
-            .safe_area_padding(),
-        cranpose::BoxSpec::default(),
-        winamp::WinampMobileApp,
-    );
+    winamp::WinampMobileApp();
 }
 #[cfg(not(all(feature = "studio-review", target_os = "android")))]
 cranpose::android_main! {

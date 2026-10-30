@@ -127,7 +127,9 @@ final class PickerProviders: XCTestCase {
             let button = app.buttons[label]
             for _ in 0..<6 {
                 let navigation = app.buttons.matching(identifier: "Settings")
-                let bottom = navigation.element(boundBy: navigation.count - 1).frame.minY
+                let dock = app.buttons["Show current track in Player"]
+                let bottom = min(navigation.element(boundBy: navigation.count - 1).frame.minY,
+                                 dock.exists ? dock.frame.minY : app.frame.maxY)
                 if button.exists && button.isHittable &&
                     button.frame.minY >= app.frame.minY + 44 && button.frame.maxY < bottom {
                     // Cranpose owns scroll inertia, so XCTest's UIKit-idle wait
@@ -155,6 +157,7 @@ final class PickerProviders: XCTestCase {
         XCTAssertTrue(app.buttons["Contact support"].waitForExistence(timeout: 10))
         capture("mobile-about")
         reveal("Open source licenses").tap()
+        XCTAssertTrue(app.buttons["Cranamp — Apache License 2.0"].waitForExistence(timeout: 10))
         app.buttons["Cranamp — Apache License 2.0"].tap()
         XCTAssertTrue(app.buttons["Back to Licenses"].waitForExistence(timeout: 10))
         capture("mobile-license")

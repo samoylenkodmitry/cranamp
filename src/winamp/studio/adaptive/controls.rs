@@ -19,7 +19,7 @@ pub(crate) fn feedback(_label: String) -> Modifier {
 }
 
 pub(super) fn hint_feedback(label: String) -> Modifier {
-    hint_feedback_colour(label, ACCENT_LIT)
+    hint_feedback_colour(label, studio_accent_lit())
 }
 
 pub(super) fn hint_feedback_colour(label: String, tint: Color) -> Modifier {
@@ -355,12 +355,12 @@ pub(super) fn Control(
     let help_modifier = hover_hint(hints, help.label, help.text, enabled);
     let fg = super::motion::colour(if enabled {
         if selected || hovered {
-            ACCENT_LIT
+            studio_accent_lit()
         } else {
-            FG
+            studio_fg()
         }
     } else {
-        DIM
+        studio_dim()
     });
     let press = super::motion::press(pressed);
     let mut modifier = Modifier::empty()
@@ -435,7 +435,10 @@ pub(super) fn PrimaryAction(icon: Icon, label: String, area: Area, action: impl 
                         Modifier::empty()
                             .absolute_offset(12., (area.h - 24.) / 2.)
                             .size_points(24., 24.),
-                        move |scope| draw_icon(scope, icon, FG),
+                        {
+                            let color = Color::WHITE;
+                            move |scope| draw_icon(scope, icon, color)
+                        },
                     );
                     super::desktop::RowLabel(
                         label.clone(),
@@ -443,7 +446,7 @@ pub(super) fn PrimaryAction(icon: Icon, label: String, area: Area, action: impl 
                         (area.h - 18.) / 2.,
                         area.w - 60.,
                         14.,
-                        FG,
+                        Color::WHITE,
                     );
                 },
             );
@@ -490,7 +493,7 @@ pub(super) fn HintOverlay(hints: Hints, width: f32, height: f32) {
                     Text(
                         text.clone(),
                         Modifier::empty().width(w).padding(10.),
-                        text_style(12., FG),
+                        text_style(12., studio_fg()),
                     );
                 },
             );
@@ -505,7 +508,11 @@ pub(super) fn SwitchRow(label: String, area: Area, on: bool, action: impl Fn() +
         cranpose_animation::tween(140, cranpose_animation::Easing::EaseOut),
         "Studio switch",
     );
-    let track = super::motion::colour(if on { ACCENT } else { PIP_OFF });
+    let track = super::motion::colour(if on {
+        studio_accent()
+    } else {
+        studio_pip_off()
+    });
     Button(
         Modifier::empty()
             .absolute_offset(area.x, area.y)
@@ -527,8 +534,9 @@ pub(super) fn SwitchRow(label: String, area: Area, on: bool, action: impl Fn() +
                         (area.h - 16.) / 2.,
                         area.w - 64.,
                         12.,
-                        FG,
+                        studio_fg(),
                     );
+                    let thumb_color = Color::WHITE;
                     Canvas(
                         Modifier::empty()
                             .absolute_offset(area.w - 48., (area.h - 20.) / 2.)
@@ -539,7 +547,7 @@ pub(super) fn SwitchRow(label: String, area: Area, on: bool, action: impl Fn() +
                                 cranpose_ui_graphics::CornerRadii::uniform(10.),
                             );
                             scope.draw_circle(
-                                cranpose_ui_graphics::Brush::solid(FG),
+                                cranpose_ui_graphics::Brush::solid(thumb_color),
                                 cranpose_ui_graphics::Point::new(10. + 16. * thumb.get(), 10.),
                                 7.,
                             );

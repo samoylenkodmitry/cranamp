@@ -30,9 +30,14 @@ pub(super) fn Notification(notice: Option<(u64, String)>, width: f32, height: f3
         .map(|line| line.chars().count().max(1).div_ceil(columns))
         .sum::<usize>();
     let panel_h = (lines as f32 * 16. + 24.).clamp(56., 160.);
+    let palette = design::palette_local().current();
     LiquidTheme(
         LiquidThemeSpec {
-            scheme: SchemeMode::Dark,
+            scheme: if palette.is_some_and(|colors| !colors.is_dark) {
+                SchemeMode::Light
+            } else {
+                SchemeMode::Dark
+            },
             ..Default::default()
         },
         move || {
@@ -43,7 +48,9 @@ pub(super) fn Notification(notice: Option<(u64, String)>, width: f32, height: f3
                     .glass_effect(
                         Glass::regular()
                             .shape(LiquidShape::RoundedRect(10.))
-                            .tint(Color(0.06, 0.10, 0.14, 0.82))
+                            .tint(palette.map_or(Color(0.06, 0.10, 0.14, 0.82), |colors| {
+                                colors.surface_glass
+                            }))
                             .blur_radius(12.),
                     )
                     .content_description("Studio notification")
@@ -53,7 +60,7 @@ pub(super) fn Notification(notice: Option<(u64, String)>, width: f32, height: f3
                     Text(
                         message.clone(),
                         Modifier::empty().width(w - 44.).padding(12.),
-                        text_style(12., FG),
+                        text_style(12., studio_fg()),
                     );
                     Control(
                         Icon::Close,

@@ -66,13 +66,13 @@ pub(super) fn ExactField(
                     help.into()
                 },
                 if invalid.get() {
-                    design::ERROR
+                    design::studio_error()
                 } else {
-                    ACCENT_LIT
+                    studio_accent_lit()
                 },
             ))
             .padding_symmetric(8., ((area.h - 18.) / 2.).max(0.)),
-        text_style(13., FG),
+        text_style(13., studio_fg()),
     );
 }
 
@@ -171,7 +171,7 @@ fn Body(ui: Ui, width: f32, target: Target) {
         8.,
         width - 24.,
         13.,
-        FG,
+        studio_fg(),
     );
     let field_size: (f32, f32) = (width - 24., 88.);
     const STRIP_H: f32 = 28.;
@@ -253,7 +253,7 @@ fn Body(ui: Ui, width: f32, target: Target) {
                         ((1. - v0) * field_size.1 - 4.).clamp(0., field_size.1 - 8.),
                     )
                     .size_points(8., 8.)
-                    .background(if v0 > 0.55 { BG } else { FG })
+                    .background(if v0 > 0.55 { studio_bg() } else { studio_fg() })
                     .rounded_corners(4.),
                 BoxSpec::default(),
                 || {},
@@ -320,14 +320,14 @@ fn Body(ui: Ui, width: f32, target: Target) {
                 Modifier::empty()
                     .absolute_offset((h * field_size.0 - 2.).clamp(0., field_size.0 - 4.), 6.)
                     .size_points(4., 16.)
-                    .background(FG),
+                    .background(studio_fg()),
                 BoxSpec::default(),
                 || {},
             );
         },
     );
 
-    Label("HEX".into(), 12., 168., 36., 11., DIM);
+    Label("HEX".into(), 12., 168., 36., 11., studio_dim());
     let d = shared.clone();
     ExactField(
         "HEX colour",
@@ -354,7 +354,14 @@ fn Body(ui: Ui, width: f32, target: Target) {
     );
     let cell = (width - 24.) / 3.;
     for (i, label) in ["R", "G", "B"].into_iter().enumerate() {
-        Label(label.into(), 12. + i as f32 * cell, 212., 16., 11., DIM);
+        Label(
+            label.into(),
+            12. + i as f32 * cell,
+            212.,
+            16.,
+            11.,
+            studio_dim(),
+        );
         let d = shared.clone();
         ExactField(
             ["Red channel", "Green channel", "Blue channel"][i],
@@ -374,7 +381,14 @@ fn Body(ui: Ui, width: f32, target: Target) {
     if target != Target::Brush {
         return;
     }
-    Label("Saved colours".into(), 12., 254., width - 132., 12., FG);
+    Label(
+        "Saved colours".into(),
+        12.,
+        254.,
+        width - 132.,
+        12.,
+        studio_fg(),
+    );
     let selected = cranpose_core::rememberMutableStateOf(|| None::<usize>);
     let slot = selected.get().filter(|i| *i < view.swatches.len());
     for (i, (icon, label)) in [

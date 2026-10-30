@@ -58,7 +58,7 @@ pub(super) fn entrance(key: u64, distance: f32) -> Modifier {
 
 #[track_caller]
 pub(super) fn feedback() -> Modifier {
-    feedback_colour(ACCENT_LIT)
+    feedback_colour(studio_accent_lit())
 }
 
 #[track_caller]

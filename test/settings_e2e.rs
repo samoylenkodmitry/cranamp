@@ -430,6 +430,62 @@ fn mobile_player_keeps_the_skin_edge_at_the_screen_edge() {
 }
 
 #[test]
+fn mobile_controls_avoid_the_notch_and_home_indicator() {
+    let _application = TestApplication::new("mobile-safe-area");
+    for (width, height, insets) in [
+        (
+            440.,
+            956.,
+            cranpose_ui::EdgeInsets::from_components(0., 62., 0., 34.),
+        ),
+        (
+            844.,
+            390.,
+            cranpose_ui::EdgeInsets::from_components(47., 0., 47., 21.),
+        ),
+    ] {
+        let mut shell = AppShell::new(
+            HitGraphRenderer::default(),
+            location_key(file!(), line!(), column!()),
+            move || {
+                cranpose_core::CompositionLocalProvider(
+                    vec![cranpose_ui::local_safe_area_insets().provides(insets)],
+                    cranamp::winamp::WinampMobileApp,
+                )
+            },
+        );
+        shell.set_buffer_size(width as u32, height as u32);
+        shell.set_viewport(width, height);
+        pump(&mut shell);
+        for destination in ["Player", "Library", "Settings", "Skin Studio"] {
+            click_mobile(&mut shell, destination);
+            for label in ["Player", "Library", "Skin Studio", "Settings"] {
+                let bounds = mobile_control_bounds(&mut shell, label);
+                assert!(
+                    bounds.x >= insets.left && bounds.x + bounds.width <= width - insets.right,
+                    "{label}: {bounds:?}"
+                );
+                assert!(
+                    bounds.y >= insets.top && bounds.y + bounds.height <= height - insets.bottom,
+                    "{label}: {bounds:?}"
+                );
+            }
+            let top_control = match destination {
+                "Player" => "Close player",
+                "Library" => "Add music",
+                "Settings" => "Choose skin",
+                _ => "New project",
+            };
+            let bounds = mobile_control_bounds(&mut shell, top_control);
+            assert!(
+                bounds.y >= insets.top,
+                "{top_control} overlaps status bar: {bounds:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn mobile_tabs_keep_navigation_visible_and_studio_drafts_alive() {
     let _application = TestApplication::new("mobile");
     let mut shell = AppShell::new(
@@ -595,8 +651,12 @@ fn mobile_library_keyboard_keeps_tabs_visible_and_tab_change_clears_focus() {
         location_key(file!(), line!(), column!()),
         || {
             cranpose_core::CompositionLocalProvider(
-                vec![cranpose_ui::local_ime_insets()
-                    .provides(cranpose_ui::EdgeInsets::from_components(0., 0., 0., 300.))],
+                vec![
+                    cranpose_ui::local_safe_area_insets()
+                        .provides(cranpose_ui::EdgeInsets::from_components(0., 59., 0., 34.)),
+                    cranpose_ui::local_ime_insets()
+                        .provides(cranpose_ui::EdgeInsets::from_components(0., 0., 0., 300.)),
+                ],
                 cranamp::winamp::WinampMobileApp,
             );
         },

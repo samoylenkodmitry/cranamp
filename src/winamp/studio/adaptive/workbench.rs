@@ -207,7 +207,7 @@ pub(super) fn ContextBar(ui: Ui, layout: Layout) {
                 area.y + 16.,
                 100.,
                 12.,
-                DIM,
+                studio_dim(),
             );
             if layout.references.is_none() {
                 CanvasToggles(
@@ -226,7 +226,7 @@ pub(super) fn ContextBar(ui: Ui, layout: Layout) {
                     area.y + 16.,
                     220.,
                     12.,
-                    FG,
+                    studio_fg(),
                 );
             }
             let next = ui.clone();
@@ -248,7 +248,7 @@ pub(super) fn ContextBar(ui: Ui, layout: Layout) {
                 area.y + 16.,
                 area.w - 60.,
                 12.,
-                DIM,
+                studio_dim(),
             );
         }
     } else {
@@ -389,7 +389,14 @@ pub(super) fn CanvasSettings(ui: Ui, area: Area) {
             CanvasToggles(ui.clone(), Area::new(8., y, area.w - 16., 48.));
             y += 56.;
         }
-        Label("Paint into".into(), 12., y + 8., area.w - 24., 12., DIM);
+        Label(
+            "Paint into".into(),
+            12.,
+            y + 8.,
+            area.w - 24.,
+            12.,
+            studio_dim(),
+        );
         for (i, (key, label)) in [
             ("current", "This state"),
             ("all", "All states"),
@@ -437,7 +444,14 @@ pub(super) fn CanvasSettings(ui: Ui, area: Area) {
                 Area::new(4., y + i as f32 * 64., area.w - 8., 64.),
             );
         }
-        Label("Playback".into(), 12., y + 328., area.w - 24., 12., DIM);
+        Label(
+            "Playback".into(),
+            12.,
+            y + 328.,
+            area.w - 24.,
+            12.,
+            studio_dim(),
+        );
         for (i, name) in ["Stopped", "Playing", "Paused"].into_iter().enumerate() {
             let d = ui.shared.clone();
             desktop::ListRow(
@@ -477,7 +491,7 @@ pub(super) fn PropertyHeading(ui: Ui, area: Area) {
         area.y + 14.,
         area.w - 60.,
         14.,
-        FG,
+        studio_fg(),
     );
     let next = ui.clone();
     Control(
@@ -531,7 +545,7 @@ pub(super) fn ValueSlider(
             (area.w - 76.).max(28.)
         },
         12.,
-        FG,
+        studio_fg(),
     );
     let _ = suffix;
     let d = ui.shared.clone();
@@ -628,7 +642,7 @@ pub(super) fn Properties(ui: Ui, area: Area, vertical: bool) {
             first.y + 16.,
             area.w - 68.,
             13.,
-            FG,
+            studio_fg(),
         );
         let next = ui.clone();
         Control(
@@ -713,7 +727,7 @@ pub(super) fn Properties(ui: Ui, area: Area, vertical: bool) {
             first.y + 4.,
             first.w - 16.,
             12.,
-            DIM,
+            studio_dim(),
         );
         let feedback = controls::feedback("Text to paint".into());
         cranpose_ui::BasicTextField(
@@ -725,7 +739,7 @@ pub(super) fn Properties(ui: Ui, area: Area, vertical: bool) {
                 .content_description("Text to paint")
                 .then(feedback)
                 .padding_symmetric(8., 6.),
-            text_style(14., FG),
+            text_style(14., studio_fg()),
         );
         ValueSlider(
             ui,

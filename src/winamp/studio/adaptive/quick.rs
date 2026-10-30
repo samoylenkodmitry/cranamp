@@ -37,7 +37,14 @@ pub(super) fn Properties(ui: Ui, area: Area) {
 pub(super) fn Navigation(ui: Ui, area: Area) {
     let view = ui.viewport.get();
     let zoom = ui.viewport;
-    Label("Zoom".into(), area.x + 12., area.y + 6., 70., 12., DIM);
+    Label(
+        "Zoom".into(),
+        area.x + 12.,
+        area.y + 6.,
+        70.,
+        12.,
+        studio_dim(),
+    );
     colour::ExactField(
         "Canvas zoom",
         format!("{:.0}%", view.scale * 100.),
@@ -140,7 +147,10 @@ pub(super) fn Palette(ui: Ui, area: Area) {
                         Modifier::empty()
                             .absolute_offset(9., 6.)
                             .size_points(22., 22.),
-                        move |scope| controls::draw_icon(scope, Icon::Colour, FG),
+                        {
+                            let color = studio_fg();
+                            move |scope| controls::draw_icon(scope, Icon::Colour, color)
+                        },
                     );
                     Box(
                         Modifier::empty()
@@ -176,9 +186,9 @@ pub(super) fn Palette(ui: Ui, area: Area) {
                     Modifier::empty()
                         .size_points(26., 28.)
                         .background(if selected {
-                            ACCENT_LIT
+                            studio_accent_lit()
                         } else {
-                            design::PIP_OFF
+                            design::studio_pip_off()
                         })
                         .rounded_corners(4.),
                     BoxSpec::default(),

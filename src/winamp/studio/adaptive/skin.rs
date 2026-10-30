@@ -45,7 +45,14 @@ pub(super) fn Panel(ui: Ui, area: Area) {
         BoxSpec::default(),
         move || {
             if side {
-                Label("Skin settings".into(), 12., 16., nav_w - 24., 16., FG);
+                Label(
+                    "Skin settings".into(),
+                    12.,
+                    16.,
+                    nav_w - 24.,
+                    16.,
+                    studio_fg(),
+                );
             }
             for (i, (name, icon)) in SECTIONS.into_iter().enumerate() {
                 if i == 1 {
@@ -92,19 +99,18 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                                 Modifier::empty().size_points(at.w, at.h),
                                 BoxSpec::default(),
                                 move || {
+                                    let icon_color =
+                                        if on { studio_accent_lit() } else { studio_fg() };
                                     cranpose_ui::Canvas(
                                         Modifier::empty()
                                             .absolute_offset((at.w - 20.) / 2., 5.)
                                             .size_points(20., 20.),
-                                        move |scope| {
-                                            controls::draw_icon(
-                                                scope,
-                                                icon,
-                                                if on { ACCENT_LIT } else { FG },
-                                            )
-                                        },
+                                        move |scope| controls::draw_icon(scope, icon, icon_color),
                                     );
-                                    let mut style = text_style(10., if on { FG } else { DIM });
+                                    let mut style = text_style(
+                                        10.,
+                                        if on { studio_fg() } else { studio_dim() },
+                                    );
                                     style.paragraph_style.text_align =
                                         cranpose_ui::text::TextAlign::Center;
                                     Text(
@@ -202,7 +208,14 @@ fn SkinPreview(ui: Ui, area: Area) {
             .then(design::surface(design::Surface::Well, false, false, false)),
         BoxSpec::default(),
         move || {
-            Label("Skin preview".into(), 12., 16., area.w - 24., 13., DIM);
+            Label(
+                "Skin preview".into(),
+                12.,
+                16.,
+                area.w - 24.,
+                13.,
+                studio_dim(),
+            );
             let d = ui.shared.clone();
             Box(
                 Modifier::empty()
@@ -254,8 +267,8 @@ fn Colours(ui: Ui, area: Area) {
             1080.
         },
         move || {
-            Label("Colours".into(), 16., 16., area.w - 32., 16., FG);
-            Label("Playlist".into(), 16., 54., list_w - 32., 13., DIM);
+            Label("Colours".into(), 16., 16., area.w - 32., 16., studio_fg());
+            Label("Playlist".into(), 16., 54., list_w - 32., 13., studio_dim());
             for (i, (key, title)) in PLAYLIST.into_iter().enumerate() {
                 let color = paint(&playlist.iter().find(|p| p.0 == key).unwrap().1);
                 let y = 80. + i as f32 * 44.;
@@ -291,7 +304,14 @@ fn Colours(ui: Ui, area: Area) {
                                     BoxSpec::default(),
                                     || {},
                                 );
-                                desktop::RowLabel(title.into(), 48., 14., w - 56., 12., FG);
+                                desktop::RowLabel(
+                                    title.into(),
+                                    48.,
+                                    14.,
+                                    w - 56.,
+                                    12.,
+                                    studio_fg(),
+                                );
                             },
                         );
                     },
@@ -302,7 +322,14 @@ fn Colours(ui: Ui, area: Area) {
                 PlaylistPreview(playlist.clone(), Area::new(16., 356., list_w - 32., 152.));
             }
             let vis_y = if detached { 356. } else { 528. };
-            Label("Visualizer".into(), 16., vis_y, list_w - 32., 13., DIM);
+            Label(
+                "Visualizer".into(),
+                16.,
+                vis_y,
+                list_w - 32.,
+                13.,
+                studio_dim(),
+            );
             let columns = ((list_w - 24.) / 44.).floor().max(1.) as usize;
             let cell = (list_w - 24.) / columns as f32;
             for (i, value) in visualizer.iter().enumerate() {
@@ -373,7 +400,7 @@ fn Colours(ui: Ui, area: Area) {
                 if split { 22. } else { colour_y - 24. },
                 colour_w - 24.,
                 13.,
-                FG,
+                studio_fg(),
             );
             cranpose_core::key(target, || {
                 colour::SkinColour(
@@ -449,7 +476,7 @@ fn Palette(ui: Ui, area: Area, visualizer: bool) {
             16.,
             area.w - 32.,
             16.,
-            FG,
+            studio_fg(),
         );
         Label(
             if visualizer {
@@ -462,7 +489,7 @@ fn Palette(ui: Ui, area: Area, visualizer: bool) {
             40.,
             list_w - 32.,
             11.,
-            DIM,
+            studio_dim(),
         );
         let cell = (list_w - 24.) / cols as f32;
         for (i, value) in values.iter().enumerate() {
@@ -515,7 +542,14 @@ fn Palette(ui: Ui, area: Area, visualizer: bool) {
                                 || {},
                             );
                             if !visualizer {
-                                desktop::RowLabel(title.clone(), 42., 12., at.w - 50., 12., FG);
+                                desktop::RowLabel(
+                                    title.clone(),
+                                    42.,
+                                    12.,
+                                    at.w - 50.,
+                                    12.,
+                                    studio_fg(),
+                                );
                             }
                         },
                     );
@@ -538,7 +572,7 @@ fn Palette(ui: Ui, area: Area, visualizer: bool) {
                 22.,
                 picker_w - 24.,
                 13.,
-                FG,
+                studio_fg(),
             );
         }
         cranpose_core::key(target, || {
@@ -692,14 +726,14 @@ fn Font(ui: Ui, area: Area, preview_below: bool) {
     let preview_h = (area.h - preview_y - 16.).clamp(260., 420.);
     let content_h = preview_y + if preview_below { preview_h + 16. } else { 0. };
     ScrollArea(area, content_h, move || {
-        Label("Text font".into(), 16., 16., area.w - 32., 16., FG);
+        Label("Text font".into(), 16., 16., area.w - 32., 16., studio_fg());
         Label(
             "TEXT.BMP contains the player's letters.".into(),
             16.,
             44.,
             area.w - 32.,
             12.,
-            DIM,
+            studio_dim(),
         );
         let image = ui
             .shared
@@ -741,7 +775,7 @@ fn Font(ui: Ui, area: Area, preview_below: bool) {
                 },
                 if stacked { area.w - 32. } else { area.w - 160. },
                 12.,
-                DIM,
+                studio_dim(),
             );
             colour::ExactField(
                 label,
@@ -794,7 +828,7 @@ fn Font(ui: Ui, area: Area, preview_below: bool) {
                 preview_y,
                 area.w - 32.,
                 13.,
-                DIM,
+                studio_dim(),
             );
             let scale = ((area.w - 32.) / 275.).min((preview_h - 28.) / 116.);
             let shared = ui.shared.clone();
@@ -818,14 +852,21 @@ fn Windows(ui: Ui, area: Area) {
         cranpose_core::rememberMutableStateOf(|| ui.shared.lock().unwrap().view.color.clone());
     let row_h = if area.w < 400. { 204. } else { 172. };
     ScrollArea(area, 160. + row_h * 2., move || {
-        Label("Window shape".into(), 16., 16., area.w - 32., 16., FG);
+        Label(
+            "Window shape".into(),
+            16.,
+            16.,
+            area.w - 32.,
+            16.,
+            studio_fg(),
+        );
         Label(
             "Remove matching pixels that touch the outside edge.".into(),
             16.,
             44.,
             area.w - 32.,
             12.,
-            DIM,
+            studio_dim(),
         );
         Label(
             "Cutout colour".into(),
@@ -833,7 +874,7 @@ fn Windows(ui: Ui, area: Area) {
             100.,
             (area.w - 164.).max(74.),
             12.,
-            DIM,
+            studio_dim(),
         );
         colour::ExactField(
             "Cutout colour",
@@ -852,7 +893,7 @@ fn Windows(ui: Ui, area: Area) {
             .enumerate()
         {
             let y = 144. + i as f32 * row_h;
-            Label(label.into(), 16., y, area.w - 32., 13., FG);
+            Label(label.into(), 16., y, area.w - 32., 13., studio_fg());
             let image = ui.shared.lock().unwrap().skin_render();
             let image = image::imageops::crop_imm(&image, 0, i as u32 * 116, 275, 116).to_image();
             Bitmap(
@@ -906,14 +947,14 @@ fn Cursors(ui: Ui, area: Area) {
         area,
         list_y + regions.len().div_ceil(columns) as f32 * 52. + 16.,
         move || {
-            Label("Cursors".into(), 16., 16., area.w - 32., 16., FG);
+            Label("Cursors".into(), 16., 16., area.w - 32., 16., studio_fg());
             Label(
                 format!("{} of {} supplied", report["drawn"], report["of"]),
                 16.,
                 44.,
                 area.w - 32.,
                 12.,
-                DIM,
+                studio_dim(),
             );
             if missing {
                 let next = ui.clone();
@@ -992,7 +1033,7 @@ pub(super) fn CursorCanvas(ui: Ui, area: Area) {
                 20.,
                 area.w - 32.,
                 12.,
-                DIM,
+                studio_dim(),
             );
         }
         let next = ui.clone();
@@ -1021,7 +1062,7 @@ pub(super) fn Hotspot(ui: Ui, role: String, cursor: serde_json::Value, area: Are
         area.y,
         area.w - 44.,
         12.,
-        DIM,
+        studio_dim(),
     );
     for (i, label) in ["Cursor X", "Cursor Y"].into_iter().enumerate() {
         let next = ui.clone();
@@ -1034,7 +1075,7 @@ pub(super) fn Hotspot(ui: Ui, role: String, cursor: serde_json::Value, area: Are
             area.y + 40.,
             16.,
             12.,
-            DIM,
+            studio_dim(),
         );
         colour::ExactField(
             label,
@@ -1141,7 +1182,14 @@ fn Format(ui: Ui, area: Area, preview_below: bool) {
     let preview_h = (area.h - preview_y - 16.).clamp(260., 560.);
     let content_h = preview_y + if preview_below { preview_h + 16. } else { 32. };
     ScrollArea(area, content_h, move || {
-        Label("Format check".into(), 16., 16., area.w - 32., 16., FG);
+        Label(
+            "Format check".into(),
+            16.,
+            16.,
+            area.w - 32.,
+            16.,
+            studio_fg(),
+        );
         Label(
             if report["exportable"] == true {
                 "Ready for WSZ export"
@@ -1153,7 +1201,7 @@ fn Format(ui: Ui, area: Area, preview_below: bool) {
             48.,
             area.w - 32.,
             13.,
-            FG,
+            studio_fg(),
         );
         Label(
             "CSTUDIO projects can be saved at any time.".into(),
@@ -1161,7 +1209,7 @@ fn Format(ui: Ui, area: Area, preview_below: bool) {
             80.,
             area.w - 32.,
             12.,
-            DIM,
+            studio_dim(),
         );
         for (i, problem) in problems.iter().enumerate() {
             let y = 128. + i as f32 * 108.;
@@ -1171,7 +1219,7 @@ fn Format(ui: Ui, area: Area, preview_below: bool) {
                 y,
                 area.w - 32.,
                 13.,
-                FG,
+                studio_fg(),
             );
             Label(
                 format!(
@@ -1183,7 +1231,7 @@ fn Format(ui: Ui, area: Area, preview_below: bool) {
                 y + 24.,
                 area.w - 32.,
                 12.,
-                DIM,
+                studio_dim(),
             );
         }
         if preview_below {

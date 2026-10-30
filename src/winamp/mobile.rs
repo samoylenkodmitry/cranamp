@@ -215,9 +215,9 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
     let library = library::remember_library_ui();
     let focus = cranpose_ui::local_focus_manager().current();
     let insets = cranpose_ui::window_insets();
-    // The mobile host already consumes the system safe area. Only add the
-    // remaining keyboard obstruction here, so the tabs stay reachable.
-    let keyboard_bottom = (insets.ime.bottom - insets.safe_area.bottom).max(0.0);
+    // Paint the whole viewport, including the status bar and home indicator.
+    // Only content is inset; IME and safe-area obstruction overlap.
+    let content_insets = insets.combined();
     cranpose_services::BackHandler(
         Destination::from_state(&player.get()) != Destination::Player,
         move || player.update(|state| Destination::Player.select(state)),
@@ -234,7 +234,12 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
         Modifier::empty()
             .fill_max_size()
             .background(background)
-            .padding_each(0.0, 0.0, 0.0, keyboard_bottom),
+            .padding_each(
+                content_insets.left,
+                content_insets.top,
+                content_insets.right,
+                content_insets.bottom,
+            ),
         move |scope| {
             let width = scope.max_width().0;
             let height = scope.max_height().0;

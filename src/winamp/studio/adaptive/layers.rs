@@ -55,7 +55,7 @@ pub(super) fn Destination(ui: Ui, area: Area) {
         area.y + 10.,
         area.w - 72.,
         12.,
-        FG,
+        studio_fg(),
     );
 }
 
@@ -86,7 +86,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
             cranpose_core::LaunchedEffect((id.clone(), name.clone()), move |_| {
                 field.set_text(name);
             });
-            Label("Name".into(), 12., 4., area.w - 24., 11., DIM);
+            Label("Name".into(), 12., 4., area.w - 24., 11., studio_dim());
             cranpose_ui::BasicTextField(
                 field,
                 Modifier::empty()
@@ -96,7 +96,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                     .content_description("Layer name")
                     .then(controls::feedback(String::new()))
                     .padding_symmetric(8., 10.),
-                text_style(13., FG),
+                text_style(13., studio_fg()),
             );
             let next = ui.clone();
             let key = id.clone();
@@ -112,7 +112,14 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 move || command(&next, json!({"action":"set","id":key,"name":field.text()})),
             );
             let opacity = layer["opacity"].as_u64().unwrap_or(255) as u8;
-            Label("Layer opacity (%)".into(), 12., 84., area.w - 96., 12., FG);
+            Label(
+                "Layer opacity (%)".into(),
+                12.,
+                84.,
+                area.w - 96.,
+                12.,
+                studio_fg(),
+            );
             let next = ui.clone();
             let key = id.clone();
             colour::ExactField(
@@ -215,14 +222,21 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 move || command(&next, json!({"action":"set","id":id,"clip_below":!clipped})),
             );
         } else {
-            Label("Source artwork".into(), 12., 8., area.w - 24., 14., FG);
+            Label(
+                "Source artwork".into(),
+                12.,
+                8.,
+                area.w - 24.,
+                14.,
+                studio_fg(),
+            );
             Label(
                 "Add a layer to keep new paint separate.".into(),
                 12.,
                 32.,
                 area.w - 24.,
                 12.,
-                DIM,
+                studio_dim(),
             );
         }
         Label(
@@ -231,7 +245,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
             details_h + 14.,
             area.w - 80.,
             12.,
-            DIM,
+            studio_dim(),
         );
         let next = ui.clone();
         Control(

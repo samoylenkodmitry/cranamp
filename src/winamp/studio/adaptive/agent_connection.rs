@@ -46,7 +46,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 4.,
                 width,
                 13.,
-                DIM,
+                studio_dim(),
             );
             let status = connection.clone();
             let actions = ui.clone();
@@ -64,14 +64,18 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                     } else {
                         "Server off"
                     };
-                    let tint = if status.running { ACCENT_LIT } else { DIM };
+                    let tint = if status.running {
+                        studio_accent_lit()
+                    } else {
+                        studio_dim()
+                    };
                     cranpose_ui::Canvas(
                         Modifier::empty()
                             .absolute_offset(14., 18.)
                             .size_points(24., 24.),
                         move |scope| controls::draw_icon(scope, Icon::Agent, tint),
                     );
-                    desktop::RowLabel(title.into(), 50., 14., width - 118., 15., FG);
+                    desktop::RowLabel(title.into(), 50., 14., width - 118., 15., studio_fg());
                     desktop::RowLabel(
                         if status.running {
                             "This computer only"
@@ -83,7 +87,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                         36.,
                         width - 118.,
                         11.,
-                        DIM,
+                        studio_dim(),
                     );
                     let shared = actions.shared.clone();
                     Control(
@@ -129,7 +133,14 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                         Modifier::empty()
                             .absolute_offset(14., 76.)
                             .width(width - 80.),
-                        text_style(12., if status.error { design::ERROR } else { DIM }),
+                        text_style(
+                            12.,
+                            if status.error {
+                                design::studio_error()
+                            } else {
+                                studio_dim()
+                            },
+                        ),
                         cranpose_ui::text::TextOverflow::Ellipsis,
                         true,
                         3,
@@ -153,7 +164,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                     );
                 },
             );
-            desktop::RowLabel("HTTP server URL".into(), 16., 212., width, 12., FG);
+            desktop::RowLabel("HTTP server URL".into(), 16., 212., width, 12., studio_fg());
             let url_clipboard = clipboard;
             Box(
                 Modifier::empty()
@@ -170,7 +181,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                             18.,
                             width - 70.,
                             12.,
-                            FG,
+                            studio_fg(),
                         );
                         let clipboard = url_clipboard;
                         Control(
@@ -203,7 +214,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 296.,
                 width,
                 12.,
-                DIM,
+                studio_dim(),
             );
             let hints = ui.hints;
             desktop::ListRow(
@@ -217,7 +228,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 move || fallback.set(!fallback.get_non_reactive()),
             );
             if expanded {
-                Label("Keep the server running. Copy this command\ninto your agent's stdio server settings.".into(), 16., 382., width - 52., 12., DIM);
+                Label("Keep the server running. Copy this command\ninto your agent's stdio server settings.".into(), 16., 382., width - 52., 12., studio_dim());
                 Control(
                     if copied.get() == 2 {
                         Icon::Check
@@ -248,7 +259,10 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 Modifier::empty()
                     .absolute_offset(16., access_y + 48.)
                     .size_points(20., 20.),
-                move |scope| controls::draw_icon(scope, Icon::Lock, DIM),
+                {
+                    let color = studio_dim();
+                    move |scope| controls::draw_icon(scope, Icon::Lock, color)
+                },
             );
             Label(
                 "Local access".into(),
@@ -256,7 +270,7 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 access_y + 48.,
                 width - 30.,
                 12.,
-                FG,
+                studio_fg(),
             );
             if let Some((image, name, edits)) = &preview {
                 previews::Divider(Area::new(16., preview_y, width, 1.));
@@ -271,21 +285,28 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                     preview_y + 24.,
                     area.w - 148.,
                     12.,
-                    DIM,
+                    studio_dim(),
                 );
-                desktop::RowLabel(name.clone(), 132., preview_y + 48., area.w - 148., 13., FG);
+                desktop::RowLabel(
+                    name.clone(),
+                    132.,
+                    preview_y + 48.,
+                    area.w - 148.,
+                    13.,
+                    studio_fg(),
+                );
                 Label(
                     format!("{edits} edits in Undo"),
                     132.,
                     preview_y + 74.,
                     area.w - 148.,
                     12.,
-                    DIM,
+                    studio_dim(),
                 );
             }
             Label(
             "Agents with your session secret can use files\nCranamp can access. Stop revokes the secret.\nYour agent runs separately from Cranamp.".into(),
-            16., access_y + 78., width, 12., DIM,
+            16., access_y + 78., width, 12., studio_dim(),
         );
         },
     );

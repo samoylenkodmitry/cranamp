@@ -10,8 +10,8 @@ fn android_and_ios_compose_the_same_player() {
         .next()
         .expect("mobile_root has a body");
     assert!(
-        shared.contains(STACKED_APP) && shared.contains(".safe_area_padding()"),
-        "mobile root must compose {STACKED_APP} inside the safe area: {shared}"
+        shared.contains(STACKED_APP) && !shared.contains(".safe_area_padding()"),
+        "{STACKED_APP} owns the full viewport and insets its controls: {shared}"
     );
     let ios = lib
         .split("fn ios_entry_point()")

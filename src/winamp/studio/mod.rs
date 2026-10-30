@@ -64,7 +64,9 @@ impl std::ops::Deref for SharedDocument {
         &self.0
     }
 }
-use design::{ACCENT, ACCENT_LIT, BG, CARD, DIM, FG, PIP_OFF};
+use design::{
+    studio_accent, studio_accent_lit, studio_bg, studio_card, studio_dim, studio_fg, studio_pip_off,
+};
 fn presentation_origin(scene: [f32; 2], player: [f32; 2]) -> [f32; 2] {
     [
         ((scene[0] - player[0]) / 2.).floor(),
@@ -307,12 +309,12 @@ fn Label(text: String, x: f32, y: f32, w: f32, size: f32, color: Color) {
 }
 #[composable]
 fn Action(label: String, x: f32, y: f32, w: f32, click: impl Fn() + 'static) {
-    Slab(label, x, y, w, CARD, click);
+    Slab(label, x, y, w, studio_card(), click);
 }
 #[composable]
 fn MaybeAction(label: String, x: f32, y: f32, w: f32, enabled: bool, click: impl Fn() + 'static) {
     if enabled {
-        Slab(label, x, y, w, CARD, click);
+        Slab(label, x, y, w, studio_card(), click);
         return;
     }
     Box(
@@ -330,7 +332,7 @@ fn MaybeAction(label: String, x: f32, y: f32, w: f32, enabled: bool, click: impl
             Text(
                 label.clone(),
                 Modifier::empty().padding(6.),
-                text_style(12., PIP_OFF),
+                text_style(12., studio_pip_off()),
             );
         },
     );
@@ -344,7 +346,7 @@ fn Slab(label: String, x: f32, y: f32, w: f32, fill: Color, click: impl Fn() + '
             .size_points(w, 30.)
             .then(design::surface(
                 design::Surface::Button,
-                fill == ACCENT,
+                fill == studio_accent(),
                 false,
                 false,
             ))
@@ -355,7 +357,7 @@ fn Slab(label: String, x: f32, y: f32, w: f32, fill: Color, click: impl Fn() + '
             Text(
                 label.clone(),
                 Modifier::empty().padding(6.),
-                text_style(12., FG),
+                text_style(12., studio_fg()),
             );
         },
     );
@@ -375,7 +377,7 @@ fn Panel(label: String, x: f32, y: f32, w: f32, open: bool, click: impl Fn() + '
             Text(
                 label.clone(),
                 Modifier::empty().padding(6.),
-                text_style(12., FG),
+                text_style(12., studio_fg()),
             );
         },
     );
@@ -383,7 +385,7 @@ fn Panel(label: String, x: f32, y: f32, w: f32, open: bool, click: impl Fn() + '
         Modifier::empty()
             .absolute_offset(x + 7., y + 24.)
             .size_points(w - 14., 2.)
-            .background(if open { FG } else { DIM })
+            .background(if open { studio_fg() } else { studio_dim() })
             .rounded_corners(1.),
         BoxSpec::default(),
         || {},
@@ -404,7 +406,7 @@ fn ListToggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() 
             Text(
                 label.clone(),
                 Modifier::empty().width(w - 34.),
-                text_style(12., FG),
+                text_style(12., studio_fg()),
             );
         },
     );
@@ -412,7 +414,11 @@ fn ListToggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() 
         Modifier::empty()
             .absolute_offset(x + w - 17., y + 11.)
             .size_points(8., 8.)
-            .background(if on { ACCENT_LIT } else { PIP_OFF })
+            .background(if on {
+                studio_accent_lit()
+            } else {
+                studio_pip_off()
+            })
             .rounded_corners(4.),
         BoxSpec::default(),
         || {},
@@ -438,7 +444,7 @@ fn ListChoice(label: String, x: f32, y: f32, w: f32, current: bool, click: impl 
             Text(
                 label.clone(),
                 Modifier::empty().width(w - 28.),
-                text_style(12., FG),
+                text_style(12., studio_fg()),
             );
         },
     );
@@ -463,7 +469,7 @@ fn Choice(label: String, x: f32, y: f32, w: f32, current: bool, click: impl Fn()
             Text(
                 label.clone(),
                 Modifier::empty().padding(6.),
-                text_style(12., FG),
+                text_style(12., studio_fg()),
             );
         },
     );
@@ -483,7 +489,7 @@ fn Toggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() + 's
             Text(
                 label.clone(),
                 Modifier::empty().padding(6.),
-                text_style(12., FG),
+                text_style(12., studio_fg()),
             );
         },
     );
@@ -491,7 +497,11 @@ fn Toggle(label: String, x: f32, y: f32, w: f32, on: bool, click: impl Fn() + 's
         Modifier::empty()
             .absolute_offset(x + w - 17., y + 11.)
             .size_points(8., 8.)
-            .background(if on { ACCENT_LIT } else { PIP_OFF })
+            .background(if on {
+                studio_accent_lit()
+            } else {
+                studio_pip_off()
+            })
             .rounded_corners(4.),
         BoxSpec::default(),
         || {},
@@ -602,14 +612,14 @@ fn LayerChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
             .collect::<Vec<_>>();
         (shown, d.view.layers.clone(), total)
     };
-    Label("SPRITE TARGETS".into(), 12., 17., 260., 14., FG);
+    Label("SPRITE TARGETS".into(), 12., 17., 260., 14., studio_fg());
     Label(
         "Which sprites a stroke paints into.\nAny combination; Solo isolates one.".into(),
         12.,
         43.,
         width,
         11.,
-        DIM,
+        studio_dim(),
     );
     for (i, (label, all)) in [
         ("Auto · every sprite", false),
@@ -647,7 +657,7 @@ fn LayerChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
             .size_points(width - 140., 26.)
             .then(design::surface(design::Surface::Field, false, false, false))
             .padding_symmetric(6., 4.),
-        text_style(12., FG),
+        text_style(12., studio_fg()),
     );
     Label(
         if needle.is_empty() {
@@ -659,7 +669,7 @@ fn LayerChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         130.,
         140.,
         11.,
-        DIM,
+        studio_dim(),
     );
     let scroll = cranpose_ui::rememberScrollState!(0.0);
     cranpose_ui::Column(
@@ -707,7 +717,7 @@ fn LayerChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                         Action("Solo".into(), width - 66., 0., 64., move || {
                             state(&d, json!({"layers":[id]}))
                         });
-                        Label(info.clone(), 8., 32., width - 16., 10., DIM);
+                        Label(info.clone(), 8., 32., width - 16., 10., studio_dim());
                     },
                 );
             }
@@ -874,7 +884,7 @@ fn StudyChooser(
         17.,
         room.0,
         14.,
-        FG,
+        studio_fg(),
     );
     Label(
         if chosen {
@@ -897,7 +907,7 @@ fn StudyChooser(
         46.,
         room.0,
         11.,
-        DIM,
+        studio_dim(),
     );
     for (i, label) in ["Color", "Values"].into_iter().enumerate() {
         Choice(
@@ -971,7 +981,7 @@ fn StudyChooser(
             summary,
             room.0,
             10.,
-            FG,
+            studio_fg(),
         );
     }
     if let Some(coverage) = coverage {
@@ -985,7 +995,7 @@ fn StudyChooser(
             summary + 20.,
             room.0,
             10.,
-            DIM,
+            studio_dim(),
         );
     }
 }
@@ -1003,7 +1013,7 @@ fn GuideChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
     }
     drop(doc);
     let outlining = { shared.lock().unwrap().view.guides };
-    Label("SPRITE RECTANGLES".into(), 12., 17., 270., 14., FG);
+    Label("SPRITE RECTANGLES".into(), 12., 17., 270., 14., studio_fg());
     Label(
         "Where each sprite lives in the joined skin. The editor\noutlines the one under the pointer; it never draws into\nthe artwork."
             .into(),
@@ -1011,7 +1021,7 @@ fn GuideChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         40.,
         room.0,
         11.,
-        DIM,
+        studio_dim(),
     );
     {
         let d = shared.clone();
@@ -1061,7 +1071,7 @@ fn GuideChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
         170.,
         room.0,
         10.,
-        DIM,
+        studio_dim(),
     );
     let scroll = cranpose_ui::rememberScrollState!(0.0);
     cranpose_ui::Column(
@@ -1086,7 +1096,7 @@ fn GuideChooser(shared: SharedDocument, _revision: u64, room: (f32, f32)) {
                         ListChoice(name.clone(), 0., 0., room.0 - 6., false, move || {
                             let _ = d.lock().unwrap().select_guide(&id);
                         });
-                        Label(text.clone(), 8., 32., room.0 - 16., 10., DIM);
+                        Label(text.clone(), 8., 32., room.0 - 16., 10., studio_dim());
                     },
                 );
             }

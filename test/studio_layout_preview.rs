@@ -14,7 +14,21 @@ fn main() {
             .with_application_id("com.cranamp.mobile-review")
             .with_developer_inspector(false)
             .with_size(width, height);
-        with_capture(launcher, None).run(cranamp::winamp::WinampMobileApp);
+        let insets = review_insets();
+        let theme = std::env::var("CRANAMP_REVIEW_THEME").ok().map(|value| {
+            if value == "dark" {
+                cranpose_services::SystemTheme::Dark
+            } else {
+                cranpose_services::SystemTheme::Light
+            }
+        });
+        with_capture(launcher, None).run(move || {
+            let mut locals = vec![cranpose_ui::local_safe_area_insets().provides(insets)];
+            if let Some(theme) = theme {
+                locals.push(cranpose_services::local_system_theme().provides(theme));
+            }
+            cranpose_core::CompositionLocalProvider(locals, cranamp::winamp::WinampMobileApp);
+        });
     }
     if std::env::args().nth(1).as_deref() == Some("--player") {
         let width = std::env::args()
@@ -97,6 +111,14 @@ fn main() {
         .run(move || cranamp::winamp::studio::SkinStudio(doc.clone(), None));
 }
 
+fn review_insets() -> cranpose_ui::EdgeInsets {
+    if std::env::var_os("CRANAMP_REVIEW_PHONE_INSETS").is_some() {
+        cranpose_ui::EdgeInsets::from_components(0., 59., 0., 34.)
+    } else {
+        cranpose_ui::EdgeInsets::default()
+    }
+}
+
 // Export actual GPU frames. When reviewing a case, omit only the separate
 // review navigation footer below the product UI.
 fn with_capture(
@@ -109,6 +131,8 @@ fn with_capture(
         let settings = std::env::var_os("CRANAMP_REVIEW_OPEN_SETTINGS").is_some();
         let library = std::env::var_os("CRANAMP_REVIEW_OPEN_LIBRARY").is_some();
         let albums = std::env::var_os("CRANAMP_REVIEW_OPEN_ALBUMS").is_some();
+        let studio = std::env::var_os("CRANAMP_REVIEW_OPEN_STUDIO").is_some();
+        let insets = review_insets();
         let scale = std::env::var("CRANAMP_REVIEW_CAPTURE_SCALE")
             .ok()
             .and_then(|value| value.parse::<f32>().ok())
@@ -116,36 +140,29 @@ fn with_capture(
             .unwrap_or(1.);
         launcher.with_test_driver(move |robot| {
             std::thread::spawn(move || {
-                if library || albums {
+                if library || albums || studio || settings {
                     robot.wait_for_idle().expect("player ready");
                     let frame = robot.screenshot_with_scale(1.).expect("player frame");
                     let width = frame.width as f32;
                     let height = frame.height as f32;
+                    let (tab, fraction) = if settings {
+                        ("Settings", 0.875)
+                    } else if studio {
+                        ("Skin Studio", 0.625)
+                    } else {
+                        ("Library", 0.375)
+                    };
                     robot
-                        .click(12. + (width - 24.) * 0.375, height - 40.)
-                        .expect("open Library");
-                    robot.wait_for_idle().expect("Library ready");
-                    robot.validate_content("Library").expect("Library visible");
+                        .click(12. + (width - 24.) * fraction, height - insets.bottom - 40.)
+                        .expect("open destination");
+                    robot.wait_for_idle().expect("destination ready");
+                    robot.validate_content(tab).expect("destination visible");
                     if albums {
-                        robot.click(width * 0.75, 147.).expect("open Albums");
+                        robot
+                            .click(width * 0.75, insets.top + 147.)
+                            .expect("open Albums");
                         robot.wait_for_idle().expect("Albums ready");
                     }
-                }
-                if settings {
-                    robot.wait_for_idle().expect("player ready");
-                    let frame = robot.screenshot_with_scale(1.).expect("player frame");
-                    let width = frame.width as f32;
-                    let height = frame.height as f32;
-                    let scale = (width / 275.).min(height / 493.).clamp(0.5, 4.);
-                    robot
-                        .click((width - 275. * scale) / 2. + 262. * scale, 95.5 * scale)
-                        .expect("open player settings");
-                    robot.wait_for_idle().expect("settings ready");
-                    robot
-                        .validate_content("Settings")
-                        .expect("settings visible");
-                    robot.mouse_move(width / 2., height / 2.).unwrap();
-                    robot.mouse_scroll(0., -450.).unwrap();
                 }
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(3));

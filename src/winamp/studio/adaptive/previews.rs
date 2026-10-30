@@ -151,7 +151,7 @@ pub(super) fn ToolSample(ui: Ui, area: Area) {
                     (area.h - 14.) / 2.,
                     area.w - 16.,
                     11.,
-                    DIM,
+                    studio_dim(),
                 );
             } else {
                 cranpose_ui::Image(
@@ -212,9 +212,12 @@ pub(super) fn ToolCard(
                         Modifier::empty()
                             .absolute_offset(8., 6.)
                             .size_points(24., 24.),
-                        move |scope| controls::draw_icon(scope, icon, FG),
+                        {
+                            let color = studio_fg();
+                            move |scope| controls::draw_icon(scope, icon, color)
+                        },
                     );
-                    desktop::RowLabel(name.clone(), 40., 11., area.w - 48., 12., FG);
+                    desktop::RowLabel(name.clone(), 40., 11., area.w - 48., 12., studio_fg());
                     if empty {
                         desktop::RowLabel(
                             if name == "Stamp" {
@@ -227,7 +230,7 @@ pub(super) fn ToolCard(
                             38.,
                             area.w - 16.,
                             10.,
-                            DIM,
+                            studio_dim(),
                         );
                     } else {
                         Image(
@@ -298,9 +301,13 @@ pub(super) fn AssetRow(
                         8.,
                         area.w - 76.,
                         12.,
-                        if selected { ACCENT_LIT } else { FG },
+                        if selected {
+                            studio_accent_lit()
+                        } else {
+                            studio_fg()
+                        },
                     );
-                    desktop::RowLabel(detail.clone(), 64., 26., area.w - 76., 10., DIM);
+                    desktop::RowLabel(detail.clone(), 64., 26., area.w - 76., 10., studio_dim());
                 },
             );
         },
@@ -330,7 +337,14 @@ pub(super) fn StateReferences(ui: Ui, area: Area) {
     let view = ui.shared.lock().unwrap().view.clone();
     let height = (area.w - 24.) * 116. / 275. + 30.;
     ScrollArea(area, 32. + height * 4., move || {
-        Label("State previews".into(), 12., 10., area.w - 24., 12., DIM);
+        Label(
+            "State previews".into(),
+            12.,
+            10.,
+            area.w - 24.,
+            12.,
+            studio_dim(),
+        );
         for (i, ((active, pressed), name)) in
             [(true, false), (true, true), (false, false), (false, true)]
                 .into_iter()
@@ -379,7 +393,7 @@ pub(super) fn StateReferences(ui: Ui, area: Area) {
                                 height - 24.,
                                 area.w - 32.,
                                 11.,
-                                DIM,
+                                studio_dim(),
                             );
                         },
                     );
