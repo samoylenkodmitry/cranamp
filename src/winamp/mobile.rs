@@ -317,6 +317,7 @@ fn MobilePlayer(artwork: WinampSkin, player: MutableState<WinampState>, skin: Wi
             reflection::corner_color(&artwork),
             snapshot,
             layout,
+            scope.max_width().0,
             scope.max_height().0,
         );
     });

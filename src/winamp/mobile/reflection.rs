@@ -1,10 +1,13 @@
-//! Reflect the rendered lower edge without mounting another player or copying pixels to the CPU.
+//! Project the player's lower half onto glass using the live GPU backdrop.
 use super::*;
 use cranpose_ui_graphics::{RuntimeShader, RUNTIME_SHADER_PRELUDE_WGSL};
 
-pub(super) const GAP: f32 = 26.;
-const DEPTH: f32 = 104.;
-const COMPRESSION: f32 = 0.65;
+pub(super) const GAP: f32 = 88.;
+const DEPTH: f32 = 128.;
+// The plane widens toward the viewer and shears to the right. At its contact
+// edge it has exactly the player's width and position.
+const SPREAD: f32 = 0.24;
+const SKEW: f32 = 0.18;
 
 pub(super) fn player_layout(width: f32, height: f32, state: &WinampState) -> StackedLayout {
     let mut layout = resizable_stacked_layout(
@@ -36,8 +39,10 @@ pub(super) fn corner_color(skin: &WinampSkin) -> Color {
 
 #[derive(Clone, Copy, Debug)]
 struct ReflectionBounds {
+    left: f32,
     top: f32,
     width: f32,
+    source_width: f32,
     source_height: f32,
     depth: f32,
 }
@@ -45,6 +50,7 @@ struct ReflectionBounds {
 fn bounds(
     state: &WinampState,
     layout: StackedLayout,
+    viewport_width: f32,
     viewport_height: f32,
     density: f32,
 ) -> ReflectionBounds {
@@ -58,13 +64,19 @@ fn bounds(
     let snap = |value: f32| (value * density).round() / density;
     let height = snap(skin_height * layout.scale);
     let bottom = snap(layout.content_top_inset) + height;
+    // Align the capture to physical pixels so rounding its offscreen texture
+    // cannot shift the projected footer by half a source pixel.
+    let source_height = snap(height * 0.5);
     let depth = (viewport_height - bottom)
         .clamp(0., DEPTH)
-        .min(height * COMPRESSION);
-    let source_height = depth / COMPRESSION;
+        .min(source_height * 0.5);
+    let left = snap(layout.content_left_inset);
+    let source_width = snap(MAIN_WIDTH * layout.scale);
     ReflectionBounds {
+        left,
         top: bottom - source_height,
-        width: snap(MAIN_WIDTH * layout.scale),
+        width: snap(source_width * (1. + SPREAD * 0.5 + SKEW)).min((viewport_width - left).max(0.)),
+        source_width,
         source_height,
         depth,
     }
@@ -86,7 +98,9 @@ fn shader(area: ReflectionBounds, background: Color) -> RuntimeShader {
     shader.set_float(2, area.source_height);
     shader.set_float(3, area.depth);
     shader.set_float4(4, background.0, background.1, background.2, 1.);
-    shader.set_float(8, COMPRESSION);
+    shader.set_float(8, area.source_width);
+    shader.set_float(9, SPREAD);
+    shader.set_float(10, SKEW);
     shader
 }
 
@@ -95,18 +109,25 @@ pub(super) fn FloorReflection(
     background: Color,
     state: WinampState,
     layout: StackedLayout,
+    viewport_width: f32,
     viewport_height: f32,
 ) {
-    let area = bounds(&state, layout, viewport_height, current_density());
+    let area = bounds(
+        &state,
+        layout,
+        viewport_width,
+        viewport_height,
+        current_density(),
+    );
     if area.depth <= 0. {
         return;
     }
-    // Include the source strip in the backdrop capture. Above the contact edge,
-    // the shader returns those pixels unchanged; below it, it mirrors and fades them.
+    // Capture the complete lower half, regardless of the available floor depth.
+    // Preserve it above the contact edge; project its mirror onto the floor below.
     // This empty drawing layer has no input handlers or accessibility nodes.
     Box(
         Modifier::empty()
-            .absolute_offset(snap_to_pixel(layout.content_left_inset), area.top)
+            .absolute_offset(area.left, area.top)
             .size_points(area.width, area.source_height + area.depth)
             .shader_background(shader(area, background)),
         BoxSpec::default(),

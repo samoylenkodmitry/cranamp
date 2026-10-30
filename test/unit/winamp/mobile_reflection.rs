@@ -40,7 +40,7 @@ fn reflection_meets_the_visible_player_bottom_and_stays_inside_the_screen() {
                 ..WinampState::default()
             };
             let layout = player_layout(width, height, &state);
-            let area = bounds(&state, layout, height, 1.);
+            let area = bounds(&state, layout, width, height, 1.);
             let bottom = ((main_height(main_shaded)
                 + if eq_visible { EQ_HEIGHT } else { 0. }
                 + if playlist_visible {
@@ -53,7 +53,22 @@ fn reflection_meets_the_visible_player_bottom_and_stays_inside_the_screen() {
             assert!((area.top + area.source_height - bottom).abs() < 0.001);
             assert!(area.top >= -0.001 && area.depth > 0.);
             assert!(bottom + area.depth <= height + 0.001);
-            assert!((area.source_height * COMPRESSION - area.depth).abs() < 0.001);
+            assert!((area.source_height - bottom * 0.5).abs() <= 0.5);
+            assert!(area.depth <= area.source_height * 0.5);
+            assert!(area.left >= 0. && area.left + area.width <= width + 0.001);
         }
     }
+}
+
+#[test]
+fn reflection_captures_half_the_player_even_when_the_floor_is_shallow() {
+    let state = WinampState::default();
+    let layout = player_layout(440., 863., &state);
+    let full = bounds(&state, layout, 440., 863., 3.);
+    let contact = full.top + full.source_height;
+    let shallow = bounds(&state, layout, 440., contact + 20., 3.);
+    assert_eq!(shallow.source_height, full.source_height);
+    assert_eq!(shallow.depth, 20.);
+    assert!(full.source_height > full.depth * 2.);
+    assert!(863. - NAV_HEIGHT - contact >= GAP - 1.);
 }
