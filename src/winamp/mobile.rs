@@ -9,6 +9,7 @@ pub(super) mod theme;
 use theme::colors as liquid_colors;
 
 const NAV_HEIGHT: f32 = 86.0;
+const NAV_TOP_INSET: f32 = 10.0;
 const PLAY_ICON: &str = "M8 5v14l11-7z";
 
 pub(super) fn touch_controls_enabled() -> bool {
@@ -253,10 +254,14 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
             let height = scope.max_height().0;
             let nav_top = (height - NAV_HEIGHT).max(0.0);
             let destination = Destination::from_state(&player.get());
+            let surface = Modifier::empty().size_points(width, height);
             Box(
-                Modifier::empty()
-                    .size_points(width, height)
-                    .clip_to_bounds(),
+                if destination == Destination::Player {
+                    // The reflection continues behind the home indicator.
+                    surface
+                } else {
+                    surface.clip_to_bounds()
+                },
                 BoxSpec::default(),
                 move || {
                     // This call remains mounted across tabs so its shared documents and
@@ -267,7 +272,9 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
                         Destination::Settings => MobileSettings(player, skin, appearance),
                         Destination::Library => library::LibraryScreen(player, library),
                         Destination::Player => match skin.get() {
-                            Ok(artwork) => MobilePlayer(artwork, player, skin),
+                            Ok(artwork) => {
+                                MobilePlayer(artwork, player, skin, content_insets.bottom)
+                            }
                             Err(error) => WinampSkinError(error),
                         },
                     }
@@ -289,7 +296,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
             }
             LiquidTabBar(
                 Modifier::empty()
-                    .absolute_offset((width - nav_width) * 0.5, nav_top + 10.0)
+                    .absolute_offset((width - nav_width) * 0.5, nav_top + NAV_TOP_INSET)
                     .width(nav_width),
                 LiquidTabBarSpec::new((nav_width - 8.0) / 4.0),
                 destination.index(),
@@ -315,7 +322,12 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
 }
 
 #[composable]
-fn MobilePlayer(artwork: WinampSkin, player: MutableState<WinampState>, skin: WinampSkinState) {
+fn MobilePlayer(
+    artwork: WinampSkin,
+    player: MutableState<WinampState>,
+    skin: WinampSkinState,
+    bottom_inset: f32,
+) {
     BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
         let snapshot = player.get();
         let layout =
@@ -326,7 +338,7 @@ fn MobilePlayer(artwork: WinampSkin, player: MutableState<WinampState>, skin: Wi
             snapshot,
             layout,
             scope.max_width().0,
-            scope.max_height().0,
+            scope.max_height().0 + bottom_inset,
         );
     });
 }
