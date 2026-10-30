@@ -24,7 +24,7 @@ jobs:
         with:
           cache-bin: false
       - name: Install Linux audio/dialog dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config xvfb xauth libxkbcommon-x11-0
       - name: Format
         run: cargo fmt --all --check
       - name: State-holder gate
@@ -39,6 +39,8 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test --all-targets
+      - name: X11 cursor resource regression
+        run: xvfb-run -a cargo test -p winit-x11 --lib -- --include-ignored
       - name: Check wasm
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features web,renderer-wgpu
 
