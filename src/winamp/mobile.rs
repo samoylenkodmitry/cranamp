@@ -2,13 +2,15 @@
 use super::*;
 use cranpose::liquid::prelude::*;
 mod chrome;
+mod desktop;
+pub(super) use desktop::{DesktopNavigation, DesktopWorkspace};
 mod library;
 mod reflection;
 mod settings;
 pub(super) mod theme;
 use theme::colors as liquid_colors;
 
-const NAV_HEIGHT: f32 = 86.0;
+pub(super) const NAV_HEIGHT: f32 = 86.0;
 const NAV_TOP_INSET: f32 = 10.0;
 const PLAY_ICON: &str = "M8 5v14l11-7z";
 
@@ -218,7 +220,6 @@ pub fn WinampMobileApp() {
 fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appearance: theme::Ui) {
     let library = library::remember_library_ui();
     library::PlaylistEffects(player, library);
-    let focus = cranpose_ui::local_focus_manager().current();
     let insets = cranpose_ui::window_insets();
     // Paint the whole viewport, including the status bar and home indicator.
     // Only content is inset; IME and safe-area obstruction overlap.
@@ -294,29 +295,39 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
                         .size_points(nav_width, 58.0),
                 );
             }
-            LiquidTabBar(
+            NavigationBar(
+                player,
                 Modifier::empty()
-                    .absolute_offset((width - nav_width) * 0.5, nav_top + NAV_TOP_INSET)
-                    .width(nav_width),
-                LiquidTabBarSpec::new((nav_width - 8.0) / 4.0),
-                destination.index(),
-                move |index| {
-                    focus.clear_focus();
-                    let destination = match index {
-                        1 => Destination::Library,
-                        2 => Destination::Studio,
-                        3 => Destination::Settings,
-                        _ => Destination::Player,
-                    };
-                    player.update(|state| destination.select(state));
-                },
-                |tabs| {
-                    tabs.push(LiquidTab::new(PLAY_ICON, "Player").with_icon_scale(0.72));
-                    tabs.push(LiquidTab::new(icons::LIST, "Library").with_icon_scale(0.72));
-                    tabs.push(LiquidTab::new(icons::EDIT, "Skin Studio").with_icon_scale(0.72));
-                    tabs.push(LiquidTab::new(icons::SETTINGS, "Settings").with_icon_scale(0.72));
-                },
+                    .absolute_offset((width - nav_width) * 0.5, nav_top + NAV_TOP_INSET),
+                nav_width,
             );
+        },
+    );
+}
+
+/// One tab bar for mobile screens and desktop companion windows.
+#[composable]
+fn NavigationBar(player: MutableState<WinampState>, modifier: Modifier, width: f32) {
+    let focus = cranpose_ui::local_focus_manager().current();
+    LiquidTabBar(
+        modifier.width(width),
+        LiquidTabBarSpec::new((width - 8.0).max(4.0) / 4.0),
+        Destination::from_state(&player.get()).index(),
+        move |index| {
+            focus.clear_focus();
+            let destination = match index {
+                1 => Destination::Library,
+                2 => Destination::Studio,
+                3 => Destination::Settings,
+                _ => Destination::Player,
+            };
+            player.update(|state| destination.select(state));
+        },
+        |tabs| {
+            tabs.push(LiquidTab::new(PLAY_ICON, "Player").with_icon_scale(0.72));
+            tabs.push(LiquidTab::new(icons::LIST, "Library").with_icon_scale(0.72));
+            tabs.push(LiquidTab::new(icons::EDIT, "Skin Studio").with_icon_scale(0.72));
+            tabs.push(LiquidTab::new(icons::SETTINGS, "Settings").with_icon_scale(0.72));
         },
     );
 }

@@ -123,6 +123,8 @@ struct WinampState {
     settings_open: bool,
     studio_open: bool,
     library_open: bool,
+    /// Some on the desktop player; None for surfaces that own their navigation.
+    desktop_navigation: Option<bool>,
     main_shaded: bool,
     /// Winamp's main window can be closed on its own, Alt+W, while the
     /// equalizer or the playlist stays open.
@@ -176,6 +178,7 @@ impl PartialEq for WinampState {
             && self.settings_open == other.settings_open
             && self.studio_open == other.studio_open
             && self.library_open == other.library_open
+            && self.desktop_navigation == other.desktop_navigation
             && self.main_shaded == other.main_shaded
             && self.main_visible == other.main_visible
             && self.vis_mode == other.vis_mode
@@ -237,6 +240,7 @@ impl Default for WinampState {
             settings_open: false,
             studio_open: false,
             library_open: false,
+            desktop_navigation: None,
             main_shaded: false,
             main_visible: true,
             vis_mode: vis::VisMode::default(),
@@ -2897,10 +2901,16 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
         } else {
             0.0
         };
-    if peer_windows.main.size_non_reactive() != Size::new(stack_width, stack_height) {
+    let navigation_height = if snapshot.desktop_navigation == Some(true) {
+        86.0
+    } else {
+        0.0
+    };
+    let window_height = stack_height + navigation_height;
+    if peer_windows.main.size_non_reactive() != Size::new(stack_width, window_height) {
         peer_windows
             .main
-            .set_size(Size::new(stack_width, stack_height));
+            .set_size(Size::new(stack_width, window_height));
     }
     MainWindowClosedAside(StackPanes {
         main_visible: snapshot.main_visible,
@@ -3055,9 +3065,13 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
                     },
                 );
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            if navigation_height > 0.0 {
+                mobile::DesktopNavigation(state, stack_width, stack_height);
+            }
         },
     );
-    if snapshot.settings_open {
+    if snapshot.settings_open && snapshot.desktop_navigation.is_none() {
         Box(
             Modifier::empty().window(
                 winamp_window_config(WinampWindowPlacement {
@@ -3076,7 +3090,10 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
 }
 #[composable]
 pub fn WinampStandaloneApp() {
-    let state = cranpose_core::rememberMutableStateOf(initial_winamp_state);
+    let state = cranpose_core::rememberMutableStateOf(|| WinampState {
+        desktop_navigation: Some(false),
+        ..initial_winamp_state()
+    });
     let peer_windows = WinampPeerWindowStates {
         main: rememberWindowState(MAIN_WIDTH, MAIN_HEIGHT),
         equalizer: rememberWindowState(EQ_WIDTH, EQ_HEIGHT),
@@ -3098,7 +3115,7 @@ pub fn WinampStandaloneApp() {
             return;
         }
     };
-    WinampWindowStack(WinampWindowStackSpec {
+    let stack = WinampWindowStackSpec {
         skin,
         state,
         skin_state,
@@ -3114,7 +3131,11 @@ pub fn WinampStandaloneApp() {
         scale: ui_scale(),
         dock,
         snapshot,
-    });
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    mobile::DesktopWorkspace(stack);
+    #[cfg(target_arch = "wasm32")]
+    WinampWindowStack(stack);
 }
 #[composable]
 fn MainWindow(
@@ -3599,7 +3620,11 @@ fn MainWindowFace(
     {
         let state_click = state;
         ClickTarget(
-            "Settings",
+            if snapshot.desktop_navigation.is_some() {
+                "Toggle navigation"
+            } else {
+                "Settings"
+            },
             MAIN_SKIN_CHOOSER_HIT_AREA.0,
             MAIN_SKIN_CHOOSER_HIT_AREA.1,
             MAIN_SKIN_CHOOSER_HIT_AREA.2,
@@ -3607,6 +3632,15 @@ fn MainWindowFace(
             scale,
             move || {
                 state_click.update(|s| {
+                    if let Some(visible) = s.desktop_navigation {
+                        s.desktop_navigation = Some(!visible);
+                        if visible {
+                            s.settings_open = false;
+                            s.studio_open = false;
+                            s.library_open = false;
+                        }
+                        return;
+                    }
                     s.settings_open = !s.settings_open;
                     s.status = if s.settings_open {
                         "Settings".to_string()

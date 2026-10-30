@@ -10,6 +10,9 @@ pub(super) const TRASH: &str =
 pub(super) const MINI_HEIGHT: f32 = 66.0;
 
 pub(super) fn bottom_inset(state: &WinampState) -> f32 {
+    if state.desktop_navigation.is_some() {
+        return 0.0;
+    }
     NAV_HEIGHT
         + if state.current_index.is_some() {
             MINI_HEIGHT

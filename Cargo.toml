@@ -81,6 +81,11 @@ name = "cranamp-studio-review"
 path = "test/studio_layout_preview.rs"
 required-features = ["desktop", "studio-review"]
 
+[[bin]]
+name = "cranamp-desktop-navigation-review"
+path = "test/desktop_navigation_preview.rs"
+required-features = ["desktop", "studio-review"]
+
 [features]
 studio-review = []
 audio-audit = []

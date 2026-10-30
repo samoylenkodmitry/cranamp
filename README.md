@@ -6,7 +6,7 @@ A music player in Rust with WSZ skin support and a built-in Skin Studio, powered
 
 ## Player and Skin Studio
 
-The player uses classic Winamp skins. Open **Settings > Open Skin Studio** to edit the current skin or open a skin file.
+The player uses classic Winamp skins. On desktop, click the Winamp logo to show or hide the bottom navigation. Library, Skin Studio and Settings open beside the player. Selecting Player or closing the companion window returns to the player. Hiding the bar also closes the companion window. On mobile, use the bottom tabs to switch screens.
 
 | Player with equalizer and playlist | Desktop Studio with tool settings and layers |
 | --- | --- |
@@ -44,7 +44,7 @@ Actual release captures from [0.1.92](store/releases/0.1.92/screenshots.json). S
 - **Floating web player** — Open PiP explicitly in supported Chromium browsers.
 - **Sync** — Share listening progress and play counts through a chosen folder on native platforms.
 - **Android updates** — Direct APK builds can install new releases from Settings. Store builds use store updates.
-- **Skin Studio** — Open the editor from Settings on desktop, Android, iOS and the web. Layouts follow screen width, with current tool properties beside the canvas.
+- **Skin Studio** — Open the editor from the bottom navigation on desktop, Android and iOS, or from Settings on the web. Layouts follow screen width, with current tool properties beside the canvas.
 - **Drawing** — Pencil, lines, curves, shapes, pixel stamps, fur strokes and glass tools.
 - **Layers** — Edit painting layers, masks and selected skin parts with undo/redo.
 - **Connected canvas** — Draw across main, equalizer and playlist with source-part guides.

@@ -1570,3 +1570,87 @@ fn library_indexes_tags_folder_art_and_albums_without_changing_original_audio() 
         .flatten()
         .any(|e| e.path().extension().is_some_and(|e| e == "png")));
 }
+
+/// Exercise the native window roots through their accessible controls and separate scenes.
+#[test]
+fn desktop_navigation_keeps_player_and_opens_one_shared_companion() {
+    use cranpose_app_shell::RootId;
+    fn surfaces(shell: &mut AppShell<HitGraphRenderer>) {
+        for _ in 0..8 {
+            shell.update();
+        }
+        for root in shell.window_roots() {
+            let size = root.descriptor.layout_size();
+            let id = RootId::Window(root.node);
+            if !shell.surface_ids().contains(&id) {
+                shell.add_window_surface(
+                    root.node,
+                    HitGraphRenderer::default(),
+                    (size.width as u32, size.height as u32),
+                    (size.width, size.height),
+                );
+            } else {
+                let mut surface = shell.surface(id).unwrap();
+                surface.set_buffer_size(size.width as u32, size.height as u32);
+                surface.set_viewport(size.width, size.height);
+            }
+        }
+        for _ in 0..8 {
+            shell.update();
+        }
+    }
+    fn press(shell: &mut AppShell<HitGraphRenderer>, root: RootId, label: &str) {
+        fn find(
+            node: &cranpose_ui::SemanticsNode,
+            label: &str,
+        ) -> Option<cranpose_foundation::SemanticsCustomAction> {
+            if !node.hidden && node.description.as_deref() == Some(label) {
+                if let Some(action) = &node.on_click {
+                    return Some(action.clone());
+                }
+            }
+            node.children.iter().find_map(|child| find(child, label))
+        }
+        shell.set_semantics_enabled(true);
+        let action = shell
+            .surface(root)
+            .unwrap()
+            .with_semantics_tree(|tree| find(tree.expect("native semantics").root(), label))
+            .unwrap_or_else(|| panic!("Missing native control {label}"));
+        shell.debug_enter_app_context(|| action.invoke());
+        surfaces(shell);
+    }
+    let _app = TestApplication::new("desktop-navigation");
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampStandaloneApp,
+    );
+    shell.set_buffer_size(1, 1);
+    shell.set_viewport(1., 1.);
+    surfaces(&mut shell);
+    let roots = shell.window_roots();
+    assert_eq!(roots.len(), 1);
+    let main = roots[0].node;
+    let player = RootId::Window(main);
+    let original = roots[0].descriptor.layout_size();
+    press(&mut shell, player, "Toggle navigation");
+    // OS size acknowledgements are covered by the native preview; this shell
+    // exercises declaration lifetime and the same accessible tab actions.
+    for tab in ["Library", "Settings", "Skin Studio", "Library"] {
+        press(&mut shell, player, tab);
+        let roots = shell.window_roots();
+        assert_eq!(roots.len(), 2, "tab {tab} opens one companion");
+        assert!(roots.iter().any(|root| root.node == main));
+    }
+    press(&mut shell, player, "Player");
+    assert_eq!(shell.window_roots().len(), 1);
+    // Open after removal, then close both the bar and companion with the logo.
+    press(&mut shell, player, "Library");
+    assert_eq!(shell.window_roots().len(), 2);
+    press(&mut shell, player, "Toggle navigation");
+    assert_eq!(shell.window_roots().len(), 1);
+    assert_eq!(shell.window_roots()[0].descriptor.layout_size(), original);
+    press(&mut shell, player, "Toggle navigation");
+    assert_eq!(shell.window_roots().len(), 1, "the bar returns to Player");
+}
