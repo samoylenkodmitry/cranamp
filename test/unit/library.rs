@@ -16,6 +16,18 @@ fn track(name: &str, path: &str) -> Track {
 fn reset() {
     RUNTIME.with(|slot| *slot.borrow_mut() = Some(Rc::new(RefCell::new(Runtime::new(None)))));
 }
+fn index_track(track: &Track, artwork: Option<&str>, album: Option<&str>) {
+    let uri = track.path.clone().unwrap_or_default();
+    runtime().borrow_mut().index.insert_track(
+        uri.clone(),
+        Record {
+            folder: parent(&uri),
+            artwork: artwork.map(str::to_owned),
+            album: album.map(str::to_owned),
+            ..Default::default()
+        },
+    );
+}
 fn png() -> Vec<u8> {
     let image = image::RgbaImage::from_pixel(640, 480, image::Rgba([12, 34, 56, 255]));
     let mut bytes = std::io::Cursor::new(Vec::new());
@@ -68,7 +80,7 @@ fn partial_tags_override_only_fields_they_supply_and_disc_folders_form_one_album
         ),
         track("01 - Someone - Song", "/Other/Folder album/01.flac"),
     ];
-    runtime().borrow_mut().index.tracks.insert(
+    runtime().borrow_mut().index.insert_track(
         tracks[0].path.clone().unwrap(),
         Record {
             title: Some("Embedded title".into()),
@@ -114,7 +126,7 @@ fn embedded_artwork_wins_and_late_folder_covers_apply_without_mutating_tracks() 
         },
     );
     assert_eq!(record(&track).artwork.as_deref(), Some("folder"));
-    runtime().borrow_mut().index.tracks.insert(
+    runtime().borrow_mut().index.insert_track(
         track.path.clone().unwrap(),
         Record {
             artwork: Some("embedded".into()),
@@ -126,6 +138,88 @@ fn embedded_artwork_wins_and_late_folder_covers_apply_without_mutating_tracks() 
     assert_eq!(record(&track).artwork.as_deref(), Some("embedded"));
     assert_eq!(record(&track).album.as_deref(), Some("Tagged album"));
     assert_eq!(track, original);
+}
+#[test]
+fn tracks_inherit_late_album_artwork_across_discs_and_keep_their_own_picture() {
+    reset();
+    let tracks = [
+        track("Song", "/Artist/Album/Disc 1/01.flac"),
+        track("Other song", "/Artist/Album/Disc 2/02.flac"),
+        track("Separate release", "/Other artist/Album/01.flac"),
+        track("Different album tag", "/Artist/Album/Disc 1/03.flac"),
+    ];
+    index_track(&tracks[0], None, None);
+    index_track(&tracks[3], None, Some("Another album"));
+    assert!(record(&tracks[0]).artwork.is_none());
+
+    index_track(&tracks[1], Some("album-picture"), Some("ALBUM"));
+    assert_eq!(record(&tracks[0]).artwork.as_deref(), Some("album-picture"));
+    assert!(record(&tracks[2]).artwork.is_none());
+    assert!(record(&tracks[3]).artwork.is_none());
+    let albums = albums(&tracks, &[0, 1, 2, 3]);
+    let album = albums.iter().find(|album| album.tracks == [0, 1]).unwrap();
+    assert_eq!(
+        record(&tracks[album.cover_track]).artwork,
+        record(&tracks[0]).artwork
+    );
+    assert!(
+        runtime().borrow().index.tracks[tracks[0].path.as_ref().unwrap()]
+            .artwork
+            .is_none(),
+        "Inherited images must not replace source metadata"
+    );
+
+    runtime().borrow_mut().index.covers.insert(
+        "/Artist/Album".into(),
+        Cover {
+            thumbnail: "folder-picture".into(),
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        record(&tracks[0]).artwork.as_deref(),
+        Some("folder-picture")
+    );
+    assert_eq!(record(&tracks[1]).artwork.as_deref(), Some("album-picture"));
+    index_track(&tracks[0], Some("own-picture"), None);
+    assert_eq!(record(&tracks[0]).artwork.as_deref(), Some("own-picture"));
+}
+#[test]
+fn album_artwork_is_stable_after_restart_and_follows_metadata_changes() {
+    reset();
+    let root = temp("album-artwork");
+    let first = track("First", "/Music/Album/01.flac");
+    let second = track("Second", "/Music/Album/02.flac");
+    let missing = track("Missing picture", "/Music/Album/03.flac");
+    index_track(&second, Some("second-picture"), None);
+    index_track(&first, Some("first-picture"), None);
+    assert_eq!(record(&missing).artwork.as_deref(), Some("first-picture"));
+    let bytes = {
+        let rt = runtime();
+        let mut data = rt.borrow_mut();
+        data.index.version = 1;
+        serde_json::to_vec(&data.index).unwrap()
+    };
+    assert!(!serde_json::from_slice::<serde_json::Value>(&bytes)
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .contains_key("album_artwork"));
+    atomic_write(&root.join("index.json"), &bytes).unwrap();
+    reset();
+    runtime().borrow_mut().index = load_index(Some(&root));
+    assert_eq!(record(&missing).artwork.as_deref(), Some("first-picture"));
+
+    index_track(&first, Some("changed-picture"), Some("Different album"));
+    assert_eq!(record(&missing).artwork.as_deref(), Some("second-picture"));
+    index_track(&second, None, None);
+    assert!(record(&missing).artwork.is_none());
+    index_track(&second, Some("replacement-picture"), None);
+    assert_eq!(
+        record(&missing).artwork.as_deref(),
+        Some("replacement-picture")
+    );
+    std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
 fn folder_art_selection_is_deterministic_and_thumbnail_cache_survives_restart() {

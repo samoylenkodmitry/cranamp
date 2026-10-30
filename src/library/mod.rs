@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     path::PathBuf,
     rc::Rc,
 };
@@ -59,6 +59,36 @@ struct Index {
     version: u32,
     tracks: HashMap<String, Record>,
     covers: HashMap<String, Cover>,
+    // Derived from embedded artwork; never persist fallback artwork as track metadata.
+    #[serde(skip)]
+    album_artwork: HashMap<String, BTreeMap<String, String>>,
+}
+impl Index {
+    fn insert_track(&mut self, uri: String, record: Record) {
+        if let Some(previous) = self.tracks.get(&uri) {
+            let key = album_key(previous);
+            if let Some(artwork) = self.album_artwork.get_mut(&key) {
+                artwork.remove(&uri);
+                if artwork.is_empty() {
+                    self.album_artwork.remove(&key);
+                }
+            }
+        }
+        self.index_artwork(&uri, &record);
+        self.tracks.insert(uri, record);
+    }
+
+    fn index_artwork(&mut self, uri: &str, record: &Record) {
+        if let Some(artwork) = &record.artwork {
+            if !record.folder.is_empty() {
+                // URI order keeps the album cover stable across discovery order and restarts.
+                self.album_artwork
+                    .entry(album_key(record))
+                    .or_default()
+                    .insert(uri.to_owned(), artwork.clone());
+            }
+        }
+    }
 }
 #[derive(Clone)]
 struct Job {
@@ -157,7 +187,14 @@ pub(crate) fn record(track: &Track) -> Record {
             .covers
             .get(&result.folder)
             .or_else(|| rt.index.covers.get(&album_folder(&result.folder)))
-            .map(|cover| cover.thumbnail.clone());
+            .map(|cover| cover.thumbnail.clone())
+            .or_else(|| {
+                rt.index
+                    .album_artwork
+                    .get(&album_key(&result))?
+                    .first_key_value()
+                    .map(|(_, artwork)| artwork.clone())
+            });
     }
     result
 }
@@ -241,6 +278,17 @@ fn album_folder(folder: &str) -> String {
     } else {
         folder.to_owned()
     }
+}
+fn album_key(record: &Record) -> String {
+    let folder = album_folder(&record.folder);
+    let title = record
+        .album
+        .clone()
+        .or_else(|| folder_name(&folder))
+        .unwrap_or_else(|| "Unknown album".into());
+    // Use the same identity for grouping and artwork, including multi-disc folders.
+    // Folder identity keeps separate releases with the same title apart.
+    format!("{}\n{}", folder, title.to_lowercase())
 }
 
 fn image_rank(name: &str) -> Option<(u8, String)> {
@@ -539,7 +587,7 @@ async fn run(rt: Rc<RefCell<Runtime>>) {
                 record.artwork = thumbnail;
                 if data.index.tracks.len() < MAX_RECORDS || data.index.tracks.contains_key(&job.uri)
                 {
-                    data.index.tracks.insert(job.uri, record);
+                    data.index.insert_track(job.uri, record);
                 }
             }
             since_save += 1;
@@ -743,7 +791,13 @@ fn load_index(root: Option<&std::path::Path>) -> Index {
         let index: Index = serde_json::from_slice(&bytes).ok()?;
         (index.version == 1 && index.tracks.len() <= MAX_RECORDS).then_some(index)
     };
-    load().unwrap_or_default()
+    let mut index = load().unwrap_or_default();
+    let tracks = std::mem::take(&mut index.tracks);
+    for (uri, record) in &tracks {
+        index.index_artwork(uri, record);
+    }
+    index.tracks = tracks;
+    index
 }
 async fn persist(rt: &Rc<RefCell<Runtime>>, prune: bool) {
     let (root, index) = {
@@ -885,8 +939,7 @@ pub(crate) fn albums(tracks: &[Track], rows: &[usize]) -> Vec<Album> {
         let track = &tracks[index];
         let meta = record(track);
         let title = meta.album.clone().unwrap_or_else(|| "Unknown album".into());
-        // Folder identity prevents unrelated releases with the same name from merging.
-        let key = format!("{}\n{}", album_folder(&meta.folder), title.to_lowercase());
+        let key = album_key(&meta);
         let artist = meta
             .album_artist
             .clone()
