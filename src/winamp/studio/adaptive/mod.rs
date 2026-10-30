@@ -139,7 +139,13 @@ impl Ui {
 }
 #[composable]
 pub fn SkinStudio(shared: SharedDocument, host: Option<StudioHost>) {
-    MountedSkinStudio(shared, host, true, 0.0);
+    if host.is_some() {
+        MountedSkinStudio(shared, host, true, 0.0);
+    } else {
+        cranpose::liquid::LiquidTheme(Default::default(), move || {
+            MountedSkinStudio(shared, host, true, 0.0);
+        });
+    }
 }
 
 /// Keep editor navigation and the viewport while a host tab is hidden.
@@ -392,15 +398,8 @@ pub(super) fn MountedSkinStudio(
         },
     );
     let hosted = host.is_some();
-    #[cfg(not(target_arch = "wasm32"))]
-    let mobile_palette = crate::winamp::mobile::theme::colors;
-    #[cfg(target_arch = "wasm32")]
-    let mobile_palette = cranpose::liquid::liquid_colors;
     cranpose_core::CompositionLocalProvider(
-        vec![
-            controls::hint_context().provides(Some(ui.hints)),
-            design::palette_local().provides((bottom_inset > 0.0).then(mobile_palette)),
-        ],
+        [controls::hint_context().provides(Some(ui.hints))],
         move || {
             BoxWithConstraints(
                 Modifier::empty().fill_max_size().background(studio_bg()),

@@ -1,7 +1,5 @@
 //! Persisted appearance for mobile chrome. The player's bitmap keeps its own colors.
 use super::*;
-use cranpose_core::{compositionLocalOf, CompositionLocal};
-use std::cell::OnceCell;
 
 const KEY: &str = "cranamp.appearance.v1";
 
@@ -72,14 +70,7 @@ impl Mode {
 /// Choose the black/white label with the greater contrast against the sampled
 /// sRGB background, including saturated skins whose RGB average is misleading.
 pub(super) fn prefers_dark(color: Color) -> bool {
-    let linear = |v: f32| {
-        if v <= 0.04045 {
-            v / 12.92
-        } else {
-            ((v + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    let luminance = 0.2126 * linear(color.0) + 0.7152 * linear(color.1) + 0.0722 * linear(color.2);
+    let luminance = palette::luminance(color);
     1.05 / (luminance + 0.05) > (luminance + 0.05) / 0.05
 }
 
@@ -145,22 +136,7 @@ pub(super) fn remember_theme() -> Ui {
     ui
 }
 
-fn skin_background() -> CompositionLocal<Option<Color>> {
-    thread_local! {
-        static LOCAL: OnceCell<CompositionLocal<Option<Color>>> = const { OnceCell::new() };
-    }
-    LOCAL.with(|local| local.get_or_init(|| compositionLocalOf(|| None)).clone())
-}
-
-/// Liquid controls retain their light/dark material palette. App surfaces and
-/// Studio use the skin color behind that material in the skin-derived mode.
-pub(in crate::winamp) fn colors() -> LiquidColors {
-    let mut colors = cranpose::liquid::liquid_colors();
-    if let Some(background) = skin_background().current() {
-        colors.background = background;
-    }
-    colors
-}
+pub(in crate::winamp) use cranpose::liquid::liquid_colors as colors;
 
 #[composable]
 pub(super) fn Theme(ui: Ui, skin: WinampSkinState, content: impl FnOnce()) {
@@ -176,10 +152,40 @@ pub(super) fn Theme(ui: Ui, skin: WinampSkinState, content: impl FnOnce()) {
             ..Default::default()
         },
         move || {
-            cranpose_core::CompositionLocalProvider(
-                [skin_background().provides(background)],
-                content,
-            );
+            let colors = if let Some(mut background) = background {
+                let options = cranpose_services::local_accessibility_options().current();
+                if options.invert_colors {
+                    background = Color(1. - background.0, 1. - background.1, 1. - background.2, 1.);
+                }
+                let colors = palette::from_background(background);
+                let colors = if options.increase_contrast {
+                    LiquidColors {
+                        secondary_label: colors.label,
+                        tertiary_label: colors.label,
+                        toggle_off: colors.accent.with_alpha(0.6),
+                        ..colors.with_more_contrast()
+                    }
+                } else {
+                    colors
+                };
+                colors
+            } else {
+                cranpose::liquid::liquid_colors()
+            };
+            let style = if background.is_some() {
+                LiquidSegmentedStyle {
+                    track: colors.fill,
+                    indicator: colors.surface,
+                    ..LiquidSegmentedStyle::system(&colors, &liquid_typography())
+                }
+            } else {
+                liquid_segmented_style()
+            };
+            // Keep the content in the same composition group when preferences
+            // load or the user changes modes. File-picker launchers stay mounted.
+            ProvideLiquidColors(colors, move || {
+                ProvideLiquidSegmentedStyle(style, content);
+            });
         },
     );
 }

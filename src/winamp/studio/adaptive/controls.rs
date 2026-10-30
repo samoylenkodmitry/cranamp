@@ -436,7 +436,7 @@ pub(super) fn PrimaryAction(icon: Icon, label: String, area: Area, action: impl 
                             .absolute_offset(12., (area.h - 24.) / 2.)
                             .size_points(24., 24.),
                         {
-                            let color = Color::WHITE;
+                            let color = cranpose::liquid::liquid_colors().on_accent;
                             move |scope| draw_icon(scope, icon, color)
                         },
                     );
@@ -446,7 +446,7 @@ pub(super) fn PrimaryAction(icon: Icon, label: String, area: Area, action: impl 
                         (area.h - 18.) / 2.,
                         area.w - 60.,
                         14.,
-                        Color::WHITE,
+                        cranpose::liquid::liquid_colors().on_accent,
                     );
                 },
             );
@@ -536,7 +536,8 @@ pub(super) fn SwitchRow(label: String, area: Area, on: bool, action: impl Fn() +
                         12.,
                         studio_fg(),
                     );
-                    let thumb_color = Color::WHITE;
+                    let colors = cranpose::liquid::liquid_colors();
+                    let thumb_color = if on { colors.on_accent } else { colors.label };
                     Canvas(
                         Modifier::empty()
                             .absolute_offset(area.w - 48., (area.h - 20.) / 2.)

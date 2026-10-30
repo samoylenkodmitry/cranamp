@@ -8,6 +8,8 @@ A music player in Rust with WSZ skin support and a built-in Skin Studio, powered
 
 The player uses classic Winamp skins. On desktop, the bottom navigation starts hidden. Click the Winamp logo to show or hide it. Library, Skin Studio and Settings open beside the player. Selecting Player or closing the companion window returns to the player. Hiding the bar also closes the companion window. On mobile, use the bottom tabs to switch screens.
 
+The appearance setting applies throughout Library, Settings, Skin Studio and the navigation. “From skin background” uses the skin's corner color for surfaces and glass controls, with matching control colors and readable labels. Changing the skin updates this palette immediately.
+
 | Player with equalizer and playlist | Desktop Studio with tool settings and layers |
 | --- | --- |
 | ![Cranamp player with the Silverplay skin and demo playlist](store/releases/0.1.92/screenshots/macos/00-playback.png) | ![Desktop Skin Studio with pencil properties, exact colour values and layers](store/releases/0.1.92/screenshots/macos/01-studio-canvas.png) |

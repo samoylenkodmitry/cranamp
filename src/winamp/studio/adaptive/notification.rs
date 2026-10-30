@@ -1,7 +1,5 @@
 use super::*;
-use cranpose::liquid::{
-    Glass, LiquidModifierExt, LiquidShape, LiquidTheme, LiquidThemeSpec, SchemeMode,
-};
+use cranpose::liquid::{Glass, LiquidModifierExt, LiquidShape};
 
 #[composable]
 pub(super) fn Notification(notice: Option<(u64, String)>, width: f32, height: f32) {
@@ -30,50 +28,36 @@ pub(super) fn Notification(notice: Option<(u64, String)>, width: f32, height: f3
         .map(|line| line.chars().count().max(1).div_ceil(columns))
         .sum::<usize>();
     let panel_h = (lines as f32 * 16. + 24.).clamp(56., 160.);
-    let palette = design::palette_local().current();
-    LiquidTheme(
-        LiquidThemeSpec {
-            scheme: if palette.is_some_and(|colors| !colors.is_dark) {
-                SchemeMode::Light
-            } else {
-                SchemeMode::Dark
-            },
-            ..Default::default()
-        },
+    let palette = cranpose::liquid::liquid_colors();
+    Box(
+        Modifier::empty()
+            .absolute_offset(width - w - 12., (height - panel_h - 12.).max(8.))
+            .size_points(w, panel_h)
+            .glass_effect(
+                Glass::regular()
+                    .shape(LiquidShape::RoundedRect(10.))
+                    .tint(palette.surface_glass)
+                    .blur_radius(12.),
+            )
+            .content_description("Studio notification")
+            .then(transition.clone()),
+        BoxSpec::default(),
         move || {
-            Box(
-                Modifier::empty()
-                    .absolute_offset(width - w - 12., (height - panel_h - 12.).max(8.))
-                    .size_points(w, panel_h)
-                    .glass_effect(
-                        Glass::regular()
-                            .shape(LiquidShape::RoundedRect(10.))
-                            .tint(palette.map_or(Color(0.06, 0.10, 0.14, 0.82), |colors| {
-                                colors.surface_glass
-                            }))
-                            .blur_radius(12.),
-                    )
-                    .content_description("Studio notification")
-                    .then(transition.clone()),
-                BoxSpec::default(),
-                move || {
-                    Text(
-                        message.clone(),
-                        Modifier::empty().width(w - 44.).padding(12.),
-                        text_style(12., studio_fg()),
-                    );
-                    Control(
-                        Icon::Close,
-                        "Dismiss notification".into(),
-                        String::new(),
-                        Area::new(w - 44., 6., 36., 44.),
-                        false,
-                        true,
-                        false,
-                        controls::hint_context().current().expect("Studio hints"),
-                        move || visible.set(false),
-                    );
-                },
+            Text(
+                message.clone(),
+                Modifier::empty().width(w - 44.).padding(12.),
+                text_style(12., studio_fg()),
+            );
+            Control(
+                Icon::Close,
+                "Dismiss notification".into(),
+                String::new(),
+                Area::new(w - 44., 6., 36., 44.),
+                false,
+                true,
+                false,
+                controls::hint_context().current().expect("Studio hints"),
+                move || visible.set(false),
             );
         },
     );

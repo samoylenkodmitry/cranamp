@@ -5,6 +5,7 @@ mod chrome;
 mod desktop;
 pub(super) use desktop::{DesktopNavigation, DesktopWorkspace};
 mod library;
+mod palette;
 mod reflection;
 mod settings;
 pub(super) mod theme;

@@ -23,6 +23,14 @@ fn main() {
             }
         });
         with_capture(launcher, None).run(move || {
+            if let Ok(appearance) = std::env::var("CRANAMP_REVIEW_APPEARANCE") {
+                cranpose_core::remember(move || {
+                    assert!(["day", "night", "auto", "skin"].contains(&appearance.as_str()));
+                    cranpose_services::preferences()
+                        .set("cranamp.appearance.v1", &appearance)
+                        .expect("seed review appearance");
+                });
+            }
             if let Ok(view) = std::env::var("CRANAMP_REVIEW_PLAYLISTS") {
                 cranpose_core::remember(move || {
                     let tracks: Vec<_> = [("Cats - Aurora", "tone.wav"), ("Cats - Night Drive", "tone.flac"), ("Cats - Floating", "tone.m4a")].into_iter().map(|(title, file)| serde_json::json!({"title": title, "path": std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/audio").join(file), "duration_seconds": 180.})).collect();

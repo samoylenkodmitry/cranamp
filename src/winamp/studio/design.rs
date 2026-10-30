@@ -3,52 +3,24 @@ use super::*;
 use cranpose_animation::{animateColorAsState, tween, Easing};
 use cranpose_ui_graphics::{Brush, CornerRadii, Point, Stroke};
 
-// Desktop workbench colors stay fixed. Mobile Studio reads the same live
-// Liquid palette as Library and Settings, through this composition local.
-pub(super) fn palette_local(
-) -> cranpose_core::CompositionLocal<Option<cranpose::liquid::LiquidColors>> {
-    thread_local! {
-        static LOCAL: std::cell::OnceCell<cranpose_core::CompositionLocal<Option<cranpose::liquid::LiquidColors>>> = const { std::cell::OnceCell::new() };
-    }
-    LOCAL.with(|local| {
-        local
-            .get_or_init(|| cranpose_core::compositionLocalOf(|| None))
-            .clone()
-    })
-}
-
 macro_rules! palette_color {
-    ($name:ident, $field:ident, $fallback:expr) => {
+    ($name:ident, $field:ident) => {
         pub(super) fn $name() -> Color {
-            palette_local()
-                .current()
-                .map_or(rgb($fallback), |colors| colors.$field)
+            cranpose::liquid::liquid_colors().$field
         }
     };
 }
-palette_color!(studio_bg, background, 0x0b1018);
-palette_color!(studio_panel_back, surface, 0x111a26);
-palette_color!(studio_card, surface, 0x172437);
-palette_color!(studio_card_on, surface_pressed, 0x19365e);
-palette_color!(studio_fg, label, 0xe8f6ff);
-palette_color!(studio_dim, secondary_label, 0x8ca6c4);
-palette_color!(studio_accent, accent, 0x387aff);
-palette_color!(studio_accent_lit, accent, 0x7ddcff);
-palette_color!(studio_pip_off, fill, 0x2b405b);
-palette_color!(studio_border, separator, 0x29425d);
-palette_color!(studio_error, destructive, 0xff686b);
+palette_color!(studio_bg, background);
+palette_color!(studio_card, surface);
+palette_color!(studio_fg, label);
+palette_color!(studio_dim, secondary_label);
+palette_color!(studio_accent, accent);
+palette_color!(studio_accent_lit, accent);
+palette_color!(studio_pip_off, fill);
+palette_color!(studio_error, destructive);
 
 pub(super) const CONTROL_RADIUS: f32 = 8.;
 pub(super) const PANEL_RADIUS: f32 = 12.;
-
-const fn rgb(value: u32) -> Color {
-    Color(
-        ((value >> 16) & 255) as f32 / 255.,
-        ((value >> 8) & 255) as f32 / 255.,
-        (value & 255) as f32 / 255.,
-        1.,
-    )
-}
 
 #[derive(Clone, Copy)]
 pub(super) enum Surface {
@@ -64,58 +36,28 @@ pub(super) enum Surface {
 
 #[track_caller]
 pub(super) fn surface(role: Surface, selected: bool, hovered: bool, pressed: bool) -> Modifier {
-    let (mut top, mut bottom, mut border) = match role {
-        Surface::Panel => (rgb(0x172231), studio_panel_back(), rgb(0x24374c)),
-        Surface::Well => (rgb(0x0c1520), rgb(0x101c2a), rgb(0x203348)),
-        Surface::Field => (rgb(0x101b29), rgb(0x162437), studio_border()),
-        Surface::Invalid => (rgb(0x241923), rgb(0x1d1721), studio_error()),
-        Surface::Primary => (rgb(0x4386ff), rgb(0x2461db), rgb(0x6a9eff)),
-        Surface::Row => (
-            Color(0., 0., 0., 0.),
-            Color(0., 0., 0., 0.),
-            Color(0., 0., 0., 0.),
-        ),
-        Surface::Button | Surface::Icon => (rgb(0x1c2b3e), rgb(0x121e2e), studio_border()),
+    let colors = cranpose::liquid::liquid_colors();
+    let base = match role {
+        Surface::Primary => colors.accent,
+        Surface::Well | Surface::Field => colors.background,
+        Surface::Row => Color::TRANSPARENT,
+        _ => colors.surface,
     };
-    if selected {
-        top = rgb(0x234b80);
-        bottom = studio_card_on();
-        border = studio_accent();
-    }
-    if hovered {
-        top = mix(top, rgb(0x39608b), 0.22);
-        bottom = mix(bottom, rgb(0x294568), 0.15);
-        border = mix(border, studio_accent_lit(), 0.48);
-    }
-    if pressed {
-        top = rgb(0x112742);
-        bottom = rgb(0x1b395d);
-        border = studio_accent_lit();
-    }
-    if let Some(colors) = palette_local().current() {
-        let base = match role {
-            Surface::Primary => colors.accent,
-            Surface::Well | Surface::Field => colors.background,
-            Surface::Row => Color::TRANSPARENT,
-            _ => colors.surface,
+    let (mut top, mut bottom, mut border) = (base, base, colors.separator);
+    if selected || hovered || pressed {
+        let tint = if matches!(role, Surface::Primary) {
+            colors.on_accent
+        } else {
+            colors.accent
         };
-        top = base;
-        bottom = base;
-        border = colors.separator;
-        if selected || hovered || pressed {
-            let tint = if matches!(role, Surface::Primary) {
-                colors.on_accent
-            } else {
-                colors.accent
-            };
-            top = mix(base, tint, if pressed { 0.22 } else { 0.10 });
-            bottom = mix(base, tint, if pressed { 0.16 } else { 0.06 });
-            border = colors.accent;
-        }
-        if matches!(role, Surface::Invalid) {
-            border = colors.destructive;
-        }
+        top = mix(base, tint, if pressed { 0.22 } else { 0.10 });
+        bottom = mix(base, tint, if pressed { 0.16 } else { 0.06 });
+        border = colors.accent;
     }
+    if matches!(role, Surface::Invalid) {
+        border = colors.destructive;
+    }
+    let selection_glow = colors.accent.with_alpha(0.14);
     let top = animateColorAsState(top, tween(130, Easing::EaseOut), "Studio surface top").get();
     let bottom =
         animateColorAsState(bottom, tween(130, Easing::EaseOut), "Studio surface base").get();
@@ -162,7 +104,7 @@ pub(super) fn surface(role: Surface, selected: bool, hovered: bool, pressed: boo
                 };
                 scope.draw_round_rect_at_stroked(
                     inner,
-                    Brush::solid(Color(0.35, 0.65, 1., 0.14)),
+                    Brush::solid(selection_glow),
                     CornerRadii::uniform((radius - 2.).max(0.)),
                     Stroke::new(1.),
                 );
@@ -187,6 +129,7 @@ pub(super) fn SliderTrack(width: f32, height: f32, thumb_offset: f32) {
     let accent = studio_accent();
     let accent_lit = studio_accent_lit();
     let edge = studio_dim();
+    let thumb = studio_fg();
     cranpose_ui::Canvas(Modifier::empty().size_points(width, height), move |scope| {
         let y = height / 2.;
         let rail = Rect {
@@ -217,7 +160,7 @@ pub(super) fn SliderTrack(width: f32, height: f32, thumb_offset: f32) {
         scope.draw_circle(Brush::solid(edge), centre, 8.);
         scope.draw_circle(
             Brush::linear_gradient_range(
-                vec![Color::WHITE, rgb(0xb9d9ef)],
+                vec![thumb, mix(thumb, accent, 0.18)],
                 Point::new(centre.x, y - 7.),
                 Point::new(centre.x, y + 7.),
             ),
