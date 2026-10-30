@@ -1,5 +1,21 @@
 //! Native GPU review at a requested logical size. Run only with studio-review.
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--mobile") {
+        let width = std::env::args()
+            .nth(2)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(393);
+        let height = std::env::args()
+            .nth(3)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(780);
+        let launcher = cranamp::create_surface_app()
+            .with_title("Cranamp · Mobile GPU review")
+            .with_application_id("com.cranamp.mobile-review")
+            .with_developer_inspector(false)
+            .with_size(width, height);
+        with_capture(launcher, None).run(cranamp::winamp::WinampMobileApp);
+    }
     if std::env::args().nth(1).as_deref() == Some("--player") {
         let width = std::env::args()
             .nth(2)

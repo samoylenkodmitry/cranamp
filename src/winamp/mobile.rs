@@ -3,6 +3,7 @@ use super::*;
 use cranpose::liquid::prelude::*;
 mod chrome;
 mod library;
+mod reflection;
 mod settings;
 
 const NAV_HEIGHT: f32 = 86.0;
@@ -222,24 +223,26 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
         move || player.update(|state| Destination::Player.select(state)),
     );
     let colors = liquid_colors();
+    let background = if Destination::from_state(&player.get()) == Destination::Player {
+        skin.get()
+            .map(|artwork| reflection::corner_color(&artwork))
+            .unwrap_or(colors.background)
+    } else {
+        colors.background
+    };
     BoxWithConstraints(
         Modifier::empty()
             .fill_max_size()
-            .background(colors.background)
+            .background(background)
             .padding_each(0.0, 0.0, 0.0, keyboard_bottom),
         move |scope| {
             let width = scope.max_width().0;
             let height = scope.max_height().0;
             let nav_top = (height - NAV_HEIGHT).max(0.0);
             let destination = Destination::from_state(&player.get());
-            let content_height = if destination == Destination::Player {
-                nav_top.max(1.0)
-            } else {
-                height
-            };
             Box(
                 Modifier::empty()
-                    .size_points(width, content_height)
+                    .size_points(width, height)
                     .clip_to_bounds(),
                 BoxSpec::default(),
                 move || {
@@ -301,15 +304,16 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
 #[composable]
 fn MobilePlayer(artwork: WinampSkin, player: MutableState<WinampState>, skin: WinampSkinState) {
     BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
-        let layout = resizable_stacked_layout(
-            scope.max_width().0,
-            scope.max_height().0,
-            0.0,
-            0.0,
-            &player.get(),
-            ui_scale(),
-        );
+        let snapshot = player.get();
+        let layout =
+            reflection::player_layout(scope.max_width().0, scope.max_height().0, &snapshot);
         WinampStackedStage(artwork.clone(), player, skin, layout, StackedDrag::Fixed);
+        reflection::FloorReflection(
+            reflection::corner_color(&artwork),
+            snapshot,
+            layout,
+            scope.max_height().0,
+        );
     });
 }
 
