@@ -1442,9 +1442,9 @@ fn playlist_source_directory(source: &str) -> Option<std::path::PathBuf> {
     if !path.is_absolute() {
         return None;
     }
-    path.parent()
-        .filter(|parent| parent.is_dir())
-        .map(std::path::Path::to_path_buf)
+    // Resolve references without probing the disk. A playlist may refer to a
+    // network folder that is temporarily unavailable.
+    path.parent().map(std::path::Path::to_path_buf)
 }
 fn playlist_picker_options() -> cranpose::FilePickerOptions {
     cranpose::FilePickerOptions::default()
