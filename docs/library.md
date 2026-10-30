@@ -15,3 +15,11 @@ Known file size and modification time invalidate cached records. Sources without
 The browser keeps its metadata and thumbnails in site storage. Its provider API offers sequential reads, so metadata reads stop after 8 MiB; metadata beyond that limit falls back to filenames. Native sources support seeking, including Android document descriptors and HTTP ranges.
 
 Recognition uses the selected files and folders. There is no online album lookup.
+
+## Saved playlists
+
+The mobile Library has Tracks, Albums and Playlists in its Liquid Glass segmented control. Use the plus button in Playlists to create a named list, or use **Save current queue** in Library options to preserve the current order. A track's menu and the selection toolbar can add music to a saved list. Playlist details provide a searchable track picker, Play and Shuffle buttons, and track menus for moving or removing entries. Playlist options include rename, duplicate and delete. Deletion requires confirmation.
+
+Play and Shuffle replace the current playing queue. Editing a saved list leaves current playback unchanged. The track picker retains references to music already added to the app, so switching queues does not lose the other available tracks. Saved lists and their order survive restarts. Artwork uses the same track and album fallback as the rest of the Library.
+
+Named playlists live in the `cranamp.playlists.v1` application preference, separate from the metadata cache. It contains source URIs and display metadata, with a 32 MiB serialized limit. Reads and writes use Cranpose's blocking dispatcher. One writer saves changes in order; a failed save remains visible with a retry control. Unreadable saved data is preserved. Creating, duplicating or deleting a playlist never copies or deletes an audio file.

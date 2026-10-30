@@ -2,7 +2,7 @@
 use cranpose_services::{MediaItem, MediaMetadata};
 use std::f32::consts::PI;
 use std::time::Duration;
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Track {
     pub title: String,
     pub path: Option<String>,

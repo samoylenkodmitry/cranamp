@@ -552,6 +552,221 @@ fn seed_library(titles: &[&str]) {
         .unwrap();
 }
 
+fn wait_for_saved_playlists(
+    shell: &mut AppShell<HitGraphRenderer>,
+    ready: impl Fn(&serde_json::Value) -> bool,
+) -> serde_json::Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        shell.update();
+        pump(shell);
+        if let Some(value) = cranpose_services::preferences()
+            .get("cranamp.playlists.v1")
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .filter(&ready)
+        {
+            return value;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Saved playlists did not settle"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn enter_mobile_text(shell: &mut AppShell<HitGraphRenderer>, label: &str, value: &str) {
+    // Semantics expose the final sheet bounds while its entrance is animated.
+    // Allow the surface to reach those bounds before sending a physical tap.
+    for _ in 0..30 {
+        std::thread::sleep(std::time::Duration::from_millis(16));
+        shell.update();
+        pump(shell);
+    }
+    let bounds = mobile_control_bounds(shell, label);
+    shell.set_cursor(bounds.x + bounds.width / 2., bounds.y + bounds.height / 2.);
+    shell.pointer_pressed();
+    shell.pointer_released();
+    pump(shell);
+    assert!(
+        shell.ime_editor_state().is_some(),
+        "No focus for {value}: {bounds:?}; {:?}",
+        visible_texts(shell)
+    );
+    shell.on_key_event(&cranpose_ui::KeyEvent::key_down_with_modifiers(
+        cranpose_ui::KeyCode::A,
+        "a",
+        cranpose_ui::Modifiers {
+            ctrl: true,
+            meta: true,
+            ..cranpose_ui::Modifiers::NONE
+        },
+    ));
+    assert!(shell.on_paste(value), "Cannot enter {value}");
+    pump(shell);
+}
+
+#[test]
+fn saved_playlists_create_pick_reorder_rename_play_and_survive_restart() {
+    let app = TestApplication::new("saved-playlists");
+    let hex = |text: &str| text.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/audio/tone.wav");
+    let mut state = "version=1\ncurrent_index=0\n".to_owned();
+    for title in ["Cats - Sunrise", "Cats - Moon", "Dogs - River"] {
+        let source = app.directory.join(format!("{title}.wav"));
+        std::fs::copy(&fixture, &source).unwrap();
+        state.push_str(&format!(
+            "track={}\t{}\t90\n",
+            hex(title),
+            hex(&source.to_string_lossy())
+        ));
+    }
+    cranpose_services::preferences()
+        .set("cranamp.player", &state)
+        .unwrap();
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_buffer_size(393, 780);
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    wait_for_saved_playlists(&mut shell, |v| {
+        v["available"].as_array().is_some_and(|a| a.len() == 3)
+    });
+    click_mobile(&mut shell, "Library");
+    click_mobile(&mut shell, "Library Playlists tab");
+    click_mobile(&mut shell, "New playlist");
+    click_mobile(&mut shell, "Save playlist");
+    assert!(contains(
+        &visible_texts(&mut shell),
+        "Enter a playlist name."
+    ));
+    enter_mobile_text(&mut shell, "Playlist name", "Night Drive");
+    click_mobile(&mut shell, "Save playlist");
+    click_mobile(&mut shell, "Add tracks to playlist");
+    click_mobile(&mut shell, "Choose track 1: Sunrise");
+    click_mobile(&mut shell, "Choose track 3: River");
+    click_mobile(&mut shell, "Add selected tracks");
+    mobile_control_bounds(&mut shell, "Play saved track 1: Sunrise");
+    mobile_control_bounds(&mut shell, "Play saved track 2: River");
+    click_mobile(&mut shell, "Saved track 2 options");
+    click_mobile(&mut shell, "Move up");
+    assert!(
+        contains(&visible_texts(&mut shell), "Play saved track 1: River"),
+        "After reorder: {:?}",
+        visible_texts(&mut shell)
+    );
+    mobile_control_bounds(&mut shell, "Play saved track 1: River");
+    click_mobile(&mut shell, "Saved playlist options");
+    click_mobile(&mut shell, "Rename playlist");
+    enter_mobile_text(&mut shell, "Playlist name", "After Dark");
+    click_mobile(&mut shell, "Save playlist");
+    click_mobile(&mut shell, "Saved playlist options");
+    click_mobile(&mut shell, "Duplicate playlist");
+    click_mobile(&mut shell, "Saved track 1 options");
+    click_mobile(&mut shell, "Remove from saved playlist");
+    mobile_control_bounds(&mut shell, "Play saved track 1: Sunrise");
+    for (width, height) in [(320., 568.), (844., 390.), (768., 1024.)] {
+        shell.set_buffer_size(width as u32, height as u32);
+        shell.set_viewport(width, height);
+        pump(&mut shell);
+        let row = mobile_control_bounds(&mut shell, "Play saved track 1: Sunrise");
+        let dock = mobile_control_bounds(&mut shell, "Show current track in Player");
+        assert!(
+            row.y + row.height <= dock.y,
+            "Saved track overlaps player dock at {width}x{height}: {row:?} {dock:?}"
+        );
+        click_mobile(&mut shell, "Add tracks to playlist");
+        let add = mobile_control_bounds(&mut shell, "Add selected tracks");
+        assert!(
+            add.x >= 0. && add.x + add.width <= width,
+            "Picker button clipped: {add:?}"
+        );
+        click_mobile(&mut shell, "Cancel adding tracks");
+    }
+    shell.set_buffer_size(393, 780);
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    click_mobile(&mut shell, "Back to playlists");
+    click_mobile(&mut shell, "Open playlist After Dark");
+    click_mobile(&mut shell, "Play playlist");
+    click_mobile(&mut shell, "Library Tracks tab");
+    mobile_control_bounds(&mut shell, "Play track 1: River");
+    mobile_control_bounds(&mut shell, "Play track 2: Sunrise");
+    click_mobile(&mut shell, "Library Playlists tab");
+    click_mobile(&mut shell, "Open playlist After Dark");
+    click_mobile(&mut shell, "Add tracks to playlist");
+    mobile_control_bounds(&mut shell, "Choose track 2: Moon");
+    click_mobile(&mut shell, "Cancel adding tracks");
+    let saved = wait_for_saved_playlists(&mut shell, |v| {
+        v["lists"].as_array().is_some_and(|a| {
+            a.len() == 2 && a[1]["tracks"].as_array().is_some_and(|t| t.len() == 1)
+        })
+    });
+    assert_eq!(saved["lists"][0]["name"], "After Dark");
+    assert_eq!(saved["lists"][0]["tracks"][0]["title"], "Dogs - River");
+    assert_eq!(saved["available"].as_array().unwrap().len(), 3);
+    drop(shell);
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    // Let the asynchronous load finish before using saved-list controls.
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        shell.update();
+        pump(&mut shell);
+    }
+    click_mobile(&mut shell, "Library");
+    click_mobile(&mut shell, "Library Playlists tab");
+    mobile_control_bounds(&mut shell, "Open playlist After Dark");
+    click_mobile(&mut shell, "Open playlist After Dark copy");
+    click_mobile(&mut shell, "Saved playlist options");
+    click_mobile(&mut shell, "Delete playlist");
+    click_mobile(&mut shell, "Cancel");
+    mobile_control_bounds(&mut shell, "Play saved track 1: Sunrise");
+    click_mobile(&mut shell, "Saved playlist options");
+    click_mobile(&mut shell, "Delete playlist");
+    click_mobile(&mut shell, "Confirm delete playlist");
+    let saved = wait_for_saved_playlists(&mut shell, |v| {
+        v["lists"].as_array().is_some_and(|a| a.len() == 1)
+    });
+    assert_eq!(saved["lists"][0]["name"], "After Dark");
+    click_mobile(&mut shell, "Library Tracks tab");
+    click_mobile(&mut shell, "Select");
+    click_mobile(&mut shell, "Select results");
+    click_mobile(&mut shell, "Add selected to playlist");
+    click_mobile(&mut shell, "New playlist");
+    enter_mobile_text(&mut shell, "Playlist name", "Queue selection");
+    click_mobile(&mut shell, "Save playlist");
+    wait_for_saved_playlists(&mut shell, |v| {
+        v["lists"].as_array().is_some_and(|lists| {
+            lists.iter().any(|list| {
+                list["name"] == "Queue selection"
+                    && list["tracks"]
+                        .as_array()
+                        .is_some_and(|tracks| tracks.len() == 2)
+            })
+        })
+    });
+    click_mobile(&mut shell, "Library Tracks tab");
+    mobile_control_bounds(&mut shell, "Play track 1: River");
+    assert_eq!(
+        std::fs::read_dir(&app.directory)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "wav"))
+            .count(),
+        3
+    );
+}
+
 #[test]
 fn mobile_library_search_selection_reorder_and_removal_share_the_player_playlist() {
     let _application = TestApplication::new("library");

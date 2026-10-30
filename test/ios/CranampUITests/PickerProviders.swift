@@ -198,6 +198,66 @@ final class PickerProviders: XCTestCase {
         app.buttons["Library Tracks tab"].tap()
     }
 
+    func testSavedPlaylists() throws {
+        continueAfterFailure = false
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_LIBRARY"] == "1" else { throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_LIBRARY=1") }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        let tabs = app.buttons.matching(identifier: "Library")
+        XCTAssertTrue(tabs.firstMatch.waitForExistence(timeout: 20))
+        tabs.element(boundBy: tabs.count - 1).tap()
+        app.buttons["Library Playlists tab"].tap()
+        let original = "Review \(Int(Date().timeIntervalSince1970))"
+        func capture(_ name: String) {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        app.buttons["New playlist"].tap()
+        let name = app.descendants(matching: .any).matching(identifier: "Playlist name").firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        name.tap()
+        name.typeText(original)
+        capture("playlists-name")
+        app.buttons["Save playlist"].tap()
+        XCTAssertTrue(app.buttons["Back to playlists"].waitForExistence(timeout: 10))
+        app.buttons["Add tracks to playlist"].firstMatch.tap()
+        let tracks = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ OR label BEGINSWITH %@", "Choose track ", "Choose track "))
+        if tracks.firstMatch.waitForExistence(timeout: 8) {
+            tracks.element(boundBy: 0).tap()
+            if tracks.count > 1 { tracks.element(boundBy: 1).tap() }
+            capture("playlists-picker")
+            app.buttons["Add selected tracks"].tap()
+            if app.buttons["Saved track 2 options"].waitForExistence(timeout: 5) {
+                app.buttons["Saved track 2 options"].tap()
+                app.buttons["Move up"].tap()
+            }
+        } else { app.buttons["Cancel adding tracks"].tap() }
+        capture("playlists-detail")
+        app.buttons["Saved playlist options"].tap()
+        app.buttons["Rename playlist"].tap()
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: original.count))
+        let renamed = original + " edit"
+        name.typeText(renamed)
+        app.buttons["Save playlist"].tap()
+        app.buttons["Saved playlist options"].tap()
+        app.buttons["Duplicate playlist"].tap()
+        app.buttons["Back to playlists"].tap()
+        capture("playlists-overview")
+        for title in [renamed + " copy", renamed] {
+            let saved = app.buttons["Open playlist " + title]
+            XCTAssertTrue(saved.waitForExistence(timeout: 10), app.debugDescription)
+            saved.tap()
+            app.buttons["Saved playlist options"].tap()
+            app.buttons["Delete playlist"].tap()
+            app.buttons["Confirm delete playlist"].tap()
+        }
+        app.buttons["Library Tracks tab"].tap()
+    }
+
     func testMobileLibrary() throws {
         guard ProcessInfo.processInfo.environment["CRANAMP_TEST_LIBRARY"] == "1" else {
             throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_LIBRARY=1")

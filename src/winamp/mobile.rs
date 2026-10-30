@@ -213,6 +213,7 @@ pub fn WinampMobileApp() {
 #[composable]
 fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
     let library = library::remember_library_ui();
+    library::PlaylistEffects(player, library);
     let focus = cranpose_ui::local_focus_manager().current();
     let insets = cranpose_ui::window_insets();
     // Paint the whole viewport, including the status bar and home indicator.

@@ -20,6 +20,40 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public final class MobileNavigationTest {
     private final UiAutomation ui = InstrumentationRegistry.getInstrumentation().getUiAutomation();
+    @Test public void savedPlaylistsCreateRenameDuplicateDelete() throws Exception {
+        try (ActivityScenario<CranposeActivity> scenario = ActivityScenario.launch(CranposeActivity.class)) {
+            click("Library");
+            click("Library Playlists tab");
+            String name = "Review " + SystemClock.uptimeMillis();
+            click("New playlist");
+            Bundle input = new Bundle();
+            input.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, name);
+            assertTrue(waitFor("Playlist name").performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, input));
+            capture("playlists-name");
+            click("Save playlist");
+            click("Add tracks to playlist");
+            capture("playlists-picker");
+            click("Cancel adding tracks");
+            click("Saved playlist options");
+            click("Rename playlist");
+            name += " edit";
+            input.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, name);
+            assertTrue(waitFor("Playlist name").performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, input));
+            click("Save playlist");
+            capture("playlists-detail");
+            click("Saved playlist options");
+            click("Duplicate playlist");
+            click("Back to playlists");
+            capture("playlists-overview");
+            for (String title : new String[] {name + " copy", name}) {
+                click("Open playlist " + title);
+                click("Saved playlist options");
+                click("Delete playlist");
+                click("Confirm delete playlist");
+            }
+            click("Library Tracks tab");
+        }
+    }
     private AccessibilityNodeInfo find(AccessibilityNodeInfo node, String label) {
         if (node == null) return null;
         AccessibilityNodeInfo found = label.contentEquals(node.getContentDescription() == null ? "" : node.getContentDescription()) ? node : null;

@@ -23,6 +23,15 @@ fn main() {
             }
         });
         with_capture(launcher, None).run(move || {
+            if let Ok(view) = std::env::var("CRANAMP_REVIEW_PLAYLISTS") {
+                cranpose_core::remember(move || {
+                    let tracks: Vec<_> = [("Cats - Aurora", "tone.wav"), ("Cats - Night Drive", "tone.flac"), ("Cats - Floating", "tone.m4a")].into_iter().map(|(title, file)| serde_json::json!({"title": title, "path": std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test/fixtures/audio").join(file), "duration_seconds": 180.})).collect();
+                    let lists = if view == "empty" { vec![] } else {
+                        vec![serde_json::json!({"id":1, "name":"Late night", "tracks":tracks}), serde_json::json!({"id":2, "name":"Focus", "tracks":&tracks[..1]}), serde_json::json!({"id":3, "name":"Weekend", "tracks":&tracks[..2]})]
+                    };
+                    cranpose_services::preferences().set("cranamp.playlists.v1", &serde_json::json!({"version":1,"next_id":4,"lists":lists,"available":tracks}).to_string()).expect("seed review playlists");
+                });
+            }
             let mut locals = vec![cranpose_ui::local_safe_area_insets().provides(insets)];
             if let Some(theme) = theme {
                 locals.push(cranpose_services::local_system_theme().provides(theme));
@@ -131,6 +140,7 @@ fn with_capture(
         let settings = std::env::var_os("CRANAMP_REVIEW_OPEN_SETTINGS").is_some();
         let library = std::env::var_os("CRANAMP_REVIEW_OPEN_LIBRARY").is_some();
         let albums = std::env::var_os("CRANAMP_REVIEW_OPEN_ALBUMS").is_some();
+        let playlists = std::env::var("CRANAMP_REVIEW_PLAYLISTS").ok();
         let studio = std::env::var_os("CRANAMP_REVIEW_OPEN_STUDIO").is_some();
         let drag_segment = std::env::var_os("CRANAMP_REVIEW_DRAG_LIBRARY_SEGMENT").is_some();
         let insets = review_insets();
@@ -141,7 +151,7 @@ fn with_capture(
             .unwrap_or(1.);
         launcher.with_test_driver(move |robot| {
             std::thread::spawn(move || {
-                if library || albums || studio || settings || drag_segment {
+                if library || albums || playlists.is_some() || studio || settings || drag_segment {
                     robot.wait_for_idle().expect("player ready");
                     let frame = robot.screenshot_with_scale(1.).expect("player frame");
                     let width = frame.width as f32;
@@ -160,9 +170,37 @@ fn with_capture(
                     robot.validate_content(tab).expect("destination visible");
                     if albums {
                         robot
-                            .click(width * 0.75, insets.top + 147.)
+                            .click(width * 0.5, insets.top + 147.)
                             .expect("open Albums");
                         robot.wait_for_idle().expect("Albums ready");
+                    }
+                    if let Some(view) = &playlists {
+                        robot
+                            .click(width * 0.83, insets.top + 147.)
+                            .expect("open Playlists");
+                        robot.wait_for_idle().expect("Playlists ready");
+                        if view == "detail" || view == "picker" {
+                            robot
+                                .click(
+                                    width * 0.4,
+                                    insets.top
+                                        + if height - insets.top - insets.bottom < 560.
+                                            && width > 500.
+                                        {
+                                            166.
+                                        } else {
+                                            220.
+                                        },
+                                )
+                                .expect("open saved list");
+                            robot.wait_for_idle().expect("saved list ready");
+                        }
+                        if view == "picker" {
+                            robot
+                                .click((width + width.min(760.)) * 0.5 - 100., insets.top + 38.)
+                                .expect("open track picker");
+                            robot.wait_for_idle().expect("track picker ready");
+                        }
                     }
                     if drag_segment {
                         robot.mouse_move(width * 0.25, insets.top + 147.).unwrap();

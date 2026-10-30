@@ -32,7 +32,7 @@ Actual release captures from [0.1.92](store/releases/0.1.92/screenshots.json). S
 - **Web skin library** — Keep skins and your selection across browser reloads.
 - **Local music** — Open audio files and folders through platform file pickers. See [audio format support](docs/audio-formats.md).
 - **Streaming** — Play audio URLs and your own radio streams.
-- **Playlists** — Import M3U/M3U8/PLS, export M3U, and open remote playlists.
+- **Playlists** — Import M3U/M3U8/PLS, export M3U, and open remote playlists. The mobile Library also saves named playlists with track selection, reordering, and Play or Shuffle controls.
 - **Playlist tools** — Search, multi-select, sort, randomize and remove tracks.
 - **Playback** — Play, pause, stop, seek, skip, shuffle and repeat.
 - **Sound** — Volume, balance, ten-band equalizer, preamp and presets.

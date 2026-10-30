@@ -2,6 +2,7 @@
 use super::*;
 
 use super::chrome::{self, MUSIC};
+mod playlists;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Sheet {
@@ -39,10 +40,14 @@ enum LibraryView {
     Tracks,
     Albums,
     Album(String),
+    Playlists,
+    Playlist(u64),
+    AddToPlaylist(u64),
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct LibraryUi {
+    saved: playlists::Ui,
     view: MutableState<LibraryView>,
     query: TextFieldState,
     search_focused: MutableState<bool>,
@@ -57,6 +62,7 @@ pub(super) struct LibraryUi {
 #[composable]
 pub(super) fn remember_library_ui() -> LibraryUi {
     cranpose_core::remember(|| LibraryUi {
+        saved: playlists::Ui::new(),
         view: cranpose_core::mutableStateOf(LibraryView::Tracks),
         query: TextFieldState::new(""),
         search_focused: cranpose_core::mutableStateOf(false),
@@ -216,6 +222,13 @@ fn toggle_selection(player: MutableState<WinampState>, index: usize) {
 
 #[composable]
 pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
+    if matches!(
+        ui.view.get(),
+        LibraryView::Playlists | LibraryView::Playlist(_) | LibraryView::AddToPlaylist(_)
+    ) {
+        playlists::Screen(player, ui);
+        return;
+    }
     use cranpose_coroflow::StateFlowCollect;
     let _revision = crate::library::revision().collectAsState().get();
     let focus = cranpose_ui::local_focus_manager().current();
@@ -657,23 +670,54 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                 .size_points(width - 40.0, 52.0),
                             BoxSpec::default(),
                             move || {
-                                GlassButton(
-                                    Modifier::empty()
-                                        .fill_max_size()
-                                        .content_description("Remove selected tracks"),
-                                    GlassButtonSpec::glass().with_content_color(colors.destructive),
+                                Row(
+                                    Modifier::empty().fill_max_size(),
+                                    RowSpec::default()
+                                        .horizontal_arrangement(LinearArrangement::SpacedBy(10.)),
                                     move || {
-                                        let s = player.get_non_reactive();
-                                        ui.sheet.set(Sheet::Remove(Removal {
-                                            playlist: s.playlist,
-                                            indices: s.selected_indices,
-                                        }));
-                                    },
-                                    move || {
-                                        GlassButtonLabel(
-                                            "Remove selected".into(),
-                                            GlassButtonSpec::destructive(),
-                                        )
+                                        GlassButton(
+                                            Modifier::empty()
+                                                .weight(1.)
+                                                .height(52.)
+                                                .content_description("Add selected to playlist"),
+                                            GlassButtonSpec::glass(),
+                                            move || {
+                                                let s = player.get_non_reactive();
+                                                let tracks = s
+                                                    .selected_indices
+                                                    .iter()
+                                                    .filter_map(|&i| s.playlist.get(i).cloned())
+                                                    .collect();
+                                                ui.saved.choose(Rc::new(tracks));
+                                            },
+                                            || {
+                                                GlassButtonLabel(
+                                                    "Add to playlist".into(),
+                                                    GlassButtonSpec::glass(),
+                                                )
+                                            },
+                                        );
+                                        GlassButton(
+                                            Modifier::empty()
+                                                .weight(1.)
+                                                .height(52.)
+                                                .content_description("Remove selected tracks"),
+                                            GlassButtonSpec::glass()
+                                                .with_content_color(colors.destructive),
+                                            move || {
+                                                let s = player.get_non_reactive();
+                                                ui.sheet.set(Sheet::Remove(Removal {
+                                                    playlist: s.playlist,
+                                                    indices: s.selected_indices,
+                                                }));
+                                            },
+                                            move || {
+                                                GlassButtonLabel(
+                                                    "Remove selected".into(),
+                                                    GlassButtonSpec::destructive(),
+                                                )
+                                            },
+                                        );
                                     },
                                 );
                             },
@@ -686,6 +730,12 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
     if ui.sheet.get() != Sheet::None {
         LibrarySheet(player, ui);
     }
+    playlists::Sheet(player, ui);
+}
+
+#[composable]
+pub(super) fn PlaylistEffects(player: MutableState<WinampState>, ui: LibraryUi) {
+    playlists::Effects(player, ui.saved);
 }
 
 #[composable]
@@ -980,6 +1030,11 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
         }
         Sheet::Manage => {
             Heading("Playlist options");
+            SheetAction("Save current queue", move || {
+                ui.sheet.set(Sheet::None);
+                ui.saved
+                    .name_playlist(None, player.get_non_reactive().playlist);
+            });
             SheetAction("Sort tracks", move || ui.sheet.set(Sheet::Sort));
             SheetAction("Import a playlist", move || ui.sheet.set(Sheet::Import));
             if !player.get().playlist.is_empty() {
@@ -1034,6 +1089,7 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 return;
             };
             let track = track.clone();
+            let to_save = track.clone();
             Row(
                 Modifier::empty()
                     .fill_max_width()
@@ -1074,6 +1130,10 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 },
             );
             chrome::Divider();
+            SheetAction("Add to saved playlist", move || {
+                ui.sheet.set(Sheet::None);
+                ui.saved.choose(Rc::new(vec![to_save.clone()]));
+            });
             for (label, action) in [
                 ("Play now", 0),
                 ("Play next", 1),
@@ -1267,18 +1327,23 @@ fn LibraryTabs(ui: LibraryUi) {
                 .fill_max_width()
                 .content_description("Library view")
                 .glass_effect(Glass::regular().shape(LiquidShape::Capsule).no_clip()),
-            usize::from(ui.view.get() != LibraryView::Tracks),
+            match ui.view.get() {
+                LibraryView::Tracks => 0,
+                LibraryView::Albums | LibraryView::Album(_) => 1,
+                _ => 2,
+            },
             move |index| {
-                ui.view.set(if index == 0 {
-                    LibraryView::Tracks
-                } else {
-                    LibraryView::Albums
+                ui.view.set(match index {
+                    0 => LibraryView::Tracks,
+                    1 => LibraryView::Albums,
+                    _ => LibraryView::Playlists,
                 });
+                set_text_field_text(&ui.query, "");
                 ui.editing.set(false);
                 ui.list.scroll_to_item(0, 0.0);
             },
             move |segments| {
-                for label in ["Tracks", "Albums"] {
+                for label in ["Tracks", "Albums", "Playlists"] {
                     segments.segment_content(format!("Library {label} tab"), move |selected| {
                         chrome::Label(
                             label,
