@@ -6,13 +6,12 @@ mod desktop;
 pub(super) use desktop::{DesktopNavigation, DesktopWorkspace};
 mod library;
 mod palette;
-mod reflection;
+pub(super) mod reflection;
 mod settings;
 pub(super) mod theme;
 use theme::colors as liquid_colors;
 
-pub(super) const NAV_HEIGHT: f32 = 86.0;
-const NAV_TOP_INSET: f32 = 10.0;
+pub(super) use super::navigation::{HEIGHT as NAV_HEIGHT, TOP_INSET as NAV_TOP_INSET};
 const PLAY_ICON: &str = "M8 5v14l11-7z";
 
 pub(super) fn touch_controls_enabled() -> bool {
@@ -191,6 +190,9 @@ impl Destination {
     }
 
     fn select(self, state: &mut WinampState) {
+        if let Navigation::MobileAutomatic(visible) = state.navigation {
+            state.navigation = Navigation::Mobile(visible);
+        }
         state.settings_open = self == Self::Settings;
         state.studio_open = self == Self::Studio;
         state.library_open = self == Self::Library;
@@ -208,12 +210,28 @@ impl Destination {
 
 #[composable]
 pub fn WinampMobileApp() {
-    let tabs = remember_winamp_tab_state();
-    let skin = remember_winamp_skin(tabs.player);
-    WinampRuntimeEffects(tabs.player, tabs.peer_windows, skin);
-    let appearance = theme::remember_theme();
-    theme::Theme(appearance, skin, move || {
-        MobileShell(tabs.player, skin, appearance)
+    BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
+        let tabs = remember_winamp_tab_state(Navigation::mobile(scope.max_width().0));
+        let initial = Navigation::mobile(scope.max_width().0);
+        if scope.max_width().0.is_finite()
+            && scope.max_width().0 > 0.
+            && matches!(tabs.player.get().navigation, Navigation::MobileAutomatic(_))
+            && tabs.player.get().navigation != initial
+        {
+            cranpose_core::SideEffect(move || {
+                tabs.player.update(|state| {
+                    if matches!(state.navigation, Navigation::MobileAutomatic(_)) {
+                        state.navigation = initial;
+                    }
+                })
+            });
+        }
+        let skin = remember_winamp_skin(tabs.player);
+        WinampRuntimeEffects(tabs.player, tabs.peer_windows, skin);
+        let appearance = theme::remember_theme();
+        theme::Theme(appearance, skin, move || {
+            MobileShell(tabs.player, skin, appearance)
+        });
     });
 }
 
@@ -232,7 +250,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
     let colors = liquid_colors();
     let background = if Destination::from_state(&player.get()) == Destination::Player {
         skin.get()
-            .map(|artwork| reflection::corner_color(&artwork))
+            .map(|artwork| skin_corner_color(&artwork))
             .unwrap_or(colors.background)
     } else {
         colors.background
@@ -254,7 +272,9 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
         move |scope| {
             let width = scope.max_width().0;
             let height = scope.max_height().0;
-            let nav_top = (height - NAV_HEIGHT).max(0.0);
+            let nav_visible = player.get().navigation.visible();
+            let nav_height = if nav_visible { NAV_HEIGHT } else { 0. };
+            let nav_top = (height - nav_height).max(0.0);
             let destination = Destination::from_state(&player.get());
             let surface = Modifier::empty().size_points(width, height);
             Box(
@@ -268,7 +288,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
                 move || {
                     // This call remains mounted across tabs so its shared documents and
                     // undo histories survive a visit to Settings or the player.
-                    WinampStudioSurfaceWithInset(player, skin, NAV_HEIGHT);
+                    WinampStudioSurfaceWithInset(player, skin, nav_height);
                     match destination {
                         Destination::Studio => {}
                         Destination::Settings => MobileSettings(player, skin, appearance),
@@ -296,12 +316,14 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
                         .size_points(nav_width, 58.0),
                 );
             }
-            NavigationBar(
-                player,
-                Modifier::empty()
-                    .absolute_offset((width - nav_width) * 0.5, nav_top + NAV_TOP_INSET),
-                nav_width,
-            );
+            if nav_visible {
+                NavigationBar(
+                    player,
+                    Modifier::empty()
+                        .absolute_offset((width - nav_width) * 0.5, nav_top + NAV_TOP_INSET),
+                    nav_width,
+                );
+            }
         },
     );
 }
@@ -345,13 +367,14 @@ fn MobilePlayer(
         let layout =
             reflection::player_layout(scope.max_width().0, scope.max_height().0, &snapshot);
         WinampStackedStage(artwork.clone(), player, skin, layout, StackedDrag::Fixed);
-        reflection::FloorReflection(
-            reflection::corner_color(&artwork),
-            snapshot,
-            layout,
-            scope.max_width().0,
-            scope.max_height().0 + bottom_inset,
-        );
+        if snapshot.navigation.visible() {
+            reflection::FloorReflection(
+                skin_corner_color(&artwork),
+                reflection::player_bounds(&snapshot, layout),
+                scope.max_width().0,
+                scope.max_height().0 + bottom_inset,
+            );
+        }
     });
 }
 

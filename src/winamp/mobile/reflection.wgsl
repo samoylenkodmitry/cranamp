@@ -10,7 +10,12 @@ fn effect_fs(input: VertexOutput) -> @location(0) vec4<f32> {
     if distance < 0.0 {
         return textureSampleLevel(input_texture, input_sampler, input.uv, 0.0);
     }
-    let t = clamp(distance / max(depth, 0.001), 0.0, 1.0);
+    let gap = u[3].x;
+    if distance < gap {
+        return vec4<f32>(u[1].rgb, 1.0);
+    }
+    let floor_distance = distance - gap;
+    let t = clamp(floor_distance / max(depth - gap, 0.001), 0.0, 1.0);
     let source_width = u[2].x;
     let spread = u[2].y;
     let skew = u[2].z;
@@ -31,6 +36,6 @@ fn effect_fs(input: VertexOutput) -> @location(0) vec4<f32> {
     let opacity = 0.42 * (1.0 - t) * (1.0 - t);
     let floor = mix(u[1].rgb, reflected.rgb, opacity);
     // A narrow light at the contact edge suggests a horizontal glass surface.
-    let sheen = 0.035 * exp(-distance / 5.0);
+    let sheen = 0.035 * exp(-floor_distance / 5.0);
     return vec4<f32>(mix(floor, vec3<f32>(1.0), sheen), 1.0);
 }

@@ -10,15 +10,18 @@ pub(super) const TRASH: &str =
 pub(super) const MINI_HEIGHT: f32 = 66.0;
 
 pub(super) fn bottom_inset(state: &WinampState) -> f32 {
-    if state.desktop_navigation.is_some() {
+    if matches!(state.navigation, Navigation::Desktop(_)) {
         return 0.0;
     }
-    NAV_HEIGHT
-        + if state.current_index.is_some() {
-            MINI_HEIGHT
-        } else {
-            0.0
-        }
+    (if state.navigation.visible() {
+        NAV_HEIGHT
+    } else {
+        0.
+    }) + if state.current_index.is_some() {
+        MINI_HEIGHT
+    } else {
+        0.0
+    }
 }
 
 #[composable]

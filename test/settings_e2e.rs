@@ -639,7 +639,7 @@ fn click_mobile(shell: &mut AppShell<HitGraphRenderer>, label: &str) {
 }
 
 #[test]
-fn mobile_player_keeps_the_skin_edge_at_the_screen_edge() {
+fn mobile_logo_toggles_margins_and_full_size_player() {
     let _application = TestApplication::new("mobile-width");
     let mut shell = AppShell::new(
         HitGraphRenderer::default(),
@@ -650,13 +650,45 @@ fn mobile_player_keeps_the_skin_edge_at_the_screen_edge() {
         shell.set_buffer_size(width as u32, height as u32);
         shell.set_viewport(width, height);
         pump(&mut shell);
+        let inset = mobile_control_bounds(&mut shell, "Close player");
+        assert!(inset.x + inset.width < width - 10.);
+        click_mobile(&mut shell, "Toggle navigation");
+        assert!(!contains(&visible_texts(&mut shell), "Skin Studio"));
         let close = mobile_control_bounds(&mut shell, "Close player");
         let right_border = 2.0 * width / 275.0;
-        assert!(
-            (close.x + close.width + right_border - width).abs() <= 1.0,
-            "Skin inset at {width}x{height}: close button {close:?}"
-        );
+        assert!((close.x + close.width + right_border - width).abs() <= 1.0);
+        assert!(close.y < inset.y);
+        click_mobile(&mut shell, "Toggle navigation");
+        mobile_control_bounds(&mut shell, "Library");
+        let restored = mobile_control_bounds(&mut shell, "Close player");
+        assert_eq!(restored, inset);
     }
+}
+
+#[test]
+fn wide_mobile_player_starts_without_navigation_and_logo_reopens_it() {
+    let _application = TestApplication::new("mobile-wide");
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_buffer_size(1024, 1366);
+    shell.set_viewport(1024., 1366.);
+    pump(&mut shell);
+    assert!(!contains(&visible_texts(&mut shell), "Skin Studio"));
+    click_mobile(&mut shell, "Toggle navigation");
+    click_mobile(&mut shell, "Library");
+    click_mobile(&mut shell, "Player");
+    shell.set_buffer_size(393, 780);
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    mobile_control_bounds(&mut shell, "Library");
+    click_mobile(&mut shell, "Toggle navigation");
+    shell.set_buffer_size(1024, 1366);
+    shell.set_viewport(1024., 1366.);
+    pump(&mut shell);
+    assert!(!contains(&visible_texts(&mut shell), "Skin Studio"));
 }
 
 #[test]
@@ -687,6 +719,9 @@ fn mobile_controls_avoid_the_notch_and_home_indicator() {
         shell.set_buffer_size(width as u32, height as u32);
         shell.set_viewport(width, height);
         pump(&mut shell);
+        if width >= 600. {
+            click_mobile(&mut shell, "Toggle navigation");
+        }
         for destination in ["Player", "Library", "Settings", "Skin Studio"] {
             click_mobile(&mut shell, destination);
             for label in ["Player", "Library", "Skin Studio", "Settings"] {

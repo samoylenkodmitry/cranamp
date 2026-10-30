@@ -2,31 +2,31 @@
 use super::*;
 use cranpose_ui_graphics::{RuntimeShader, RUNTIME_SHADER_PRELUDE_WGSL};
 
-const PLAYER_NAV_MARGIN: f32 = 6.;
+use super::super::navigation::{PLAYER_GAP, REFLECTION_GAP, SIDE_MARGIN, TOP_MARGIN};
 // The plane widens toward the viewer and shears to the left. At its contact
 // edge it has exactly the player's width and position.
 const SPREAD: f32 = 0.24;
 const SKEW: f32 = -0.18;
 
 pub(super) fn player_layout(width: f32, height: f32, state: &WinampState) -> StackedLayout {
-    resizable_stacked_layout(
-        width,
-        (height - NAV_HEIGHT + NAV_TOP_INSET - PLAYER_NAV_MARGIN).max(1.),
-        0.,
-        0.,
+    let visible = state.navigation.visible();
+    let side = if visible { SIDE_MARGIN } else { 0. };
+    let top = if visible { TOP_MARGIN } else { 0. };
+    let bottom = if visible {
+        NAV_HEIGHT - NAV_TOP_INSET + PLAYER_GAP
+    } else {
+        0.
+    };
+    let mut layout = resizable_stacked_layout(
+        (width - side * 2.).max(1.),
+        height,
+        top,
+        bottom,
         state,
         ui_scale(),
-    )
-}
-
-pub(super) fn corner_color(skin: &WinampSkin) -> Color {
-    let pixel = &skin.main.pixels()[..4];
-    Color(
-        pixel[0] as f32 / 255.,
-        pixel[1] as f32 / 255.,
-        pixel[2] as f32 / 255.,
-        1.,
-    )
+    );
+    layout.content_left_inset += side;
+    layout
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -39,35 +39,32 @@ struct ReflectionBounds {
     depth: f32,
 }
 
+pub(super) fn player_bounds(state: &WinampState, layout: StackedLayout) -> Rect {
+    Rect::from_origin_size(
+        Point::new(layout.content_left_inset, layout.content_top_inset),
+        Size::new(
+            MAIN_WIDTH * layout.scale,
+            stacked_skin_height(state, layout.playlist_height) * layout.scale,
+        ),
+    )
+}
+
 fn bounds(
-    state: &WinampState,
-    layout: StackedLayout,
+    player: Rect,
     viewport_width: f32,
     viewport_height: f32,
     density: f32,
 ) -> ReflectionBounds {
-    let skin_height = main_height(state.main_shaded)
-        + if state.eq_visible { EQ_HEIGHT } else { 0. }
-        + if state.playlist_visible {
-            layout.playlist_height
-        } else {
-            0.
-        };
     let snap = |value: f32| (value * density).round() / density;
-    let height = snap(skin_height * layout.scale);
-    let bottom = snap(layout.content_top_inset) + height;
-    // Align the capture to physical pixels so rounding its offscreen texture
-    // cannot shift the projected footer by half a source pixel.
+    let height = snap(player.height);
+    let bottom = snap(player.y) + height;
     let source_height = snap(height / 3.);
     let depth = (viewport_height - bottom).max(0.);
-    let source_width = snap(MAIN_WIDTH * layout.scale);
     ReflectionBounds {
         top: bottom - source_height,
-        // Capture the full viewport so the projected plane can extend to the
-        // left of a centered player in landscape and on tablets.
         width: viewport_width,
-        source_left: snap(layout.content_left_inset),
-        source_width,
+        source_left: snap(player.x),
+        source_width: snap(player.width),
         source_height,
         depth,
     }
@@ -93,24 +90,18 @@ fn shader(area: ReflectionBounds, background: Color) -> RuntimeShader {
     shader.set_float(9, SPREAD);
     shader.set_float(10, SKEW);
     shader.set_float(11, area.source_left);
+    shader.set_float(12, REFLECTION_GAP);
     shader
 }
 
 #[composable]
-pub(super) fn FloorReflection(
+pub(in crate::winamp) fn FloorReflection(
     background: Color,
-    state: WinampState,
-    layout: StackedLayout,
+    player: Rect,
     viewport_width: f32,
     viewport_height: f32,
 ) {
-    let area = bounds(
-        &state,
-        layout,
-        viewport_width,
-        viewport_height,
-        current_density(),
-    );
+    let area = bounds(player, viewport_width, viewport_height, current_density());
     if area.depth <= 0. {
         return;
     }

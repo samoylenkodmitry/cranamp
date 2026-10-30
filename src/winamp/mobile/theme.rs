@@ -142,7 +142,7 @@ pub(in crate::winamp) use cranpose::liquid::liquid_colors as colors;
 pub(super) fn Theme(ui: Ui, skin: WinampSkinState, content: impl FnOnce()) {
     let mode = ui.mode.get();
     let background = if mode == Mode::Skin {
-        skin.get().ok().map(|skin| reflection::corner_color(&skin))
+        skin.get().ok().map(|skin| skin_corner_color(&skin))
     } else {
         None
     };

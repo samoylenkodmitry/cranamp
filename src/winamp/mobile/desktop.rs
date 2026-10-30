@@ -7,12 +7,11 @@ pub(in crate::winamp) fn DesktopNavigation(
     width: f32,
     top: f32,
 ) {
-    let nav_width = (width - 8.0).clamp(1.0, 560.0);
+    let nav_width = (width - 24.0).clamp(1.0, 560.0);
     Box(
         Modifier::empty()
             .absolute_offset(0.0, top)
-            .size_points(width, NAV_HEIGHT)
-            .background(liquid_colors().background),
+            .size_points(width, NAV_HEIGHT),
         BoxSpec::default(),
         move || {
             NavigationBar(

@@ -20,7 +20,7 @@ fn theme_reacts_to_system_and_skin_changes_without_overriding_manual_choice() {
     let observed = Rc::new(RefCell::new(None));
     let drawn = observed.clone();
     let first = load_skin(BUNDLED_SKINS[0].bytes).unwrap();
-    let corner = reflection::corner_color(&first);
+    let corner = skin_corner_color(&first);
     let mut shell = AppShell::new(
         HitGraphRenderer::default(),
         cranpose_core::location_key(file!(), line!(), column!()),
@@ -86,7 +86,7 @@ fn theme_reacts_to_system_and_skin_changes_without_overriding_manual_choice() {
     assert_ne!(palette().accent, LiquidThemeSpec::default().accent);
     let first_palette = palette();
     let second = load_skin(BUNDLED_SKINS[1].bytes).unwrap();
-    let second_corner = reflection::corner_color(&second);
+    let second_corner = skin_corner_color(&second);
     shell.debug_enter_app_context(|| skin.set(Ok(second)));
     pump(&mut shell);
     assert_eq!(palette().background, second_corner);

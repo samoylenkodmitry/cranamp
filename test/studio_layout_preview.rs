@@ -62,7 +62,6 @@ fn main() {
             .with_developer_inspector(false)
             .with_size(width, height);
         with_capture(launcher, None).run(cranamp::winamp::WinampStackedApp);
-        return;
     }
     if std::env::args().nth(1).as_deref() == Some("--design") {
         let width = std::env::args()
@@ -150,6 +149,7 @@ fn with_capture(
         let albums = std::env::var_os("CRANAMP_REVIEW_OPEN_ALBUMS").is_some();
         let playlists = std::env::var("CRANAMP_REVIEW_PLAYLISTS").ok();
         let studio = std::env::var_os("CRANAMP_REVIEW_OPEN_STUDIO").is_some();
+        let toggle_nav = std::env::var_os("CRANAMP_REVIEW_TOGGLE_NAV").is_some();
         let drag_segment = std::env::var_os("CRANAMP_REVIEW_DRAG_LIBRARY_SEGMENT").is_some();
         let insets = review_insets();
         let scale = std::env::var("CRANAMP_REVIEW_CAPTURE_SCALE")
@@ -159,6 +159,13 @@ fn with_capture(
             .unwrap_or(1.);
         launcher.with_test_driver(move |robot| {
             std::thread::spawn(move || {
+                if toggle_nav {
+                    robot.wait_for_idle().expect("player ready");
+                    robot
+                        .click_by_text("Toggle navigation")
+                        .expect("toggle player navigation");
+                    robot.wait_for_idle().expect("player resized");
+                }
                 if library || albums || playlists.is_some() || studio || settings || drag_segment {
                     robot.wait_for_idle().expect("player ready");
                     let frame = robot.screenshot_with_scale(1.).expect("player frame");
