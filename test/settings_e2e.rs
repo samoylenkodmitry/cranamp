@@ -1575,6 +1575,20 @@ fn library_indexes_tags_folder_art_and_albums_without_changing_original_audio() 
 #[test]
 fn desktop_navigation_keeps_player_and_opens_one_shared_companion() {
     use cranpose_app_shell::RootId;
+    fn tab_count(shell: &mut AppShell<HitGraphRenderer>, root: RootId) -> usize {
+        fn count(node: &cranpose_ui::SemanticsNode) -> usize {
+            if node.hidden {
+                return 0;
+            }
+            usize::from(node.widget_role == Some(cranpose_foundation::SemanticsWidgetRole::Tab))
+                + node.children.iter().map(count).sum::<usize>()
+        }
+        shell.set_semantics_enabled(true);
+        shell
+            .surface(root)
+            .unwrap()
+            .with_semantics_tree(|tree| count(tree.expect("native semantics").root()))
+    }
     fn surfaces(shell: &mut AppShell<HitGraphRenderer>) {
         for _ in 0..8 {
             shell.update();
@@ -1634,7 +1648,9 @@ fn desktop_navigation_keeps_player_and_opens_one_shared_companion() {
     let main = roots[0].node;
     let player = RootId::Window(main);
     let original = roots[0].descriptor.layout_size();
+    assert_eq!(tab_count(&mut shell, player), 0, "navigation starts hidden");
     press(&mut shell, player, "Toggle navigation");
+    assert_eq!(tab_count(&mut shell, player), 4);
     // OS size acknowledgements are covered by the native preview; this shell
     // exercises declaration lifetime and the same accessible tab actions.
     for tab in ["Library", "Settings", "Skin Studio", "Library"] {
@@ -1651,6 +1667,11 @@ fn desktop_navigation_keeps_player_and_opens_one_shared_companion() {
     press(&mut shell, player, "Toggle navigation");
     assert_eq!(shell.window_roots().len(), 1);
     assert_eq!(shell.window_roots()[0].descriptor.layout_size(), original);
+    assert_eq!(
+        tab_count(&mut shell, player),
+        0,
+        "the logo hides navigation"
+    );
     press(&mut shell, player, "Toggle navigation");
     assert_eq!(shell.window_roots().len(), 1, "the bar returns to Player");
 }

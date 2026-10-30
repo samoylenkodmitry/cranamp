@@ -21,6 +21,7 @@ fn launcher() -> AppLauncher<cranpose::AppFonts> {
         .with_title(TITLE)
         .with_application_id(APPLICATION_ID)
         .with_fonts(fonts::APP_FONTS)
+        .with_custom_cursor_size(cranpose::CustomCursorSize::AsDrawn)
         .with_developer_inspector(
             cfg!(debug_assertions)
                 && !cfg!(feature = "store")

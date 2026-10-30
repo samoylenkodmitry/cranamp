@@ -6,7 +6,7 @@ A music player in Rust with WSZ skin support and a built-in Skin Studio, powered
 
 ## Player and Skin Studio
 
-The player uses classic Winamp skins. On desktop, click the Winamp logo to show or hide the bottom navigation. Library, Skin Studio and Settings open beside the player. Selecting Player or closing the companion window returns to the player. Hiding the bar also closes the companion window. On mobile, use the bottom tabs to switch screens.
+The player uses classic Winamp skins. On desktop, the bottom navigation starts hidden. Click the Winamp logo to show or hide it. Library, Skin Studio and Settings open beside the player. Selecting Player or closing the companion window returns to the player. Hiding the bar also closes the companion window. On mobile, use the bottom tabs to switch screens.
 
 | Player with equalizer and playlist | Desktop Studio with tool settings and layers |
 | --- | --- |
@@ -28,7 +28,7 @@ Actual release captures from [0.1.92](store/releases/0.1.92/screenshots.json). S
 - **Platforms** — Windows, macOS, Linux, Android, iOS and web.
 - **Catamp** — Original pixel-cat skins bundled by default, including Silverplay, Feral Night, Cat Scan, Seance, Salvage, Freefall, Catnip, Moon Garden and [Midnight Snack](docs/skin-studio/midnight-snack.md).
 - **Classic skins** — Import and switch `.wsz` and `.zip` skins.
-- **Skin cursors** — Classic `.cur` pointers per region, wherever the platform has a cursor. Every bundled skin draws its own, and the Skin Studio draws and edits them like any other artwork.
+- **Skin cursors** — Classic `.cur` pointers per region, wherever the platform has a cursor. They keep their drawn size independently of the system cursor-size setting. Every bundled skin draws its own, and the Skin Studio draws and edits them like any other artwork.
 - **Web skin library** — Keep skins and your selection across browser reloads.
 - **Local music** — Open audio files and folders through platform file pickers. See [audio format support](docs/audio-formats.md).
 - **Streaming** — Play audio URLs and your own radio streams.
