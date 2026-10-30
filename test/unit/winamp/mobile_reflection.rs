@@ -69,7 +69,7 @@ fn reflection_meets_the_player_and_reaches_the_physical_screen_bottom() {
             assert!(area.source_left + area.source_width <= width + 0.34);
             if playlist_visible {
                 let nav_top = height - NAV_HEIGHT + NAV_TOP_INSET;
-                assert!((nav_top - bottom - 6.).abs() <= 1. / 6.);
+                assert!((nav_top - bottom - SIDE_MARGIN * 1.5).abs() <= 1. / 6.);
             }
         }
     }
@@ -134,6 +134,9 @@ fn desktop_reflection_uses_the_inset_skin_and_reaches_below_navigation() {
         assert!((area.source_width - player.width).abs() <= 0.25);
         assert!((area.top + area.source_height + area.depth - window_height).abs() < 0.001);
         assert!(area.depth > NAV_HEIGHT - NAV_TOP_INSET);
+        let nav_top = window_height - NAV_HEIGHT + NAV_TOP_INSET;
+        let gap = nav_top - player.y - player.height;
+        assert!((gap - SIDE_MARGIN * 1.5).abs() < 1.);
         let (plain, plain_height, plain_scale) = navigation::desktop_frame(width, height, false);
         assert_eq!(plain, Rect::from_size(Size::new(width, height)));
         assert_eq!(plain_height, height);
