@@ -132,6 +132,7 @@ fn with_capture(
         let library = std::env::var_os("CRANAMP_REVIEW_OPEN_LIBRARY").is_some();
         let albums = std::env::var_os("CRANAMP_REVIEW_OPEN_ALBUMS").is_some();
         let studio = std::env::var_os("CRANAMP_REVIEW_OPEN_STUDIO").is_some();
+        let drag_segment = std::env::var_os("CRANAMP_REVIEW_DRAG_LIBRARY_SEGMENT").is_some();
         let insets = review_insets();
         let scale = std::env::var("CRANAMP_REVIEW_CAPTURE_SCALE")
             .ok()
@@ -140,7 +141,7 @@ fn with_capture(
             .unwrap_or(1.);
         launcher.with_test_driver(move |robot| {
             std::thread::spawn(move || {
-                if library || albums || studio || settings {
+                if library || albums || studio || settings || drag_segment {
                     robot.wait_for_idle().expect("player ready");
                     let frame = robot.screenshot_with_scale(1.).expect("player frame");
                     let width = frame.width as f32;
@@ -162,6 +163,11 @@ fn with_capture(
                             .click(width * 0.75, insets.top + 147.)
                             .expect("open Albums");
                         robot.wait_for_idle().expect("Albums ready");
+                    }
+                    if drag_segment {
+                        robot.mouse_move(width * 0.25, insets.top + 147.).unwrap();
+                        robot.mouse_down().unwrap();
+                        robot.mouse_move(width * 0.45, insets.top + 147.).unwrap();
                     }
                 }
                 loop {
@@ -195,6 +201,9 @@ fn with_capture(
                             if let Err(error) = std::fs::rename(pending, path) {
                                 eprintln!("Capture save failed: {error}");
                             } else if once {
+                                if drag_segment {
+                                    let _ = robot.mouse_up();
+                                }
                                 cranpose_services::request_exit();
                                 break;
                             }

@@ -1252,51 +1252,50 @@ fn SheetAction(label: impl Into<String>, action: impl Fn() + 'static) {
 #[composable]
 fn LibraryTabs(ui: LibraryUi) {
     let colors = liquid_colors();
-    Row(
-        Modifier::empty()
-            .fill_max_width()
-            .height(50.)
-            .rounded_corners(11.)
-            .background(colors.separator.with_alpha(0.18))
-            .padding(3.),
-        RowSpec::default().horizontal_arrangement(LinearArrangement::SpacedBy(4.)),
-        move || {
-            for (label, view) in [
-                ("Tracks", LibraryView::Tracks),
-                ("Albums", LibraryView::Albums),
-            ] {
-                let selected = if view == LibraryView::Albums {
-                    ui.view.get() != LibraryView::Tracks
+    let typography = liquid_typography();
+    let style = LiquidSegmentedStyle {
+        height: 50.,
+        track: Color::TRANSPARENT,
+        indicator: colors.fill,
+        selected_label: colors.accent,
+        text: typography.subheadline.clone(),
+        ..LiquidSegmentedStyle::system(&colors, &typography)
+    };
+    ProvideLiquidSegmentedStyle(style, move || {
+        LiquidSegmentedControl(
+            Modifier::empty()
+                .fill_max_width()
+                .content_description("Library view")
+                .glass_effect(Glass::regular().shape(LiquidShape::Capsule).no_clip()),
+            usize::from(ui.view.get() != LibraryView::Tracks),
+            move |index| {
+                ui.view.set(if index == 0 {
+                    LibraryView::Tracks
                 } else {
-                    ui.view.get() == view
-                };
-                let spec = GlassButtonSpec::plain().with_content_color(if selected {
-                    colors.accent
-                } else {
-                    colors.secondary_label
+                    LibraryView::Albums
                 });
-                GlassButton(
-                    Modifier::empty()
-                        .weight(1.)
-                        .fill_max_height()
-                        .rounded_corners(8.)
-                        .background(if selected {
-                            colors.surface
-                        } else {
-                            Color::TRANSPARENT
-                        })
-                        .content_description(format!("Library {label} tab")),
-                    spec.clone(),
-                    move || {
-                        ui.view.set(view.clone());
-                        ui.editing.set(false);
-                        ui.list.scroll_to_item(0, 0.0);
-                    },
-                    move || GlassButtonLabel(label.into(), spec.clone()),
-                );
-            }
-        },
-    );
+                ui.editing.set(false);
+                ui.list.scroll_to_item(0, 0.0);
+            },
+            move |segments| {
+                for label in ["Tracks", "Albums"] {
+                    segments.segment_content(format!("Library {label} tab"), move |selected| {
+                        chrome::Label(
+                            label,
+                            Modifier::empty(),
+                            15.,
+                            if selected {
+                                colors.accent
+                            } else {
+                                colors.label
+                            },
+                            selected,
+                        );
+                    });
+                }
+            },
+        );
+    });
 }
 
 #[composable]

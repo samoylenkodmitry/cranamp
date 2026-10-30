@@ -800,7 +800,21 @@ fn library_indexes_tags_folder_art_and_albums_without_changing_original_audio() 
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     mobile_control_bounds(&mut shell, "Play track 1: Tagged title");
-    click_mobile(&mut shell, "Library Albums tab");
+    // The glass lens commits the new view when a horizontal drag is released.
+    let tracks = mobile_control_bounds(&mut shell, "Library Tracks tab");
+    let albums = mobile_control_bounds(&mut shell, "Library Albums tab");
+    let start = tracks.x + tracks.width * 0.5;
+    let end = albums.x + albums.width * 0.5;
+    let y = tracks.y + tracks.height * 0.5;
+    shell.set_cursor(start, y);
+    shell.pointer_pressed();
+    pump(&mut shell);
+    for step in 1..=4 {
+        shell.set_cursor(start + (end - start) * step as f32 / 4., y);
+        pump(&mut shell);
+    }
+    shell.pointer_released();
+    pump(&mut shell);
     mobile_control_bounds(&mut shell, "Open album Tagged album");
     mobile_control_bounds(&mut shell, "Open album Original album");
     click_mobile(&mut shell, "Open album Tagged album");
