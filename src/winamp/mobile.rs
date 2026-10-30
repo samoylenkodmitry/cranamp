@@ -1,7 +1,9 @@
 //! Shared phone and tablet navigation. The skin remains a separate, unmodified surface.
 use super::*;
 use cranpose::liquid::prelude::*;
+mod chrome;
 mod library;
+mod settings;
 
 const NAV_HEIGHT: f32 = 86.0;
 const PLAY_ICON: &str = "M8 5v14l11-7z";
@@ -256,6 +258,19 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
                 },
             );
             let nav_width = (width - 24.0).clamp(1.0, 560.0);
+            if matches!(destination, Destination::Library | Destination::Settings)
+                && player.get().current_index.is_some()
+            {
+                chrome::MiniPlayer(
+                    player,
+                    Modifier::empty()
+                        .absolute_offset(
+                            (width - nav_width) * 0.5,
+                            (nav_top - chrome::MINI_HEIGHT + 4.0).max(0.0),
+                        )
+                        .size_points(nav_width, 58.0),
+                );
+            }
             LiquidTabBar(
                 Modifier::empty()
                     .absolute_offset((width - nav_width) * 0.5, nav_top + 10.0)
@@ -273,10 +288,10 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState) {
                     player.update(|state| destination.select(state));
                 },
                 |tabs| {
-                    tabs.tab(PLAY_ICON, "Player");
-                    tabs.tab(icons::LIST, "Library");
-                    tabs.tab(icons::EDIT, "Skin Studio");
-                    tabs.tab(icons::SETTINGS, "Settings");
+                    tabs.push(LiquidTab::new(PLAY_ICON, "Player").with_icon_scale(0.72));
+                    tabs.push(LiquidTab::new(icons::LIST, "Library").with_icon_scale(0.72));
+                    tabs.push(LiquidTab::new(icons::EDIT, "Skin Studio").with_icon_scale(0.72));
+                    tabs.push(LiquidTab::new(icons::SETTINGS, "Settings").with_icon_scale(0.72));
                 },
             );
         },
@@ -300,195 +315,7 @@ fn MobilePlayer(artwork: WinampSkin, player: MutableState<WinampState>, skin: Wi
 
 #[composable]
 fn MobileSettings(player: MutableState<WinampState>, skin: WinampSkinState) {
-    BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
-        let width = scope.max_width().0.min(720.0);
-        Box(
-            Modifier::empty()
-                .size_points(width, scope.max_height().0)
-                .absolute_offset((scope.max_width().0 - width) * 0.5, 0.0),
-            BoxSpec::default(),
-            move || MobileSettingsContent(player, skin),
-        );
-    });
-}
-
-#[composable]
-fn MobileSettingsContent(player: MutableState<WinampState>, skin: WinampSkinState) {
-    let choose_skin = cranpose_core::rememberMutableStateOf(|| false);
-    let page = cranpose_core::rememberMutableStateOf(about::Page::default);
-    let link_error = cranpose_core::rememberMutableStateOf(String::new);
-    let library = cranpose_core::rememberMutableStateOf(bundled_library_skins);
-    cranpose_core::LaunchedEffectAsync((choose_skin.get(), player.get().skin_path), move |_| {
-        Box::pin(async move {
-            if let Ok(entries) = cranpose_core::withBlocking(list_library_skins).await {
-                library.set(entries);
-            }
-        })
-    });
-    cranpose_services::BackHandler(choose_skin.get(), move || choose_skin.set(false));
-    cranpose_services::BackHandler(page.get() != about::Page::Settings, move || {
-        page.set(page.get().parent());
-    });
-    let scroll = cranpose_ui::rememberScrollState!(0.0);
-    let reset_scroll = scroll;
-    cranpose_core::LaunchedEffect((choose_skin.get(), page.get()), move |_| {
-        reset_scroll.scroll_to(0.0);
-    });
-    let colors = liquid_colors();
-    Column(
-        Modifier::empty()
-            .fill_max_size()
-            .vertical_scroll(scroll, false)
-            .padding_each(20.0, 20.0, 20.0, 20.0 + NAV_HEIGHT),
-        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(20.0)),
-        move || {
-            if page.get() != about::Page::Settings {
-                about::Content(page, true);
-                return;
-            }
-            if choose_skin.get() {
-                GlassAction("Back to Settings", move || choose_skin.set(false));
-                Heading("Choose a skin");
-                for entry in library.get() {
-                    let active = player.get().skin_path
-                        == entry
-                            .path
-                            .as_ref()
-                            .map(|p| p.to_string_lossy().into_owned());
-                    let title = entry
-                        .label
-                        .replace(" (Bundled)", "")
-                        .trim_end_matches(".wsz")
-                        .to_owned();
-                    let label = if active {
-                        format!("{title} · Selected")
-                    } else {
-                        title
-                    };
-                    GlassAction(label, move || apply_library_skin(player, skin, &entry));
-                }
-                GlassAction("Open skin file", move || {
-                    player.update(|s| s.pending_skin_pick = true)
-                });
-                return;
-            }
-            Heading("Settings");
-            Text(
-                "Playback and appearance",
-                Modifier::empty(),
-                settings_text_style(16.0, colors.secondary_label),
-            );
-            SettingsCard("Appearance", move || {
-                let current = player.get().skin_path;
-                let title = library
-                    .get()
-                    .into_iter()
-                    .find(|s| current == s.path.as_ref().map(|p| p.to_string_lossy().into_owned()))
-                    .map(|s| {
-                        s.label
-                            .replace(" (Bundled)", "")
-                            .trim_end_matches(".wsz")
-                            .to_owned()
-                    })
-                    .unwrap_or_else(|| "Custom skin".into());
-                Text(
-                    title,
-                    Modifier::empty(),
-                    settings_text_style(18.0, colors.label),
-                );
-                GlassAction("Choose skin", move || choose_skin.set(true));
-                SettingsToggle("Show equalizer", player.get().eq_visible, move |value| {
-                    player.update(|s| s.eq_visible = value)
-                });
-                SettingsToggle(
-                    "Show playlist",
-                    player.get().playlist_visible,
-                    move |value| player.update(|s| s.playlist_visible = value),
-                );
-            });
-            SettingsCard("Playback", move || {
-                let snapshot = player.get();
-                SettingsToggle("Shuffle", snapshot.shuffle, move |value| {
-                    player.update(|s| {
-                        s.shuffle = value;
-                        refresh_shuffle_order(s);
-                    })
-                });
-                SettingsToggle("Repeat", snapshot.repeat, move |value| {
-                    player.update(|s| s.repeat = value)
-                });
-                SettingsToggle("Equalizer enabled", snapshot.eq_enabled, move |value| {
-                    player.update(|s| {
-                        s.eq_enabled = value;
-                        if let Err(error) = audio::set_equalizer(value, s.eq_values) {
-                            s.status = error;
-                        }
-                    })
-                });
-                Text(
-                    format!("Volume  {}%", (snapshot.volume * 100.0).round()),
-                    Modifier::empty(),
-                    settings_text_style(16.0, colors.label),
-                );
-                LiquidSlider(
-                    Modifier::empty()
-                        .fill_max_width()
-                        .content_description("Player volume"),
-                    snapshot.volume,
-                    move |value| {
-                        player.update(|s| {
-                            if let Err(error) = audio::set_volume(value) {
-                                s.status = error;
-                            } else {
-                                s.volume = value;
-                            }
-                        });
-                    },
-                );
-                Text(
-                    "Balance",
-                    Modifier::empty(),
-                    settings_text_style(16.0, colors.label),
-                );
-                LiquidSlider(
-                    Modifier::empty()
-                        .fill_max_width()
-                        .content_description("Left and right balance"),
-                    snapshot.balance,
-                    move |value| {
-                        player.update(|s| {
-                            if let Err(error) = audio::set_balance(value) {
-                                s.status = error;
-                            } else {
-                                s.balance = value;
-                            }
-                        });
-                    },
-                );
-                GlassAction("Center balance", move || {
-                    player.update(|s| {
-                        if let Err(error) = audio::set_balance(0.5) {
-                            s.status = error;
-                        } else {
-                            s.balance = 0.5;
-                        }
-                    })
-                });
-            });
-            MobileSyncSettings(player);
-            SettingsCard("Help and privacy", move || {
-                GlassAction("Privacy policy", move || {
-                    about::open_link(about::PRIVACY_URL, link_error)
-                });
-                GlassAction("Help with Cranamp", move || {
-                    about::open_link(about::SUPPORT_URL, link_error)
-                });
-                about::LinkError(link_error, true);
-                Text("Audio plays from its original location. Cranamp does not copy your music library.", Modifier::empty().fill_max_width(), settings_text_style(14.0, colors.secondary_label));
-                GlassAction("About Cranamp", move || page.set(about::Page::About));
-            });
-        },
-    );
+    settings::SettingsScreen(player, skin);
 }
 
 #[composable]

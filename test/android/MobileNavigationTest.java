@@ -114,6 +114,7 @@ public final class MobileNavigationTest {
             capture("settings");
             click("Choose skin");
             waitFor("Back to Settings");
+            capture("skins");
             assertTrue(ui.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK));
             waitFor("Choose skin");
             click("About Cranamp");
@@ -174,6 +175,11 @@ public final class MobileNavigationTest {
             click("Finish search");
             click("Settings");
             waitFor("Choose skin");
+            capture("settings");
+            click("Choose skin");
+            waitFor("Find a skin");
+            capture("skins");
+            click("Back to Settings");
             click("Library");
             waitFor("Clear search");
             click("Clear search");

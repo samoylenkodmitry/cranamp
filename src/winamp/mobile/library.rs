@@ -1,9 +1,7 @@
 //! A touch library over the player's existing playlist. No media is copied or indexed here.
 use super::*;
 
-const MUSIC: &str = "M9 3v12.2A3.5 3.5 0 1 0 11 18V7h8v6.2A3.5 3.5 0 1 0 21 16V3H9z";
-const PAUSE: &str = "M6 5h4v14H6zM14 5h4v14h-4z";
-const NEXT: &str = "M5 5v14l10-7zM17 5h3v14h-3z";
+use super::chrome::{self, MUSIC};
 
 #[derive(Clone, Debug, PartialEq)]
 enum Sheet {
@@ -121,7 +119,7 @@ fn library_summary(tracks: &[Track]) -> String {
     }
 }
 
-fn track_subtitle(track: &Track) -> String {
+pub(super) fn track_subtitle(track: &Track) -> String {
     parsed_track_artist(&track.title)
         .map(str::to_owned)
         .filter(|artist| !artist.is_empty())
@@ -257,12 +255,12 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                             Column(
                                 Modifier::empty().fill_max_width().padding_each(
                                     20.0,
-                                    if compact { 8.0 } else { 20.0 },
+                                    if compact { 8.0 } else { 14.0 },
                                     20.0,
                                     8.0,
                                 ),
                                 ColumnSpec::default().vertical_arrangement(
-                                    LinearArrangement::SpacedBy(if compact { 6.0 } else { 12.0 }),
+                                    LinearArrangement::SpacedBy(if compact { 6.0 } else { 8.0 }),
                                 ),
                                 move || {
                                     let summary = summary.clone();
@@ -279,13 +277,12 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                 Modifier::empty().weight(1.0),
                                                 ColumnSpec::default(),
                                                 move || {
-                                                    Text(
+                                                    chrome::Label(
                                                         "Library",
                                                         Modifier::empty(),
-                                                        settings_text_style(
-                                                            if compact { 26.0 } else { 32.0 },
-                                                            colors.label,
-                                                        ),
+                                                        if compact { 26.0 } else { 28.0 },
+                                                        colors.label,
+                                                        true,
                                                     );
                                                     if !compact {
                                                         Text(
@@ -334,6 +331,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                     placeholder: Some(
                                                         "Search your playlist".into(),
                                                     ),
+                                                    on_glass: false,
                                                     ..Default::default()
                                                 },
                                             );
@@ -369,9 +367,6 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                             }
                                         },
                                     );
-                                    if !compact && !ui.editing.get() {
-                                        NowPlaying(player, ui, snapshot_header.clone());
-                                    }
                                     let selected = snapshot_header.selected_indices.len();
                                     let count = rows_header.len();
                                     let all = snapshot_header.playlist.len();
@@ -389,7 +384,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                             } else if count != all {
                                                 format!("{count} of {all} tracks")
                                             } else {
-                                                "Your playlist".into()
+                                                "All tracks".into()
                                             };
                                             OneLine(
                                                 label,
@@ -427,7 +422,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                 );
                                                 SmallAction(
                                                     "Select",
-                                                    GlassButtonSpec::glass(),
+                                                    GlassButtonSpec::plain(),
                                                     move || {
                                                         player.update(|s| {
                                                             set_playlist_selection(s, [])
@@ -486,7 +481,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                 cranpose_ui::PaddingValues {
                                                     start: 12.0,
                                                     end: 12.0,
-                                                    bottom: NAV_HEIGHT
+                                                    bottom: chrome::bottom_inset(&snapshot)
                                                         + if ui.editing.get() {
                                                             64.0
                                                         } else {
@@ -519,7 +514,9 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                         },
                     );
                     if ui.editing.get() && has_selection {
-                        let bottom = (scope.max_height().0 - NAV_HEIGHT - 64.0).max(0.0);
+                        let bottom =
+                            (scope.max_height().0 - chrome::bottom_inset(&player.get()) - 64.0)
+                                .max(0.0);
                         Box(
                             Modifier::empty()
                                 .absolute_offset(20.0, bottom)
@@ -581,217 +578,155 @@ fn SmallAction(label: &'static str, spec: GlassButtonSpec, action: impl Fn() + '
 }
 
 #[composable]
-fn NowPlaying(player: MutableState<WinampState>, ui: LibraryUi, snapshot: WinampState) {
-    let Some(track) = snapshot
-        .current_index
-        .and_then(|i| snapshot.playlist.get(i))
-        .cloned()
-    else {
-        return;
-    };
-    let colors = liquid_colors();
-    let playing = snapshot.playback == PlaybackState::Playing;
-    GlassSurface(
-        Modifier::empty().fill_max_width(),
-        Glass::regular()
-            .shape(LiquidShape::RoundedRect(24.0))
-            .tint(colors.accent.with_alpha(0.07)),
-        move || {
-            let track = track.clone();
-            Row(
-                Modifier::empty()
-                    .fill_max_width()
-                    .padding_each(16.0, 12.0, 8.0, 12.0),
-                RowSpec::default()
-                    .vertical_alignment(VerticalAlignment::CenterVertically)
-                    .horizontal_arrangement(LinearArrangement::SpacedBy(8.0)),
-                move || {
-                    let track = track.clone();
-                    Column(
-                        Modifier::empty().weight(1.0),
-                        ColumnSpec::default()
-                            .vertical_arrangement(LinearArrangement::SpacedBy(3.0)),
-                        move || {
-                            Text(
-                                if playing {
-                                    "NOW PLAYING"
-                                } else {
-                                    "READY TO PLAY"
-                                },
-                                Modifier::empty(),
-                                settings_text_style(11.0, colors.accent),
-                            );
-                            OneLine(
-                                parsed_track_title(&track.title).to_owned(),
-                                Modifier::empty().fill_max_width(),
-                                17.0,
-                                colors.label,
-                            );
-                            OneLine(
-                                track_subtitle(&track),
-                                Modifier::empty().fill_max_width(),
-                                13.0,
-                                colors.secondary_label,
-                            );
-                        },
-                    );
-                    GlassIconButton(
-                        Modifier::empty().content_description(if playing {
-                            "Pause library playback"
-                        } else {
-                            "Play library selection"
-                        }),
-                        GlassButtonSpec::prominent(),
-                        48.0,
-                        move || {
-                            ui.notice.set(String::new());
-                            if playing {
-                                pause_playback(player)
-                            } else {
-                                play_or_resume(player)
-                            }
-                        },
-                        if playing { PAUSE } else { PLAY_ICON },
-                    );
-                    GlassIconButton(
-                        Modifier::empty().content_description("Next library track"),
-                        GlassButtonSpec::plain(),
-                        44.0,
-                        move || {
-                            ui.notice.set(String::new());
-                            next_track(player);
-                        },
-                        NEXT,
-                    );
-                },
-            );
-        },
-    );
-}
-
-#[composable]
 fn LibraryRow(
     player: MutableState<WinampState>,
     ui: LibraryUi,
     snapshot: Rc<WinampState>,
     index: usize,
 ) {
-    let track = &snapshot.playlist[index];
+    let track = snapshot.playlist[index].clone();
     let title = parsed_track_title(&track.title).to_owned();
-    let subtitle = track_subtitle(track);
+    let subtitle = track_subtitle(&track);
     let duration = playlist_duration_text(track.duration_seconds).unwrap_or_default();
     let current = snapshot.current_index == Some(index);
     let selected = ui.editing.get() && snapshot.selected_indices.contains(&index);
     let editing = ui.editing.get();
     let colors = liquid_colors();
-    let background = if selected || current {
-        colors.accent.with_alpha(if selected { 0.13 } else { 0.07 })
-    } else {
-        Color::TRANSPARENT
-    };
     let target = TrackTarget {
         playlist: snapshot.playlist.clone(),
         index,
     };
-    Row(
+    Column(
         Modifier::empty()
             .fill_max_width()
-            .height(76.0)
-            .rounded_corners(18.0)
-            .background(background)
-            .padding_symmetric(8.0, 4.0),
-        RowSpec::default().vertical_alignment(VerticalAlignment::CenterVertically),
+            .rounded_corners(10.)
+            .background(if selected || current {
+                colors.accent.with_alpha(0.08)
+            } else {
+                Color::TRANSPARENT
+            }),
+        ColumnSpec::default(),
         move || {
             let title = title.clone();
             let subtitle = subtitle.clone();
-            let row_label = if editing {
-                format!(
-                    "{} track {}: {title}",
-                    if selected { "Deselect" } else { "Select" },
-                    index + 1
-                )
-            } else {
-                format!("Play track {}: {title}", index + 1)
-            };
+            let track = track.clone();
+            let duration = duration.clone();
+            let target = target.clone();
             Row(
                 Modifier::empty()
-                    .weight(1.0)
-                    .fill_max_height()
-                    .content_description(row_label)
-                    .clickable(move |_| {
-                        if editing {
-                            toggle_selection(player, index);
-                        } else {
-                            ui.notice.set(String::new());
-                            start_track(player, index);
-                        }
-                    }),
-                RowSpec::default()
-                    .vertical_alignment(VerticalAlignment::CenterVertically)
-                    .horizontal_arrangement(LinearArrangement::SpacedBy(12.0)),
+                    .fill_max_width()
+                    .height(60.)
+                    .padding_symmetric(4., 4.),
+                RowSpec::default().vertical_alignment(VerticalAlignment::CenterVertically),
                 move || {
-                    Box(
-                        Modifier::empty()
-                            .size_points(40.0, 40.0)
-                            .rounded_corners(12.0)
-                            .background(if current || selected {
-                                colors.accent.with_alpha(0.12)
-                            } else {
-                                colors.fill
-                            }),
-                        BoxSpec::new().content_alignment(Alignment::CENTER),
-                        move || {
-                            if editing && selected {
-                                icons::Icon(icons::CHECK, None, 22.0, colors.accent);
-                            } else if current {
-                                icons::Icon(MUSIC, None, 22.0, colors.accent);
-                            } else {
-                                Text(
-                                    format!("{}", index + 1),
-                                    Modifier::empty(),
-                                    settings_text_style(13.0, colors.secondary_label),
-                                );
-                            }
-                        },
-                    );
                     let title = title.clone();
                     let subtitle = subtitle.clone();
-                    Column(
-                        Modifier::empty().weight(1.0),
-                        ColumnSpec::default()
-                            .vertical_arrangement(LinearArrangement::SpacedBy(5.0)),
+                    let track = track.clone();
+                    let label = format!(
+                        "{} track {}: {title}",
+                        if editing {
+                            if selected {
+                                "Deselect"
+                            } else {
+                                "Select"
+                            }
+                        } else {
+                            "Play"
+                        },
+                        index + 1
+                    );
+                    Row(
+                        Modifier::empty()
+                            .weight(1.)
+                            .fill_max_height()
+                            .content_description(label)
+                            .clickable(move |_| {
+                                if editing {
+                                    toggle_selection(player, index);
+                                } else {
+                                    ui.notice.set(String::new());
+                                    start_track(player, index);
+                                }
+                            }),
+                        RowSpec::default()
+                            .vertical_alignment(VerticalAlignment::CenterVertically)
+                            .horizontal_arrangement(LinearArrangement::SpacedBy(10.)),
                         move || {
-                            OneLine(
-                                title.clone(),
-                                Modifier::empty().fill_max_width(),
-                                16.0,
-                                if current { colors.accent } else { colors.label },
-                            );
-                            OneLine(
-                                subtitle.clone(),
-                                Modifier::empty().fill_max_width(),
-                                13.0,
-                                colors.secondary_label,
+                            if editing {
+                                Box(
+                                    Modifier::empty().size_points(28., 44.),
+                                    BoxSpec::new().content_alignment(Alignment::CENTER),
+                                    move || {
+                                        icons::Icon(
+                                            if selected {
+                                                icons::CHECK
+                                            } else {
+                                                "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16z"
+                                            },
+                                            None,
+                                            22.,
+                                            if selected {
+                                                colors.accent
+                                            } else {
+                                                colors.tertiary_label
+                                            },
+                                        );
+                                    },
+                                );
+                            }
+                            chrome::Artwork(track.clone(), 44.);
+                            let title = title.clone();
+                            let subtitle = subtitle.clone();
+                            Column(
+                                Modifier::empty().weight(1.),
+                                ColumnSpec::default()
+                                    .vertical_arrangement(LinearArrangement::SpacedBy(4.)),
+                                move || {
+                                    chrome::Label(
+                                        title.clone(),
+                                        Modifier::empty().fill_max_width(),
+                                        14.,
+                                        if current { colors.accent } else { colors.label },
+                                        current,
+                                    );
+                                    chrome::Label(
+                                        subtitle.clone(),
+                                        Modifier::empty().fill_max_width(),
+                                        12.,
+                                        colors.secondary_label,
+                                        false,
+                                    );
+                                },
                             );
                         },
                     );
+                    if !editing {
+                        chrome::Label(
+                            duration.clone(),
+                            Modifier::empty().padding_symmetric(5., 0.),
+                            11.,
+                            colors.secondary_label,
+                            false,
+                        );
+                        let target = target.clone();
+                        GlassIconButton(
+                            Modifier::empty()
+                                .content_description(format!("Track {} options", index + 1)),
+                            GlassButtonSpec::plain(),
+                            44.,
+                            move || ui.sheet.set(Sheet::Track(target.clone())),
+                            icons::MORE_HORIZ,
+                        );
+                    }
                 },
             );
-            if !editing {
-                Text(
-                    duration.clone(),
-                    Modifier::empty().padding_symmetric(4.0, 0.0),
-                    settings_text_style(12.0, colors.secondary_label),
-                );
-                let target = target.clone();
-                GlassIconButton(
-                    Modifier::empty().content_description(format!("Track {} options", index + 1)),
-                    GlassButtonSpec::plain(),
-                    44.0,
-                    move || ui.sheet.set(Sheet::Track(target.clone())),
-                    icons::MORE_HORIZ,
-                );
-            }
+            Box(
+                Modifier::empty()
+                    .fill_max_width()
+                    .padding_each(58., 0., 4., 0.),
+                BoxSpec::default(),
+                chrome::Divider,
+            );
         },
     );
 }
@@ -858,7 +793,16 @@ fn LibrarySheet(player: MutableState<WinampState>, ui: LibraryUi) {
                 ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(10.0)),
                 move || {
                     SheetContents(player, ui);
-                    GlassAction("Cancel", move || ui.sheet.set(Sheet::None));
+                    chrome::Divider();
+                    GlassButton(
+                        Modifier::empty()
+                            .fill_max_width()
+                            .height(48.)
+                            .content_description("Cancel"),
+                        GlassButtonSpec::plain(),
+                        move || ui.sheet.set(Sheet::None),
+                        || GlassButtonLabel("Cancel".into(), GlassButtonSpec::plain()),
+                    );
                 },
             );
         },
@@ -877,36 +821,36 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 Modifier::empty(),
                 settings_text_style(15.0, colors.secondary_label),
             );
-            GlassAction("Choose audio files", move || {
+            SheetAction("Choose audio files", move || {
                 ui.notice.set(String::new());
                 ui.sheet.set(Sheet::None);
                 add_audio_files(player);
             });
-            GlassAction("Choose a music folder", move || {
+            SheetAction("Choose a music folder", move || {
                 ui.notice.set(String::new());
                 ui.sheet.set(Sheet::None);
                 add_audio_folder(player);
             });
-            GlassAction("Add an audio URL", move || {
+            SheetAction("Add an audio URL", move || {
                 set_text_field_text(&ui.address, "");
                 ui.sheet.set(Sheet::Address(false));
             });
-            GlassAction("Open a network folder", move || {
+            SheetAction("Open a network folder", move || {
                 set_text_field_text(&ui.address, "");
                 ui.sheet.set(Sheet::Address(true));
             });
         }
         Sheet::Manage => {
             Heading("Playlist options");
-            GlassAction("Sort tracks", move || ui.sheet.set(Sheet::Sort));
-            GlassAction("Import a playlist", move || ui.sheet.set(Sheet::Import));
+            SheetAction("Sort tracks", move || ui.sheet.set(Sheet::Sort));
+            SheetAction("Import a playlist", move || ui.sheet.set(Sheet::Import));
             if !player.get().playlist.is_empty() {
-                GlassAction("Export playlist", move || {
+                SheetAction("Export playlist", move || {
                     ui.notice.set(String::new());
                     ui.sheet.set(Sheet::None);
                     export_playlist(player);
                 });
-                GlassAction("Remove duplicates", move || {
+                SheetAction("Remove duplicates", move || {
                     let s = player.get_non_reactive();
                     let indices = duplicate_playlist_indices(&s.playlist);
                     if indices.is_empty() {
@@ -919,7 +863,7 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                         }));
                     }
                 });
-                GlassAction("Clear playlist", move || {
+                SheetAction("Clear playlist", move || {
                     let s = player.get_non_reactive();
                     ui.sheet.set(Sheet::Remove(Removal {
                         indices: (0..s.playlist.len()).collect(),
@@ -937,7 +881,7 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 ("Folder", PlaylistSortField::Path),
                 ("Duration", PlaylistSortField::Duration),
             ] {
-                GlassAction(label, move || {
+                SheetAction(label, move || {
                     player.update(|s| {
                         sort_playlist_tracks_by_field(s, field);
                     });
@@ -951,16 +895,47 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
             let Some(track) = target.playlist.get(target.index) else {
                 return;
             };
-            Text(
-                parsed_track_title(&track.title).to_owned(),
-                Modifier::empty().fill_max_width(),
-                settings_text_style(22.0, colors.label),
+            let track = track.clone();
+            Row(
+                Modifier::empty()
+                    .fill_max_width()
+                    .padding_symmetric(0., 10.),
+                RowSpec::default()
+                    .vertical_alignment(VerticalAlignment::CenterVertically)
+                    .horizontal_arrangement(LinearArrangement::SpacedBy(14.)),
+                move || {
+                    chrome::Artwork(track.clone(), 56.);
+                    let track = track.clone();
+                    Column(
+                        Modifier::empty().weight(1.),
+                        ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(5.)),
+                        move || {
+                            BasicText(
+                                parsed_track_title(&track.title).to_owned(),
+                                Modifier::empty().fill_max_width(),
+                                {
+                                    let mut style = settings_text_style(18., colors.label);
+                                    style.span_style.font_weight =
+                                        Some(cranpose_ui::text::FontWeight(600));
+                                    style
+                                },
+                                TextOverflow::Ellipsis,
+                                true,
+                                2,
+                                1,
+                            );
+                            chrome::Label(
+                                track_subtitle(&track),
+                                Modifier::empty().fill_max_width(),
+                                13.,
+                                colors.secondary_label,
+                                false,
+                            );
+                        },
+                    );
+                },
             );
-            Text(
-                track_subtitle(track),
-                Modifier::empty().fill_max_width(),
-                settings_text_style(14.0, colors.secondary_label),
-            );
+            chrome::Divider();
             for (label, action) in [
                 ("Play now", 0),
                 ("Play next", 1),
@@ -968,13 +943,16 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 ("Move down", 3),
                 ("Remove from playlist", 4),
             ] {
+                if action == 4 {
+                    chrome::Divider();
+                }
                 if (action == 2 && target.index == 0)
                     || (action == 3 && target.index + 1 == target.playlist.len())
                 {
                     continue;
                 }
                 let target = target.clone();
-                GlassAction(label, move || {
+                SheetAction(label, move || {
                     let s = player.get_non_reactive();
                     if !unchanged_prefix(&target.playlist, &s.playlist) {
                         ui.notice
@@ -1039,7 +1017,7 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
         Sheet::Import => {
             Heading("Import playlist");
             Text("Choose an M3U or PLS file. It will replace the current playlist. You can export your current list first from Playlist options.", Modifier::empty().fill_max_width(), settings_text_style(16.0, colors.secondary_label));
-            GlassAction("Choose playlist file", move || {
+            SheetAction("Choose playlist file", move || {
                 ui.notice.set(String::new());
                 ui.sheet.set(Sheet::None);
                 ui.editing.set(false);
@@ -1086,7 +1064,7 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                     ..Default::default()
                 },
             );
-            GlassAction("Open address", move || {
+            SheetAction("Open address", move || {
                 let address = ui.address.text().trim().to_owned();
                 if address.is_empty() {
                     return;
@@ -1106,3 +1084,29 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
 #[cfg(test)]
 #[path = "../../../test/unit/winamp/library.rs"]
 mod tests;
+
+#[composable]
+fn SheetAction(label: impl Into<String>, action: impl Fn() + 'static) {
+    let label = label.into();
+    let destructive = label.starts_with("Remove") || label.starts_with("Clear");
+    let icon = if label == "Play next" {
+        "M3 5v14l10-7zM15 6h6v2h-6zM15 11h6v2h-6zM15 16h6v2h-6z"
+    } else if label == "Move up" {
+        "M11 20V7.8l-5.6 5.6L4 12l8-8 8 8-1.4 1.4L13 7.8V20z"
+    } else if label == "Move down" {
+        "M11 4v12.2l-5.6-5.6L4 12l8 8 8-8-1.4-1.4-5.6 5.6V4z"
+    } else if label == "Export playlist" {
+        icons::DOWNLOAD
+    } else if destructive {
+        chrome::TRASH
+    } else if label.starts_with("Play") {
+        PLAY_ICON
+    } else if label.contains("folder") || label == "Folder" {
+        icons::FOLDER
+    } else if label.starts_with("Move") || label.starts_with("Sort") {
+        icons::LIST
+    } else {
+        icons::PLUS
+    };
+    chrome::ActionRow(label, icon, destructive, action);
+}

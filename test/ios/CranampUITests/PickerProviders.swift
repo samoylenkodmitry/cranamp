@@ -121,6 +121,7 @@ final class PickerProviders: XCTestCase {
         capture("mobile-settings")
         app.buttons["Choose skin"].tap()
         XCTAssertTrue(app.buttons["Back to Settings"].waitForExistence(timeout: 10))
+        capture("mobile-skins")
         app.buttons["Back to Settings"].tap()
         func reveal(_ label: String) -> XCUIElement {
             let button = app.buttons[label]
@@ -194,6 +195,13 @@ final class PickerProviders: XCTestCase {
         tab("Library")
         XCTAssertTrue(app.buttons["Add music"].waitForExistence(timeout: 10))
         capture("library")
+        let options = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Track [0-9]+ options"))
+        if options.firstMatch.exists {
+            options.firstMatch.tap()
+            XCTAssertTrue(app.buttons["Play now"].waitForExistence(timeout: 10))
+            capture("library-track-actions")
+            app.buttons["Cancel"].tap()
+        }
         app.buttons["Add music"].tap()
         XCTAssertTrue(app.buttons["Choose a music folder"].waitForExistence(timeout: 10))
         capture("library-add")

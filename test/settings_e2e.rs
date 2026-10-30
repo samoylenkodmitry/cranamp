@@ -114,7 +114,7 @@ fn mobile_about_has_offline_licenses_and_recovers_from_unavailable_link_apps() {
     click_mobile(&mut shell, "Back to Licenses");
     click_mobile(&mut shell, "Back to About");
     click_mobile(&mut shell, "Back to Settings");
-    assert!(contains(&visible_texts(&mut shell), "Appearance"));
+    assert!(contains(&visible_texts(&mut shell), "APPEARANCE"));
     click_mobile(&mut shell, "Player");
     assert!(contains(&visible_texts(&mut shell), "Play"));
 }
@@ -441,7 +441,7 @@ fn mobile_tabs_keep_navigation_visible_and_studio_drafts_alive() {
     shell.set_viewport(393., 780.);
     pump(&mut shell);
     click_mobile(&mut shell, "Settings");
-    assert!(contains(&visible_texts(&mut shell), "Appearance"));
+    assert!(contains(&visible_texts(&mut shell), "APPEARANCE"));
     click_mobile(&mut shell, "Choose skin");
     assert!(contains(&visible_texts(&mut shell), "Choose a skin"));
     click_mobile(&mut shell, "Back to Settings");
@@ -621,4 +621,73 @@ fn mobile_library_keyboard_keeps_tabs_visible_and_tab_change_clears_focus() {
     assert!(shell.ime_editor_state().is_none());
     click_mobile(&mut shell, "Library");
     mobile_control_bounds(&mut shell, "Clear search");
+}
+
+#[test]
+fn mobile_skin_gallery_filters_and_the_player_dock_keeps_controls_reachable() {
+    let _application = TestApplication::new("skin-gallery-dock");
+    seed_library(&[
+        "Cats - Aurora",
+        "Cats - A very long song title that must be clipped",
+    ]);
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    for (width, height) in [(320., 568.), (393., 780.), (844., 390.)] {
+        shell.set_buffer_size(width as u32, height as u32);
+        shell.set_viewport(width, height);
+        pump(&mut shell);
+        for screen in ["Library", "Settings"] {
+            click_mobile(&mut shell, screen);
+            let tab = mobile_control_bounds(&mut shell, screen);
+            for label in [
+                "Show current track in Player",
+                "Play library selection",
+                "Next library track",
+            ] {
+                let bounds = mobile_control_bounds(&mut shell, label);
+                assert!(
+                    bounds.height >= 44. && bounds.width >= 44.,
+                    "{label}: {bounds:?}"
+                );
+                assert!(
+                    bounds.x >= 0.
+                        && bounds.y >= 0.
+                        && bounds.x + bounds.width <= width
+                        && bounds.y + bounds.height <= tab.y,
+                    "{label} overlaps tabs at {width}x{height}: {bounds:?}"
+                );
+            }
+        }
+        click_mobile(&mut shell, "Choose skin");
+        let first = mobile_control_bounds(&mut shell, "Silverplay · Selected");
+        let second = mobile_control_bounds(&mut shell, "Feral Night");
+        assert!(first.x + first.width < second.x, "Skin previews overlap");
+        let search = mobile_control_bounds(&mut shell, "Find a skin");
+        shell.set_cursor(search.x + search.width / 2., search.y + search.height / 2.);
+        shell.pointer_pressed();
+        shell.pointer_released();
+        pump(&mut shell);
+        assert!(shell.on_paste("no-skin-with-this-name"));
+        pump(&mut shell);
+        assert!(contains(&visible_texts(&mut shell), "No matching skins"));
+        click_mobile(&mut shell, "Clear skin search");
+        mobile_control_bounds(&mut shell, "Silverplay · Selected");
+        click_mobile(&mut shell, "Finish skin search");
+        assert!(shell.ime_editor_state().is_none());
+        click_mobile(&mut shell, "Feral Night");
+        assert!(
+            contains(&visible_texts(&mut shell), "Feral Night · Selected"),
+            "Skin selection at {width}x{height}: {:?}",
+            visible_texts(&mut shell)
+        );
+        mobile_control_bounds(&mut shell, "Feral Night · Selected");
+        click_mobile(&mut shell, "Silverplay");
+        mobile_control_bounds(&mut shell, "Silverplay · Selected");
+        click_mobile(&mut shell, "Back to Settings");
+        click_mobile(&mut shell, "Show current track in Player");
+        assert!(contains(&visible_texts(&mut shell), "Play"));
+    }
 }
