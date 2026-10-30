@@ -12,14 +12,13 @@ fn native_size_rounding_does_not_request_another_resize() {
     assert!(!same_surface_size(actual, Size::new(275., 377.), density));
 }
 #[test]
-fn desktop_art_uses_whole_physical_pixels() {
+fn desktop_art_defaults_to_one_and_a_half_of_the_previous_size() {
     for density in [1., 130. / 96., 1.5, 1.75, 2., 2.5, 3.] {
         let physical = desktop_scale(density) * density;
-        assert!((physical - physical.round()).abs() < 0.0001);
-        assert!(physical >= 1.);
+        assert!((physical - 1.5 * density.round().max(1.)).abs() < 0.0001);
     }
-    assert_eq!(desktop_scale(2.), 1., "Retina size is unchanged");
-    assert_eq!(desktop_scale(f32::NAN), 1.);
+    assert_eq!(desktop_scale(2.), 1.5);
+    assert_eq!(desktop_scale(f32::NAN), 1.5);
 }
 #[test]
 fn tiled_edges_cover_the_same_pixels_as_one_continuous_region() {

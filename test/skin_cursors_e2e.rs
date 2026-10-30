@@ -88,8 +88,8 @@ fn native_player_hover_changes_cursors_at_fractional_display_density() {
         .expect("player window");
     let size = root.descriptor.layout_size();
     assert!(
-        (size.width * (130. / 96.) - 275.).abs() < 0.01,
-        "classic pixels keep equal physical widths at fractional DPI: {size:?}"
+        (size.width * (130. / 96.) - 275. * 1.5).abs() < 0.01,
+        "the default desktop player is 1.5 times the native skin size: {size:?}"
     );
     let scale = size.width / 275.;
     shell.add_window_surface(

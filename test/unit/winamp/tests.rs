@@ -887,6 +887,10 @@ fn saved_window_config_round_trips() {
             position: Some(Point::new(10.0, 252.0)),
             size: Some(Size::new(320.0, 240.0)),
         },
+        stack: SavedWindowConfig {
+            position: None,
+            size: Some(Size::new(330., 290.)),
+        },
     };
     assert_eq!(
         parse_window_config(&serialize_window_config(config)),

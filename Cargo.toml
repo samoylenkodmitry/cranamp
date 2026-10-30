@@ -73,6 +73,10 @@ name = "skin_cursors_e2e"
 path = "test/skin_cursors_e2e.rs"
 
 [[test]]
+name = "desktop_resize_e2e"
+path = "test/desktop_resize_e2e.rs"
+
+[[test]]
 name = "test_location"
 path = "test/test_location.rs"
 

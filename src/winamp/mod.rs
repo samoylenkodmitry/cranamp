@@ -21,6 +21,7 @@ mod playlist_size;
 mod region_clip;
 pub mod skin;
 mod sprites;
+mod stack_size;
 pub mod studio;
 mod vis;
 use crate::audio::{self, Track};
@@ -427,6 +428,13 @@ enum WinampCloseAction {
 enum WinampWindowSize {
     Fixed(Size),
     State(WindowState),
+    Stacked {
+        size: Size,
+        windows: WinampPeerWindowStates,
+        base_scale: f32,
+        above: f32,
+        side_margin: f32,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlaylistFooterMenu {
@@ -620,7 +628,7 @@ type WinampSkinState = MutableState<Result<WinampSkin, String>>;
 impl WinampWindowSize {
     fn get(self) -> Size {
         match self {
-            Self::Fixed(size) => size,
+            Self::Fixed(size) | Self::Stacked { size, .. } => size,
             Self::State(state) => state.size(),
         }
     }
@@ -861,6 +869,7 @@ struct WinampPeerWindowStates {
     equalizer: WindowState,
     playlist: WindowState,
     scale: MutableState<f32>,
+    stack: MutableState<Size>,
 }
 #[derive(Clone, Copy)]
 struct WinampWindowPlacement {
@@ -888,6 +897,7 @@ fn remember_winamp_tab_state(navigation: Navigation) -> WinampTabState {
             equalizer: WindowState::new(EQ_WIDTH, EQ_HEIGHT),
             playlist: WindowState::new(PLAYLIST_WIDTH, PLAYLIST_HEIGHT),
             scale: cranpose_core::mutableStateOf(1.),
+            stack: cranpose_core::mutableStateOf(Size::new(MAIN_WIDTH, PLAYLIST_HEIGHT)),
         },
     })
     .with(|state| *state);
@@ -2910,19 +2920,10 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
     let shaded = snapshot.main_shaded;
     let eq_docked = eq_shown && held.docked(WinampPane::Equalizer);
     let playlist_docked = playlist_shown && held.docked(WinampPane::Playlist);
-    let playlist_window_size = peer_windows.playlist.size();
-    let playlist_size = playlist_size::classic(Size::new(
-        playlist_window_size.width / scale,
-        playlist_window_size.height / scale,
-    ));
-    let playlist_height = playlist_size.height;
-    // A docked playlist may be wider than the main window, as in Winamp; the
-    // stack's window takes the widest of its panes.
-    let stack_width = if playlist_docked {
-        playlist_size.width.max(MAIN_WIDTH)
-    } else {
-        MAIN_WIDTH
-    };
+    let stack = stack_size::valid(peer_windows.stack.get());
+    let playlist_height = stack.height;
+    let stack_scale = scale * stack.width / MAIN_WIDTH;
+    let stack_width = MAIN_WIDTH;
     let stack_height = main_height(shaded)
         + if eq_docked { EQ_HEIGHT } else { 0.0 }
         + if playlist_docked {
@@ -2932,12 +2933,12 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
         };
     let navigation_visible = snapshot.navigation.visible();
     let (player_frame, window_height, frame_scale) = navigation::desktop_frame(
-        stack_width * scale,
-        stack_height * scale,
+        stack_width * stack_scale,
+        stack_height * stack_scale,
         navigation_visible,
     );
-    let stack_width = stack_width * scale;
-    let player_scale = scale * frame_scale;
+    let stack_width = stack_width * stack_scale;
+    let player_scale = stack_scale * frame_scale;
     let origin = Point::new(player_frame.x / player_scale, player_frame.y / player_scale);
     if !pixel_grid::same_surface_size(
         peer_windows.main.size_non_reactive(),
@@ -3130,10 +3131,21 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
                                         }
                                     },
                                     if playlist_docked {
-                                        WinampWindowSize::Fixed(Size::new(
-                                            scaled(playlist_size.width, pane_scale),
-                                            scaled(playlist_height, pane_scale),
-                                        ))
+                                        WinampWindowSize::Stacked {
+                                            size: Size::new(
+                                                scaled(MAIN_WIDTH, pane_scale),
+                                                scaled(playlist_height, pane_scale),
+                                            ),
+                                            windows: peer_windows,
+                                            base_scale: scale,
+                                            above: main_height(shaded)
+                                                + if eq_docked { EQ_HEIGHT } else { 0. },
+                                            side_margin: if navigation_visible {
+                                                navigation::SIDE_MARGIN
+                                            } else {
+                                                0.
+                                            },
+                                        }
                                     } else {
                                         WinampWindowSize::State(peer_windows.playlist)
                                     },
@@ -3185,6 +3197,7 @@ pub fn WinampStandaloneApp() {
         equalizer: WindowState::new(EQ_WIDTH * scale, EQ_HEIGHT * scale),
         playlist: WindowState::new(PLAYLIST_WIDTH * scale, PLAYLIST_HEIGHT * scale),
         scale: cranpose_core::mutableStateOf(scale),
+        stack: cranpose_core::mutableStateOf(Size::new(MAIN_WIDTH, PLAYLIST_HEIGHT)),
     })
     .with(|windows| *windows);
     remember_saved_window_config(peer_windows);
@@ -4895,6 +4908,21 @@ fn PlaylistWindow(
     let playlist_scroll_dragging = cranpose_core::rememberMutableStateOf(|| false);
     let search_field = cranpose_core::remember(|| TextFieldState::new("")).with(|field| *field);
     let url_field = cranpose_core::remember(|| TextFieldState::new("")).with(|field| *field);
+    let resize_source = match window_size {
+        WinampWindowSize::Stacked {
+            windows,
+            base_scale,
+            above,
+            side_margin,
+            ..
+        } => Some(PlaylistSizeSource::Stack {
+            windows,
+            base_scale,
+            above,
+            side_margin,
+        }),
+        _ => PlaylistSizeSource::of(drag_target, scale),
+    };
     let window_size = window_size.get();
     let skin_scale = scale.max(f32::EPSILON);
     let width = (window_size.width / skin_scale).max(playlist_size::BASE_WIDTH);
@@ -5093,7 +5121,7 @@ fn PlaylistWindow(
             }
             WindowDragHandle(drag_target, (0.0, 0.0, width, PLAYLIST_DRAG_AREA.3), scale);
             PlaylistResizeHandle(
-                drag_target,
+                resize_source,
                 (
                     width - PLAYLIST_RESIZE_HANDLE,
                     height - PLAYLIST_RESIZE_HANDLE,
@@ -7284,17 +7312,26 @@ fn WindowDragHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32)
 }
 /// Where the playlist's corner reads and writes the playlist's size, in skin
 /// pixels: the canvas's layout in a browser, the window state on a desktop.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum PlaylistSizeSource {
     Inline(WinampInlineWindowStates),
-    Window(WindowState),
+    Window {
+        state: WindowState,
+        scale: f32,
+    },
+    Stack {
+        windows: WinampPeerWindowStates,
+        base_scale: f32,
+        above: f32,
+        side_margin: f32,
+    },
 }
 impl PlaylistSizeSource {
-    fn of(drag_target: WinampDragTarget) -> Option<Self> {
+    fn of(drag_target: WinampDragTarget, scale: f32) -> Option<Self> {
         match drag_target {
             WinampDragTarget::Inline(drag) => Some(Self::Inline(drag.windows)),
             WinampDragTarget::Tearable { state, .. } | WinampDragTarget::Dockable { state, .. } => {
-                Some(Self::Window(state))
+                Some(Self::Window { state, scale })
             }
             _ => None,
         }
@@ -7302,13 +7339,31 @@ impl PlaylistSizeSource {
     fn get(self) -> Size {
         match self {
             Self::Inline(windows) => windows.playlist_size.get_non_reactive(),
-            Self::Window(state) => state.size_non_reactive(),
+            Self::Window { state, scale } => {
+                let size = state.size_non_reactive();
+                Size::new(size.width / scale, size.height / scale)
+            }
+            Self::Stack { windows, .. } => windows.stack.get_non_reactive(),
         }
     }
     fn set(self, size: Size) {
         match self {
             Self::Inline(windows) => windows.playlist_size.set(size),
-            Self::Window(state) => state.set_size(size),
+            Self::Window { state, scale } => {
+                state.set_size(Size::new(size.width * scale, size.height * scale))
+            }
+            Self::Stack { windows, .. } => windows.stack.set(size),
+        }
+    }
+    fn stretched(self, held: Size, travel: Point, scale: f32) -> Size {
+        match self {
+            Self::Stack {
+                base_scale,
+                above,
+                side_margin,
+                ..
+            } => stack_size::stretched(held, travel, base_scale, above, side_margin),
+            _ => playlist_size::stretched(held, Point::new(travel.x / scale, travel.y / scale)),
         }
     }
     /// The browser keeps its layout itself; a desktop window's size is kept
@@ -7317,18 +7372,24 @@ impl PlaylistSizeSource {
         if let Self::Inline(windows) = self {
             windows.save();
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Self::Stack { windows, .. } = self {
+            save_window_config_background(SavedWinampWindowConfig::from_states(windows));
+        }
     }
 }
-/// The playlist's corner, which stretches it the way Winamp's does: from the
-/// press, in whole steps of 25 across and 29 down. Winamp resized its skinned
-/// windows itself rather than through the system's frame, and so does this,
-/// docked, torn off or in a browser alike.
+/// The playlist's corner resizes a detached playlist in classic tile steps.
+/// In a desktop stack it changes the shared zoom and the playlist's height.
+/// The gesture keeps the scale from its press so a growing handle cannot
+/// change the conversion of pointer movement halfway through a drag.
 #[composable]
-fn PlaylistResizeHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: f32) {
-    let Some(source) = PlaylistSizeSource::of(drag_target) else {
+fn PlaylistResizeHandle(source: Option<PlaylistSizeSource>, area: SpriteRect, scale: f32) {
+    let Some(source) = source else {
         return;
     };
-    let grabbed = cranpose_core::rememberMutableStateOf(|| None::<(Point, Size)>);
+    let current = cranpose_core::rememberUpdatedState((source, scale));
+    let grabbed =
+        cranpose_core::rememberMutableStateOf(|| None::<(Point, Size, PlaylistSizeSource, f32)>);
     Box(
         Modifier::empty()
             .size_points(scaled(area.2, scale), scaled(area.3, scale))
@@ -7340,19 +7401,28 @@ fn PlaylistResizeHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: 
                             let event = await_scope.await_pointer_event().await;
                             match event.kind {
                                 PointerEventKind::Down => {
-                                    grabbed.set(Some((event.global_position, source.get())));
+                                    let (source, scale) = current.get();
+                                    grabbed.set(Some((
+                                        event.global_position,
+                                        source.get(),
+                                        source,
+                                        scale,
+                                    )));
                                     event.consume();
                                 }
                                 PointerEventKind::Move => {
-                                    let Some((grabbed_at, held)) = grabbed.get() else {
+                                    let Some((grabbed_at, held, source, held_scale)) =
+                                        grabbed.get()
+                                    else {
                                         continue;
                                     };
-                                    let size = playlist_size::stretched(
+                                    let size = source.stretched(
                                         held,
                                         Point::new(
-                                            (event.global_position.x - grabbed_at.x) / scale,
-                                            (event.global_position.y - grabbed_at.y) / scale,
+                                            event.global_position.x - grabbed_at.x,
+                                            event.global_position.y - grabbed_at.y,
                                         ),
+                                        held_scale,
                                     );
                                     if size != source.get() {
                                         source.set(size);
@@ -7360,7 +7430,7 @@ fn PlaylistResizeHandle(drag_target: WinampDragTarget, area: SpriteRect, scale: 
                                     event.consume();
                                 }
                                 PointerEventKind::Up | PointerEventKind::Cancel => {
-                                    if grabbed.get().is_some() {
+                                    if let Some((_, _, source, _)) = grabbed.get() {
                                         grabbed.set(None);
                                         source.keep();
                                     }
@@ -9597,6 +9667,7 @@ struct SavedWinampWindowConfig {
     main: SavedWindowConfig,
     equalizer: SavedWindowConfig,
     playlist: SavedWindowConfig,
+    stack: SavedWindowConfig,
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl SavedWinampWindowConfig {
@@ -9615,6 +9686,10 @@ impl SavedWinampWindowConfig {
             playlist: SavedWindowConfig {
                 position: peer_windows.playlist.position_non_reactive(),
                 size: Some(Size::new(playlist.width / scale, playlist.height / scale)),
+            },
+            stack: SavedWindowConfig {
+                position: None,
+                size: Some(peer_windows.stack.get_non_reactive()),
             },
         }
     }
@@ -9659,6 +9734,16 @@ fn apply_saved_window_config(
     peer_windows: WinampPeerWindowStates,
     config: SavedWinampWindowConfig,
 ) {
+    let stack = config.stack.size.unwrap_or_else(|| {
+        Size::new(
+            MAIN_WIDTH,
+            config
+                .playlist
+                .size
+                .map_or(PLAYLIST_HEIGHT, |size| size.height),
+        )
+    });
+    peer_windows.stack.set(stack_size::valid(stack));
     if let Some(position) = config.main.position {
         peer_windows.main.set_position(Some(position));
     }
@@ -9686,6 +9771,7 @@ fn serialize_window_config(config: SavedWinampWindowConfig) -> String {
     push_window_config_lines(&mut lines, "main", config.main);
     push_window_config_lines(&mut lines, "equalizer", config.equalizer);
     push_window_config_lines(&mut lines, "playlist", config.playlist);
+    push_window_config_lines(&mut lines, "stack", config.stack);
     lines.join("\n") + "\n"
 }
 #[cfg(not(target_arch = "wasm32"))]
@@ -9738,6 +9824,7 @@ fn saved_window_mut<'a>(
         "main" => Some(&mut config.main),
         "equalizer" => Some(&mut config.equalizer),
         "playlist" => Some(&mut config.playlist),
+        "stack" => Some(&mut config.stack),
         _ => None,
     }
 }
