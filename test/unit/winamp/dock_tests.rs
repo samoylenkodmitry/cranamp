@@ -5,6 +5,33 @@ use super::{
 use cranpose_ui::Point;
 
 #[test]
+fn equalizer_returns_to_its_slot_with_a_playlist_still_docked() {
+    use super::pane_dock_slots;
+    use cranpose_ui::Rect;
+    for scale in [1., 96. / 130., 0.8] {
+        let frame = Rect {
+            x: 24.,
+            y: 16.,
+            width: 275. * scale,
+            height: 377. * scale,
+        };
+        let slots = pane_dock_slots(WinampPane::Equalizer, frame, MAIN_HEIGHT * scale);
+        let original = Point::new(frame.x, frame.y + MAIN_HEIGHT * scale);
+        assert!(slots
+            .iter()
+            .any(|slot| pane_came_back_to_its_slot(original, *slot)));
+        let bottom = Point::new(frame.x, frame.y + frame.height);
+        assert!(slots
+            .iter()
+            .any(|slot| pane_came_back_to_its_slot(bottom, *slot)));
+        assert!(!slots.iter().any(|slot| pane_came_back_to_its_slot(
+            Point::new(frame.x + MAIN_WIDTH, original.y),
+            *slot
+        )));
+    }
+}
+
+#[test]
 fn a_pane_stays_in_the_stack_until_the_title_has_really_been_carried_off() {
     assert!(
         !pane_left_the_stack(Point::new(4.0, 6.0)),

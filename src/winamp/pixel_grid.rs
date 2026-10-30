@@ -1,5 +1,16 @@
 use cranpose_core::{compositionLocalOf, CompositionLocal, CompositionLocalProvider};
-use cranpose_ui_graphics::Rect;
+use cranpose_ui_graphics::{Rect, Size};
+
+pub fn desktop_scale(density: f32) -> f32 {
+    if !density.is_finite() || density <= 0. {
+        return 1.;
+    }
+    density.round().max(1.) / density
+}
+pub fn same_surface_size(actual: Size, wanted: Size, density: f32) -> bool {
+    let pixels = |value: f32| (value * density).round();
+    pixels(actual.width) == pixels(wanted.width) && pixels(actual.height) == pixels(wanted.height)
+}
 fn origin() -> CompositionLocal<[f32; 2]> {
     thread_local! {
         static LOCAL: std::cell::RefCell<Option<CompositionLocal<[f32; 2]>>> =

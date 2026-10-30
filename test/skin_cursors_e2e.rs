@@ -69,6 +69,52 @@ fn the_bundled_skin_asks_for_its_own_pointer_over_its_own_regions() {
     );
 }
 
+#[test]
+fn native_player_hover_changes_cursors_at_fractional_display_density() {
+    use cranpose_app_shell::RootId;
+    let mut shell = AppShell::new_with_size_and_density(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampStandaloneApp,
+        (1, 1),
+        (1., 1.),
+        130. / 96.,
+    );
+    pump(&mut shell);
+    let root = shell
+        .window_roots()
+        .into_iter()
+        .next()
+        .expect("player window");
+    let size = root.descriptor.layout_size();
+    assert!(
+        (size.width * (130. / 96.) - 275.).abs() < 0.01,
+        "classic pixels keep equal physical widths at fractional DPI: {size:?}"
+    );
+    let scale = size.width / 275.;
+    shell.add_window_surface(
+        root.node,
+        HitGraphRenderer::default(),
+        (size.width as u32, size.height as u32),
+        (size.width, size.height),
+    );
+    for _ in 0..8 {
+        shell.update();
+    }
+    let id = RootId::Window(root.node);
+    let mut hover = |x, y| {
+        shell.surface(id).unwrap().set_cursor(x * scale, y * scale);
+        pump(&mut shell);
+        shell.surface(id).unwrap().take_pointer_icon_change()
+    };
+    let body = hover(137., 100.).expect("body cursor");
+    assert!(matches!(body, PointerIcon::Custom(_)));
+    let seek = hover(120., 76.).expect("seek cursor");
+    assert_ne!(body, seek);
+    let title = hover(137., 7.).expect("title cursor");
+    assert_ne!(seek, title);
+}
+
 /// A 2x2 cursor of one flat colour with its hotspot at (1, 0): an icon
 /// directory holding one bottom-up 32-bit DIB and its transparency mask.
 ///

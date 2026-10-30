@@ -1,5 +1,27 @@
 use super::*;
 #[test]
+fn native_size_rounding_does_not_request_another_resize() {
+    let density = 130. / 96.;
+    let wanted = Size::new(275., 493.);
+    let actual = Size::new(
+        (wanted.width * density).round() / density,
+        (wanted.height * density).round() / density,
+    );
+    assert_ne!(actual, wanted);
+    assert!(same_surface_size(actual, wanted, density));
+    assert!(!same_surface_size(actual, Size::new(275., 377.), density));
+}
+#[test]
+fn desktop_art_uses_whole_physical_pixels() {
+    for density in [1., 130. / 96., 1.5, 1.75, 2., 2.5, 3.] {
+        let physical = desktop_scale(density) * density;
+        assert!((physical - physical.round()).abs() < 0.0001);
+        assert!(physical >= 1.);
+    }
+    assert_eq!(desktop_scale(2.), 1., "Retina size is unchanged");
+    assert_eq!(desktop_scale(f32::NAN), 1.);
+}
+#[test]
 fn tiled_edges_cover_the_same_pixels_as_one_continuous_region() {
     for density in [1., 1.5, 2., 2.625, 3.5] {
         for physical_width in [573., 720., 1080., 1280., 1344.] {
