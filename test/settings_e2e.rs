@@ -1398,6 +1398,9 @@ fn mobile_library_empty_state_and_actions_fit_small_phone_and_landscape() {
         click_mobile(&mut shell, "Add music");
         mobile_control_bounds(&mut shell, "Choose a music folder");
         click_mobile(&mut shell, "Cancel");
+        click_mobile(&mut shell, "Library options");
+        mobile_control_bounds(&mut shell, "Save current queue");
+        click_mobile(&mut shell, "Cancel");
     }
 }
 
@@ -1672,6 +1675,35 @@ fn desktop_navigation_keeps_player_and_opens_one_shared_companion() {
         shell.debug_enter_app_context(|| action.invoke());
         surfaces(shell);
     }
+    fn bounds(
+        shell: &mut AppShell<HitGraphRenderer>,
+        root: RootId,
+        label: &str,
+    ) -> cranpose_ui::Rect {
+        fn find(node: &cranpose_ui::SemanticsNode, label: &str) -> Option<cranpose_ui::Rect> {
+            if node.hidden {
+                return None;
+            }
+            if node.description.as_deref() == Some(label) && node.on_click.is_some() {
+                return Some(node.bounds);
+            }
+            node.children.iter().find_map(|child| find(child, label))
+        }
+        shell
+            .surface(root)
+            .unwrap()
+            .with_semantics_tree(|tree| find(tree.expect("native semantics").root(), label))
+            .unwrap_or_else(|| panic!("Missing native control {label} in {root:?}"))
+    }
+    fn pointer_click(shell: &mut AppShell<HitGraphRenderer>, root: RootId, label: &str) {
+        let rect = bounds(shell, root, label);
+        let mut surface = shell.surface(root).unwrap();
+        surface.set_cursor(rect.x + rect.width / 2., rect.y + rect.height / 2.);
+        assert!(surface.pointer_pressed(), "{label} handles the pointer");
+        surfaces(shell);
+        shell.surface(root).unwrap().pointer_released();
+        surfaces(shell);
+    }
     let _app = TestApplication::new("desktop-navigation");
     let mut shell = AppShell::new(
         HitGraphRenderer::default(),
@@ -1696,6 +1728,29 @@ fn desktop_navigation_keeps_player_and_opens_one_shared_companion() {
         let roots = shell.window_roots();
         assert_eq!(roots.len(), 2, "tab {tab} opens one companion");
         assert!(roots.iter().any(|root| root.node == main));
+    }
+    let companion = shell
+        .window_roots()
+        .into_iter()
+        .find(|root| root.node != main)
+        .unwrap();
+    let library = RootId::Window(companion.node);
+    for (button, action) in [
+        ("Add music", "Choose a music folder"),
+        ("Library options", "Save current queue"),
+    ] {
+        pointer_click(&mut shell, library, button);
+        let action_bounds = bounds(&mut shell, library, action);
+        let size = companion.descriptor.layout_size();
+        assert!(
+            action_bounds.width > 0.
+                && action_bounds.x >= 0.
+                && action_bounds.y >= 0.
+                && action_bounds.x + action_bounds.width <= size.width
+                && action_bounds.y + action_bounds.height <= size.height,
+            "{action} is laid out in the companion window: {action_bounds:?}"
+        );
+        press(&mut shell, library, "Cancel");
     }
     press(&mut shell, player, "Player");
     assert_eq!(shell.window_roots().len(), 1);

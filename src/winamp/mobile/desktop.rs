@@ -66,12 +66,16 @@ pub(in crate::winamp) fn DesktopWorkspace(stack: WinampWindowStackSpec) {
                 .background(colors.background)
         };
         Box(modifier, BoxSpec::default(), move || {
-            WinampStudioSurface(player, skin);
-            match destination {
-                Destination::Library => library::LibraryScreen(player, library),
-                Destination::Settings => settings::SettingsScreen(player, skin, appearance),
-                Destination::Player | Destination::Studio => {}
-            }
+            // Native companion windows need their own overlay and viewport.
+            // The app root's popup host belongs to a separate, hidden surface.
+            cranpose_ui::widgets::PopupHost(move || {
+                WinampStudioSurface(player, skin);
+                match destination {
+                    Destination::Library => library::LibraryScreen(player, library),
+                    Destination::Settings => settings::SettingsScreen(player, skin, appearance),
+                    Destination::Player | Destination::Studio => {}
+                }
+            });
         });
     });
 }
