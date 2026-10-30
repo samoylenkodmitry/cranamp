@@ -3180,12 +3180,13 @@ pub fn WinampStandaloneApp() {
         navigation: Navigation::Desktop(false),
         ..initial_winamp_state()
     });
-    let peer_windows = WinampPeerWindowStates {
-        main: rememberWindowState(MAIN_WIDTH * scale, MAIN_HEIGHT * scale),
-        equalizer: rememberWindowState(EQ_WIDTH * scale, EQ_HEIGHT * scale),
-        playlist: rememberWindowState(PLAYLIST_WIDTH * scale, PLAYLIST_HEIGHT * scale),
-        scale: cranpose_core::rememberMutableStateOf(|| scale),
-    };
+    let peer_windows = cranpose_core::remember(move || WinampPeerWindowStates {
+        main: WindowState::new(MAIN_WIDTH * scale, MAIN_HEIGHT * scale),
+        equalizer: WindowState::new(EQ_WIDTH * scale, EQ_HEIGHT * scale),
+        playlist: WindowState::new(PLAYLIST_WIDTH * scale, PLAYLIST_HEIGHT * scale),
+        scale: cranpose_core::mutableStateOf(scale),
+    })
+    .with(|windows| *windows);
     remember_saved_window_config(peer_windows);
     let previous_scale = peer_windows.scale.get_non_reactive();
     if previous_scale != scale {
