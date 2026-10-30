@@ -107,6 +107,8 @@ fn with_capture(
         let once = std::env::var_os("CRANAMP_REVIEW_CAPTURE_ONCE").is_some();
         let rgb = std::env::var_os("CRANAMP_REVIEW_CAPTURE_RGB").is_some();
         let settings = std::env::var_os("CRANAMP_REVIEW_OPEN_SETTINGS").is_some();
+        let library = std::env::var_os("CRANAMP_REVIEW_OPEN_LIBRARY").is_some();
+        let albums = std::env::var_os("CRANAMP_REVIEW_OPEN_ALBUMS").is_some();
         let scale = std::env::var("CRANAMP_REVIEW_CAPTURE_SCALE")
             .ok()
             .and_then(|value| value.parse::<f32>().ok())
@@ -114,6 +116,21 @@ fn with_capture(
             .unwrap_or(1.);
         launcher.with_test_driver(move |robot| {
             std::thread::spawn(move || {
+                if library || albums {
+                    robot.wait_for_idle().expect("player ready");
+                    let frame = robot.screenshot_with_scale(1.).expect("player frame");
+                    let width = frame.width as f32;
+                    let height = frame.height as f32;
+                    robot
+                        .click(12. + (width - 24.) * 0.375, height - 40.)
+                        .expect("open Library");
+                    robot.wait_for_idle().expect("Library ready");
+                    robot.validate_content("Library").expect("Library visible");
+                    if albums {
+                        robot.click(width * 0.75, 147.).expect("open Albums");
+                        robot.wait_for_idle().expect("Albums ready");
+                    }
+                }
                 if settings {
                     robot.wait_for_idle().expect("player ready");
                     let frame = robot.screenshot_with_scale(1.).expect("player frame");

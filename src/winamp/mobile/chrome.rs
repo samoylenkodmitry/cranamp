@@ -1,9 +1,5 @@
 use super::*;
 
-#[cfg(test)]
-#[path = "../../../test/unit/winamp/mobile_chrome.rs"]
-mod tests;
-
 pub(super) const MUSIC: &str = "M9 3v12.2A3.5 3.5 0 1 0 11 18V7h8v6.2A3.5 3.5 0 1 0 21 16V3H9z";
 pub(super) const PAUSE: &str = "M6 5h4v14H6zM14 5h4v14h-4z";
 pub(super) const NEXT: &str = "M5 5v14l10-7zM17 5h3v14h-3z";
@@ -131,76 +127,22 @@ pub(super) fn ActionRow(
     );
 }
 
-// Album art is read only for visible local tracks. The bounded memory cache also
-// remembers missing covers, so playback ticks and scrolling do not repeat I/O.
-type CoverCache = std::collections::VecDeque<(std::path::PathBuf, Option<ImageBitmap>)>;
-fn cover_cache() -> &'static std::sync::Mutex<CoverCache> {
-    static CACHE: std::sync::OnceLock<std::sync::Mutex<CoverCache>> = std::sync::OnceLock::new();
-    CACHE.get_or_init(Default::default)
-}
-
-fn cover_folder(track: &Track) -> Option<std::path::PathBuf> {
-    let path = track.path.as_deref()?;
-    let path = cranpose_services::path_from_uri(path)?;
-    path.parent().map(std::path::Path::to_path_buf)
-}
-
-fn read_cover(folder: std::path::PathBuf) -> Option<ImageBitmap> {
-    use std::io::Read;
-    if let Some((_, cover)) = cover_cache()
-        .lock()
-        .ok()?
-        .iter()
-        .find(|(key, _)| key == &folder)
-    {
-        return cover.clone();
-    }
-    let cover = [
-        "cover.jpg",
-        "folder.jpg",
-        "cover.png",
-        "folder.png",
-        "Cover.jpg",
-        "Folder.jpg",
-    ]
-    .into_iter()
-    .find_map(|name| {
-        let file = std::fs::File::open(folder.join(name)).ok()?;
-        if file.metadata().ok()?.len() > 4 * 1024 * 1024 {
-            return None;
-        }
-        let mut bytes = Vec::new();
-        file.take(4 * 1024 * 1024 + 1)
-            .read_to_end(&mut bytes)
-            .ok()?;
-        if bytes.len() > 4 * 1024 * 1024 {
-            return None;
-        }
-        let rgba = crate::content_io::decode_image(&bytes).ok()?;
-        let thumb = image::imageops::thumbnail(&rgba, 160, 160);
-        ImageBitmap::from_rgba8(thumb.width(), thumb.height(), thumb.into_raw()).ok()
-    });
-    if let Ok(mut cache) = cover_cache().lock() {
-        if cache.len() >= 128 {
-            cache.pop_front();
-        }
-        cache.push_back((folder, cover.clone()));
-    }
-    cover
-}
-
 #[composable]
 pub(super) fn Artwork(track: Track, size: f32) {
-    let folder = cover_folder(&track);
-    let picture = cranpose_core::rememberKeyed(folder.clone(), |_| {
+    use cranpose_coroflow::StateFlowCollect;
+    let _revision = crate::library::revision().collectAsState().get();
+    let pending = track.clone();
+    cranpose_core::LaunchedEffect(track.path.clone(), move |_| {
+        crate::library::prioritize(&pending)
+    });
+    let key = crate::library::record(&track).artwork;
+    let picture = cranpose_core::rememberKeyed(key.clone(), |_| {
         cranpose_core::mutableStateOf(None::<ImageBitmap>)
     });
-    cranpose_core::LaunchedEffectAsync(folder.clone(), move |_| {
+    cranpose_core::LaunchedEffectAsync(key.clone(), move |_| {
         Box::pin(async move {
-            if let Some(folder) = folder {
-                if let Ok(cover) = cranpose_core::withBlocking(move || read_cover(folder)).await {
-                    picture.set(cover);
-                }
+            if let Some(key) = key {
+                picture.set(crate::library::artwork(key).await);
             }
         })
     });
@@ -252,6 +194,8 @@ pub(super) fn Artwork(track: Track, size: f32) {
 
 #[composable]
 pub(super) fn MiniPlayer(player: MutableState<WinampState>, modifier: Modifier) {
+    use cranpose_coroflow::StateFlowCollect;
+    let _revision = crate::library::revision().collectAsState().get();
     let snapshot = player.get();
     let Some(track) = snapshot
         .current_index

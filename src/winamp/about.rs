@@ -144,6 +144,7 @@ pub(super) fn Content(page: MutableState<Page>, mobile: bool) {
                 "A music player with classic skins and Skin Studio. Built with Cranpose.",
                 mobile,
             );
+            AboutText("Library metadata and album thumbnails are cached on this device. Audio stays at its original location. Album recognition does not contact an online lookup service.", mobile);
             AboutText(format!("Support contact\n{CONTACT}"), mobile);
             AboutLink(
                 "Contact support",

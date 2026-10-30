@@ -29,6 +29,16 @@ public final class MobileNavigationTest {
         }
         return found;
     }
+    private AccessibilityNodeInfo firstAlbum(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+        CharSequence label = node.getContentDescription();
+        if (label != null && label.toString().startsWith("Open album ")) return node;
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo found = firstAlbum(node.getChild(i));
+            if (found != null) return found;
+        }
+        return null;
+    }
     private AccessibilityNodeInfo waitFor(String label) {
         long deadline = SystemClock.uptimeMillis() + 15000;
         AccessibilityNodeInfo found;
@@ -150,6 +160,16 @@ public final class MobileNavigationTest {
             click("Library");
             waitFor("Search your playlist");
             capture("library");
+            click("Library Albums tab");
+            capture("library-albums");
+            AccessibilityNodeInfo album = firstAlbum(ui.getRootInActiveWindow());
+            if (album != null) {
+                assertTrue(album.performAction(AccessibilityNodeInfo.ACTION_CLICK));
+                waitFor("Back to albums");
+                capture("library-album-tracks");
+                click("Back to albums");
+            }
+            click("Library Tracks tab");
             click("Add music");
             waitFor("Choose a music folder");
             capture("library-add");

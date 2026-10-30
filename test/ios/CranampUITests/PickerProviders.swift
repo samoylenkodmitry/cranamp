@@ -175,6 +175,26 @@ final class PickerProviders: XCTestCase {
         print("MOBILE NAVIGATION: " + app.debugDescription)
     }
 
+    func testAlbumNavigation() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_LIBRARY"] == "1" else { throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_LIBRARY=1") }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        let library = app.buttons.matching(identifier: "Library")
+        XCTAssertTrue(library.firstMatch.waitForExistence(timeout: 20))
+        library.element(boundBy: library.count - 1).tap()
+        app.buttons["Library Albums tab"].tap()
+        let albums = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ OR label BEGINSWITH %@", "Open album ", "Open album "))
+        XCTAssertTrue(albums.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        albums.firstMatch.tap()
+        XCTAssertTrue(app.buttons["Back to albums"].waitForExistence(timeout: 10))
+        let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        image.name = "library-album-tracks"
+        image.lifetime = .keepAlways
+        add(image)
+        app.buttons["Back to albums"].tap()
+        app.buttons["Library Tracks tab"].tap()
+    }
+
     func testMobileLibrary() throws {
         guard ProcessInfo.processInfo.environment["CRANAMP_TEST_LIBRARY"] == "1" else {
             throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_LIBRARY=1")
@@ -195,6 +215,18 @@ final class PickerProviders: XCTestCase {
         tab("Library")
         XCTAssertTrue(app.buttons["Add music"].waitForExistence(timeout: 10))
         capture("library")
+        let hadTracks = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Track [0-9]+ options")).firstMatch.exists
+        app.buttons["Library Albums tab"].tap()
+        capture("library-albums")
+        let albums = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ OR label BEGINSWITH %@", "Open album ", "Open album "))
+        if hadTracks {
+            XCTAssertTrue(albums.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+            albums.firstMatch.tap()
+            XCTAssertTrue(app.buttons["Back to albums"].waitForExistence(timeout: 10))
+            capture("library-album-tracks")
+            app.buttons["Back to albums"].tap()
+        }
+        app.buttons["Library Tracks tab"].tap()
         let options = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Track [0-9]+ options"))
         if options.firstMatch.exists {
             options.firstMatch.tap()

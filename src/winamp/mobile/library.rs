@@ -1,4 +1,4 @@
-//! A touch library over the player's existing playlist. No media is copied or indexed here.
+//! A touch library over the player's existing playlist. Metadata and artwork come from the background library index.
 use super::*;
 
 use super::chrome::{self, MUSIC};
@@ -33,8 +33,17 @@ fn unchanged_prefix(before: &[Track], after: &[Track]) -> bool {
     after.starts_with(before)
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+enum LibraryView {
+    #[default]
+    Tracks,
+    Albums,
+    Album(String),
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct LibraryUi {
+    view: MutableState<LibraryView>,
     query: TextFieldState,
     search_focused: MutableState<bool>,
     last_query: MutableState<String>,
@@ -48,6 +57,7 @@ pub(super) struct LibraryUi {
 #[composable]
 pub(super) fn remember_library_ui() -> LibraryUi {
     cranpose_core::remember(|| LibraryUi {
+        view: cranpose_core::mutableStateOf(LibraryView::Tracks),
         query: TextFieldState::new(""),
         search_focused: cranpose_core::mutableStateOf(false),
         last_query: cranpose_core::mutableStateOf(String::new()),
@@ -64,8 +74,10 @@ pub(super) fn remember_library_ui() -> LibraryUi {
 struct FilterCache {
     playlist: Option<Rc<Vec<Track>>>,
     query: String,
+    revision: u64,
     rows: Rc<Vec<usize>>,
     summary: String,
+    albums: Rc<Vec<crate::library::Album>>,
 }
 
 impl FilterCache {
@@ -74,7 +86,10 @@ impl FilterCache {
             .playlist
             .as_ref()
             .is_none_or(|old| !Rc::ptr_eq(old, playlist));
-        if changed || self.query != query {
+        let revision = crate::library::revision().value();
+        let metadata_changed = self.revision != revision;
+        if changed || self.query != query || metadata_changed {
+            self.revision = revision;
             let terms: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
             self.rows = Rc::new(
                 playlist
@@ -82,18 +97,25 @@ impl FilterCache {
                     .enumerate()
                     .filter_map(|(index, track)| {
                         let matches = terms.is_empty() || {
-                            let haystack =
-                                format!("{} {}", track.title, track.path.as_deref().unwrap_or(""))
-                                    .to_lowercase();
+                            let haystack = format!(
+                                "{} {} {} {} {}",
+                                track.title,
+                                crate::library::title(track),
+                                crate::library::artist(track),
+                                crate::library::record(track).album.unwrap_or_default(),
+                                track.path.as_deref().unwrap_or("")
+                            )
+                            .to_lowercase();
                             terms.iter().all(|term| haystack.contains(term))
                         };
                         matches.then_some(index)
                     })
                     .collect(),
             );
+            self.albums = Rc::new(crate::library::albums(playlist, &self.rows));
             self.query = query.to_owned();
         }
-        if changed {
+        if changed || metadata_changed {
             self.summary = library_summary(playlist);
             self.playlist = Some(playlist.clone());
         }
@@ -104,33 +126,23 @@ impl FilterCache {
 fn library_summary(tracks: &[Track]) -> String {
     let count = tracks.len();
     let label = if count == 1 { "track" } else { "tracks" };
-    if tracks.iter().any(|track| {
-        track
-            .duration_seconds
-            .is_none_or(|seconds| !seconds.is_finite() || seconds <= 0.0)
-    }) {
-        return format!("{count} {label}");
+    let mut total = 0.;
+    for track in tracks {
+        let Some(seconds) = crate::library::duration(track).filter(|s| s.is_finite() && *s > 0.)
+        else {
+            return format!("{count} {label}");
+        };
+        total += seconds;
     }
-    match playlist_total_duration_seconds(tracks) {
-        Some(seconds) if seconds > 0.0 => {
-            format!("{count} {label} · {}", format_duration_compact(seconds))
-        }
-        _ => format!("{count} {label}"),
+    if total > 0. {
+        format!("{count} {label} · {}", format_duration_compact(total))
+    } else {
+        format!("{count} {label}")
     }
 }
 
 pub(super) fn track_subtitle(track: &Track) -> String {
-    parsed_track_artist(&track.title)
-        .map(str::to_owned)
-        .filter(|artist| !artist.is_empty())
-        .unwrap_or_else(|| {
-            let folder = playlist_parent_folder(track);
-            if folder.is_empty() {
-                "Audio track".into()
-            } else {
-                folder
-            }
-        })
+    crate::library::artist(track)
 }
 
 /// Move by index, preserving the exact current occurrence even with duplicate paths.
@@ -204,16 +216,80 @@ fn toggle_selection(player: MutableState<WinampState>, index: usize) {
 
 #[composable]
 pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
+    use cranpose_coroflow::StateFlowCollect;
+    let _revision = crate::library::revision().collectAsState().get();
     let focus = cranpose_ui::local_focus_manager().current();
     cranpose_services::BackHandler(ui.editing.get(), move || ui.editing.set(false));
     cranpose_services::BackHandler(ui.sheet.get() != Sheet::None, move || {
         ui.sheet.set(Sheet::None)
     });
+    cranpose_services::BackHandler(matches!(ui.view.get(), LibraryView::Album(_)), move || {
+        ui.view.set(LibraryView::Albums);
+        ui.list.scroll_to_item(0, 0.0);
+    });
     let snapshot = player.get();
     let query = ui.query.text();
     let cache = cranpose_core::remember(|| RefCell::new(FilterCache::default()));
     let rows = cache.with(|cell| cell.borrow_mut().project(&snapshot.playlist, &query));
-    let summary = cache.with(|cell| cell.borrow().summary.clone());
+    let rows = if let LibraryView::Album(key) = ui.view.get() {
+        cache.with(|cell| {
+            Rc::new(
+                cell.borrow()
+                    .albums
+                    .iter()
+                    .find(|a| a.key == key)
+                    .map(|a| a.tracks.clone())
+                    .unwrap_or_default(),
+            )
+        })
+    } else {
+        rows
+    };
+    let summary = if matches!(ui.view.get(), LibraryView::Album(_)) {
+        format!(
+            "{} {}",
+            rows.len(),
+            if rows.len() == 1 { "track" } else { "tracks" }
+        )
+    } else {
+        cache.with(|cell| cell.borrow().summary.clone())
+    };
+    let current_view = ui.view.get();
+    let current_query = query.clone();
+    let current_cache = cache.clone();
+    cranpose_core::LaunchedEffect(
+        (current_view.clone(), _revision, query.clone()),
+        move |_| {
+            let LibraryView::Album(key) = &current_view else {
+                return;
+            };
+            if !current_query.trim().is_empty() {
+                return;
+            }
+            let replacement = current_cache.with(|cell| {
+                let data = cell.borrow();
+                if data.albums.iter().any(|album| &album.key == key) {
+                    return None;
+                }
+                let folder = key.split_once('\n').map(|(folder, _)| folder);
+                let mut matches = data
+                    .albums
+                    .iter()
+                    .filter(|album| album.key.split_once('\n').map(|(folder, _)| folder) == folder);
+                let first = matches.next();
+                Some(
+                    if let Some(album) = first.filter(|_| matches.next().is_none()) {
+                        LibraryView::Album(album.key.clone())
+                    } else {
+                        LibraryView::Albums
+                    },
+                )
+            });
+            if let Some(view) = replacement {
+                ui.view.set(view);
+            }
+        },
+    );
     let changed_query = query.clone();
     cranpose_core::LaunchedEffect(query.clone(), move |_| {
         if ui.last_query.get_non_reactive() != changed_query {
@@ -229,6 +305,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
         move |scope| {
             let width = scope.max_width().0.min(760.0);
             let compact = scope.max_height().0 < 560.0;
+            let cache = cache.clone();
             let rows = rows.clone();
             let snapshot = snapshot.clone();
             let summary = summary.clone();
@@ -239,6 +316,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                     .absolute_offset((scope.max_width().0 - width) * 0.5, 0.0),
                 BoxSpec::default(),
                 move || {
+                    let cache = cache.clone();
                     let rows = rows.clone();
                     let snapshot = snapshot.clone();
                     let summary = summary.clone();
@@ -248,6 +326,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                         Modifier::empty().fill_max_size(),
                         ColumnSpec::default(),
                         move || {
+                            let cache_header = cache.clone();
                             let summary = summary.clone();
                             let snapshot_header = snapshot.clone();
                             let rows_header = rows.clone();
@@ -263,6 +342,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                     LinearArrangement::SpacedBy(if compact { 6.0 } else { 8.0 }),
                                 ),
                                 move || {
+                                    let cache_title = cache_header.clone();
                                     let summary = summary.clone();
                                     Row(
                                         Modifier::empty().fill_max_width(),
@@ -272,13 +352,28 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                 8.0,
                                             )),
                                         move || {
+                                            let cache = cache_title.clone();
                                             let summary = summary.clone();
                                             Column(
                                                 Modifier::empty().weight(1.0),
                                                 ColumnSpec::default(),
                                                 move || {
                                                     chrome::Label(
-                                                        "Library",
+                                                        match ui.view.get() {
+                                                            LibraryView::Album(key) => {
+                                                                cache.with(|cell| {
+                                                                    cell.borrow()
+                                                                        .albums
+                                                                        .iter()
+                                                                        .find(|a| a.key == key)
+                                                                        .map(|a| a.title.clone())
+                                                                        .unwrap_or_else(|| {
+                                                                            "Album".into()
+                                                                        })
+                                                                })
+                                                            }
+                                                            _ => "Library".into(),
+                                                        },
                                                         Modifier::empty(),
                                                         if compact { 26.0 } else { 28.0 },
                                                         colors.label,
@@ -367,75 +462,107 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                             }
                                         },
                                     );
-                                    let selected = snapshot_header.selected_indices.len();
-                                    let count = rows_header.len();
-                                    let all = snapshot_header.playlist.len();
-                                    let visible = rows_header.clone();
-                                    Row(
-                                        Modifier::empty().fill_max_width().height(44.0),
-                                        RowSpec::default()
-                                            .vertical_alignment(VerticalAlignment::CenterVertically)
-                                            .horizontal_arrangement(LinearArrangement::SpacedBy(
-                                                8.0,
-                                            )),
-                                        move || {
-                                            let label = if ui.editing.get() {
-                                                format!("{selected} selected")
-                                            } else if count != all {
-                                                format!("{count} of {all} tracks")
-                                            } else {
-                                                "All tracks".into()
-                                            };
-                                            OneLine(
-                                                label,
-                                                Modifier::empty().weight(1.0),
-                                                16.0,
-                                                colors.label,
-                                            );
-                                            if ui.editing.get() {
-                                                let visible = visible.clone();
-                                                SmallAction(
-                                                    "Select results",
-                                                    GlassButtonSpec::plain(),
-                                                    move || {
-                                                        player.update(|s| {
-                                                            set_playlist_selection(
-                                                                s,
-                                                                visible.iter().copied(),
-                                                            )
-                                                        })
-                                                    },
+                                    LibraryTabs(ui);
+                                    if ui.view.get() != LibraryView::Albums {
+                                        let selected = snapshot_header.selected_indices.len();
+                                        let count = rows_header.len();
+                                        let all = snapshot_header.playlist.len();
+                                        let visible = rows_header.clone();
+                                        Row(
+                                            Modifier::empty().fill_max_width().height(44.0),
+                                            RowSpec::default()
+                                                .vertical_alignment(
+                                                    VerticalAlignment::CenterVertically,
+                                                )
+                                                .horizontal_arrangement(
+                                                    LinearArrangement::SpacedBy(8.0),
+                                                ),
+                                            move || {
+                                                let label = if ui.editing.get() {
+                                                    format!("{selected} selected")
+                                                } else if matches!(
+                                                    ui.view.get(),
+                                                    LibraryView::Album(_)
+                                                ) {
+                                                    format!(
+                                                        "{count} {}",
+                                                        if count == 1 { "track" } else { "tracks" }
+                                                    )
+                                                } else if count != all {
+                                                    format!("{count} of {all} tracks")
+                                                } else {
+                                                    "All tracks".into()
+                                                };
+                                                if matches!(ui.view.get(), LibraryView::Album(_)) {
+                                                    GlassIconButton(
+                                                        Modifier::empty()
+                                                            .content_description("Back to albums"),
+                                                        GlassButtonSpec::plain(),
+                                                        44.0,
+                                                        move || {
+                                                            ui.view.set(LibraryView::Albums);
+                                                            ui.list.scroll_to_item(0, 0.0);
+                                                        },
+                                                        chrome::BACK,
+                                                    );
+                                                }
+                                                OneLine(
+                                                    label,
+                                                    Modifier::empty().weight(1.0),
+                                                    16.0,
+                                                    colors.label,
                                                 );
-                                                SmallAction(
-                                                    "Done",
-                                                    GlassButtonSpec::glass(),
-                                                    move || ui.editing.set(false),
-                                                );
-                                            } else {
-                                                GlassIconButton(
-                                                    Modifier::empty()
-                                                        .content_description("Sort playlist"),
-                                                    GlassButtonSpec::plain(),
-                                                    44.0,
-                                                    move || ui.sheet.set(Sheet::Sort),
-                                                    icons::FILTER,
-                                                );
-                                                SmallAction(
-                                                    "Select",
-                                                    GlassButtonSpec::plain(),
-                                                    move || {
-                                                        player.update(|s| {
-                                                            set_playlist_selection(s, [])
-                                                        });
-                                                        ui.editing.set(true);
-                                                    },
-                                                );
-                                            }
-                                        },
-                                    );
+                                                if ui.editing.get() {
+                                                    let visible = visible.clone();
+                                                    SmallAction(
+                                                        "Select results",
+                                                        GlassButtonSpec::plain(),
+                                                        move || {
+                                                            player.update(|s| {
+                                                                set_playlist_selection(
+                                                                    s,
+                                                                    visible.iter().copied(),
+                                                                )
+                                                            })
+                                                        },
+                                                    );
+                                                    SmallAction(
+                                                        "Done",
+                                                        GlassButtonSpec::glass(),
+                                                        move || ui.editing.set(false),
+                                                    );
+                                                } else {
+                                                    GlassIconButton(
+                                                        Modifier::empty()
+                                                            .content_description("Sort playlist"),
+                                                        GlassButtonSpec::plain(),
+                                                        44.0,
+                                                        move || ui.sheet.set(Sheet::Sort),
+                                                        icons::FILTER,
+                                                    );
+                                                    SmallAction(
+                                                        "Select",
+                                                        GlassButtonSpec::plain(),
+                                                        move || {
+                                                            player.update(|s| {
+                                                                set_playlist_selection(s, [])
+                                                            });
+                                                            ui.editing.set(true);
+                                                        },
+                                                    );
+                                                }
+                                            },
+                                        );
+                                    }
                                     let notice = ui.notice.get();
                                     let status = if notice.is_empty() {
-                                        snapshot_header.status.clone()
+                                        if crate::library::indexing()
+                                            && !snapshot_header.status.starts_with("Scanning")
+                                        {
+                                            "Reading album information…".into()
+                                        } else {
+                                            snapshot_header.status.clone()
+                                        }
                                     } else {
                                         notice
                                     };
@@ -455,6 +582,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                     }
                                 },
                             );
+                            let cache = cache.clone();
                             let rows_list = rows.clone();
                             let snapshot_list = Rc::new(snapshot.clone());
                             let empty = snapshot.playlist.is_empty();
@@ -467,7 +595,13 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                     .clip_to_bounds(),
                                 BoxSpec::default(),
                                 move || {
-                                    if empty_result {
+                                    if ui.view.get() == LibraryView::Albums && !empty_result {
+                                        AlbumList(
+                                            player,
+                                            ui,
+                                            cache.with(|cell| cell.borrow().albums.clone()),
+                                        );
+                                    } else if empty_result {
                                         EmptyLibrary(ui, empty && query_empty);
                                     } else {
                                         let rows = rows_list.clone();
@@ -584,10 +718,12 @@ fn LibraryRow(
     snapshot: Rc<WinampState>,
     index: usize,
 ) {
+    use cranpose_coroflow::StateFlowCollect;
+    let _revision = crate::library::revision().collectAsState().get();
     let track = snapshot.playlist[index].clone();
-    let title = parsed_track_title(&track.title).to_owned();
+    let title = crate::library::title(&track);
     let subtitle = track_subtitle(&track);
-    let duration = playlist_duration_text(track.duration_seconds).unwrap_or_default();
+    let duration = playlist_duration_text(crate::library::duration(&track)).unwrap_or_default();
     let current = snapshot.current_index == Some(index);
     let selected = ui.editing.get() && snapshot.selected_indices.contains(&index);
     let editing = ui.editing.get();
@@ -811,6 +947,8 @@ fn LibrarySheet(player: MutableState<WinampState>, ui: LibraryUi) {
 
 #[composable]
 fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
+    use cranpose_coroflow::StateFlowCollect;
+    let _revision = crate::library::revision().collectAsState().get();
     let colors = liquid_colors();
     match ui.sheet.get() {
         Sheet::None => {}
@@ -911,7 +1049,7 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                         ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(5.)),
                         move || {
                             BasicText(
-                                parsed_track_title(&track.title).to_owned(),
+                                crate::library::title(&track),
                                 Modifier::empty().fill_max_width(),
                                 {
                                     let mut style = settings_text_style(18., colors.label);
@@ -1109,4 +1247,151 @@ fn SheetAction(label: impl Into<String>, action: impl Fn() + 'static) {
         icons::PLUS
     };
     chrome::ActionRow(label, icon, destructive, action);
+}
+
+#[composable]
+fn LibraryTabs(ui: LibraryUi) {
+    let colors = liquid_colors();
+    Row(
+        Modifier::empty()
+            .fill_max_width()
+            .height(50.)
+            .rounded_corners(11.)
+            .background(colors.separator.with_alpha(0.18))
+            .padding(3.),
+        RowSpec::default().horizontal_arrangement(LinearArrangement::SpacedBy(4.)),
+        move || {
+            for (label, view) in [
+                ("Tracks", LibraryView::Tracks),
+                ("Albums", LibraryView::Albums),
+            ] {
+                let selected = if view == LibraryView::Albums {
+                    ui.view.get() != LibraryView::Tracks
+                } else {
+                    ui.view.get() == view
+                };
+                let spec = GlassButtonSpec::plain().with_content_color(if selected {
+                    colors.accent
+                } else {
+                    colors.secondary_label
+                });
+                GlassButton(
+                    Modifier::empty()
+                        .weight(1.)
+                        .fill_max_height()
+                        .rounded_corners(8.)
+                        .background(if selected {
+                            colors.surface
+                        } else {
+                            Color::TRANSPARENT
+                        })
+                        .content_description(format!("Library {label} tab")),
+                    spec.clone(),
+                    move || {
+                        ui.view.set(view.clone());
+                        ui.editing.set(false);
+                        ui.list.scroll_to_item(0, 0.0);
+                    },
+                    move || GlassButtonLabel(label.into(), spec.clone()),
+                );
+            }
+        },
+    );
+}
+
+#[composable]
+fn AlbumList(
+    player: MutableState<WinampState>,
+    ui: LibraryUi,
+    albums: Rc<Vec<crate::library::Album>>,
+) {
+    let colors = liquid_colors();
+    let snapshot = player.get();
+    cranpose_ui::LazyColumn(
+        Modifier::empty()
+            .fill_max_size()
+            .content_description("Library albums"),
+        ui.list,
+        cranpose_ui::LazyColumnSpec::default().content_padding(cranpose_ui::PaddingValues {
+            start: 16.,
+            end: 16.,
+            bottom: chrome::bottom_inset(&snapshot) + 16.,
+            ..Default::default()
+        }),
+        move |scope| {
+            let albums = albums.clone();
+            let snapshot = snapshot.clone();
+            let keys = albums.clone();
+            scope.items(
+                LazyItems::new(albums.len()).key(move |i| {
+                    use std::hash::{Hash, Hasher};
+                    let mut hash = std::collections::hash_map::DefaultHasher::new();
+                    keys[i].key.hash(&mut hash);
+                    hash.finish()
+                }),
+                move |i| {
+                    let album = albums[i].clone();
+                    let key = album.key.clone();
+                    let track = snapshot.playlist[album.cover_track].clone();
+                    GlassButton(
+                        Modifier::empty()
+                            .fill_max_width()
+                            .height(86.)
+                            .padding(6.)
+                            .content_description(format!("Open album {}", album.title)),
+                        GlassButtonSpec::plain(),
+                        move || {
+                            ui.view.set(LibraryView::Album(key.clone()));
+                            ui.list.scroll_to_item(0, 0.0);
+                        },
+                        move || {
+                            let track = track.clone();
+                            let album = album.clone();
+                            Row(
+                                Modifier::empty().fill_max_size(),
+                                RowSpec::default()
+                                    .vertical_alignment(VerticalAlignment::CenterVertically)
+                                    .horizontal_arrangement(LinearArrangement::SpacedBy(14.)),
+                                move || {
+                                    chrome::Artwork(track.clone(), 64.);
+                                    let album = album.clone();
+                                    Column(
+                                        Modifier::empty().weight(1.),
+                                        ColumnSpec::default()
+                                            .vertical_arrangement(LinearArrangement::SpacedBy(4.)),
+                                        move || {
+                                            chrome::Label(
+                                                album.title.clone(),
+                                                Modifier::empty(),
+                                                17.,
+                                                colors.label,
+                                                true,
+                                            );
+                                            chrome::Label(
+                                                format!(
+                                                    "{} · {} {}",
+                                                    album.artist,
+                                                    album.tracks.len(),
+                                                    if album.tracks.len() == 1 {
+                                                        "track"
+                                                    } else {
+                                                        "tracks"
+                                                    }
+                                                ),
+                                                Modifier::empty(),
+                                                13.,
+                                                colors.secondary_label,
+                                                false,
+                                            );
+                                        },
+                                    );
+                                    icons::Icon(chrome::CHEVRON, None, 18., colors.secondary_label);
+                                },
+                            );
+                        },
+                    );
+                },
+            );
+        },
+    );
 }

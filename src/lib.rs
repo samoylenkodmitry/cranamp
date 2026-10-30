@@ -4,6 +4,7 @@ mod app_icon;
 pub mod audio;
 mod content_io;
 mod fonts;
+mod library;
 mod sync;
 pub mod winamp;
 use cranpose::AppLauncher;

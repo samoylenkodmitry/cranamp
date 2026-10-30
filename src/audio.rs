@@ -182,8 +182,16 @@ fn media_item(track: &Track) -> Option<MediaItem> {
     } else {
         cranpose_services::uri_for_path(std::path::Path::new(path))
     };
-    let mut metadata = MediaMetadata::titled(track.display_title());
-    if let Some(duration) = track.duration_seconds {
+    let indexed = crate::library::record(track);
+    let mut metadata =
+        MediaMetadata::titled(indexed.title.as_deref().unwrap_or(track.display_title()))
+            .artist(indexed.artist.unwrap_or_default())
+            .album(indexed.album.unwrap_or_default());
+    if let Some(duration) = indexed
+        .duration
+        .or(track.duration_seconds)
+        .filter(|d| d.is_finite())
+    {
         metadata = metadata.duration(Duration::from_secs_f32(duration.max(0.0)));
     }
     Some(MediaItem::new(uri).with_metadata(metadata))

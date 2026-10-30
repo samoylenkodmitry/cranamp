@@ -691,3 +691,87 @@ fn mobile_skin_gallery_filters_and_the_player_dock_keeps_controls_reachable() {
         assert!(contains(&visible_texts(&mut shell), "Play"));
     }
 }
+
+#[test]
+fn library_indexes_tags_folder_art_and_albums_without_changing_original_audio() {
+    let app = TestApplication::new("album-index");
+    let album = app.directory.join("Original album");
+    std::fs::create_dir(&album).unwrap();
+    let tagged = album.join("01 - Wrong filename.flac");
+    let untagged = album.join("02 - Folder artist - Untagged.wav");
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    std::fs::copy(fixture.join("test/fixtures/library/tagged.flac"), &tagged).unwrap();
+    std::fs::copy(fixture.join("test/fixtures/audio/tone.wav"), &untagged).unwrap();
+    let original = std::fs::read(&tagged).unwrap();
+    image::RgbImage::from_pixel(48, 32, image::Rgb([12, 34, 56]))
+        .save(album.join("Front.JPG"))
+        .unwrap();
+    let hex = |text: &str| text.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+    let mut saved = "version=1\ncurrent_index=0\n".to_owned();
+    for path in [&tagged, &untagged] {
+        saved.push_str(&format!(
+            "track={}\t{}\t\n",
+            hex(&path.file_stem().unwrap().to_string_lossy()),
+            hex(&path.to_string_lossy())
+        ));
+    }
+    cranpose_services::preferences()
+        .set("cranamp.player", &saved)
+        .unwrap();
+    let mut shell = AppShell::new(
+        HitGraphRenderer::default(),
+        location_key(file!(), line!(), column!()),
+        cranamp::winamp::WinampMobileApp,
+    );
+    shell.set_viewport(393., 780.);
+    pump(&mut shell);
+    click_mobile(&mut shell, "Library");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        shell.update();
+        pump(&mut shell);
+        if contains(&visible_texts(&mut shell), "Tagged title") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Metadata worker did not update the Library"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    mobile_control_bounds(&mut shell, "Play track 1: Tagged title");
+    click_mobile(&mut shell, "Library Albums tab");
+    mobile_control_bounds(&mut shell, "Open album Tagged album");
+    mobile_control_bounds(&mut shell, "Open album Original album");
+    click_mobile(&mut shell, "Open album Tagged album");
+    mobile_control_bounds(&mut shell, "Play track 1: Tagged title");
+    assert!(!contains(
+        &visible_texts(&mut shell),
+        "Play track 2: Untagged"
+    ));
+    click_mobile(&mut shell, "Back to albums");
+    click_mobile(&mut shell, "Open album Original album");
+    mobile_control_bounds(&mut shell, "Play track 2: Untagged");
+    click_mobile(&mut shell, "Library Tracks tab");
+    assert_eq!(std::fs::read(&tagged).unwrap(), original);
+    assert_eq!(
+        std::fs::read_dir(&album).unwrap().count(),
+        3,
+        "No sidecar or audio copy may be written to the source folder"
+    );
+    let cache = cranpose_services::application_directories()
+        .unwrap()
+        .cache
+        .join("library-v1");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !cache.join("index.json").is_file() {
+        shell.update();
+        pump(&mut shell);
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(std::fs::read_dir(cache)
+        .unwrap()
+        .flatten()
+        .any(|e| e.path().extension().is_some_and(|e| e == "png")));
+}

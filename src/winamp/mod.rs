@@ -1279,6 +1279,7 @@ fn WinampRuntimeEffects(
     DocumentPickerEffect(state);
     CranposePickerEffect(state);
     IncomingContentEffect(state);
+    LibraryIndexEffect(state);
     LaunchArgPickEffect(state);
     SkinPickerEffect(state, skin_state);
     WebSurfaceSizeEffect(state);
@@ -1388,6 +1389,17 @@ fn receive_playlist_export(
             app.status = error.to_string();
         }),
     }
+}
+#[composable]
+fn LibraryIndexEffect(state: MutableState<WinampState>) {
+    let scope = cranpose_core::rememberCoroutineScope();
+    let playlist = state.get().playlist;
+    cranpose_core::LaunchedEffect(
+        (Rc::as_ptr(&playlist) as usize, playlist.len()),
+        move |_| {
+            crate::library::enqueue_tracks(&playlist, scope.clone());
+        },
+    );
 }
 #[composable]
 fn IncomingContentEffect(state: MutableState<WinampState>) {
@@ -1537,8 +1549,13 @@ fn receive_files(
                 let mut tracks = Vec::new();
                 let mut failure = None;
                 for entry in entries {
-                    match audio::tracks_from_picked_entry(entry) {
-                        Ok(added) => tracks.extend(added),
+                    match audio::tracks_from_picked_entry(entry.clone()) {
+                        Ok(added) => {
+                            for track in &added {
+                                crate::library::observe(entry.clone(), Some(track));
+                            }
+                            tracks.extend(added);
+                        }
                         Err(error) => failure = Some(error),
                     }
                 }
@@ -1570,6 +1587,7 @@ async fn consume_folder_stream(
     append: bool,
 ) {
     let revision = state.get_non_reactive().folder_scan_revision;
+    crate::library::begin_scan();
     state.update(|s| s.status = "Scanning folder".to_string());
     log::info!(target: "cranamp::picker", "folder stream started (append={append})");
     const BATCH: usize = 24;
@@ -1615,9 +1633,13 @@ async fn consume_folder_stream(
             Ok(Some(entry)) => {
                 seen += 1;
                 let name = entry.metadata().name;
-                match audio::track_from_picked_file(entry) {
-                    Ok(Some(track)) => batch.push(track),
+                match audio::track_from_picked_file(entry.clone()) {
+                    Ok(Some(track)) => {
+                        crate::library::observe(entry, Some(&track));
+                        batch.push(track);
+                    }
                     Ok(None) => {
+                        crate::library::observe(entry, None);
                         log::info!(target: "cranamp::picker", "skipped non-audio entry: {name:?}")
                     }
                     Err(error) => failure = Some(error),
@@ -7780,19 +7802,26 @@ fn compare_tracks_by_field(
     field: PlaylistSortField,
 ) -> std::cmp::Ordering {
     match field {
-        PlaylistSortField::Duration => left
-            .duration_seconds
+        PlaylistSortField::Duration => crate::library::duration(left)
             .unwrap_or(f32::MAX)
-            .total_cmp(&right.duration_seconds.unwrap_or(f32::MAX)),
+            .total_cmp(&crate::library::duration(right).unwrap_or(f32::MAX)),
         _ => playlist_sort_key(left, field).cmp(&playlist_sort_key(right, field)),
     }
 }
 fn playlist_sort_key(track: &Track, field: PlaylistSortField) -> String {
     match field {
-        PlaylistSortField::Title => track.display_title().to_ascii_lowercase(),
-        PlaylistSortField::Artist => parsed_track_artist(track.display_title())
-            .unwrap_or(track.display_title())
-            .to_ascii_lowercase(),
+        PlaylistSortField::Title => crate::library::record(track)
+            .title
+            .unwrap_or_else(|| track.display_title().into())
+            .to_lowercase(),
+        PlaylistSortField::Artist => crate::library::record(track)
+            .artist
+            .unwrap_or_else(|| {
+                parsed_track_artist(track.display_title())
+                    .unwrap_or(track.display_title())
+                    .into()
+            })
+            .to_lowercase(),
         PlaylistSortField::FileName => playlist_file_stem(track).to_ascii_lowercase(),
         PlaylistSortField::Path => track.path.as_deref().unwrap_or("").to_ascii_lowercase(),
         PlaylistSortField::Extension => playlist_path_extension(track).to_ascii_lowercase(),
