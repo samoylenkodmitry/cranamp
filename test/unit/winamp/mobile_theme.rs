@@ -67,6 +67,7 @@ fn theme_reacts_to_system_and_skin_changes_without_overriding_manual_choice() {
     let (mode, system, skin, options) = handles.get().unwrap();
     let palette = || observed.borrow().unwrap();
     assert!(!palette().is_dark);
+    let default_day = palette();
     shell.debug_enter_app_context(|| system.set(SystemTheme::Dark));
     pump(&mut shell);
     assert!(palette().is_dark);
@@ -83,7 +84,7 @@ fn theme_reacts_to_system_and_skin_changes_without_overriding_manual_choice() {
     pump(&mut shell);
     assert_eq!(palette().background, corner);
     assert_eq!(palette().is_dark, prefers_dark(corner));
-    assert_ne!(palette().accent, Color::from_rgb_u8(0, 122, 255));
+    assert_ne!(palette().accent, default_day.accent);
     let first_palette = palette();
     let second = load_skin(BUNDLED_SKINS[1].bytes).unwrap();
     let second_corner = skin_corner_color(&second);
@@ -112,10 +113,7 @@ fn theme_reacts_to_system_and_skin_changes_without_overriding_manual_choice() {
     shell.debug_enter_app_context(|| skin.set(Err("unavailable skin".into())));
     pump(&mut shell);
     assert!(!palette().is_dark);
-    assert_eq!(
-        palette().background,
-        LiquidColors::light(Color::from_rgb_u8(0, 122, 255)).background
-    );
+    assert_eq!(palette().background, default_day.background);
 }
 
 #[test]

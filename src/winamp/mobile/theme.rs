@@ -139,33 +139,28 @@ pub(super) fn Theme(ui: Ui, skin: WinampSkinState, content: impl FnOnce()) {
     } else {
         None
     };
-    LiquidTheme(
-        LiquidThemeSpec {
-            palette: background.map_or_else(
-                || LiquidPalette::System {
-                    scheme: mode.scheme(),
-                    accent: Color::from_rgb_u8(0, 122, 255),
-                },
-                |background| LiquidPalette::Custom(palette::from_background(background)),
-            ),
+    let spec = background.map_or_else(
+        || LiquidThemeSpec::system(mode.scheme()),
+        |background| LiquidThemeSpec {
+            palette: LiquidPalette::Custom(palette::from_background(background)),
             ..Default::default()
         },
-        move || {
-            let colors = cranpose::liquid::liquid_colors();
-            let style = if background.is_some() {
-                LiquidSegmentedStyle {
-                    track: colors.fill,
-                    indicator: colors.surface,
-                    ..LiquidSegmentedStyle::system(&colors, &liquid_typography())
-                }
-            } else {
-                liquid_segmented_style()
-            };
-            // Keep the content in the same composition group when preferences
-            // load or the user changes modes. File-picker launchers stay mounted.
-            ProvideLiquidSegmentedStyle(style, content);
-        },
     );
+    LiquidTheme(spec, move || {
+        let colors = cranpose::liquid::liquid_colors();
+        let style = if background.is_some() {
+            LiquidSegmentedStyle {
+                track: colors.fill,
+                indicator: colors.surface,
+                ..LiquidSegmentedStyle::system(&colors, &liquid_typography())
+            }
+        } else {
+            liquid_segmented_style()
+        };
+        // Keep the content in the same composition group when preferences
+        // load or the user changes modes. File-picker launchers stay mounted.
+        ProvideLiquidSegmentedStyle(style, content);
+    });
 }
 
 #[cfg(test)]
