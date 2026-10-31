@@ -51,18 +51,11 @@ impl Mode {
         }
     }
 
-    fn scheme(self, background: Option<Color>) -> SchemeMode {
+    fn scheme(self) -> SchemeMode {
         match self {
             Self::Day => SchemeMode::Light,
             Self::Night => SchemeMode::Dark,
-            Self::Auto => SchemeMode::Auto,
-            Self::Skin => background.map_or(SchemeMode::Auto, |color| {
-                if prefers_dark(color) {
-                    SchemeMode::Dark
-                } else {
-                    SchemeMode::Light
-                }
-            }),
+            Self::Auto | Self::Skin => SchemeMode::Auto,
         }
     }
 }
@@ -148,30 +141,17 @@ pub(super) fn Theme(ui: Ui, skin: WinampSkinState, content: impl FnOnce()) {
     };
     LiquidTheme(
         LiquidThemeSpec {
-            scheme: mode.scheme(background),
+            palette: background.map_or_else(
+                || LiquidPalette::System {
+                    scheme: mode.scheme(),
+                    accent: Color::from_rgb_u8(0, 122, 255),
+                },
+                |background| LiquidPalette::Custom(palette::from_background(background)),
+            ),
             ..Default::default()
         },
         move || {
-            let colors = if let Some(mut background) = background {
-                let options = cranpose_services::local_accessibility_options().current();
-                if options.invert_colors {
-                    background = Color(1. - background.0, 1. - background.1, 1. - background.2, 1.);
-                }
-                let colors = palette::from_background(background);
-                let colors = if options.increase_contrast {
-                    LiquidColors {
-                        secondary_label: colors.label,
-                        tertiary_label: colors.label,
-                        toggle_off: colors.accent.with_alpha(0.6),
-                        ..colors.with_more_contrast()
-                    }
-                } else {
-                    colors
-                };
-                colors
-            } else {
-                cranpose::liquid::liquid_colors()
-            };
+            let colors = cranpose::liquid::liquid_colors();
             let style = if background.is_some() {
                 LiquidSegmentedStyle {
                     track: colors.fill,
@@ -183,9 +163,7 @@ pub(super) fn Theme(ui: Ui, skin: WinampSkinState, content: impl FnOnce()) {
             };
             // Keep the content in the same composition group when preferences
             // load or the user changes modes. File-picker launchers stay mounted.
-            ProvideLiquidColors(colors, move || {
-                ProvideLiquidSegmentedStyle(style, content);
-            });
+            ProvideLiquidSegmentedStyle(style, content);
         },
     );
 }

@@ -83,7 +83,7 @@ fn theme_reacts_to_system_and_skin_changes_without_overriding_manual_choice() {
     pump(&mut shell);
     assert_eq!(palette().background, corner);
     assert_eq!(palette().is_dark, prefers_dark(corner));
-    assert_ne!(palette().accent, LiquidThemeSpec::default().accent);
+    assert_ne!(palette().accent, Color::from_rgb_u8(0, 122, 255));
     let first_palette = palette();
     let second = load_skin(BUNDLED_SKINS[1].bytes).unwrap();
     let second_corner = skin_corner_color(&second);
@@ -93,9 +93,10 @@ fn theme_reacts_to_system_and_skin_changes_without_overriding_manual_choice() {
     assert_ne!(palette().surface, first_palette.surface);
     assert_ne!(palette().glass_tint, first_palette.glass_tint);
     assert_ne!(palette().accent, first_palette.accent);
+    let normal_label_opacity = palette().secondary_label.a();
     shell.debug_enter_app_context(|| options.update(|options| options.increase_contrast = true));
     pump(&mut shell);
-    assert_eq!(palette().secondary_label, palette().label);
+    assert!(palette().secondary_label.a() > normal_label_opacity);
     assert_eq!(palette().background, second_corner);
     shell.debug_enter_app_context(|| options.update(|options| options.invert_colors = true));
     pump(&mut shell);
@@ -113,7 +114,7 @@ fn theme_reacts_to_system_and_skin_changes_without_overriding_manual_choice() {
     assert!(!palette().is_dark);
     assert_eq!(
         palette().background,
-        LiquidColors::light(LiquidThemeSpec::default().accent).background
+        LiquidColors::light(Color::from_rgb_u8(0, 122, 255)).background
     );
 }
 
