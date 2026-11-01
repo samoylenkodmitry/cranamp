@@ -83,7 +83,7 @@ fn classic_skin_with_a_blank_strip() -> Vec<u8> {
             .compression_method(zip::CompressionMethod::Stored);
         for index in 0..source.len() {
             let mut file = source.by_index(index).expect("zip entry");
-            let name = file.name().to_string();
+            let name = file.name().expect("entry name").into_owned();
             let mut data = Vec::new();
             file.read_to_end(&mut data).expect("zip entry bytes");
             if normalize_name(&name) == "titlebar.bmp" {
@@ -146,7 +146,7 @@ fn load_skin_allows_missing_text_bitmap() {
             let mut file = source
                 .by_index(index)
                 .expect("zip entry should be readable");
-            let name = file.name().to_string();
+            let name = file.name().expect("entry name").into_owned();
             if normalize_name(&name) == "text.bmp" {
                 continue;
             }
@@ -186,7 +186,7 @@ fn bundled_skin_plus(extra: &[(&str, Vec<u8>)]) -> Vec<u8> {
             let mut file = source
                 .by_index(index)
                 .expect("zip entry should be readable");
-            let name = file.name().to_string();
+            let name = file.name().expect("entry name").into_owned();
             // Cursor parser tests supply their own entries; Catamp has a full set.
             if name.to_ascii_lowercase().ends_with(".cur") {
                 continue;

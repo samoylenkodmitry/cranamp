@@ -859,7 +859,7 @@ fn enter_mobile_text(shell: &mut AppShell<HitGraphRenderer>, label: &str, value:
         visible_texts(shell)
     );
     shell.on_key_event(&cranpose_ui::KeyEvent::key_down_with_modifiers(
-        cranpose_ui::KeyCode::A,
+        cranpose_ui::Key::A,
         "a",
         cranpose_ui::Modifiers {
             ctrl: true,

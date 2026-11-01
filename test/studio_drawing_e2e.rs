@@ -440,9 +440,17 @@ fn sprite_editing_keeps_settings_visible_and_states_reclaims_paint_space() {
 }
 
 fn enter_value(shell: &mut AppShell<HitGraphRenderer>, label: &str, value: &str) {
-    click(shell, label);
+    // The focused field's cursor handle hangs below its caret and can cover
+    // the top of the field under it, so the tap lands in the lower part.
+    let rect = bounds(shell, label);
+    shell.set_pointer_source(PointerSource::Mouse);
+    shell.set_cursor(rect.x + rect.width / 2., rect.y + rect.height * 0.75);
+    shell.pointer_pressed();
+    pump(shell);
+    shell.pointer_released();
+    pump(shell);
     shell.on_key_event(&cranpose_ui::KeyEvent::key_down_with_modifiers(
-        cranpose_ui::KeyCode::A,
+        cranpose_ui::Key::A,
         "a",
         cranpose_ui::Modifiers {
             ctrl: true,

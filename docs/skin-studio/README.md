@@ -56,6 +56,9 @@ The canvas supports scrollbars, anchored zoom and two-finger pan/pinch. A second
 touch cancels tentative paint. Custom cursor artwork and hover hints help pointer
 and stylus users. Android cursor support is in the pinned Cranpose revision; the
 physical Galaxy Tab S7 check is pending. UIKit custom cursors remain unsupported.
+On X11, `test/linux_cursor_probe.py` reads the current cursor size and pixel hash
+without moving the pointer. Hover the player body, seek bar and title bar, then
+revisit them; each region must keep its own hash.
 
 After a file opens, Studio returns to Canvas. The part picker stays one tap away. Invalid files and
 cancelled picks retain the current document. Before replacing edited work, Studio

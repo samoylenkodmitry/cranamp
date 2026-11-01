@@ -14,7 +14,7 @@ fn sync(shell: &mut AppShell<HitGraphRenderer>, root: RootId) -> Size {
         .surface(root)
         .unwrap()
         .scene()
-        .hits
+        .hit_targets()
         .iter()
         .filter(|hit| hit.rect.x.abs() < 0.001 && hit.rect.height > 40.)
         .fold(Size::ZERO, |size, hit| {
@@ -29,11 +29,17 @@ fn assert_panel_widths(shell: &mut AppShell<HitGraphRenderer>, root: RootId, siz
     let main_height = size.width * 116. / 275.;
     for y in [0., main_height, main_height * 2.] {
         assert!(
-            shell.surface(root).unwrap().scene().hits.iter().any(|hit| {
-                (hit.rect.y - y).abs() < 1.
-                    && (hit.rect.width - size.width).abs() < 1.
-                    && hit.rect.height > 80.
-            }),
+            shell
+                .surface(root)
+                .unwrap()
+                .scene()
+                .hit_targets()
+                .iter()
+                .any(|hit| {
+                    (hit.rect.y - y).abs() < 1.
+                        && (hit.rect.width - size.width).abs() < 1.
+                        && hit.rect.height > 80.
+                }),
             "the panel at {y} fills the shared width {}",
             size.width
         );

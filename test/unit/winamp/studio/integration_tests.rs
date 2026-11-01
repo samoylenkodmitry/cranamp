@@ -7,7 +7,7 @@ fn the_editor_opens_on_the_skin_the_player_wears() {
         (0..zip.len())
             .map(|i| {
                 let mut file = zip.by_index(i).unwrap();
-                let name = file.name().to_owned();
+                let name = file.name().expect("entry name").into_owned();
                 let mut data = Vec::new();
                 file.read_to_end(&mut data).unwrap();
                 (name, data)

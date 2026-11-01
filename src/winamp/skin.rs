@@ -115,9 +115,9 @@ pub fn load_skin_with_mode(wsz_bytes: &[u8], mode: BitmapMode) -> Result<WinampS
         if file.is_dir() {
             continue;
         }
+        let name = normalize_name(&file.name()?);
         let data = crate::content_io::read_entry(&mut file)
-            .with_context(|| format!("failed to read entry {}", file.name()))?;
-        let name = normalize_name(file.name());
+            .with_context(|| format!("failed to read entry {name}"))?;
         if name.ends_with(".bmp") {
             images.include(&data)?;
         }
@@ -479,7 +479,7 @@ pub fn entries_of(wsz_bytes: &[u8]) -> Result<Vec<SkinEntry>> {
         if file.is_dir() {
             continue;
         }
-        let name = normalize_name(file.name());
+        let name = normalize_name(&file.name()?);
         let data = crate::content_io::read_entry(&mut file)?;
         let size = decode_bmp(&data)
             .ok()

@@ -62,7 +62,7 @@ android {
     sourceSets.getByName("debug").java.srcDir("../../../test/android-fixtures")
     sourceSets.getByName("debug").manifest.srcFile("../../../test/android-fixtures/AndroidManifest.xml")
     namespace = "com.cranamp.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.cranamp.app"

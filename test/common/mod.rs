@@ -4,15 +4,31 @@ use cranpose_app_shell::AppShell;
 use cranpose_render_common::graph::ProjectiveTransform;
 use cranpose_render_common::graph_scene::Scene;
 use cranpose_render_common::hit_graph::collect_hits_from_graph;
+use cranpose_render_common::text_fonts::TextFonts;
 use cranpose_render_common::{RenderScene, Renderer};
 use cranpose_ui::{LayoutTree, Size};
-#[derive(Default)]
 pub struct HitGraphRenderer {
     scene: Scene,
+    fonts: TextFonts,
+}
+impl Default for HitGraphRenderer {
+    // Text lays out with the font the app ships (src/fonts.rs), as in the app.
+    fn default() -> Self {
+        Self {
+            scene: Scene::default(),
+            fonts: TextFonts::from_fonts_or_default(&[include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/fonts/LiberationSans-Regular.ttf"
+            ))]),
+        }
+    }
 }
 impl Renderer for HitGraphRenderer {
     type Scene = Scene;
     type Error = ();
+    fn attach_app_context_services(&mut self, app_context: &cranpose_ui::AppContext) {
+        app_context.set_text_fonts(self.fonts.resolver());
+    }
     fn scene(&self) -> &Self::Scene {
         &self.scene
     }
