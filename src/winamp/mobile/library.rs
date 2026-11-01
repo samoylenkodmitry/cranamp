@@ -1373,7 +1373,7 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 if folder {
                     "Enter the WebDAV address of your music folder. It will replace the current playlist."
                 } else {
-                    "Enter a link to an audio file or stream. A playlist link will replace the current playlist."
+                    "Enter a link to an audio file or stream. It plays at once. A playlist link will replace the current playlist."
                 },
                 Modifier::empty().fill_max_width(),
                 settings_text_style(15.0, colors.secondary_label),
