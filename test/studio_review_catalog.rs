@@ -439,7 +439,13 @@ fn ReviewCases(width: f32, height: f32, start: usize, automatic: bool) {
         cranpose_core::CompositionLocalProvider(
             vec![controls::hint_context().provides(Some(ui.hints))],
             || {
-                Workspace(ui.clone(), actions, Layout::new(width, height), true, false);
+                Workspace(
+                    ui.clone(),
+                    actions,
+                    Layout::new(width, height),
+                    StudioHosting::Player,
+                    false,
+                );
             },
         );
     });

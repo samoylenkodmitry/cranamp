@@ -104,10 +104,15 @@ pub fn DesignSystem(width: f32, height: f32) {
                                                 .enumerate()
                                                 {
                                                     Control(
-                                                        icon,
-                                                        ["Open", "Undo", "Redo", "Export"][i]
-                                                            .into(),
-                                                        String::new(),
+                                                        ControlFace {
+                                                            icon,
+                                                            label: [
+                                                                "Open", "Undo", "Redo", "Export",
+                                                            ][i]
+                                                                .into(),
+                                                            detail: String::new(),
+                                                            placement: ControlLabel::Hint,
+                                                        },
                                                         Area::new(
                                                             16. + i as f32 * 52.,
                                                             114.,
@@ -116,7 +121,6 @@ pub fn DesignSystem(width: f32, height: f32) {
                                                         ),
                                                         false,
                                                         i != 2,
-                                                        false,
                                                         ui.hints,
                                                         || {},
                                                     );
@@ -131,11 +135,18 @@ pub fn DesignSystem(width: f32, height: f32) {
                                                 .enumerate()
                                                 {
                                                     Control(
-                                                        icon,
-                                                        ["Pencil", "Line", "Rectangle", "Ellipse"]
-                                                            [i]
-                                                            .into(),
-                                                        String::new(),
+                                                        ControlFace {
+                                                            icon,
+                                                            label: [
+                                                                "Pencil",
+                                                                "Line",
+                                                                "Rectangle",
+                                                                "Ellipse",
+                                                            ][i]
+                                                                .into(),
+                                                            detail: String::new(),
+                                                            placement: ControlLabel::Hint,
+                                                        },
                                                         Area::new(
                                                             16. + i as f32 * 52.,
                                                             178.,
@@ -144,7 +155,6 @@ pub fn DesignSystem(width: f32, height: f32) {
                                                         ),
                                                         i == 0,
                                                         true,
-                                                        false,
                                                         ui.hints,
                                                         || {},
                                                     );
