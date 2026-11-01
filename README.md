@@ -10,20 +10,20 @@ The player uses classic Winamp skins. On desktop, the bottom navigation starts h
 
 The appearance setting applies throughout Library, Settings, Skin Studio and the navigation. “From skin background” uses the skin's corner color for surfaces and glass controls, with matching control colors and readable labels. Changing the skin updates this palette immediately.
 
-| Player with equalizer and playlist | Desktop Studio with tool settings and layers |
+| Player with equalizer and playlist | Desktop Studio with tool settings |
 | --- | --- |
-| ![Cranamp player with the Silverplay skin and demo playlist](store/releases/0.1.92/screenshots/macos/00-playback.png) | ![Desktop Skin Studio with pencil properties, exact colour values and layers](store/releases/0.1.92/screenshots/macos/01-studio-canvas.png) |
+| ![Cranamp player with the Silverplay skin and demo playlist](store/releases/0.1.93/screenshots/macos/01-playback.png) | ![Desktop Skin Studio with pencil size, opacity, stroke and texture settings](store/releases/0.1.93/screenshots/macos/02-studio-canvas.png) |
 
 <table>
 <tr><th width="28%">Phone canvas</th><th>Tablet canvas</th></tr>
-<tr><td><img src="store/releases/0.1.92/screenshots/android-phone/02-studio-canvas.png" alt="Phone Studio with drawing tools and size and opacity controls below the canvas"></td><td><img src="store/releases/0.1.92/screenshots/android-tablet-10/02-studio-canvas.png" alt="Tablet Studio with skin parts on the left and pencil properties on the right"></td></tr>
+<tr><td><img src="store/releases/0.1.93/screenshots/android-phone/02-studio-canvas.png" alt="Phone Studio with drawing tools and size and opacity controls below the canvas"></td><td><img src="store/releases/0.1.93/screenshots/android-tablet-10/02-studio-canvas.png" alt="Tablet Studio with skin parts on the left and pencil properties on the right"></td></tr>
 </table>
 
 | Skin colours and live preview | Desktop MCP connection |
 | --- | --- |
-| ![Skin settings with HEX and RGB inputs, playlist colours and visualizer colours](store/releases/0.1.92/screenshots/macos/03-skin-colours.png) | ![Desktop Studio with local MCP server controls and access disclosure](store/releases/0.1.92/screenshots/macos/05-agent-connection.png) |
+| ![Skin settings with HEX and RGB inputs, playlist colours and visualizer colours](store/releases/0.1.93/screenshots/macos/04-skin-colours.png) | ![Desktop Studio with local MCP server controls and access disclosure](store/releases/0.1.93/screenshots/macos/06-agent-connection.png) |
 
-Actual release captures from [0.1.92](store/releases/0.1.92/screenshots.json). Select an image to view it at full size.
+Actual release captures from [0.1.93](store/releases/0.1.93/screenshots.json). Select an image to view it at full size.
 
 ## Features
 

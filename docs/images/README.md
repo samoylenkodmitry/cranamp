@@ -1,7 +1,7 @@
 # Screenshot sources
 
 The main README uses actual player and Studio captures from
-[`store/releases/0.1.92/screenshots.json`](../../store/releases/0.1.92/screenshots.json).
+[`store/releases/0.1.93/screenshots.json`](../../store/releases/0.1.93/screenshots.json).
 That manifest records dimensions, hashes and capture provenance. The files below
 are older device illustrations, retained as source material.
 
