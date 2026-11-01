@@ -8414,10 +8414,19 @@ fn open_url(state: MutableState<WinampState>, url: String) {
                     s.status = format!("Loaded {} Track(s) From URL", s.playlist.len());
                 });
             }
-            Ok(UrlContent::Track(track)) => receive_incoming_tracks(state, vec![track]),
+            Ok(UrlContent::Track(track)) => play_opened_track(state, track),
             Err(message) => state.update(move |s| s.status = message.clone()),
         }
     });
+}
+// A link opened by address plays at once, as Winamp's Open Location does.
+// Without this, a stream added during playback waits at the end of the list.
+fn play_opened_track(state: MutableState<WinampState>, track: Track) {
+    let index = state.get_non_reactive().playlist.len();
+    state.update(|s| {
+        append_playlist_tracks(s, vec![track]);
+    });
+    start_track(state, index);
 }
 async fn url_content(url: &str) -> Result<UrlContent, String> {
     if let Some(format) = media_extension(url)
@@ -8609,8 +8618,34 @@ fn is_supported_playlist_path(path: &str) -> bool {
             .any(|candidate| *candidate == extension)
     })
 }
+// A stream address such as `https://radio.example:9152/;` names no file, so
+// its server names the stream.
 fn title_from_url(url: &str) -> String {
-    playlist_title_from_path(url.split(['?', '#']).next().unwrap_or(url))
+    let address = url.split(['?', '#']).next().unwrap_or(url);
+    let Some((_, rest)) = address.split_once("://") else {
+        return playlist_title_from_path(address);
+    };
+    let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let name = path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or_default();
+    if name.chars().any(char::is_alphanumeric) {
+        return playlist_title_from_path(path);
+    }
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = match host.rsplit_once(':') {
+        Some((name, port)) if port.chars().all(|c| c.is_ascii_digit()) => name,
+        _ => host,
+    };
+    if host.is_empty() {
+        playlist_title_from_path(path)
+    } else {
+        host.to_owned()
+    }
 }
 fn parse_pls_playlist(input: &str, base: PlaylistBase<'_>) -> Vec<Track> {
     type Entry = (Option<String>, Option<String>, Option<f32>);

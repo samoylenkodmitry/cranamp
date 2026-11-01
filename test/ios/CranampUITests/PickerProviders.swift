@@ -606,6 +606,52 @@ final class PickerProviders: XCTestCase {
         waitForExpectations(timeout: timeout)
     }
 
+    // Opens a stream or file link through Add music and requires playback.
+    func testAudioUrl() throws {
+        guard let address = ProcessInfo.processInfo.environment["CRANAMP_TEST_AUDIO_URL"] else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_AUDIO_URL to an audio file or stream link")
+        }
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        if ProcessInfo.processInfo.environment["CRANAMP_UITEST_ATTACH"] == nil {
+            app.launch()
+        } else {
+            app.activate()
+        }
+        let library = app.buttons.matching(identifier: "Library")
+        XCTAssertTrue(library.firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+        library.element(boundBy: library.count - 1).tap()
+        let add = app.buttons["Add music"].exists ? app.buttons["Add music"] : app.buttons["Add music to Library"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10), app.debugDescription)
+        add.tap()
+        let item = app.buttons["Add an audio URL"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 10), app.debugDescription)
+        Thread.sleep(forTimeInterval: 1.0)
+        item.tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10), app.debugDescription)
+        field.tap()
+        let editor = app.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
+        editor.typeText(address)
+        let open = app.buttons["Open address"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5), app.debugDescription)
+        open.tap()
+        let closed = NSPredicate(format: "exists == false")
+        expectation(for: closed, evaluatedWith: open)
+        waitForExpectations(timeout: 10)
+        Thread.sleep(forTimeInterval: 1.0)
+        let player = app.buttons.matching(identifier: "Player")
+        player.element(boundBy: player.count - 1).tap()
+        XCTAssertTrue(app.images.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+:[0-9]{2}")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "audio-url-opened"
+        shot.lifetime = .keepAlways
+        self.add(shot)
+        waitForPlayback(app, timeout: 30)
+        // The test leaves the phone quiet.
+        app.terminate()
+    }
+
     func testRemoteMusicFolder() {
         let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
         app.launch()

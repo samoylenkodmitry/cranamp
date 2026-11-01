@@ -301,6 +301,44 @@ fn adding_a_folder_to_a_stopped_playlist_starts_the_first_new_track() {
     );
 }
 #[test]
+fn a_stream_address_without_a_file_name_is_titled_by_its_server() {
+    assert_eq!(
+        title_from_url("https://naxi128ssl.streaming.rs:9152/;"),
+        "naxi128ssl.streaming.rs"
+    );
+    assert_eq!(
+        title_from_url("http://user@radio.example/"),
+        "radio.example"
+    );
+    assert_eq!(
+        title_from_url("https://example.com/music/song.mp3?x=1"),
+        "song"
+    );
+}
+#[test]
+fn an_opened_link_plays_at_once_while_another_track_plays() {
+    let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
+        cranpose_core::DefaultScheduler,
+    ));
+    let track = || {
+        futures_lite::future::block_on(audio::track_from_picked_file(folder_test_entry()))
+            .unwrap()
+            .unwrap()
+    };
+    let mut initial = WinampState::default();
+    replace_playlist_tracks(&mut initial, vec![track(), track()]);
+    initial.current_index = Some(0);
+    initial.playback = PlaybackState::Playing;
+    let state = cranpose_core::OwnedMutableState::with_runtime(initial, runtime.handle());
+    play_opened_track(state.handle(), track());
+    assert_eq!(state.get().playlist.len(), 3);
+    assert_eq!(
+        state.get().current_index,
+        Some(2),
+        "a link the listener opens must not wait at the end of the playlist"
+    );
+}
+#[test]
 fn a_folder_does_not_interrupt_playback_or_restart_after_stop() {
     for playback in [PlaybackState::Playing, PlaybackState::Paused] {
         let runtime = cranpose_core::Runtime::new(cranpose_core::scheduler_ref(
