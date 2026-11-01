@@ -36,6 +36,10 @@ parts:
     # The store tarball of the Linux job, built from the same commit.
     plugin: dump
     source: cranamp-linux-x86_64-store.tar.gz
+    # Unpacking drops the tarball's single top folder, usr.
+    organize:
+      bin: usr/bin
+      share: usr/share
     stage-packages:
       - libasound2t64
       - libvulkan1
