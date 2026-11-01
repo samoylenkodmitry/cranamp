@@ -60,35 +60,33 @@ public final class StoreGalleryTest {
             assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,stream));
         } finally {bitmap.recycle();}
     }
+    private boolean visible(String name) {
+        return find(ui.getRootInActiveWindow(), name) != null;
+    }
     @Test public void capturePlayerAndStudio() throws Exception {
         output=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null),"store-gallery");
         assertTrue(output.isDirectory() || output.mkdirs());
         try (ActivityScenario<CranposeActivity> scenario=ActivityScenario.launch(CranposeActivity.class)) {
             SystemClock.sleep(5000);
-            capture("01-playback");
-            final Rect window=new Rect();
-            scenario.onActivity(activity -> {
-                android.view.View view=activity.findViewById(android.R.id.content);
-                int[] location=new int[2];
-                view.getLocationOnScreen(location);
-                android.view.WindowInsets insets=view.getRootWindowInsets();
-                window.set(location[0]+insets.getSystemWindowInsetLeft(),
-                        location[1]+insets.getSystemWindowInsetTop(),
-                        location[0]+view.getWidth()-insets.getSystemWindowInsetRight(),
-                        location[1]+view.getHeight()-insets.getSystemWindowInsetBottom());
-            });
-            assertTrue("Player content bounds: "+window,window.width()>0 && window.height()>0);
-            System.out.println("Player content bounds: "+window);
-            float scale=Math.min(window.width()/275f,window.height()/493f);
-            tap(window.left+(window.width()-275*scale)/2+262*scale,window.top+95*scale);
-            capture("debug-settings");
-            click("Open Skin Studio");
-            click("Open working copy");
+            // A wide window starts with the whole player and its navigation
+            // hidden; the logo shows it.
+            if (!visible("Library")) {
+                capture("00-wide-player");
+                click("Toggle navigation");
+            }
+            click("Player");
+            capture("01-player");
+            click("Skin Studio");
+            if (visible("Open working copy")) click("Open working copy");
             capture("02-studio-canvas");
-            click("Skin");
-            capture("03-skin-colours");
-            click("States");
-            capture("04-states");
+            click("Settings");
+            capture("04-settings");
+            click("Choose skin");
+            capture("03-skins");
+            click("Back to Settings");
+            click("Library");
+            capture("05-library");
+            click("Player");
         }
     }
 }
