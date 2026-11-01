@@ -40,6 +40,14 @@ Tag builds produce validation artifacts without distribution credentials. Manual
 
 Packages are retained as workflow artifacts. The `apple_status_only` input reads current Apple versions, recent build processing states and review status without building. The `apple_upload_run` input uploads signed Apple packages from a successful Store packages run. It does not submit a version for review or change its listing. Tags must match Cargo.toml. Set `build_number` above the highest previously uploaded Mac build number, including earlier marketing versions. Leave `build_number` empty to use the increasing Store packages workflow run number. An explicit override must still exceed the highest uploaded Mac build number. The previous Apple release uses build `5`; the replacement uses `6`.
 
+Three more inputs publish packages from a successful signed run without building:
+
+- `play_upload_run` sends `google-play-bundle` to the Google Play production track for review, with the release notes from `store/releases/VERSION/listing-en-US.json`. `play_rollout` sets a staged fraction such as `0.2`. It uses the `CRANAMP_PLAY_SERVICE_ACCOUNT_JSON` secret, a service account with release rights for every app of the developer account.
+- `msstore_upload_run` submits `microsoft-store-msix` through the Microsoft Store CLI. It replaces the package and keeps the current listing; change listing text and screenshots in Partner Center. It uses the `CRANAMP_MS_STORE_TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET` and `SELLER_ID` secrets of the `cranamp-store-submission` app in the `DmitriiSamoilenko.onmicrosoft.com` directory, which has the Developer role in Partner Center.
+- `aur_publish_run` attaches the source and x86_64 store archives of `linux-repository-packages` to the `vVERSION` release, then pushes both recipes with the `faceless33` key in `CRANAMP_AUR_SSH_KEY`. The release must exist; the recipe checksums name those exact archives.
+
+The keys also live in the encrypted Vault folder for local use; none is in this repository.
+
 ## 0.1.88 listing preparation
 
 The reviewed [screenshot gallery](../store/releases/0.1.88/screenshots/index.html) contains 23 real app captures across six Apple and Windows size groups. The [manifest](../store/releases/0.1.88/screenshots.json) records their dimensions, hashes and capture sources. The [listing text](../store/releases/0.1.88/listing-en-US.json) contains each platform description and review notes. Android screenshot groups remain pending.
