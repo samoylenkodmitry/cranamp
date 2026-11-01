@@ -164,7 +164,7 @@ pub(super) fn subfolders(entries: Vec<cranpose_services::ContentEntry>) -> Vec<N
 
 fn browse_from(ui: LibraryUi, address: String) {
     let name = if address == TAILDRIVE {
-        "Tailscale Drive".to_owned()
+        "Taildrive".to_owned()
     } else {
         address.clone()
     };
@@ -1163,7 +1163,7 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 set_text_field_text(&ui.address, "");
                 ui.sheet.set(Sheet::Address(true));
             });
-            SheetAction("Browse Tailscale Drive folders", move || {
+            SheetAction("Browse Taildrive folders", move || {
                 ui.notice.set(String::new());
                 ui.sheet.set(Sheet::Browse);
                 browse_from(ui, TAILDRIVE.to_owned());

@@ -150,24 +150,24 @@ fn network_folder(name: &str) -> NetworkFolder {
 #[test]
 fn browsing_keeps_the_way_back_and_asks_for_each_folder_again() {
     let mut browse = Browse::default();
-    browse.start(network_folder("Tailscale Drive"));
+    browse.start(network_folder("Taildrive"));
     browse.listing = Listing::Ready(vec![network_folder("server")]);
     let started = browse.generation;
 
     browse.enter(network_folder("server"));
     browse.enter(network_folder("music"));
-    assert_eq!(browse.path(), "Tailscale Drive / server / music");
+    assert_eq!(browse.path(), "Taildrive / server / music");
     assert_eq!(browse.listing, Listing::Loading);
     assert_eq!(browse.generation, started.wrapping_add(2));
 
     browse.up();
-    assert_eq!(browse.path(), "Tailscale Drive / server");
+    assert_eq!(browse.path(), "Taildrive / server");
     assert_eq!(browse.trail.last(), Some(&network_folder("server")));
 
     browse.up();
     let at_root = browse.generation;
     browse.up();
-    assert_eq!(browse.path(), "Tailscale Drive");
+    assert_eq!(browse.path(), "Taildrive");
     assert_eq!(
         browse.generation, at_root,
         "the first folder has nothing above it"

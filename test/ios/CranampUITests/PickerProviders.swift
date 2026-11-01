@@ -872,7 +872,7 @@ final class PickerProviders: XCTestCase {
             }
             return false
         }
-        XCTAssertTrue(press("Browse Tailscale Drive folders"), app.debugDescription)
+        XCTAssertTrue(press("Browse Taildrive folders"), app.debugDescription)
         let account = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "@")).firstMatch
         XCTAssertTrue(account.waitForExistence(timeout: 15), app.debugDescription)
         for name in [account.label] + folders {
