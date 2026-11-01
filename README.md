@@ -2,7 +2,7 @@
 
 A music player in Rust with WSZ skin support and a built-in Skin Studio, powered by [Cranpose](https://github.com/samoylenkodmitry/Cranpose).
 
-[Website](https://cranamp.dmitrysamoylenko.in/) · [Google Play](https://play.google.com/store/apps/details?id=com.cranamp.app) · [App Store](https://apps.apple.com/app/id6818451356) · [Microsoft Store](https://apps.microsoft.com/detail/9N0XTC9PGM8X) · [AUR](https://aur.archlinux.org/packages/cranamp) · [Download](https://github.com/samoylenkodmitry/cranamp/releases/latest) · [Play in your browser](https://samoylenkodmitry.github.io/cranamp/) · [Skin Studio](docs/skin-studio/README.md)
+[Website](https://cranamp.dmitrysamoylenko.in/) · [Google Play](https://play.google.com/store/apps/details?id=com.cranamp.app) · [App Store](https://apps.apple.com/app/id6818451356) · [Microsoft Store](https://apps.microsoft.com/detail/9N0XTC9PGM8X) · [Snap Store](https://snapcraft.io/cranamp) · [AUR](https://aur.archlinux.org/packages/cranamp) · [Download](https://github.com/samoylenkodmitry/cranamp/releases/latest) · [Play in your browser](https://samoylenkodmitry.github.io/cranamp/) · [Skin Studio](docs/skin-studio/README.md)
 
 ## Player and Skin Studio
 
@@ -23,6 +23,20 @@ The appearance setting applies throughout Library, Settings, Skin Studio and the
 | --- | --- |
 | ![Skin settings with HEX and RGB inputs, playlist colours and visualizer colours](store/releases/0.1.93/screenshots/macos/04-skin-colours.png) | ![Desktop Studio with local MCP server controls and access disclosure](store/releases/0.1.93/screenshots/macos/06-agent-connection.png) |
 
+<table>
+<tr><th>Player</th><th>Library</th><th>Skins</th><th>Settings</th></tr>
+<tr>
+<td><img src="store/releases/0.1.93/screenshots/ios-6.9/01-player.png" alt="iPhone player with the Catamp skin, equalizer and playlist"></td>
+<td><img src="store/releases/0.1.93/screenshots/ios-6.9/05-library.png" alt="iPhone Library with tracks, albums and saved playlists"></td>
+<td><img src="store/releases/0.1.93/screenshots/ios-6.9/03-skins.png" alt="iPhone skin gallery with bundled Catamp skins"></td>
+<td><img src="store/releases/0.1.93/screenshots/ios-6.9/04-settings.png" alt="iPhone Settings with theme, sound and playlist options"></td>
+</tr>
+</table>
+
+| Wide tablet player | Windows Skin Studio |
+| --- | --- |
+| ![The whole skinned player on a wide Android tablet](store/releases/0.1.93/screenshots/android-tablet-10/00-wide-player.png) | ![Windows Skin Studio with the edited skin previewed on the player](store/releases/0.1.93/screenshots/windows/01-player-preview.png) |
+
 Actual release captures from [0.1.93](store/releases/0.1.93/screenshots.json). Select an image to view it at full size.
 
 ## Features
@@ -33,7 +47,8 @@ Actual release captures from [0.1.93](store/releases/0.1.93/screenshots.json). S
 - **Skin cursors** — Classic `.cur` pointers per region, wherever the platform has a cursor. They keep their drawn size independently of the system cursor-size setting. Every bundled skin draws its own, and the Skin Studio draws and edits them like any other artwork.
 - **Web skin library** — Keep skins and your selection across browser reloads.
 - **Local music** — Open audio files and folders through platform file pickers. See [audio format support](docs/audio-formats.md).
-- **Streaming** — Play audio URLs and your own radio streams.
+- **Streaming** — Play audio URLs and your own radio streams. A link opened by address plays at once.
+- **Network folders** — Play WebDAV folders from their original location. On iPhone, iPad and Android, Add music can browse folders that [Taildrive](https://tailscale.com/kb/1369/taildrive) shares on your Tailscale network and open one of them.
 - **Playlists** — Import M3U/M3U8/PLS, export M3U, and open remote playlists. The mobile Library uses the same import/export actions, saves the full current player playlist under a new name, and supports Select all when adding tracks.
 - **System media controls** — Show the current title, artist, album and available cover on mobile, desktop and the web. Tracks without their own artwork use the Library's album cover.
 - **Playlist tools** — Search, multi-select, sort, randomize and remove tracks.
@@ -58,6 +73,17 @@ Actual release captures from [0.1.93](store/releases/0.1.93/screenshots.json). S
 
 https://github.com/user-attachments/assets/8c768bfa-eb62-44f6-9629-9e0ae89e0210
 
+
+## Install
+
+| Platform | Where |
+| --- | --- |
+| Android | [Google Play](https://play.google.com/store/apps/details?id=com.cranamp.app), or APKs from [releases](https://github.com/samoylenkodmitry/cranamp/releases/latest) |
+| iPhone, iPad and Mac | [App Store](https://apps.apple.com/app/id6818451356) |
+| Windows | [Microsoft Store](https://apps.microsoft.com/detail/9N0XTC9PGM8X), or the ZIP from releases |
+| Ubuntu and other Linux | [Snap Store](https://snapcraft.io/cranamp): `sudo snap install cranamp`; DEB, RPM and tarball from releases |
+| Arch Linux | `yay -S cranamp-bin`, or `yay -S cranamp` to build from source |
+| Web | [Play in your browser](https://samoylenkodmitry.github.io/cranamp/) |
 
 ## Distribution
 
