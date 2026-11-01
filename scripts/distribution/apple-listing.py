@@ -15,9 +15,12 @@ def stage(platform, destination):
     listing = json.loads((release / "listing-en-US.json").read_text())
     manifest = json.loads((release / "screenshots.json").read_text())
     assert listing["version"] == manifest["version"] == version
-    families = {"macos"} if platform == "macos" else {"ios-small", "ios-6.9", "ipad-11", "ipad-13"}
+    # App Store Connect scales the largest iPhone and iPad sets to the smaller
+    # displays, so those two are required and the others are optional.
+    required = {"macos"} if platform == "macos" else {"ios-6.9", "ipad-13"}
+    families = required if platform == "macos" else required | {"ios-small", "ipad-11"}
     galleries = [g for g in manifest["galleries"] if g["family"] in families]
-    assert {g["family"] for g in galleries} == families
+    assert required <= {g["family"] for g in galleries}
     for gallery in galleries:
         assert gallery["status"] == "ready"
         assert 1 <= len(gallery["images"]) <= 10

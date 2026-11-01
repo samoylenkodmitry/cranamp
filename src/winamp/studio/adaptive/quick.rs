@@ -17,17 +17,19 @@ pub(super) fn Properties(ui: Ui, area: Area) {
     workbench::Properties(
         ui.clone(),
         Area::new(area.x + sample_w, area.y, area.w - sample_w - 48., 64.),
-        false,
+        workbench::PropertyFlow::Row,
     );
     let next = ui.clone();
     Control(
-        Icon::Settings,
-        "Tool settings".into(),
-        String::new(),
+        ControlFace {
+            icon: Icon::Settings,
+            label: "Tool settings".into(),
+            detail: String::new(),
+            placement: ControlLabel::Hint,
+        },
         Area::new(area.x + area.w - 48., area.y + 10., 44., 44.),
         false,
         true,
-        false,
         ui.hints,
         move || next.open_sheet(Sheet::Advanced(4)),
     );
@@ -69,13 +71,15 @@ pub(super) fn Navigation(ui: Ui, area: Area) {
     let grid = ui.shared.lock().unwrap().view.grid;
     let next = ui.clone();
     Control(
-        Icon::Grid,
-        "Pixel grid".into(),
-        String::new(),
+        ControlFace {
+            icon: Icon::Grid,
+            label: "Pixel grid".into(),
+            detail: String::new(),
+            placement: ControlLabel::Hint,
+        },
         Area::new(area.x + 88., area.y + 12., 44., 44.),
         grid,
         true,
-        false,
         ui.hints,
         move || update(&next.shared, next.tick, json!({"grid":!grid})),
     );
@@ -108,13 +112,15 @@ pub(super) fn NavigationBar(ui: Ui, area: Area) {
     let grid = ui.shared.lock().unwrap().view.grid;
     let next = ui.clone();
     Control(
-        Icon::Grid,
-        "Pixel grid".into(),
-        String::new(),
+        ControlFace {
+            icon: Icon::Grid,
+            label: "Pixel grid".into(),
+            detail: String::new(),
+            placement: ControlLabel::Hint,
+        },
         Area::new(area.x + 68., area.y, 44., 44.),
         grid,
         true,
-        false,
         ui.hints,
         move || update(&next.shared, next.tick, json!({"grid":!grid})),
     );

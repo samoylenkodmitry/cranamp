@@ -290,6 +290,55 @@ final class PickerProviders: XCTestCase {
         app.buttons["Library Tracks tab"].tap()
     }
 
+    /// The store gallery: each tab of the installed store app, through its
+    /// public controls, with no user media.
+    func testStoreGallery() throws {
+        guard ProcessInfo.processInfo.environment["CRANAMP_TEST_STORE_GALLERY"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_STORE_GALLERY=1")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        func tab(_ name: String) {
+            let query = app.buttons.matching(identifier: name)
+            XCTAssertTrue(query.firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+            query.element(boundBy: query.count - 1).tap()
+        }
+        func capture(_ name: String) {
+            // Tab and sheet animations settle before the capture.
+            Thread.sleep(forTimeInterval: 2)
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = name
+            image.lifetime = .keepAlways
+            add(image)
+        }
+        XCTAssertTrue(app.buttons["Play"].firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+        // A wide screen starts with the whole player and its navigation hidden;
+        // the logo shows it.
+        if !app.buttons.matching(identifier: "Library").firstMatch.waitForExistence(timeout: 3) {
+            capture("00-wide-player")
+            app.buttons["Toggle navigation"].tap()
+        }
+        tab("Player")
+        capture("01-player")
+        tab("Library")
+        capture("02-library")
+        tab("Skin Studio")
+        if app.buttons["Open working copy"].waitForExistence(timeout: 5) {
+            app.buttons["Open working copy"].tap()
+        }
+        XCTAssertTrue(app.buttons["Canvas"].waitForExistence(timeout: 10), app.debugDescription)
+        capture("03-studio-canvas")
+        tab("Settings")
+        XCTAssertTrue(app.buttons["Choose skin"].waitForExistence(timeout: 10), app.debugDescription)
+        capture("04-settings")
+        app.buttons["Choose skin"].tap()
+        XCTAssertTrue(app.buttons["Back to Settings"].waitForExistence(timeout: 10))
+        capture("05-skins")
+        app.buttons["Back to Settings"].tap()
+        tab("Player")
+    }
+
     func testAppearanceThemes() throws {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: Self.appBundleId)

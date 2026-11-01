@@ -126,7 +126,7 @@ pub(super) fn SettingsScreen(
             })),
             move || {
                 if legal.get() != about::Page::Settings {
-                    about::Content(legal, true);
+                    about::Content(legal, about::AboutStyle::Liquid);
                     return;
                 }
                 if page.get() != Page::Main {
@@ -151,7 +151,13 @@ pub(super) fn SettingsScreen(
                                 },
                                 chrome::BACK,
                             );
-                            Label(title, Modifier::empty().weight(1.), 28., colors.label, true);
+                            Label(
+                                Modifier::empty().weight(1.),
+                                title,
+                                28.,
+                                colors.label,
+                                FontWeight::SEMI_BOLD,
+                            );
                             if page.get() == Page::Skins {
                                 GlassIconButton(
                                     Modifier::empty().content_description("Open skin file"),
@@ -164,7 +170,13 @@ pub(super) fn SettingsScreen(
                         },
                     );
                 } else {
-                    Label("Settings", Modifier::empty(), 28., colors.label, true);
+                    Label(
+                        Modifier::empty(),
+                        "Settings",
+                        28.,
+                        colors.label,
+                        FontWeight::SEMI_BOLD,
+                    );
                 }
                 match page.get() {
                     Page::Skins => {
@@ -272,18 +284,18 @@ pub(super) fn SettingsScreen(
                                                 ),
                                                 move || {
                                                     Label(
-                                                        "Player skin",
                                                         Modifier::empty(),
+                                                        "Player skin",
                                                         11.,
                                                         colors.secondary_label,
-                                                        false,
+                                                        FontWeight::NORMAL,
                                                     );
                                                     Label(
-                                                        title.clone(),
                                                         Modifier::empty().fill_max_width(),
+                                                        title.clone(),
                                                         15.,
                                                         colors.label,
-                                                        true,
+                                                        FontWeight::SEMI_BOLD,
                                                     );
                                                 },
                                             );
@@ -361,7 +373,7 @@ pub(super) fn SettingsScreen(
                                 "Support and common questions",
                                 move || about::open_link(about::SUPPORT_URL, error),
                             );
-                            about::LinkError(error, true);
+                            about::LinkError(error, about::AboutStyle::Liquid);
                         });
                         Text(
                             "Your audio files stay in their original location.",
@@ -411,11 +423,15 @@ fn ThemeChoices(appearance: theme::Ui) {
                                         .vertical_arrangement(LinearArrangement::SpacedBy(5.)),
                                     move || {
                                         Label(
-                                            mode.label(),
                                             Modifier::empty().fill_max_width(),
+                                            mode.label(),
                                             16.,
                                             colors.label,
-                                            selected,
+                                            if selected {
+                                                FontWeight::SEMI_BOLD
+                                            } else {
+                                                FontWeight::NORMAL
+                                            },
                                         );
                                         Text(
                                             mode.description(),
@@ -477,18 +493,18 @@ fn NavigationRow(title: &'static str, subtitle: &'static str, action: impl Fn() 
                         ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(4.)),
                         move || {
                             Label(
-                                title,
                                 Modifier::empty().fill_max_width(),
+                                title,
                                 15.,
                                 colors.label,
-                                false,
+                                FontWeight::NORMAL,
                             );
                             Label(
-                                subtitle,
                                 Modifier::empty().fill_max_width(),
+                                subtitle,
                                 11.,
                                 colors.secondary_label,
-                                false,
+                                FontWeight::NORMAL,
                             );
                         },
                     );
@@ -514,13 +530,14 @@ fn BalanceControl(player: MutableState<WinampState>) {
                 RowSpec::default().vertical_alignment(VerticalAlignment::CenterVertically),
                 move || {
                     Label(
-                        "Balance",
                         Modifier::empty().weight(1.),
+                        "Balance",
                         15.,
                         colors.label,
-                        false,
+                        FontWeight::NORMAL,
                     );
                     Label(
+                        Modifier::empty(),
                         if (balance - 0.5).abs() < 0.01 {
                             "Centered".into()
                         } else {
@@ -530,10 +547,9 @@ fn BalanceControl(player: MutableState<WinampState>) {
                                 ((balance - 0.5).abs() * 200.).round()
                             )
                         },
-                        Modifier::empty(),
                         11.,
                         colors.secondary_label,
-                        false,
+                        FontWeight::NORMAL,
                     );
                 },
             );
@@ -543,7 +559,13 @@ fn BalanceControl(player: MutableState<WinampState>) {
                     .vertical_alignment(VerticalAlignment::CenterVertically)
                     .horizontal_arrangement(LinearArrangement::SpacedBy(8.)),
                 move || {
-                    Label("L", Modifier::empty(), 11., colors.secondary_label, false);
+                    Label(
+                        Modifier::empty(),
+                        "L",
+                        11.,
+                        colors.secondary_label,
+                        FontWeight::NORMAL,
+                    );
                     LiquidSlider(
                         Modifier::empty()
                             .weight(1.)
@@ -556,7 +578,13 @@ fn BalanceControl(player: MutableState<WinampState>) {
                             })
                         },
                     );
-                    Label("R", Modifier::empty(), 11., colors.secondary_label, false);
+                    Label(
+                        Modifier::empty(),
+                        "R",
+                        11.,
+                        colors.secondary_label,
+                        FontWeight::NORMAL,
+                    );
                     GlassButton(
                         Modifier::empty()
                             .height(44.)
@@ -592,11 +620,11 @@ fn PlaybackSettings(player: MutableState<WinampState>) {
         });
         chrome::Divider();
         Label(
-            format!("Volume  {}%", (player.get().volume * 100.).round()),
             Modifier::empty().padding_symmetric(0., 14.),
+            format!("Volume  {}%", (player.get().volume * 100.).round()),
             15.,
             colors.label,
-            false,
+            FontWeight::NORMAL,
         );
         LiquidSlider(
             Modifier::empty()
@@ -719,11 +747,11 @@ fn SkinGrid(
                                         ),
                                         move || {
                                             Label(
-                                                name.clone(),
                                                 Modifier::empty().weight(1.),
+                                                name.clone(),
                                                 13.,
                                                 colors.label,
-                                                true,
+                                                FontWeight::SEMI_BOLD,
                                             );
                                             if selected {
                                                 icons::Icon(icons::CHECK, None, 17., colors.accent);
@@ -731,15 +759,15 @@ fn SkinGrid(
                                         },
                                     );
                                     Label(
-                                        if selected { "Current" } else { "Tap to apply" },
                                         Modifier::empty(),
+                                        if selected { "Current" } else { "Tap to apply" },
                                         11.,
                                         if selected {
                                             colors.accent
                                         } else {
                                             colors.secondary_label
                                         },
-                                        false,
+                                        FontWeight::NORMAL,
                                     );
                                 },
                             );

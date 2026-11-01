@@ -1,36 +1,36 @@
 use super::*;
 use cranpose_ui::Modifiers;
 
-fn press(key: KeyCode) -> KeyEvent {
+fn press(key: Key) -> KeyEvent {
     KeyEvent::key_down(key, "")
 }
 
 #[test]
 fn the_winamp_letters_drive_the_transport() {
-    assert_eq!(winamp_key(&press(KeyCode::Z)), Some(WinampKey::Previous));
-    assert_eq!(winamp_key(&press(KeyCode::X)), Some(WinampKey::Play));
-    assert_eq!(winamp_key(&press(KeyCode::C)), Some(WinampKey::Pause));
-    assert_eq!(winamp_key(&press(KeyCode::V)), Some(WinampKey::Stop));
-    assert_eq!(winamp_key(&press(KeyCode::B)), Some(WinampKey::Next));
-    assert_eq!(winamp_key(&press(KeyCode::L)), Some(WinampKey::OpenFiles));
+    assert_eq!(winamp_key(&press(Key::Z)), Some(WinampKey::Previous));
+    assert_eq!(winamp_key(&press(Key::X)), Some(WinampKey::Play));
+    assert_eq!(winamp_key(&press(Key::C)), Some(WinampKey::Pause));
+    assert_eq!(winamp_key(&press(Key::V)), Some(WinampKey::Stop));
+    assert_eq!(winamp_key(&press(Key::B)), Some(WinampKey::Next));
+    assert_eq!(winamp_key(&press(Key::L)), Some(WinampKey::OpenFiles));
 }
 
 #[test]
 fn the_arrows_seek_and_change_the_volume() {
     assert_eq!(
-        winamp_key(&press(KeyCode::ArrowLeft)),
+        winamp_key(&press(Key::DirectionLeft)),
         Some(WinampKey::SeekBack)
     );
     assert_eq!(
-        winamp_key(&press(KeyCode::ArrowRight)),
+        winamp_key(&press(Key::DirectionRight)),
         Some(WinampKey::SeekForward)
     );
     assert_eq!(
-        winamp_key(&press(KeyCode::ArrowUp)),
+        winamp_key(&press(Key::DirectionUp)),
         Some(WinampKey::VolumeUp)
     );
     assert_eq!(
-        winamp_key(&press(KeyCode::ArrowDown)),
+        winamp_key(&press(Key::DirectionDown)),
         Some(WinampKey::VolumeDown)
     );
 }
@@ -51,11 +51,11 @@ fn a_key_held_with_a_system_modifier_is_left_to_the_platform() {
             ..Modifiers::NONE
         },
     ] {
-        let copy = KeyEvent::key_down_with_modifiers(KeyCode::C, "c", modifiers);
+        let copy = KeyEvent::key_down_with_modifiers(Key::C, "c", modifiers);
         assert_eq!(winamp_key(&copy), None, "{modifiers:?}+C is the platform's");
     }
     let shifted = KeyEvent::key_down_with_modifiers(
-        KeyCode::B,
+        Key::B,
         "B",
         Modifiers {
             shift: true,
@@ -77,19 +77,13 @@ fn alt_with_w_e_and_g_opens_and_closes_winamps_windows() {
             },
         )
     };
-    assert_eq!(window_key(&alt(KeyCode::W)), Some(WinampWindowKey::Main));
-    assert_eq!(
-        window_key(&alt(KeyCode::E)),
-        Some(WinampWindowKey::Playlist)
-    );
-    assert_eq!(
-        window_key(&alt(KeyCode::G)),
-        Some(WinampWindowKey::Equalizer)
-    );
-    assert_eq!(window_key(&alt(KeyCode::Q)), None);
-    assert_eq!(window_key(&press(KeyCode::W)), None, "W alone is not Alt+W");
+    assert_eq!(window_key(&alt(Key::W)), Some(WinampWindowKey::Main));
+    assert_eq!(window_key(&alt(Key::E)), Some(WinampWindowKey::Playlist));
+    assert_eq!(window_key(&alt(Key::G)), Some(WinampWindowKey::Equalizer));
+    assert_eq!(window_key(&alt(Key::Q)), None);
+    assert_eq!(window_key(&press(Key::W)), None, "W alone is not Alt+W");
     let ctrl_alt = KeyEvent::key_down_with_modifiers(
-        KeyCode::W,
+        Key::W,
         "",
         Modifiers {
             alt: true,
@@ -102,8 +96,8 @@ fn alt_with_w_e_and_g_opens_and_closes_winamps_windows() {
 
 #[test]
 fn keys_that_are_not_winamp_keys_pass_through() {
-    assert_eq!(winamp_key(&press(KeyCode::Q)), None);
-    assert_eq!(winamp_key(&press(KeyCode::Space)), None);
+    assert_eq!(winamp_key(&press(Key::Q)), None);
+    assert_eq!(winamp_key(&press(Key::Spacebar)), None);
 }
 
 #[test]

@@ -81,10 +81,12 @@ fn RowAction(
     action: impl Fn() + 'static,
 ) {
     desktop::ListRow(
-        Some(icon),
-        label,
-        detail.into(),
-        String::new(),
+        desktop::ListRowFace {
+            icon: Some(icon),
+            label,
+            hint: detail.into(),
+            metadata: String::new(),
+        },
         area,
         false,
         hints,
@@ -92,7 +94,8 @@ fn RowAction(
     );
 }
 #[composable]
-pub(super) fn Projects(ui: Ui, actions: Actions, layout: Layout, hosted: bool) {
+pub(super) fn Projects(ui: Ui, actions: Actions, layout: Layout, hosting: StudioHosting) {
+    let hosted = hosting == StudioHosting::Player;
     let _ = ui.tick.get();
     let wide = layout.width >= 600.;
     let width = (layout.width - 32.).min(880.);
@@ -229,8 +232,17 @@ pub(super) fn Projects(ui: Ui, actions: Actions, layout: Layout, hosted: bool) {
         },
     );
 }
+/// How the part list arranges its entries.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PartArrangement {
+    /// Cards in columns, in the parts sheet.
+    Grid,
+    /// One column beside the canvas.
+    Rail,
+}
 #[composable]
-pub(super) fn PartList(ui: Ui, area: Area, grid: bool) {
+pub(super) fn PartList(ui: Ui, area: Area, arrangement: PartArrangement) {
+    let grid = arrangement == PartArrangement::Grid;
     let revision = ui.tick.get();
     let d = ui.shared.clone();
     let bitmap = cranpose_core::rememberKeyed((d.clone(), revision), move |_| {
@@ -395,10 +407,12 @@ pub(super) fn ToolSettings(ui: Ui, area: Area) {
         }
         let shared = ui.shared.clone();
         desktop::ListRow(
-            Some(Icon::Grid),
-            "Pixel grid".into(),
-            "Show pixel boundaries".into(),
-            if view.grid { "On" } else { "Off" }.into(),
+            desktop::ListRowFace {
+                icon: Some(Icon::Grid),
+                label: "Pixel grid".into(),
+                hint: "Show pixel boundaries".into(),
+                metadata: if view.grid { "On" } else { "Off" }.into(),
+            },
             Area::new(0., y + 48., area.w, 44.),
             view.grid,
             ui.hints,
@@ -480,20 +494,22 @@ pub(super) fn SheetPanel(ui: Ui, area: Area, sheet: Sheet, revision: u64) {
             desktop::RowLabel(heading.clone(), 12., 16., area.w - 64., 16., studio_fg());
             let close = ui.clone();
             Control(
-                Icon::Close,
-                "Close panel".into(),
-                "Return to the canvas".into(),
+                ControlFace {
+                    icon: Icon::Close,
+                    label: "Close panel".into(),
+                    detail: "Return to the canvas".into(),
+                    placement: ControlLabel::Hint,
+                },
                 Area::new(area.w - 48., 4., 44., 40.),
                 false,
                 true,
-                false,
                 ui.hints,
                 move || close.open_sheet(Sheet::None),
             );
             let body = Area::new(0., 48., area.w, area.h - 48.);
             match sheet {
                 Sheet::Scopes => ScopeList(ui.clone(), body),
-                Sheet::Parts => PartList(ui.clone(), body, true),
+                Sheet::Parts => PartList(ui.clone(), body, PartArrangement::Grid),
                 Sheet::Targets => desktop::SpriteTargets(ui.clone(), body, ui.screen.get()),
                 Sheet::Sources => desktop::Sources(ui.clone(), body),
                 Sheet::Tools => ToolSettings(ui.clone(), body),
@@ -529,10 +545,12 @@ fn ScopeList(ui: Ui, area: Area) {
         {
             let next = ui.clone();
             desktop::ListRow(
-                Some(icon),
-                name.into(),
-                String::new(),
-                String::new(),
+                desktop::ListRowFace {
+                    icon: Some(icon),
+                    label: name.into(),
+                    hint: String::new(),
+                    metadata: String::new(),
+                },
                 Area::new(8., i as f32 * 48., area.w - 16., 44.),
                 ui.screen.get() == screen,
                 ui.hints,
@@ -715,9 +733,12 @@ pub(super) fn Preview(ui: Ui, layout: Layout, revision: u64) {
             }
         };
         Control(
-            icon,
-            label.into(),
-            "Inspect the skin in this visual state".into(),
+            ControlFace {
+                icon,
+                label: label.into(),
+                detail: "Inspect the skin in this visual state".into(),
+                placement: ControlLabel::Caption,
+            },
             Area::new(
                 layout.width / 2. - 104. + i as f32 * 108.,
                 layout.height - 88.,
@@ -726,14 +747,14 @@ pub(super) fn Preview(ui: Ui, layout: Layout, revision: u64) {
             ),
             on,
             true,
-            true,
             ui.hints,
             move || state(&d, json!({key:!on})),
         );
     }
 }
 #[composable]
-pub(super) fn SaveScreen(ui: Ui, actions: Actions, layout: Layout, hosted: bool) {
+pub(super) fn SaveScreen(ui: Ui, actions: Actions, layout: Layout, hosting: StudioHosting) {
+    let hosted = hosting == StudioHosting::Player;
     let width = (layout.width - 32.).min(600.);
     ScrollArea(
         Area::new(
@@ -863,10 +884,12 @@ fn History(ui: Ui, area: Area) {
             let cursor = entry["cursor"].as_u64().unwrap_or(0) as usize;
             let next = ui.clone();
             desktop::ListRow(
-                Some(Icon::History),
-                entry["label"].as_str().unwrap_or("Edit").to_owned(),
-                entry["source"].as_str().unwrap_or("").to_owned(),
-                String::new(),
+                desktop::ListRowFace {
+                    icon: Some(Icon::History),
+                    label: entry["label"].as_str().unwrap_or("Edit").to_owned(),
+                    hint: entry["source"].as_str().unwrap_or("").to_owned(),
+                    metadata: String::new(),
+                },
                 Area::new(4., 40. + index as f32 * 52., area.w - 8., 48.),
                 entry["current"] == true,
                 ui.hints,

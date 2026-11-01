@@ -3,7 +3,7 @@
 //! the platform, so the browser's and the system's own shortcuts keep working,
 //! except Winamp's own Alt keys for its windows.
 
-use cranpose_ui::{KeyCode, KeyEvent, KeyEventType};
+use cranpose_ui::{Key, KeyEvent, KeyEventType};
 
 /// How far the arrow keys move the song, in seconds.
 pub(super) const SEEK_STEP_SECONDS: f32 = 5.0;
@@ -26,21 +26,24 @@ pub(super) enum WinampKey {
 
 /// The player action a key press stands for, if any.
 pub(super) fn winamp_key(event: &KeyEvent) -> Option<WinampKey> {
-    let held = event.modifiers;
-    if event.event_type != KeyEventType::KeyDown || held.ctrl || held.alt || held.meta {
+    if event.type_() != KeyEventType::KeyDown
+        || event.is_ctrl_pressed()
+        || event.is_alt_pressed()
+        || event.is_meta_pressed()
+    {
         return None;
     }
-    Some(match event.key_code {
-        KeyCode::Z => WinampKey::Previous,
-        KeyCode::X => WinampKey::Play,
-        KeyCode::C => WinampKey::Pause,
-        KeyCode::V => WinampKey::Stop,
-        KeyCode::B => WinampKey::Next,
-        KeyCode::ArrowLeft => WinampKey::SeekBack,
-        KeyCode::ArrowRight => WinampKey::SeekForward,
-        KeyCode::ArrowUp => WinampKey::VolumeUp,
-        KeyCode::ArrowDown => WinampKey::VolumeDown,
-        KeyCode::L => WinampKey::OpenFiles,
+    Some(match event.key() {
+        Key::Z => WinampKey::Previous,
+        Key::X => WinampKey::Play,
+        Key::C => WinampKey::Pause,
+        Key::V => WinampKey::Stop,
+        Key::B => WinampKey::Next,
+        Key::DirectionLeft => WinampKey::SeekBack,
+        Key::DirectionRight => WinampKey::SeekForward,
+        Key::DirectionUp => WinampKey::VolumeUp,
+        Key::DirectionDown => WinampKey::VolumeDown,
+        Key::L => WinampKey::OpenFiles,
         _ => return None,
     })
 }
@@ -56,14 +59,17 @@ pub(super) enum WinampWindowKey {
 /// The window Alt with a key opens or closes, if any: W the main window, E
 /// the playlist and G the equalizer.
 pub(super) fn window_key(event: &KeyEvent) -> Option<WinampWindowKey> {
-    let held = event.modifiers;
-    if event.event_type != KeyEventType::KeyDown || !held.alt || held.ctrl || held.meta {
+    if event.type_() != KeyEventType::KeyDown
+        || !event.is_alt_pressed()
+        || event.is_ctrl_pressed()
+        || event.is_meta_pressed()
+    {
         return None;
     }
-    Some(match event.key_code {
-        KeyCode::W => WinampWindowKey::Main,
-        KeyCode::E => WinampWindowKey::Playlist,
-        KeyCode::G => WinampWindowKey::Equalizer,
+    Some(match event.key() {
+        Key::W => WinampWindowKey::Main,
+        Key::E => WinampWindowKey::Playlist,
+        Key::G => WinampWindowKey::Equalizer,
         _ => return None,
     })
 }

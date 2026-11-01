@@ -39,14 +39,23 @@ fn paint(
         doc.revision += 1;
     }
 }
+/// Whether the canvas takes paint.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum CanvasAccess {
+    Edit,
+    /// The States review: the canvas shows the art and takes no strokes.
+    ReadOnly,
+}
 #[composable]
 pub(super) fn EditorCanvas(
     ui: super::Ui,
     area: Area,
     enabled: bool,
-    read_only: bool,
-    desktop: bool,
+    access: CanvasAccess,
+    class: WidthClass,
 ) {
+    let desktop = class == WidthClass::Desktop;
+    let read_only = access == CanvasAccess::ReadOnly;
     let crop = if ui.screen.get() == Screen::Sprites {
         ui.sprite_crop.get()
     } else {

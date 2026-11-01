@@ -15,8 +15,8 @@ pub(in crate::winamp) fn DesktopNavigation(
         BoxSpec::default(),
         move || {
             NavigationBar(
-                player,
                 Modifier::empty().absolute_offset((width - nav_width) * 0.5, NAV_TOP_INSET),
+                player,
                 nav_width,
             )
         },
@@ -27,8 +27,8 @@ pub(in crate::winamp) fn DesktopNavigation(
 pub(in crate::winamp) fn DesktopWorkspace(stack: WinampWindowStackSpec) {
     let player = stack.state;
     let skin = stack.skin_state;
-    let appearance = theme::remember_theme();
-    let library = library::remember_library_ui();
+    let appearance = theme::rememberTheme();
+    let library = library::rememberLibraryUi();
     library::PlaylistEffects(player, library);
     let library_window = rememberWindowState(760.0, 780.0);
     let studio_window = rememberWindowState(1140.0, 820.0);

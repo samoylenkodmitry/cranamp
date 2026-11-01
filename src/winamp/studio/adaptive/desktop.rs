@@ -6,13 +6,15 @@ pub(super) fn ScopeSelector(ui: Ui, layout: Layout) {
     if !desktop && layout.height < 500. {
         let next = ui.clone();
         Control(
-            Icon::Canvas,
-            "Workspaces".into(),
-            "Canvas, sprites, states, skin settings and preview".into(),
+            ControlFace {
+                icon: Icon::Canvas,
+                label: "Workspaces".into(),
+                detail: "Canvas, sprites, states, skin settings and preview".into(),
+                placement: ControlLabel::Hint,
+            },
             Area::new(56., 6., 44., 44.),
             false,
             true,
-            false,
             ui.hints,
             move || next.open_sheet(Sheet::Scopes),
         );
@@ -35,10 +37,12 @@ pub(super) fn ScopeSelector(ui: Ui, layout: Layout) {
         let area = Area::new(x + i as f32 * width / 5., y, width / 5., 44.);
         if desktop || layout.width >= 600. {
             ListRow(
-                Some(icon),
-                name.into(),
-                String::new(),
-                String::new(),
+                ListRowFace {
+                    icon: Some(icon),
+                    label: name.into(),
+                    hint: String::new(),
+                    metadata: String::new(),
+                },
                 area,
                 ui.screen.get() == screen,
                 ui.hints,
@@ -46,13 +50,15 @@ pub(super) fn ScopeSelector(ui: Ui, layout: Layout) {
             );
         } else {
             Control(
-                icon,
-                name.into(),
-                String::new(),
+                ControlFace {
+                    icon,
+                    label: name.into(),
+                    detail: String::new(),
+                    placement: ControlLabel::Hint,
+                },
                 area,
                 ui.screen.get() == screen,
                 true,
-                false,
                 ui.hints,
                 move || workbench::switch_scope(&next, screen),
             );
@@ -60,18 +66,29 @@ pub(super) fn ScopeSelector(ui: Ui, layout: Layout) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What a list row shows: an optional icon, its name, the hint for hovering
+/// it, and the metadata at its end.
+#[derive(Clone, PartialEq)]
+pub(super) struct ListRowFace {
+    pub icon: Option<Icon>,
+    pub label: String,
+    pub hint: String,
+    pub metadata: String,
+}
 #[composable]
 pub(super) fn ListRow(
-    icon: Option<Icon>,
-    label: String,
-    hint: String,
-    metadata: String,
+    face: ListRowFace,
     area: Area,
     selected: bool,
     hints: Hints,
     action: impl Fn() + 'static,
 ) {
+    let ListRowFace {
+        icon,
+        label,
+        hint,
+        metadata,
+    } = face;
     let source = cranpose_ui::rememberMutableInteractionSource();
     let hovered = cranpose_ui::collect_is_hovered_as_state(&source).get();
     let help = Hint {
@@ -418,7 +435,11 @@ pub(super) fn Inspector(ui: Ui, area: Area, screen: Screen, _revision: u64, _pre
         } else {
             workbench::PropertyHeading(ui.clone(), Area::new(0., 0., area.w, 40.));
             previews::ToolSample(ui.clone(), Area::new(12., 44., area.w - 24., 52.));
-            workbench::Properties(ui.clone(), Area::new(4., 104., area.w - 8., 64.), false);
+            workbench::Properties(
+                ui.clone(),
+                Area::new(4., 104., area.w - 8., 64.),
+                workbench::PropertyFlow::Row,
+            );
             if extra_h > 0. {
                 properties::Essentials(ui.clone(), Area::new(0., 168., area.w, extra_h));
             }
@@ -455,13 +476,15 @@ fn CompactLayers(ui: Ui, area: Area) {
         Label("Layers".into(), 12., 16., area.w - 80., 11., studio_dim());
         let next = ui.clone();
         Control(
-            Icon::Add,
-            "Add paint layer".into(),
-            "Add a layer above the source artwork".into(),
+            ControlFace {
+                icon: Icon::Add,
+                label: "Add paint layer".into(),
+                detail: "Add a layer above the source artwork".into(),
+                placement: ControlLabel::Hint,
+            },
             Area::new(area.w - 56., 0., 48., 48.),
             false,
             true,
-            false,
             ui.hints,
             move || plane_action(&next.shared, json!({"action":"add"})),
         );
@@ -499,13 +522,15 @@ fn CompactLayers(ui: Ui, area: Area) {
                     let next = ui.clone();
                     let key = id.clone();
                     Control(
-                        icon,
-                        format!("{} {}", if i == 0 { "Visibility" } else { "Lock" }, id),
-                        String::new(),
+                        ControlFace {
+                            icon,
+                            label: format!("{} {}", if i == 0 { "Visibility" } else { "Lock" }, id),
+                            detail: String::new(),
+                            placement: ControlLabel::Hint,
+                        },
                         Area::new(area.w - 76. + i as f32 * 38., top, 36., 36.),
                         on,
                         true,
-                        false,
                         ui.hints,
                         move || {
                             plane_action(

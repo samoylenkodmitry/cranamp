@@ -66,10 +66,10 @@ pub fn open_archive(bytes: &[u8]) -> Result<zip::ZipArchive<Cursor<&[u8]>>> {
     let mut names = std::collections::HashSet::new();
     for index in 0..archive.len() {
         let entry = archive.by_index(index)?;
+        let name = entry.name()?;
         anyhow::ensure!(
             entry.size() <= MAX_ENTRY_BYTES as u64,
-            "Archive entry exceeds 16 MiB: {}",
-            entry.name()
+            "Archive entry exceeds 16 MiB: {name}"
         );
         total = total
             .checked_add(entry.size())
@@ -79,9 +79,8 @@ pub fn open_archive(bytes: &[u8]) -> Result<zip::ZipArchive<Cursor<&[u8]>>> {
             "Expanded archive exceeds 128 MiB"
         );
         anyhow::ensure!(
-            names.insert(entry.name().replace('\\', "/").to_ascii_lowercase()),
-            "Duplicate archive entry: {}",
-            entry.name()
+            names.insert(name.replace('\\', "/").to_ascii_lowercase()),
+            "Duplicate archive entry: {name}"
         );
     }
     Ok(archive)

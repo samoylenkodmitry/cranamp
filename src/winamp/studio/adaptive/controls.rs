@@ -320,19 +320,39 @@ fn instrument_cursor(icon: Icon) -> (ImageBitmap, [u32; 2]) {
         [4, 4],
     )
 }
-#[allow(clippy::too_many_arguments)]
+/// Where a control shows its name.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ControlLabel {
+    /// Under the icon; the hover hint shows the detail.
+    Caption,
+    /// In the hover hint only.
+    Hint,
+}
+/// What a control shows: its icon and name, the detail its hint adds, and
+/// where the name goes.
+#[derive(Clone, PartialEq)]
+pub(super) struct ControlFace {
+    pub icon: Icon,
+    pub label: String,
+    pub detail: String,
+    pub placement: ControlLabel,
+}
 #[composable]
 pub(super) fn Control(
-    icon: Icon,
-    label: String,
-    detail: String,
+    face: ControlFace,
     area: Area,
     selected: bool,
     enabled: bool,
-    caption: bool,
     hints: Hints,
     click: impl Fn() + 'static,
 ) {
+    let ControlFace {
+        icon,
+        label,
+        detail,
+        placement,
+    } = face;
+    let caption = placement == ControlLabel::Caption;
     let source = cranpose_ui::rememberMutableInteractionSource();
     let hovered = cranpose_ui::collect_is_hovered_as_state(&source).get();
     let pressed = cranpose_ui::collect_is_pressed_as_state(&source).get();

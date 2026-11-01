@@ -445,10 +445,12 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
         let captured = Rc::clone(&captured_for_app);
         cranamp::winamp::PlaylistRowClickTarget(
             "Test track".into(),
-            0.0,
-            0.0,
-            100.0,
-            20.0,
+            cranpose_ui_graphics::Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 20.0,
+            },
             1.0,
             0,
             move |modifiers| {
@@ -859,7 +861,7 @@ fn enter_mobile_text(shell: &mut AppShell<HitGraphRenderer>, label: &str, value:
         visible_texts(shell)
     );
     shell.on_key_event(&cranpose_ui::KeyEvent::key_down_with_modifiers(
-        cranpose_ui::KeyCode::A,
+        cranpose_ui::Key::A,
         "a",
         cranpose_ui::Modifiers {
             ctrl: true,

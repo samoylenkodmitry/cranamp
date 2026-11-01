@@ -71,10 +71,12 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 );
                 if side {
                     desktop::ListRow(
-                        Some(icon),
-                        name.into(),
-                        String::new(),
-                        String::new(),
+                        desktop::ListRowFace {
+                            icon: Some(icon),
+                            label: name.into(),
+                            hint: String::new(),
+                            metadata: String::new(),
+                        },
                         at,
                         i == selected || i == 0 && selected == 1,
                         ui.hints,
@@ -162,10 +164,12 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                             {
                                 let next = ui.skin_section;
                                 desktop::ListRow(
-                                    None,
-                                    title.into(),
-                                    String::new(),
-                                    String::new(),
+                                    desktop::ListRowFace {
+                                        icon: None,
+                                        label: title.into(),
+                                        hint: String::new(),
+                                        metadata: String::new(),
+                                    },
                                     Area::new(
                                         8. + index as f32 * (inner.w - 16.) / 2.,
                                         4.,
@@ -180,13 +184,33 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                             Palette(
                                 ui.clone(),
                                 Area::new(0., 48., inner.w, inner.h - 48.),
-                                selected == 1,
+                                if selected == 1 {
+                                    PaletteColours::Visualizer
+                                } else {
+                                    PaletteColours::Playlist
+                                },
                             );
                         }
-                        2 => Font(ui.clone(), inner, !with_preview),
+                        2 => Font(
+                            ui.clone(),
+                            inner,
+                            if !with_preview {
+                                PreviewPlacement::Below
+                            } else {
+                                PreviewPlacement::Beside
+                            },
+                        ),
                         3 => Windows(ui.clone(), inner),
                         4 => Cursors(ui.clone(), inner),
-                        _ => Format(ui.clone(), inner, !with_preview),
+                        _ => Format(
+                            ui.clone(),
+                            inner,
+                            if !with_preview {
+                                PreviewPlacement::Below
+                            } else {
+                                PreviewPlacement::Beside
+                            },
+                        ),
                     }
                 },
             );
@@ -428,8 +452,23 @@ fn Colours(ui: Ui, area: Area) {
     );
 }
 
+/// Which skin colours a palette editor edits.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PaletteColours {
+    /// The 24 visualizer colours.
+    Visualizer,
+    /// The playlist text and background colours.
+    Playlist,
+}
+/// Where an editor shows its preview.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PreviewPlacement {
+    Below,
+    Beside,
+}
 #[composable]
-fn Palette(ui: Ui, area: Area, visualizer: bool) {
+fn Palette(ui: Ui, area: Area, colours: PaletteColours) {
+    let visualizer = colours == PaletteColours::Visualizer;
     let _ = ui.tick.get();
     let selected = cranpose_core::rememberMutableStateOf(|| 0usize);
     let (playlist, colours) = ui.shared.lock().unwrap().text_palettes();
@@ -714,7 +753,8 @@ fn VisualizerPreview(colours: Vec<String>, area: Area) {
 }
 
 #[composable]
-fn Font(ui: Ui, area: Area, preview_below: bool) {
+fn Font(ui: Ui, area: Area, preview: PreviewPlacement) {
+    let preview_below = preview == PreviewPlacement::Below;
     let revision = ui.tick.get();
     let colours = ui.shared.lock().unwrap().text_palettes().0;
     let ink = cranpose_core::rememberMutableStateOf(|| colours[0].1.clone());
@@ -797,10 +837,12 @@ fn Font(ui: Ui, area: Area, preview_below: bool) {
         }
         let next = ui.clone();
         desktop::ListRow(
-            Some(Icon::Text),
-            "Build classic text font".into(),
-            "Replace the bitmap font on the active paint layer".into(),
-            String::new(),
+            desktop::ListRowFace {
+                icon: Some(Icon::Text),
+                label: "Build classic text font".into(),
+                hint: "Replace the bitmap font on the active paint layer".into(),
+                metadata: String::new(),
+            },
             Area::new(12., actions_y, area.w - 24., 44.),
             false,
             ui.hints,
@@ -812,10 +854,12 @@ fn Font(ui: Ui, area: Area, preview_below: bool) {
         );
         let next = ui.clone();
         desktop::ListRow(
-            Some(Icon::Brush),
-            "Edit font pixels".into(),
-            String::new(),
-            String::new(),
+            desktop::ListRowFace {
+                icon: Some(Icon::Brush),
+                label: "Edit font pixels".into(),
+                hint: String::new(),
+                metadata: String::new(),
+            },
             Area::new(12., actions_y + 52., area.w - 24., 44.),
             false,
             ui.hints,
@@ -908,10 +952,12 @@ fn Windows(ui: Ui, area: Area) {
                 let next = ui.clone();
                 let w = (area.w - 24.) / 2.;
                 desktop::ListRow(
-                    Some(icon),
-                    name.into(),
-                    String::new(),
-                    String::new(),
+                    desktop::ListRowFace {
+                        icon: Some(icon),
+                        label: name.into(),
+                        hint: String::new(),
+                        metadata: String::new(),
+                    },
                     Area::new(12. + j as f32 * w, y + 120., w, 44.),
                     false,
                     ui.hints,
@@ -959,10 +1005,12 @@ fn Cursors(ui: Ui, area: Area) {
             if missing {
                 let next = ui.clone();
                 desktop::ListRow(
-                    Some(Icon::Add),
-                    "Draw missing cursors".into(),
-                    "Use the skin's colours; existing cursors stay unchanged".into(),
-                    String::new(),
+                    desktop::ListRowFace {
+                        icon: Some(Icon::Add),
+                        label: "Draw missing cursors".into(),
+                        hint: "Use the skin's colours; existing cursors stay unchanged".into(),
+                        metadata: String::new(),
+                    },
                     Area::new(12., 72., area.w - 24., 44.),
                     false,
                     ui.hints,
@@ -1038,10 +1086,12 @@ pub(super) fn CursorCanvas(ui: Ui, area: Area) {
         }
         let next = ui.clone();
         desktop::ListRow(
-            Some(Icon::Hand),
-            "Choose cursor".into(),
-            String::new(),
-            String::new(),
+            desktop::ListRowFace {
+                icon: Some(Icon::Hand),
+                label: "Choose cursor".into(),
+                hint: String::new(),
+                metadata: String::new(),
+            },
             Area::new(12., 124., area.w - 24., 44.),
             false,
             ui.hints,
@@ -1107,13 +1157,15 @@ pub(super) fn Hotspot(ui: Ui, role: String, cursor: serde_json::Value, area: Are
     }
     let next = ui.clone();
     Control(
-        Icon::Brush,
-        "Paint cursor".into(),
-        String::new(),
+        ControlFace {
+            icon: Icon::Brush,
+            label: "Paint cursor".into(),
+            detail: String::new(),
+            placement: ControlLabel::Hint,
+        },
         Area::new(area.x + cell * 2. + 4., area.y + 24., 44., 44.),
         false,
         true,
-        false,
         ui.hints,
         move || {
             update(
@@ -1168,7 +1220,8 @@ fn cursor_name(role: &str) -> &str {
 }
 
 #[composable]
-fn Format(ui: Ui, area: Area, preview_below: bool) {
+fn Format(ui: Ui, area: Area, preview: PreviewPlacement) {
+    let preview_below = preview == PreviewPlacement::Below;
     let _ = ui.tick.get();
     let report =
         ui.shared.lock().unwrap().classic_report().unwrap_or_else(

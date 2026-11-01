@@ -169,7 +169,7 @@ fn skin_with_cursors(name: &str, cursors: &[(&str, bool)]) -> std::path::PathBuf
             .compression_method(zip::CompressionMethod::Stored);
         for index in 0..zip.len() {
             let mut entry = zip.by_index(index).expect("readable entry");
-            let entry_name = entry.name().to_string();
+            let entry_name = entry.name().expect("entry name").into_owned();
             if entry_name.to_ascii_lowercase().ends_with(".cur") {
                 continue;
             }

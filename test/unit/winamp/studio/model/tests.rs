@@ -84,7 +84,7 @@ fn document_with_a_cursor() -> Document {
             .compression_method(zip::CompressionMethod::Stored);
         for index in 0..zip.len() {
             let mut entry = zip.by_index(index).unwrap();
-            let name = entry.name().to_string();
+            let name = entry.name().expect("entry name").into_owned();
             if name.eq_ignore_ascii_case("normal.cur") {
                 continue;
             }

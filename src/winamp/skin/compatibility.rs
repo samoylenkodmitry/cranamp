@@ -23,7 +23,7 @@ pub fn audit_classic_archive(bytes: &[u8]) -> Result<ClassicAudit> {
         if file.is_dir() {
             continue;
         }
-        let name = normalize_name(file.name());
+        let name = normalize_name(&file.name()?);
         if !names.insert(name.clone()) {
             errors.push(Divergence {
                 entry: name.clone(),

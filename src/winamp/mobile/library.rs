@@ -61,7 +61,7 @@ pub(super) struct LibraryUi {
 }
 
 #[composable]
-pub(super) fn remember_library_ui() -> LibraryUi {
+pub(super) fn rememberLibraryUi() -> LibraryUi {
     cranpose_core::remember(|| LibraryUi {
         saved: playlists::Ui::new(),
         view: cranpose_core::mutableStateOf(LibraryView::Tracks),
@@ -373,6 +373,7 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                 ColumnSpec::default(),
                                                 move || {
                                                     chrome::Label(
+                                                        Modifier::empty(),
                                                         match ui.view.get() {
                                                             LibraryView::Album(key) => {
                                                                 cache.with(|cell| {
@@ -388,10 +389,9 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                             }
                                                             _ => "Library".into(),
                                                         },
-                                                        Modifier::empty(),
                                                         if compact { 26.0 } else { 28.0 },
                                                         colors.label,
-                                                        true,
+                                                        FontWeight::SEMI_BOLD,
                                                     );
                                                     if !compact {
                                                         Text(
@@ -521,8 +521,8 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                     );
                                                 }
                                                 OneLine(
-                                                    label,
                                                     Modifier::empty().weight(1.0),
+                                                    label,
                                                     16.0,
                                                     colors.label,
                                                 );
@@ -588,8 +588,8 @@ pub(super) fn LibraryScreen(player: MutableState<WinampState>, ui: LibraryUi) {
                                         )
                                     {
                                         OneLine(
-                                            status,
                                             Modifier::empty().fill_max_width(),
+                                            status,
                                             13.0,
                                             colors.secondary_label,
                                         );
@@ -742,7 +742,7 @@ pub(super) fn PlaylistEffects(player: MutableState<WinampState>, ui: LibraryUi) 
 }
 
 #[composable]
-fn OneLine(text: String, modifier: Modifier, size: f32, color: Color) {
+fn OneLine(modifier: Modifier, text: String, size: f32, color: Color) {
     BasicText(
         text,
         modifier,
@@ -872,18 +872,22 @@ fn LibraryRow(
                                     .vertical_arrangement(LinearArrangement::SpacedBy(4.)),
                                 move || {
                                     chrome::Label(
-                                        title.clone(),
                                         Modifier::empty().fill_max_width(),
+                                        title.clone(),
                                         14.,
                                         if current { colors.accent } else { colors.label },
-                                        current,
+                                        if current {
+                                            FontWeight::SEMI_BOLD
+                                        } else {
+                                            FontWeight::NORMAL
+                                        },
                                     );
                                     chrome::Label(
-                                        subtitle.clone(),
                                         Modifier::empty().fill_max_width(),
+                                        subtitle.clone(),
                                         12.,
                                         colors.secondary_label,
-                                        false,
+                                        FontWeight::NORMAL,
                                     );
                                 },
                             );
@@ -891,11 +895,11 @@ fn LibraryRow(
                     );
                     if !editing {
                         chrome::Label(
-                            duration.clone(),
                             Modifier::empty().padding_symmetric(5., 0.),
+                            duration.clone(),
                             11.,
                             colors.secondary_label,
-                            false,
+                            FontWeight::NORMAL,
                         );
                         let target = target.clone();
                         GlassIconButton(
@@ -1114,11 +1118,11 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                                 1,
                             );
                             chrome::Label(
-                                track_subtitle(&track),
                                 Modifier::empty().fill_max_width(),
+                                track_subtitle(&track),
                                 13.,
                                 colors.secondary_label,
-                                false,
+                                FontWeight::NORMAL,
                             );
                         },
                     );
@@ -1301,7 +1305,16 @@ fn SheetAction(label: impl Into<String>, action: impl Fn() + 'static) {
     } else {
         icons::PLUS
     };
-    chrome::ActionRow(label, icon, destructive, action);
+    chrome::ActionRow(
+        label,
+        icon,
+        if destructive {
+            chrome::ActionRole::Destructive
+        } else {
+            chrome::ActionRole::Default
+        },
+        action,
+    );
 }
 
 #[composable]
@@ -1341,15 +1354,19 @@ fn LibraryTabs(ui: LibraryUi) {
                 for label in ["Tracks", "Albums", "Playlists"] {
                     segments.segment_content(format!("Library {label} tab"), move |selected| {
                         chrome::Label(
-                            label,
                             Modifier::empty(),
+                            label,
                             15.,
                             if selected {
                                 colors.accent
                             } else {
                                 colors.label
                             },
-                            selected,
+                            if selected {
+                                FontWeight::SEMI_BOLD
+                            } else {
+                                FontWeight::NORMAL
+                            },
                         );
                     });
                 }
@@ -1422,13 +1439,14 @@ fn AlbumList(
                                             .vertical_arrangement(LinearArrangement::SpacedBy(4.)),
                                         move || {
                                             chrome::Label(
-                                                album.title.clone(),
                                                 Modifier::empty(),
+                                                album.title.clone(),
                                                 17.,
                                                 colors.label,
-                                                true,
+                                                FontWeight::SEMI_BOLD,
                                             );
                                             chrome::Label(
+                                                Modifier::empty(),
                                                 format!(
                                                     "{} · {} {}",
                                                     album.artist,
@@ -1439,10 +1457,9 @@ fn AlbumList(
                                                         "tracks"
                                                     }
                                                 ),
-                                                Modifier::empty(),
                                                 13.,
                                                 colors.secondary_label,
-                                                false,
+                                                FontWeight::NORMAL,
                                             );
                                         },
                                     );

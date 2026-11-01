@@ -103,10 +103,12 @@ pub(super) fn HelpScreen(ui: Ui, layout: Layout) {
             move || {
                 for (i, topic) in TOPICS.iter().enumerate() {
                     desktop::ListRow(
-                        None,
-                        topic.title.into(),
-                        String::new(),
-                        String::new(),
+                        desktop::ListRowFace {
+                            icon: None,
+                            label: topic.title.into(),
+                            hint: String::new(),
+                            metadata: String::new(),
+                        },
                         Area::new(0., i as f32 * 64., list_w, 60.),
                         current == Some(i),
                         ui.hints,

@@ -615,7 +615,7 @@ impl Document {
                 continue;
             }
             let name = entry
-                .name()
+                .name()?
                 .replace('\\', "/")
                 .rsplit('/')
                 .next()

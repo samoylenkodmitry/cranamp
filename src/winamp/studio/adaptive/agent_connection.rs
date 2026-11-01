@@ -91,23 +91,25 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                     );
                     let shared = actions.shared.clone();
                     Control(
-                        Icon::Power,
-                        if status.running {
-                            "Stop server"
-                        } else {
-                            "Start server"
-                        }
-                        .into(),
-                        if status.running {
-                            "Disconnect local agents"
-                        } else {
-                            "Allow local agents to edit this skin"
-                        }
-                        .into(),
+                        ControlFace {
+                            icon: Icon::Power,
+                            label: if status.running {
+                                "Stop server"
+                            } else {
+                                "Start server"
+                            }
+                            .into(),
+                            detail: if status.running {
+                                "Disconnect local agents"
+                            } else {
+                                "Allow local agents to edit this skin"
+                            }
+                            .into(),
+                            placement: ControlLabel::Hint,
+                        },
                         Area::new(width - 54., 8., 44., 44.),
                         status.running,
                         !status.stopping,
-                        false,
                         actions.hints,
                         move || {
                             if agent_server::status().running {
@@ -148,17 +150,19 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                     );
                     let shared = actions.shared.clone();
                     Control(
-                        if status.tools.is_some() {
-                            Icon::Check
-                        } else {
-                            Icon::Test
+                        ControlFace {
+                            icon: if status.tools.is_some() {
+                                Icon::Check
+                            } else {
+                                Icon::Test
+                            },
+                            label: "Test connection".into(),
+                            detail: "Check the server identity and available tools".into(),
+                            placement: ControlLabel::Hint,
                         },
-                        "Test connection".into(),
-                        "Check the server identity and available tools".into(),
                         Area::new(width - 54., 76., 44., 44.),
                         status.tools.is_some(),
                         status.running && !status.testing && !status.stopping,
-                        false,
                         actions.hints,
                         move || agent_server::test_connection(shared.clone()),
                     );
@@ -185,17 +189,19 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                         );
                         let clipboard = url_clipboard;
                         Control(
-                            if copied.get() == 1 {
-                                Icon::Check
-                            } else {
-                                Icon::Copy
+                            ControlFace {
+                                icon: if copied.get() == 1 {
+                                    Icon::Check
+                                } else {
+                                    Icon::Copy
+                                },
+                                label: "Copy server URL".into(),
+                                detail: "Paste into your agent's HTTP server settings".into(),
+                                placement: ControlLabel::Hint,
                             },
-                            "Copy server URL".into(),
-                            "Paste into your agent's HTTP server settings".into(),
                             Area::new(width - 48., 4., 44., 44.),
                             false,
                             clipboard.has_system_clipboard() && connection.running,
-                            false,
                             hints,
                             move || {
                                 if let Some(url) = agent_server::connection_url() {
@@ -218,10 +224,12 @@ pub(super) fn Panel(ui: Ui, area: Area) {
             );
             let hints = ui.hints;
             desktop::ListRow(
-                Some(if expanded { Icon::Up } else { Icon::Down }),
-                "Use a stdio connection".into(),
-                "For agents that require a local command".into(),
-                String::new(),
+                desktop::ListRowFace {
+                    icon: Some(if expanded { Icon::Up } else { Icon::Down }),
+                    label: "Use a stdio connection".into(),
+                    hint: "For agents that require a local command".into(),
+                    metadata: String::new(),
+                },
                 Area::new(12., 332., width + 8., 40.),
                 expanded,
                 hints,
@@ -230,17 +238,19 @@ pub(super) fn Panel(ui: Ui, area: Area) {
             if expanded {
                 Label("Keep the server running. Copy this command\ninto your agent's stdio server settings.".into(), 16., 382., width - 52., 12., studio_dim());
                 Control(
-                    if copied.get() == 2 {
-                        Icon::Check
-                    } else {
-                        Icon::Copy
+                    ControlFace {
+                        icon: if copied.get() == 2 {
+                            Icon::Check
+                        } else {
+                            Icon::Copy
+                        },
+                        label: "Copy stdio command".into(),
+                        detail: "Copy the Cranamp executable path and --skin-studio-mcp".into(),
+                        placement: ControlLabel::Hint,
                     },
-                    "Copy stdio command".into(),
-                    "Copy the Cranamp executable path and --skin-studio-mcp".into(),
                     Area::new(area.w - 60., 376., 44., 44.),
                     false,
                     clipboard.has_system_clipboard() && connection.running,
-                    false,
                     hints,
                     move || {
                         if let (Ok(path), Some(token)) =

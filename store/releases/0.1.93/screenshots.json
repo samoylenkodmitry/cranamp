@@ -1,0 +1,559 @@
+{
+  "version": "0.1.93",
+  "locale": "en-US",
+  "capture_date": "2026-11-01",
+  "product_source": "New captures of the mobile tab bar, Library, Skins and Settings, and fresh desktop Skin Studio captures.",
+  "image_processing": "Native pixels. The opaque alpha channel of the Apple captures was removed without changing RGB values.",
+  "galleries": [
+    {
+      "family": "android-phone",
+      "store_slot": "Phone",
+      "layout": "Phone",
+      "device": "Android emulator, 1080x1920 at 480 dpi",
+      "status": "ready",
+      "note": "Player, Library, Skin Studio, Settings and Skins through the tab bar.",
+      "images": [
+        {
+          "file": "screenshots/android-phone/01-player.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "5cd7d49a0b79874577d02e2bf6a5329922bd5b438055992779663e38c7993eda",
+          "caption": "Play your music with the equalizer and playlist.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 480 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-phone/02-studio-canvas.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "c9a3be97d6854c048be6a36b9dd7214a4b2a5986b87ae1af78e0ad693e9fb548",
+          "caption": "Draw pixel artwork with tool settings beside the canvas.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 480 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-phone/03-skins.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "8011577759e5615be9f10716353a95979442c76d120642f6c3cb27b03eb0430b",
+          "caption": "Choose a bundled skin or import your own.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 480 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-phone/04-settings.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "15c7c12481b10822465ca927c0685e5be477843ac2b348da62ec8b2d36e01861",
+          "caption": "Themes, sound and playlist settings.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 480 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-phone/05-library.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "0d6b985a62201a1bf3eb0cd58fc56dc2993ee70b5831b06bdc40b91f0b3996c8",
+          "caption": "Add music from files or folders. Files stay where they are.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 480 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        }
+      ]
+    },
+    {
+      "family": "android-tablet-7",
+      "store_slot": "7-inch tablet",
+      "layout": "Tablet, portrait",
+      "device": "Android emulator, 1080x1920 at 240 dpi",
+      "status": "ready",
+      "note": "Wide player first. Player, Library, Skin Studio, Settings and Skins through the tab bar.",
+      "images": [
+        {
+          "file": "screenshots/android-tablet-7/00-wide-player.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "b73b62aacc16eb178666e1113c51cb8da09e55eccb5173d52a046aaa3b4fb23f",
+          "caption": "The whole skinned player on a wide screen.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-7/01-player.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "0af4a33468cc00f1b79112f4b69e0273cab0f9d8d044b2cdc8520f64840a9ab8",
+          "caption": "Play your music with the equalizer and playlist.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-7/02-studio-canvas.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "a310ccb18b8fecaa3430db7cf153c339601203c9ed8eb705e65d047abc0c2e39",
+          "caption": "Draw pixel artwork with tool settings beside the canvas.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-7/03-skins.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "5467f8fccf9eb864c351eabc398669b872511beee7eb752a48101d3fdb2e4fba",
+          "caption": "Choose a bundled skin or import your own.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-7/04-settings.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "c199201039a07d4b7967c12e360eff2c9bce08ac2d8eb5fd8b2f78794fb09015",
+          "caption": "Themes, sound and playlist settings.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-7/05-library.png",
+          "width": 1080,
+          "height": 1920,
+          "sha256": "865cc16426600aab7afd34e107091bad0bd9b7c9024b1d8ec5042dcf4fcfbb94",
+          "caption": "Add music from files or folders. Files stay where they are.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1080x1920 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        }
+      ]
+    },
+    {
+      "family": "android-tablet-10",
+      "store_slot": "10-inch tablet",
+      "layout": "Wide tablet, landscape",
+      "device": "Android emulator, 1920x1080 at 240 dpi",
+      "status": "ready",
+      "note": "Wide player first. Player, Library, Skin Studio, Settings and Skins through the tab bar.",
+      "images": [
+        {
+          "file": "screenshots/android-tablet-10/00-wide-player.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "64bd2094577597eaa0566fb61cac447db84e51072d9f3e082472fcbc48ee0586",
+          "caption": "The whole skinned player on a wide screen.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1920x1080 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-10/01-player.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "9c35306d6a1166dde1a54cbc85005f12c1adf47607a7a23f50e6a80b055d75e5",
+          "caption": "Play your music with the equalizer and playlist.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1920x1080 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-10/02-studio-canvas.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "f87730620a3ab11611b33df9821538884c986a7fdedc189f101f917321ec30c9",
+          "caption": "Draw pixel artwork with tool settings beside the canvas.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1920x1080 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-10/03-skins.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "3a9515c0ab9c5b7f90547ac409348fe077b5fddce43b9acae5f259235d56e068",
+          "caption": "Choose a bundled skin or import your own.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1920x1080 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-10/04-settings.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "78e2909575a689417063a54da82a4fe7a6a13eb293c0efa7fbc69edda193d192",
+          "caption": "Themes, sound and playlist settings.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1920x1080 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-tablet-10/05-library.png",
+          "width": 1920,
+          "height": 1080,
+          "sha256": "37f6cd1e5bc4ee7f93f67e36bbfff10301c7b896734c6f37af3942f6f6c6574d",
+          "caption": "Add music from files or folders. Files stay where they are.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 1920x1080 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        }
+      ]
+    },
+    {
+      "family": "android-desktop",
+      "store_slot": "Desktop",
+      "layout": "Desktop-width Android window",
+      "device": "Android emulator, 2560x1440 at 240 dpi",
+      "status": "ready",
+      "note": "Wide player first. Player, Library, Skin Studio, Settings and Skins through the tab bar.",
+      "images": [
+        {
+          "file": "screenshots/android-desktop/00-wide-player.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "a48395146fac07870415a0868b32d21d5251a6b93c7c613aa1b43cc15a04602b",
+          "caption": "The whole skinned player on a wide screen.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 2560x1440 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-desktop/01-player.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "f6db6d24948ea363be810d140aae2b4df870e2a31e258b6f235872c6ba896ed1",
+          "caption": "Play your music with the equalizer and playlist.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 2560x1440 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-desktop/02-studio-canvas.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "7c0cc6ce77b56f17f14b702c03eb7bc49d2fa0d004c87fd7d1b8a2c6675dea1c",
+          "caption": "Draw pixel artwork with tool settings beside the canvas.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 2560x1440 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-desktop/03-skins.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "ef8391b3333d4318822d4c98c0f7fb3066fe317967ea07a30c50f5b8376fe953",
+          "caption": "Choose a bundled skin or import your own.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 2560x1440 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-desktop/04-settings.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "3dc5a7ecb5299a97c30ddecc7077a8a9fce61d3c495921020bbba298cbb5a221",
+          "caption": "Themes, sound and playlist settings.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 2560x1440 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        },
+        {
+          "file": "screenshots/android-desktop/05-library.png",
+          "width": 2560,
+          "height": 1440,
+          "sha256": "eba21d4b1bdb859fa67161f7482e7f8c7451419f3ea13ab00dc1c36c36e5a206",
+          "caption": "Add music from files or folders. Files stay where they are.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Android emulator, 2560x1440 at 240 dpi. Store-feature debug build; StoreGalleryTest through public controls; no user media."
+        }
+      ]
+    },
+    {
+      "family": "ios-6.9",
+      "store_slot": "iPhone, large display",
+      "layout": "Large phone",
+      "device": "iPhone 17 Pro Max simulator, iOS 27",
+      "status": "ready",
+      "note": "Player, Library, Skin Studio, Settings and Skins through the tab bar.",
+      "images": [
+        {
+          "file": "screenshots/ios-6.9/01-player.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "dd0f83acf6cb0179fab92266dea9d0b307db431dc1cdaf936654fceeedf65f55",
+          "caption": "Play your music with the equalizer and playlist.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPhone 17 Pro Max simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        },
+        {
+          "file": "screenshots/ios-6.9/02-studio-canvas.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "67114c882d50012d787877529a46f6a74ed11b28acce40fff5a69aa9a73be1d5",
+          "caption": "Draw pixel artwork with tool settings beside the canvas.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPhone 17 Pro Max simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        },
+        {
+          "file": "screenshots/ios-6.9/03-skins.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "7031c0a09ad25ef1fe6b5928e7d743618cd4dc7bc0100f8268bb2dc6493c9343",
+          "caption": "Choose a bundled skin or import your own.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPhone 17 Pro Max simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        },
+        {
+          "file": "screenshots/ios-6.9/04-settings.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "0a30c15339c966cec549a3fcb35280b06193535bd2dd40fc5b01ed4c39e618fc",
+          "caption": "Themes, sound and playlist settings.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPhone 17 Pro Max simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        },
+        {
+          "file": "screenshots/ios-6.9/05-library.png",
+          "width": 1320,
+          "height": 2868,
+          "sha256": "42e1f3a5f331a909945c4a9eeba1baeaceb5ad870a78c5f484c3ce36038fd10f",
+          "caption": "Add music from files or folders. Files stay where they are.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPhone 17 Pro Max simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        }
+      ]
+    },
+    {
+      "family": "ipad-13",
+      "store_slot": "iPad 13-inch",
+      "layout": "Wide tablet and desktop",
+      "device": "iPad Pro 13-inch (M5) simulator, iOS 27",
+      "status": "ready",
+      "note": "Wide player first. Player, Library, Skin Studio, Settings and Skins through the tab bar.",
+      "images": [
+        {
+          "file": "screenshots/ipad-13/01-wide-player.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "e5f1c7831637ca329c2f198236d1fc380dbea4de6bff35786de5f6ba376e5c7a",
+          "caption": "The whole skinned player on a wide screen.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPad Pro 13-inch (M5) simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        },
+        {
+          "file": "screenshots/ipad-13/02-player.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "ac82ba3869b96dfd2e094aa67906d83b8e47ec6249637f345210ea828b64f619",
+          "caption": "Play your music with the equalizer and playlist.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPad Pro 13-inch (M5) simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        },
+        {
+          "file": "screenshots/ipad-13/03-studio-canvas.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "b71ac57c11ea413c6d30fd3deb1f4c7a00f333ebf5ced9e6ef024e29f48b5ab3",
+          "caption": "Draw pixel artwork with tool settings beside the canvas.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPad Pro 13-inch (M5) simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        },
+        {
+          "file": "screenshots/ipad-13/04-skins.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "1f9434e4b8aadc512212cdcc1496b15cf895e46989fb194ad8aa05b1ca175daf",
+          "caption": "Choose a bundled skin or import your own.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPad Pro 13-inch (M5) simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        },
+        {
+          "file": "screenshots/ipad-13/05-settings.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "eff5f4e4f745a75568cf887c5c3d3904b3c67bdea33b2e2afa8b8e58c7357c86",
+          "caption": "Themes, sound and playlist settings.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPad Pro 13-inch (M5) simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        },
+        {
+          "file": "screenshots/ipad-13/06-library.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "4613d41d5e9cd56deea4de1b2d47765eb3c56d11a294200881cef2e84e5fdeed",
+          "caption": "Add music from files or folders. Files stay where they are.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "iPad Pro 13-inch (M5) simulator, iOS 27. Store-feature simulator build; XCUITest testStoreGallery through the tab bar; no user media."
+        }
+      ]
+    },
+    {
+      "family": "macos",
+      "store_slot": "Mac",
+      "layout": "Desktop",
+      "device": "Native macOS GPU review executable",
+      "status": "ready",
+      "note": "Player first, then Skin Studio canvas, sprites, colours, states and the MCP panel.",
+      "images": [
+        {
+          "file": "screenshots/macos/01-playback.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "cba2f089dda3f8ff8dd6dc88283882327660145937d52a23b4f5cc00bee165b1",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Native macOS GPU review executable. Store features; actual GPU frames, no resizing or artwork edits."
+        },
+        {
+          "file": "screenshots/macos/02-studio-canvas.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "1409a42f94e73ad3dab869386f068e85860f28a2a548bb8d28dd3ed8273dba83",
+          "caption": "Draw pixel artwork with tool settings beside the canvas.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Native macOS GPU review executable. Store features; actual GPU frames, no resizing or artwork edits."
+        },
+        {
+          "file": "screenshots/macos/03-sprites.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "70134cdc4fbe8e47f09da5109d8e0995e5be905a6222852770d2caa8ae0a6f7f",
+          "caption": "Edit each control at pixel size.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Native macOS GPU review executable. Store features; actual GPU frames, no resizing or artwork edits."
+        },
+        {
+          "file": "screenshots/macos/04-skin-colours.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "6c7ea7d4ccf50d2e29b957dfdae0dd3ee1c27c1cf7c9bd195c4763e533fe6e10",
+          "caption": "Set exact skin colours and preview the result.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Native macOS GPU review executable. Store features; actual GPU frames, no resizing or artwork edits."
+        },
+        {
+          "file": "screenshots/macos/05-states.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "633092d27a3fee9ec8dd4f551b09047072bf185c9eab1cd6086bb0aa22ee31cb",
+          "caption": "Compare released and pressed control artwork.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Native macOS GPU review executable. Store features; actual GPU frames, no resizing or artwork edits."
+        },
+        {
+          "file": "screenshots/macos/06-agent-connection.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "fefa91f49ca6a18280161f321303f91903cff13042a1bccfbe1a9e5b9b755644",
+          "caption": "Connect an MCP agent to the same canvas and undo history.",
+          "source_version": "0.1.93",
+          "source_commit": "15bd77c73cac0ea4b2de3aa03270b3b738cc43b5",
+          "capture": "Native macOS GPU review executable. Store features; actual GPU frames, no resizing or artwork edits."
+        }
+      ]
+    },
+    {
+      "family": "windows",
+      "store_slot": "Windows desktop",
+      "layout": "Desktop",
+      "device": "Native Windows app; Actions run 41283196724",
+      "status": "ready",
+      "note": "Player first, then Skin Studio canvas, sprites, colours, states and the MCP panel.",
+      "images": [
+        {
+          "file": "screenshots/windows/00-playback.png",
+          "width": 1440,
+          "height": 900,
+          "sha256": "d5290f65d26be1a17816c366cddf546afe61d9447b205b3cace2804eb631e3ab",
+          "caption": "Play local audio with the equalizer and playlist.",
+          "source_version": "0.1.93",
+          "source_commit": "6a28d713ecfb300901ccbc1ada04bd8d6d26d155",
+          "capture": "Native Windows app; Actions run 41283196724. Windows GPU capture from store package CI run 41283196724."
+        },
+        {
+          "file": "screenshots/windows/01-player-preview.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "708ddffb868128bad1301398743aad17096e72b19b5ee6c854117971773aca10",
+          "caption": "Preview the edited skin on the player.",
+          "source_version": "0.1.93",
+          "source_commit": "6a28d713ecfb300901ccbc1ada04bd8d6d26d155",
+          "capture": "Native Windows app; Actions run 41283196724. Windows GPU capture from store package CI run 41283196724."
+        },
+        {
+          "file": "screenshots/windows/02-studio-canvas.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "ca6ad7983681ccadabaa0140b683a419cefcc1e4e9aa5fd07150c203ec8d6303",
+          "caption": "Draw pixel artwork with tool settings beside the canvas.",
+          "source_version": "0.1.93",
+          "source_commit": "6a28d713ecfb300901ccbc1ada04bd8d6d26d155",
+          "capture": "Native Windows app; Actions run 41283196724. Windows GPU capture from store package CI run 41283196724."
+        },
+        {
+          "file": "screenshots/windows/03-sprites.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "444a7337c96eba173ebddffbf0c90cd6c1648e3a80ca417591cba1a7e20deef7",
+          "caption": "Edit each control at pixel size.",
+          "source_version": "0.1.93",
+          "source_commit": "6a28d713ecfb300901ccbc1ada04bd8d6d26d155",
+          "capture": "Native Windows app; Actions run 41283196724. Windows GPU capture from store package CI run 41283196724."
+        },
+        {
+          "file": "screenshots/windows/04-skin-colours.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "d2daf981f7123bcfa0b182847369a631cab8942f898e9a177e5e57f844b461c9",
+          "caption": "Set exact skin colours and preview the result.",
+          "source_version": "0.1.93",
+          "source_commit": "6a28d713ecfb300901ccbc1ada04bd8d6d26d155",
+          "capture": "Native Windows app; Actions run 41283196724. Windows GPU capture from store package CI run 41283196724."
+        },
+        {
+          "file": "screenshots/windows/05-states.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "1646820fe13c2d35c72fd57b9312f0a2503ec19d81d4b86bc19a1891818ef2cd",
+          "caption": "Compare released and pressed control artwork.",
+          "source_version": "0.1.93",
+          "source_commit": "6a28d713ecfb300901ccbc1ada04bd8d6d26d155",
+          "capture": "Native Windows app; Actions run 41283196724. Windows GPU capture from store package CI run 41283196724."
+        },
+        {
+          "file": "screenshots/windows/06-agent-connection.png",
+          "width": 1388,
+          "height": 1000,
+          "sha256": "8e199bd4f0c86a130d47f4b67cc16d1c5b4d7a7efb6854428fce99018257dd28",
+          "caption": "Connect an MCP agent to the same canvas and undo history.",
+          "source_version": "0.1.93",
+          "source_commit": "6a28d713ecfb300901ccbc1ada04bd8d6d26d155",
+          "capture": "Native Windows app; Actions run 41283196724. Windows GPU capture from store package CI run 41283196724."
+        }
+      ]
+    }
+  ]
+}

@@ -20,8 +20,10 @@ pub mod review;
 mod skin;
 mod viewport;
 mod workbench;
-use canvas::{CanvasState, EditorCanvas};
-use controls::{control_cursor, Control, Hint, HintOverlay, Hints, Icon};
+use canvas::{CanvasAccess, CanvasState, EditorCanvas};
+use controls::{
+    control_cursor, Control, ControlFace, ControlLabel, Hint, HintOverlay, Hints, Icon,
+};
 use layout::{Area, Layout, WidthClass};
 use panels::*;
 use viewport::Viewport;
@@ -411,7 +413,11 @@ pub(super) fn MountedSkinStudio(
                             scope.constraints().max_width,
                             (scope.constraints().max_height - bottom_inset).max(1.0),
                         ),
-                        hosted,
+                        if hosted {
+                            StudioHosting::Player
+                        } else {
+                            StudioHosting::Standalone
+                        },
                         busy.get(),
                     );
                 },
@@ -551,8 +557,16 @@ fn sheet_area(ui: &Ui, layout: Layout, sheet: Sheet) -> Area {
     panel
 }
 
+/// Where Studio runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum StudioHosting {
+    /// Opened from the player, which it returns to.
+    Player,
+    /// Launched on its own.
+    Standalone,
+}
 #[composable]
-fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool) {
+fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosting: StudioHosting, busy: bool) {
     let layout = if ui.hand.get() && matches!(ui.screen.get(), Screen::Canvas | Screen::Sprites) {
         layout.for_navigation()
     } else {
@@ -652,7 +666,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                             Header(ui.clone(), layout, name.clone(), dirty);
                             match screen {
                                 Screen::Projects => {
-                                    Projects(ui.clone(), actions.clone(), layout, hosted)
+                                    Projects(ui.clone(), actions.clone(), layout, hosting)
                                 }
                                 Screen::Canvas | Screen::States | Screen::Sprites => {
                                     if let Some(rail) = layout.rail {
@@ -663,7 +677,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                         } else if layout.class == WidthClass::Desktop {
                                             desktop::Parts(ui.clone(), rail, true);
                                         } else {
-                                            PartList(ui.clone(), rail, false);
+                                            PartList(ui.clone(), rail, PartArrangement::Rail);
                                         }
                                     }
                                     workbench::ContextBar(ui.clone(), layout);
@@ -698,8 +712,16 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                             && (sheet == Sheet::None
                                                 || (layout.inspector.is_some()
                                                     && sheet != Sheet::Tools)),
-                                        screen == Screen::States,
-                                        layout.class == WidthClass::Desktop,
+                                        if screen == Screen::States {
+                                            CanvasAccess::ReadOnly
+                                        } else {
+                                            CanvasAccess::Edit
+                                        },
+                                        if layout.class == WidthClass::Desktop {
+                                            WidthClass::Desktop
+                                        } else {
+                                            WidthClass::Desktop
+                                        },
                                     );
                                     if screen != Screen::States {
                                         workbench::Tools(ui.clone(), layout);
@@ -729,9 +751,12 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                     {
                                         let viewport = ui.viewport;
                                         Control(
-                                            icon,
-                                            label.into(),
-                                            "Zoom the canvas".into(),
+                                            ControlFace {
+                                                icon,
+                                                label: label.into(),
+                                                detail: "Zoom the canvas".into(),
+                                                placement: ControlLabel::Hint,
+                                            },
                                             Area::new(
                                                 canvas.x + canvas.w - 132. + i as f32 * 44.,
                                                 y,
@@ -740,7 +765,6 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                             ),
                                             false,
                                             true,
-                                            false,
                                             ui.hints,
                                             move || {
                                                 viewport.update(|v| {
@@ -793,7 +817,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                 Screen::Skin => skin::Screen(ui.clone(), layout),
                                 Screen::Preview => Preview(ui.clone(), layout, revision),
                                 Screen::Save => {
-                                    SaveScreen(ui.clone(), actions.clone(), layout, hosted)
+                                    SaveScreen(ui.clone(), actions.clone(), layout, hosting)
                                 }
                                 Screen::Help => help::HelpScreen(ui.clone(), layout),
                                 Screen::ConfirmBlank => ConfirmBlank(ui.clone(), layout),
@@ -858,27 +882,29 @@ fn Header(ui: Ui, layout: Layout, name: String, dirty: bool) {
     };
     let button = ui.clone();
     Control(
-        if screen == Screen::Projects {
-            Icon::Help
-        } else {
-            Icon::Back
+        ControlFace {
+            icon: if screen == Screen::Projects {
+                Icon::Help
+            } else {
+                Icon::Back
+            },
+            label: if screen == Screen::Projects {
+                "Studio help"
+            } else {
+                "Back"
+            }
+            .into(),
+            detail: if screen == Screen::Projects {
+                "Instructions for editing and saving"
+            } else {
+                ""
+            }
+            .into(),
+            placement: ControlLabel::Hint,
         },
-        if screen == Screen::Projects {
-            "Studio help"
-        } else {
-            "Back"
-        }
-        .into(),
-        if screen == Screen::Projects {
-            "Instructions for editing and saving"
-        } else {
-            ""
-        }
-        .into(),
         Area::new(4., 6., 44., 44.),
         false,
         true,
-        false,
         ui.hints,
         move || {
             if screen == Screen::Projects {
@@ -983,19 +1009,21 @@ fn Header(ui: Ui, layout: Layout, name: String, dirty: bool) {
             #[cfg(any(target_os = "ios", target_os = "android", target_arch = "wasm32"))]
             let selected = false;
             Control(
-                icon,
-                label.into(),
-                match i {
-                    0 => "Undo the last edit",
-                    1 => "Redo the last undone edit",
-                    2 => "Project tools and help",
-                    _ => "Connect an MCP agent to this canvas",
-                }
-                .into(),
+                ControlFace {
+                    icon,
+                    label: label.into(),
+                    detail: match i {
+                        0 => "Undo the last edit",
+                        1 => "Redo the last undone edit",
+                        2 => "Project tools and help",
+                        _ => "Connect an MCP agent to this canvas",
+                    }
+                    .into(),
+                    placement: ControlLabel::Hint,
+                },
                 Area::new(x, 6., 44., 44.),
                 selected,
                 enabled,
-                false,
                 ui.hints,
                 move || {
                     if i == 3 {
@@ -1017,13 +1045,15 @@ fn Header(ui: Ui, layout: Layout, name: String, dirty: bool) {
     } else if screen == Screen::Preview {
         let ui = ui.clone();
         Control(
-            Icon::Share,
-            "Save and share".into(),
-            "Save the layered project or export a skin".into(),
+            ControlFace {
+                icon: Icon::Share,
+                label: "Save and share".into(),
+                detail: "Save the layered project or export a skin".into(),
+                placement: ControlLabel::Hint,
+            },
             Area::new(layout.width - 56., 8., 48., 48.),
             false,
             true,
-            false,
             ui.hints,
             move || ui.show(Screen::Save),
         );
