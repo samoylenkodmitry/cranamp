@@ -48,4 +48,4 @@ parts:
     override-prime: |
       craftctl default
       sed -i 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/512x512/apps/io.cranamp.app.png|' \
-        usr/share/applications/io.cranamp.app.desktop
+        "$CRAFT_PRIME/usr/share/applications/io.cranamp.app.desktop"
