@@ -17,7 +17,7 @@ pub(super) fn Properties(ui: Ui, area: Area) {
     workbench::Properties(
         ui.clone(),
         Area::new(area.x + sample_w, area.y, area.w - sample_w - 48., 64.),
-        false,
+        workbench::PropertyFlow::Row,
     );
     let next = ui.clone();
     Control(

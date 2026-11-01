@@ -1305,7 +1305,16 @@ fn SheetAction(label: impl Into<String>, action: impl Fn() + 'static) {
     } else {
         icons::PLUS
     };
-    chrome::ActionRow(label, icon, destructive, action);
+    chrome::ActionRow(
+        label,
+        icon,
+        if destructive {
+            chrome::ActionRole::Destructive
+        } else {
+            chrome::ActionRole::Default
+        },
+        action,
+    );
 }
 
 #[composable]

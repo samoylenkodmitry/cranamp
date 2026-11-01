@@ -435,7 +435,11 @@ pub(super) fn Inspector(ui: Ui, area: Area, screen: Screen, _revision: u64, _pre
         } else {
             workbench::PropertyHeading(ui.clone(), Area::new(0., 0., area.w, 40.));
             previews::ToolSample(ui.clone(), Area::new(12., 44., area.w - 24., 52.));
-            workbench::Properties(ui.clone(), Area::new(4., 104., area.w - 8., 64.), false);
+            workbench::Properties(
+                ui.clone(),
+                Area::new(4., 104., area.w - 8., 64.),
+                workbench::PropertyFlow::Row,
+            );
             if extra_h > 0. {
                 properties::Essentials(ui.clone(), Area::new(0., 168., area.w, extra_h));
             }

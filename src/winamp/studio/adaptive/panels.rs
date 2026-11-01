@@ -94,7 +94,8 @@ fn RowAction(
     );
 }
 #[composable]
-pub(super) fn Projects(ui: Ui, actions: Actions, layout: Layout, hosted: bool) {
+pub(super) fn Projects(ui: Ui, actions: Actions, layout: Layout, hosting: StudioHosting) {
+    let hosted = hosting == StudioHosting::Player;
     let _ = ui.tick.get();
     let wide = layout.width >= 600.;
     let width = (layout.width - 32.).min(880.);
@@ -231,8 +232,17 @@ pub(super) fn Projects(ui: Ui, actions: Actions, layout: Layout, hosted: bool) {
         },
     );
 }
+/// How the part list arranges its entries.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PartArrangement {
+    /// Cards in columns, in the parts sheet.
+    Grid,
+    /// One column beside the canvas.
+    Rail,
+}
 #[composable]
-pub(super) fn PartList(ui: Ui, area: Area, grid: bool) {
+pub(super) fn PartList(ui: Ui, area: Area, arrangement: PartArrangement) {
+    let grid = arrangement == PartArrangement::Grid;
     let revision = ui.tick.get();
     let d = ui.shared.clone();
     let bitmap = cranpose_core::rememberKeyed((d.clone(), revision), move |_| {
@@ -499,7 +509,7 @@ pub(super) fn SheetPanel(ui: Ui, area: Area, sheet: Sheet, revision: u64) {
             let body = Area::new(0., 48., area.w, area.h - 48.);
             match sheet {
                 Sheet::Scopes => ScopeList(ui.clone(), body),
-                Sheet::Parts => PartList(ui.clone(), body, true),
+                Sheet::Parts => PartList(ui.clone(), body, PartArrangement::Grid),
                 Sheet::Targets => desktop::SpriteTargets(ui.clone(), body, ui.screen.get()),
                 Sheet::Sources => desktop::Sources(ui.clone(), body),
                 Sheet::Tools => ToolSettings(ui.clone(), body),
@@ -743,7 +753,8 @@ pub(super) fn Preview(ui: Ui, layout: Layout, revision: u64) {
     }
 }
 #[composable]
-pub(super) fn SaveScreen(ui: Ui, actions: Actions, layout: Layout, hosted: bool) {
+pub(super) fn SaveScreen(ui: Ui, actions: Actions, layout: Layout, hosting: StudioHosting) {
+    let hosted = hosting == StudioHosting::Player;
     let width = (layout.width - 32.).min(600.);
     ScrollArea(
         Area::new(

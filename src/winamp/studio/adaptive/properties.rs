@@ -88,7 +88,11 @@ pub(super) fn ToolProperties(ui: Ui, area: Area) {
         workbench::Properties(
             ui.clone(),
             Area::new(4., 64., area.w - 8., primary),
-            area.w < 360. && v.brush != "lift",
+            if area.w < 360. && v.brush != "lift" {
+                workbench::PropertyFlow::Column
+            } else {
+                workbench::PropertyFlow::Row
+            },
         );
         let mut y = 64. + primary + 8.;
         if matches!(v.brush.as_str(), "lift" | "stamp") {

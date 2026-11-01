@@ -574,9 +574,9 @@ pub(super) fn Screen(player: MutableState<WinampState>, ui: LibraryUi) {
                             } else if !ui.saved.loaded.get() {
                                 // Status above offers a retry without replacing saved data.
                             } else if picker {
-                                TrackList(player, ui, list.clone(), true);
+                                TrackList(player, ui, list.clone(), TrackListMode::Pick);
                             } else if let Some(list) = list.clone() {
-                                TrackList(player, ui, Some(list), false);
+                                TrackList(player, ui, Some(list), TrackListMode::Browse);
                             } else {
                                 Overview(player, ui, data.clone(), query.clone());
                             }
@@ -916,13 +916,22 @@ fn SelectionControls(ui: LibraryUi, id: u64) {
     );
 }
 
+/// What a playlist's track list is for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TrackListMode {
+    /// Picking library tracks to add to the playlist.
+    Pick,
+    /// Showing and playing the playlist's own tracks.
+    Browse,
+}
 #[composable]
 fn TrackList(
     player: MutableState<WinampState>,
     ui: LibraryUi,
     list: Option<Playlist>,
-    picker: bool,
+    mode: TrackListMode,
 ) {
+    let picker = mode == TrackListMode::Pick;
     let Some(list) = list else {
         return;
     };
@@ -1271,9 +1280,12 @@ fn DialogContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 }
             });
             chrome::Divider();
-            chrome::ActionRow("Delete playlist", chrome::TRASH, true, move || {
-                ui.saved.dialog.set(Dialog::Delete(id))
-            });
+            chrome::ActionRow(
+                "Delete playlist",
+                chrome::TRASH,
+                chrome::ActionRole::Destructive,
+                move || ui.saved.dialog.set(Dialog::Delete(id)),
+            );
         }
         Dialog::Delete(id) => {
             Heading("Delete playlist?");
@@ -1332,7 +1344,7 @@ fn DialogContents(player: MutableState<WinampState>, ui: LibraryUi) {
             chrome::ActionRow(
                 "Remove from saved playlist",
                 chrome::TRASH,
-                true,
+                chrome::ActionRole::Destructive,
                 move || {
                     if ui
                         .saved

@@ -20,7 +20,7 @@ pub mod review;
 mod skin;
 mod viewport;
 mod workbench;
-use canvas::{CanvasState, EditorCanvas};
+use canvas::{CanvasAccess, CanvasState, EditorCanvas};
 use controls::{
     control_cursor, Control, ControlFace, ControlLabel, Hint, HintOverlay, Hints, Icon,
 };
@@ -413,7 +413,11 @@ pub(super) fn MountedSkinStudio(
                             scope.constraints().max_width,
                             (scope.constraints().max_height - bottom_inset).max(1.0),
                         ),
-                        hosted,
+                        if hosted {
+                            StudioHosting::Player
+                        } else {
+                            StudioHosting::Standalone
+                        },
                         busy.get(),
                     );
                 },
@@ -553,8 +557,16 @@ fn sheet_area(ui: &Ui, layout: Layout, sheet: Sheet) -> Area {
     panel
 }
 
+/// Where Studio runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum StudioHosting {
+    /// Opened from the player, which it returns to.
+    Player,
+    /// Launched on its own.
+    Standalone,
+}
 #[composable]
-fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool) {
+fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosting: StudioHosting, busy: bool) {
     let layout = if ui.hand.get() && matches!(ui.screen.get(), Screen::Canvas | Screen::Sprites) {
         layout.for_navigation()
     } else {
@@ -654,7 +666,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                             Header(ui.clone(), layout, name.clone(), dirty);
                             match screen {
                                 Screen::Projects => {
-                                    Projects(ui.clone(), actions.clone(), layout, hosted)
+                                    Projects(ui.clone(), actions.clone(), layout, hosting)
                                 }
                                 Screen::Canvas | Screen::States | Screen::Sprites => {
                                     if let Some(rail) = layout.rail {
@@ -665,7 +677,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                         } else if layout.class == WidthClass::Desktop {
                                             desktop::Parts(ui.clone(), rail, true);
                                         } else {
-                                            PartList(ui.clone(), rail, false);
+                                            PartList(ui.clone(), rail, PartArrangement::Rail);
                                         }
                                     }
                                     workbench::ContextBar(ui.clone(), layout);
@@ -700,8 +712,16 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                             && (sheet == Sheet::None
                                                 || (layout.inspector.is_some()
                                                     && sheet != Sheet::Tools)),
-                                        screen == Screen::States,
-                                        layout.class == WidthClass::Desktop,
+                                        if screen == Screen::States {
+                                            CanvasAccess::ReadOnly
+                                        } else {
+                                            CanvasAccess::Edit
+                                        },
+                                        if layout.class == WidthClass::Desktop {
+                                            WidthClass::Desktop
+                                        } else {
+                                            WidthClass::Desktop
+                                        },
                                     );
                                     if screen != Screen::States {
                                         workbench::Tools(ui.clone(), layout);
@@ -797,7 +817,7 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                 Screen::Skin => skin::Screen(ui.clone(), layout),
                                 Screen::Preview => Preview(ui.clone(), layout, revision),
                                 Screen::Save => {
-                                    SaveScreen(ui.clone(), actions.clone(), layout, hosted)
+                                    SaveScreen(ui.clone(), actions.clone(), layout, hosting)
                                 }
                                 Screen::Help => help::HelpScreen(ui.clone(), layout),
                                 Screen::ConfirmBlank => ConfirmBlank(ui.clone(), layout),

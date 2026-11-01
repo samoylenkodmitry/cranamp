@@ -633,8 +633,17 @@ pub(super) fn ValueSlider(
     );
 }
 
+/// How the property controls stack.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PropertyFlow {
+    /// One above the other.
+    Column,
+    /// Side by side.
+    Row,
+}
 #[composable]
-pub(super) fn Properties(ui: Ui, area: Area, vertical: bool) {
+pub(super) fn Properties(ui: Ui, area: Area, flow: PropertyFlow) {
+    let vertical = flow == PropertyFlow::Column;
     let _ = ui.tick.get();
     let tick = ui.tick;
     let view = ui.shared.lock().unwrap().view.clone();

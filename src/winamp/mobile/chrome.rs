@@ -86,13 +86,22 @@ pub(super) fn Section(title: &'static str, content: impl FnMut() + 'static) {
     );
 }
 
+/// What an action row does, which decides its colour.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ActionRole {
+    Default,
+    /// Removes or deletes something.
+    Destructive,
+}
+
 #[composable]
 pub(super) fn ActionRow(
     label: impl Into<String>,
     icon: &'static str,
-    destructive: bool,
+    role: ActionRole,
     action: impl Fn() + 'static,
 ) {
+    let destructive = role == ActionRole::Destructive;
     let label = label.into();
     let colors = liquid_colors();
     let color = if destructive {

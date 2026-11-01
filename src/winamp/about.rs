@@ -60,17 +60,27 @@ pub(super) fn open_link(url: &'static str, error: MutableState<String>) {
     );
 }
 
+/// Which settings surface draws the pages.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum AboutStyle {
+    /// The Liquid controls of the mobile and companion-window settings.
+    #[cfg(not(target_arch = "wasm32"))]
+    Liquid,
+    /// The settings panel of the desktop and web player.
+    Panel,
+}
+
 #[composable]
-pub(super) fn LinkError(error: MutableState<String>, mobile: bool) {
+pub(super) fn LinkError(error: MutableState<String>, style: AboutStyle) {
     if !error.get().is_empty() {
-        AboutText(error.get(), mobile);
+        AboutText(error.get(), style);
     }
 }
 
 #[composable]
-fn AboutText(text: impl Into<String>, mobile: bool) {
+fn AboutText(text: impl Into<String>, style: AboutStyle) {
     #[cfg(not(target_arch = "wasm32"))]
-    if mobile {
+    if style == AboutStyle::Liquid {
         Text(
             text.into(),
             Modifier::empty().fill_max_width(),
@@ -78,7 +88,7 @@ fn AboutText(text: impl Into<String>, mobile: bool) {
         );
         return;
     }
-    let _ = mobile;
+    let _ = style;
     Text(
         text.into(),
         Modifier::empty().fill_max_width(),
@@ -87,9 +97,9 @@ fn AboutText(text: impl Into<String>, mobile: bool) {
 }
 
 #[composable]
-fn AboutHeading(title: &'static str, mobile: bool) {
+fn AboutHeading(title: &'static str, style: AboutStyle) {
     #[cfg(not(target_arch = "wasm32"))]
-    if mobile {
+    if style == AboutStyle::Liquid {
         Text(
             title.to_string(),
             Modifier::empty().fill_max_width(),
@@ -97,7 +107,7 @@ fn AboutHeading(title: &'static str, mobile: bool) {
         );
         return;
     }
-    let _ = mobile;
+    let _ = style;
     Text(
         title.to_string(),
         Modifier::empty().fill_max_width(),
@@ -106,25 +116,25 @@ fn AboutHeading(title: &'static str, mobile: bool) {
 }
 
 #[composable]
-fn AboutAction(label: impl Into<String>, mobile: bool, action: impl Fn() + 'static) {
+fn AboutAction(label: impl Into<String>, style: AboutStyle, action: impl Fn() + 'static) {
     #[cfg(not(target_arch = "wasm32"))]
-    if mobile {
+    if style == AboutStyle::Liquid {
         super::mobile::GlassAction(label, action);
         return;
     }
-    let _ = mobile;
+    let _ = style;
     SettingsActionButton(label.into(), SETTINGS_CARD, action);
 }
 
 #[composable]
-fn AboutLink(label: &'static str, url: &'static str, mobile: bool) {
+fn AboutLink(label: &'static str, url: &'static str, style: AboutStyle) {
     let error = cranpose_core::rememberMutableStateOf(String::new);
-    AboutAction(label, mobile, move || open_link(url, error));
-    LinkError(error, mobile);
+    AboutAction(label, style, move || open_link(url, error));
+    LinkError(error, style);
 }
 
 #[composable]
-pub(super) fn Content(page: MutableState<Page>, mobile: bool) {
+pub(super) fn Content(page: MutableState<Page>, style: AboutStyle) {
     let current = page.get();
     AboutAction(
         match current.parent() {
@@ -132,51 +142,51 @@ pub(super) fn Content(page: MutableState<Page>, mobile: bool) {
             Page::About => "Back to About",
             _ => "Back to Licenses",
         },
-        mobile,
+        style,
         move || page.set(current.parent()),
     );
     match current {
         Page::Settings => {}
         Page::About => {
-            AboutHeading("About Cranamp", mobile);
-            AboutText(format!("Version {}", env!("CARGO_PKG_VERSION")), mobile);
+            AboutHeading("About Cranamp", style);
+            AboutText(format!("Version {}", env!("CARGO_PKG_VERSION")), style);
             AboutText(
                 "A music player with classic skins and Skin Studio. Built with Cranpose.",
-                mobile,
+                style,
             );
-            AboutText("Library metadata and album thumbnails are cached on this device. Audio stays at its original location. Album recognition does not contact an online lookup service.", mobile);
-            AboutText(format!("Support contact\n{CONTACT}"), mobile);
+            AboutText("Library metadata and album thumbnails are cached on this device. Audio stays at its original location. Album recognition does not contact an online lookup service.", style);
+            AboutText(format!("Support contact\n{CONTACT}"), style);
             AboutLink(
                 "Contact support",
                 "mailto:cranamp@dmitrysamoylenko.in",
-                mobile,
+                style,
             );
-            AboutText("Your mail app opens a draft. Include your app version and device model. Omit private files and secret URLs.", mobile);
-            AboutLink("Help with Cranamp", SUPPORT_URL, mobile);
-            AboutLink("Privacy policy", PRIVACY_URL, mobile);
+            AboutText("Your mail app opens a draft. Include your app version and device model. Omit private files and secret URLs.", style);
+            AboutLink("Help with Cranamp", SUPPORT_URL, style);
+            AboutLink("Privacy policy", PRIVACY_URL, style);
             AboutLink(
                 "Source code",
                 "https://github.com/samoylenkodmitry/cranamp",
-                mobile,
+                style,
             );
-            AboutAction("Open source licenses", mobile, move || {
+            AboutAction("Open source licenses", style, move || {
                 page.set(Page::Licenses)
             });
         }
         Page::Licenses => {
-            AboutHeading("Open source licenses", mobile);
+            AboutHeading("Open source licenses", style);
             for (index, notice) in notices().iter().enumerate() {
-                AboutAction(notice.title.clone(), mobile, move || {
+                AboutAction(notice.title.clone(), style, move || {
                     page.set(Page::License(index))
                 });
             }
         }
         Page::License(index) => {
             if let Some(notice) = notices().get(index) {
-                AboutHeading(&notice.title, mobile);
+                AboutHeading(&notice.title, style);
                 // Keep individual text layouts bounded, including long dependency notices.
                 for paragraph in notice.text.split("\n\n").filter(|text| !text.is_empty()) {
-                    AboutText(paragraph.to_string(), mobile);
+                    AboutText(paragraph.to_string(), style);
                 }
             }
         }

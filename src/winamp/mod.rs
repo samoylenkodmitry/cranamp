@@ -3178,7 +3178,15 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
             ),
             BoxSpec::default(),
             move || {
-                SettingsPanel(state, skin_state, display_text_color, 0.0, 0.0, true, scale);
+                SettingsPanel(
+                    state,
+                    skin_state,
+                    display_text_color,
+                    0.0,
+                    0.0,
+                    SettingsPanelDrag::Window,
+                    scale,
+                );
             },
         );
     }
@@ -4744,6 +4752,14 @@ fn open_releases_page() -> bool {
         .open_uri("https://github.com/samoylenkodmitry/cranamp/releases")
         .is_ok()
 }
+/// Whether the settings panel moves its window by its title strip.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsPanelDrag {
+    /// The panel is a window of its own and drags it.
+    Window,
+    /// The panel sits inside another window.
+    Fixed,
+}
 #[composable]
 fn SettingsPanel(
     state: MutableState<WinampState>,
@@ -4751,9 +4767,10 @@ fn SettingsPanel(
     text_color: [u8; 4],
     _origin_x: f32,
     _origin_y: f32,
-    with_drag: bool,
+    drag: SettingsPanelDrag,
     scale: f32,
 ) {
+    let with_drag = drag == SettingsPanelDrag::Window;
     let _ = text_color;
     let page = cranpose_core::rememberMutableStateOf(about::Page::default);
     let link_error = cranpose_core::rememberMutableStateOf(String::new);
@@ -4783,7 +4800,7 @@ fn SettingsPanel(
                 move || {
                     SettingsHeader(state);
                     if page.get() != about::Page::Settings {
-                        about::Content(page, false);
+                        about::Content(page, about::AboutStyle::Panel);
                         return;
                     }
                     SettingsSkinsSection(state, skin_state);
@@ -4825,7 +4842,7 @@ fn SettingsPanel(
                     SettingsActionButton("Privacy policy".into(), SETTINGS_CARD, move || {
                         about::open_link(about::PRIVACY_URL, link_error);
                     });
-                    about::LinkError(link_error, false);
+                    about::LinkError(link_error, about::AboutStyle::Panel);
                     SettingsActionButton("About Cranamp".into(), SETTINGS_CARD, move || {
                         page.set(about::Page::About);
                     });
@@ -4873,7 +4890,15 @@ fn SettingsModal(
                         .clickable(|_| {}),
                     BoxSpec::default(),
                     move || {
-                        SettingsPanel(state_panel, skin_panel, text_color, 0.0, 0.0, false, scale);
+                        SettingsPanel(
+                            state_panel,
+                            skin_panel,
+                            text_color,
+                            0.0,
+                            0.0,
+                            SettingsPanelDrag::Fixed,
+                            scale,
+                        );
                     },
                 );
             }

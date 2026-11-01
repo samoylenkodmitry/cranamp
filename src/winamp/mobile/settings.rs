@@ -126,7 +126,7 @@ pub(super) fn SettingsScreen(
             })),
             move || {
                 if legal.get() != about::Page::Settings {
-                    about::Content(legal, true);
+                    about::Content(legal, about::AboutStyle::Liquid);
                     return;
                 }
                 if page.get() != Page::Main {
@@ -373,7 +373,7 @@ pub(super) fn SettingsScreen(
                                 "Support and common questions",
                                 move || about::open_link(about::SUPPORT_URL, error),
                             );
-                            about::LinkError(error, true);
+                            about::LinkError(error, about::AboutStyle::Liquid);
                         });
                         Text(
                             "Your audio files stay in their original location.",
