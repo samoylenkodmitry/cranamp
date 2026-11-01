@@ -41,6 +41,26 @@ on:
         description: Submit the prepared Apple version and selected build for review
         type: boolean
         default: false
+      play_upload_run:
+        description: Send the signed AAB from this Store packages run to Google Play for review
+        type: string
+        default: ''
+      play_rollout:
+        description: Staged rollout fraction for play_upload_run (empty releases to everyone)
+        type: string
+        default: ''
+      msstore_upload_run:
+        description: Submit the MSIX from this Store packages run to the Microsoft Store
+        type: string
+        default: ''
+      snap_publish_run:
+        description: Release the snap from this Store packages run to the Snap Store stable channel
+        type: string
+        default: ''
+      aur_publish_run:
+        description: Attach the Linux archives from this Store packages run to the release and push both AUR recipes
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -155,6 +175,164 @@ jobs:
           package=$(find "$GITHUB_WORKSPACE/apple-upload" -name "*.$extension" -type f)
           test -n "$package" && test -f "$package"
           xcrun altool --upload-app -f "$package" -t "$upload_type" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+  play-upload:
+    if: inputs.play_upload_run != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: play-upload
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Check source package job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.play_upload_run }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+          gh api "repos/$SOURCE_REPO/actions/runs/$SOURCE_RUN/jobs" --paginate --jq '.jobs[] | select(.name == "Google Play AAB") | .conclusion' | grep -qx success
+      - uses: actions/download-artifact@v8
+        with:
+          name: google-play-bundle
+          path: play-upload
+          run-id: ${{ inputs.play_upload_run }}
+          github-token: ${{ github.token }}
+      - run: python3 -m pip install 'google-api-python-client==2.187.0' 'google-auth==2.43.0'
+      - name: Send the bundle to Google Play
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.CRANAMP_PLAY_SERVICE_ACCOUNT_JSON }}
+          PLAY_ROLLOUT: ${{ inputs.play_rollout }}
+        run: python3 scripts/distribution/play-upload.py play-upload/app-release.aab
+  msstore-upload:
+    if: inputs.msstore_upload_run != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: msstore-upload
+    steps:
+      - name: Check source package job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.msstore_upload_run }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+          gh api "repos/$SOURCE_REPO/actions/runs/$SOURCE_RUN/jobs" --paginate --jq '.jobs[] | select(.name == "Microsoft Store MSIX") | .conclusion' | grep -qx success
+      - uses: actions/download-artifact@v8
+        with:
+          name: microsoft-store-msix
+          path: msstore-upload
+          run-id: ${{ inputs.msstore_upload_run }}
+          github-token: ${{ github.token }}
+      - name: Install the Microsoft Store CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          gh release download v0.4.3 -R microsoft/msstore-cli -p 'MSStoreCLI-linux-x64.tar.gz*'
+          expected=$(iconv -f UTF-16 -t UTF-8 MSStoreCLI-linux-x64.tar.gz.sha256.txt 2>/dev/null || cat MSStoreCLI-linux-x64.tar.gz.sha256.txt)
+          actual=$(sha256sum MSStoreCLI-linux-x64.tar.gz | cut -d' ' -f1)
+          echo "$expected" | tr -d '\r' | grep -qi "$actual"
+          mkdir msstore && tar -xzf MSStoreCLI-linux-x64.tar.gz -C msstore
+          echo "$RUNNER_TEMP/msstore" >> "$GITHUB_PATH"
+      - name: Submit the package to the Microsoft Store
+        env:
+          MS_TENANT_ID: ${{ secrets.CRANAMP_MS_STORE_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.CRANAMP_MS_STORE_CLIENT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.CRANAMP_MS_STORE_CLIENT_SECRET }}
+          MS_SELLER_ID: ${{ secrets.CRANAMP_MS_STORE_SELLER_ID }}
+          MS_PRODUCT_ID: ${{ vars.CRANAMP_MS_STORE_PRODUCT_ID || '9N0XTC9PGM8X' }}
+        run: |
+          set -euo pipefail
+          package=$(find msstore-upload -maxdepth 1 -name '*.msix' -type f)
+          test -f "$package"
+          msstore reconfigure --tenantId "$MS_TENANT_ID" --clientId "$MS_CLIENT_ID" --clientSecret "$MS_CLIENT_SECRET" --sellerId "$MS_SELLER_ID"
+          msstore publish "$(dirname "$package")" --inputDirectory "$(dirname "$package")" --appId "$MS_PRODUCT_ID" --uploadTimeout 900
+  aur-publish:
+    if: inputs.aur_publish_run != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: aur-publish
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check source package job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.aur_publish_run }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+          gh api "repos/$SOURCE_REPO/actions/runs/$SOURCE_RUN/jobs" --paginate --jq '.jobs[] | select(.name == "Linux DEB, RPM and AUR source package") | .conclusion' | grep -qx success
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-repository-packages
+          path: linux
+          run-id: ${{ inputs.aur_publish_run }}
+          github-token: ${{ github.token }}
+      - name: Attach the archives the recipes download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(python3 scripts/distribution/version.py)
+          for recipe in linux/aur/PKGBUILD linux/aur-bin/PKGBUILD; do grep -qx "pkgver=$version" "$recipe"; done
+          gh release upload "v$version" "linux/cranamp-$version-source.tar.gz" "linux/cranamp-$version-linux-x86_64-store.tar.gz" --clobber
+      - name: Push both AUR recipes
+        env:
+          AUR_SSH_KEY: ${{ secrets.CRANAMP_AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          version=$(python3 scripts/distribution/version.py)
+          key="$RUNNER_TEMP/aur_key"
+          (umask 077; printf '%s\n' "$AUR_SSH_KEY" > "$key")
+          trap 'rm -f "$key"' EXIT
+          echo 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$RUNNER_TEMP/aur_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/aur_hosts"
+          git config --global user.name 'Dmitry Samoylenko'
+          git config --global user.email 'samoylenkodmitry@gmail.com'
+          for pair in cranamp:aur cranamp-bin:aur-bin; do
+            repo=${pair%%:*}; dir=${pair##*:}
+            git clone "ssh://aur@aur.archlinux.org/$repo.git" "$RUNNER_TEMP/$repo"
+            cp "linux/$dir/PKGBUILD" "linux/$dir/.SRCINFO" "$RUNNER_TEMP/$repo/"
+            git -C "$RUNNER_TEMP/$repo" add PKGBUILD .SRCINFO
+            if git -C "$RUNNER_TEMP/$repo" diff --cached --quiet; then echo "$repo is current"; continue; fi
+            git -C "$RUNNER_TEMP/$repo" commit -m "Update to Cranamp $version"
+            git -C "$RUNNER_TEMP/$repo" push origin HEAD:master
+          done
+  snap-publish:
+    if: inputs.snap_publish_run != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: snap-publish
+    steps:
+      - name: Check source package job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.snap_publish_run }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+          gh api "repos/$SOURCE_REPO/actions/runs/$SOURCE_RUN/jobs" --paginate --jq '.jobs[] | select(.name == "Snap") | .conclusion' | grep -qx success
+      - uses: actions/download-artifact@v8
+        with:
+          name: snap-store
+          path: snap-publish
+          run-id: ${{ inputs.snap_publish_run }}
+          github-token: ${{ github.token }}
+      - name: Find the snap
+        id: snap
+        run: echo "file=$(find snap-publish -name '*.snap' -type f)" >> "$GITHUB_OUTPUT"
+      - uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.CRANAMP_SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.snap.outputs.file }}
+          release: stable
   apple-status:
     if: inputs.apple_status_only == true
     runs-on: ubuntu-latest
@@ -171,7 +349,7 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.CRANAMP_ASC_API_ISSUER_ID }}
         run: python3 scripts/distribution/apple-status.py
   android:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
     name: Google Play AAB
     runs-on: ubuntu-latest
     steps:
@@ -242,7 +420,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/play-upload.jks"
 
   apple:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
     name: Apple ${{ matrix.platform }}
     runs-on: macos-latest
     strategy:
@@ -300,7 +478,7 @@ jobs:
           if [ -n "${CRANAMP_INSTALLED_PROFILE:-}" ]; then rm -f "$CRANAMP_INSTALLED_PROFILE"; fi
 
   windows:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
     name: Microsoft Store MSIX
     runs-on: windows-latest
     env:
@@ -351,8 +529,38 @@ jobs:
           path: store-artifacts/
           if-no-files-found: warn
 
+  snap:
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
+    name: Snap
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-repository-packages
+          path: linux
+      - name: Stage the snap project
+        run: |
+          set -euo pipefail
+          version=$(python3 scripts/distribution/version.py)
+          mkdir snap-build
+          cp platform/snap/snapcraft.yaml snap-build/
+          cp "linux/cranamp-$version-linux-x86_64-store.tar.gz" snap-build/cranamp-linux-x86_64-store.tar.gz
+          tar -xzf snap-build/cranamp-linux-x86_64-store.tar.gz -C "$RUNNER_TEMP" usr/share/icons/hicolor/512x512/apps/io.cranamp.app.png
+          cp "$RUNNER_TEMP/usr/share/icons/hicolor/512x512/apps/io.cranamp.app.png" snap-build/
+          echo "$version" > snap-build/version.txt
+      - uses: snapcore/action-build@v1
+        id: build
+        with:
+          path: snap-build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snap-store
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
   linux:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
     name: Linux DEB, RPM and AUR source package
     runs-on: ubuntu-22.04
     steps:
