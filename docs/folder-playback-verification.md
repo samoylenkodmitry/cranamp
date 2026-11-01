@@ -29,6 +29,13 @@ other native app targets do. The native picker still uses `UTTypeFolder` with
 `asCopy: false`; installed providers that disable directory selection can be
 accessed through Add Network when they expose WebDAV.
 
+The Tailscale file provider lets the picker open its folders but keeps Open
+disabled for a folder. Add music therefore offers Browse Tailscale Drive folders.
+It lists Taildrive at `http://100.100.100.100:8080/` one folder at a time, and
+Use this folder opens the shown folder as a WebDAV folder. On 2026-11-01 the
+paired iPhone opened the original library this way. Discovery found 2,096 audio
+entries among 2,754 files in 6 seconds.
+
 Native and web extension filters differ, so their discovered counts differ.
 Build checks do not replace the device results above.
 
@@ -48,6 +55,13 @@ Build checks do not replace the device results above.
   folder URL, and requires two seconds of playback progress. It also tests Next.
   Set `TEST_RUNNER_CRANAMP_TEST_WEBDAV_URL` to an accessible original folder URL.
   The separate native provider test retains the provider screenshot.
+- `testTaildriveBrowseFolder` in the same file walks the Taildrive browser to the
+  original library, checks the shown path after each folder, and requires new
+  playlist tracks. Set `TEST_RUNNER_CRANAMP_TEST_TAILDRIVE_PATH` to the folders
+  below the tailnet account, such as `machine/share/music`. Set
+  `TEST_RUNNER_CRANAMP_UITEST_ATTACH=1` to drive an app that
+  `xcrun devicectl device process launch --console` started, so its log reaches
+  the Mac. The log needs a build with the `logging` feature.
 - `test/windows-folder-playback.ps1` runs the desktop probe in the signed-in
   Windows session through a temporary scheduled task. It opens an existing folder,
   checks decoded samples and process completion, and removes its task afterward.
