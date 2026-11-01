@@ -145,16 +145,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
 symphonia = { version = "0.6.1", default-features = false, features = ["all-formats", "all-meta", "flac", "mp1", "mp2", "mp3"] }
-coroflow = "0.17.2"
-cranpose = { version = "0.17.2", default-features = false }
-cranpose-core = "0.17.2"
-cranpose-animation = "0.17.2"
-cranpose-coroflow = "0.17.2"
-cranpose-foundation = "0.17.2"
-cranpose-services = { version = "0.17.2", default-features = false }
-cranpose-ui = { version = "0.17.2", features = ["svg"] }
-cranpose-ui-graphics = "0.17.2"
-cranpose-ui-layout = "0.17.2"
+coroflow = "0.18.0"
+cranpose = { version = "0.18.0", default-features = false }
+cranpose-core = "0.18.0"
+cranpose-animation = "0.18.0"
+cranpose-coroflow = "0.18.0"
+cranpose-foundation = "0.18.0"
+cranpose-services = { version = "0.18.0", default-features = false }
+cranpose-ui = { version = "0.18.0", features = ["svg"] }
+cranpose-ui-graphics = "0.18.0"
+cranpose-ui-layout = "0.18.0"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "png", "webp"] }
 log = "0.4"
@@ -175,21 +175,11 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 wasm-logger = { version = "0.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cranpose-app-shell = "0.17.2"
-cranpose-render-common = "0.17.2"
+cranpose-app-shell = "0.18.0"
+cranpose-render-common = "0.18.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures-lite = "2"
-
-[target.'cfg(target_os = "android")'.dependencies]
-jni = "0.22.4"
-
-[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
-souvlaki = { version = "0.9.3", default-features = false, features = ["use_zbus"] }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-raw-window-handle = "0.6"
-windows = { version = "0.62", features = ["Media", "Win32_Foundation", "Win32_System_WinRT", "Storage_Streams"] }
 
 [profile.release]
 opt-level = 3
@@ -208,34 +198,5 @@ inherits = "release-small"
 panic = "abort"
 
 [build-dependencies]
-cranpose-capabilities = "0.17.2"
+cranpose-capabilities = "0.18.0"
 embed-resource = "3.0.12"
-
-# Pin Cranpose main, with its winit fork, until the next Cranpose release.
-[patch.crates-io]
-coroflow = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-animation = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-app-shell = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-audio = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-capabilities = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-core = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-coroflow = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-foundation = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-gl-templates = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-liquid = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-macros = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-media = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-platform-android = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-platform-desktop-winit = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-platform-web = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-render-common = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-render-pixels = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-render-wgpu = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-runtime-std = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-services = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-ui = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-ui-graphics = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-ui-layout = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-wgpu = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }
-cranpose-winit = { git = "https://github.com/samoylenkodmitry/Cranpose", rev = "5ca3a7c22408e894cd782d691fe012826076333b" }

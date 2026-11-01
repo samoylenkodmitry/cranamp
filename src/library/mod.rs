@@ -905,16 +905,6 @@ pub(crate) async fn encoded_artwork(key: String) -> Option<cranpose_services::Me
     .flatten()
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-pub(crate) fn artwork_uri(key: &str) -> Option<String> {
-    if !valid_key(key) {
-        return None;
-    }
-    let root = runtime().borrow().root.clone()?;
-    let path = root.join(format!("{key}.png"));
-    Some(cranpose_services::uri_for_path(&path))
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn artwork(key: String) -> Option<cranpose_ui::ImageBitmap> {
     let rt = runtime();

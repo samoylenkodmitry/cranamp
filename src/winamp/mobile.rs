@@ -249,9 +249,10 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
         move || player.update(|state| Destination::Player.select(state)),
     );
     let background = liquid_colors().background;
-    #[cfg(target_os = "android")]
-    cranpose_core::LaunchedEffect(background, move |_| {
-        crate::android_appearance::set_dark_system_bar_icons(!theme::prefers_dark(background));
+    cranpose_services::SystemBarAppearance(if theme::prefers_dark(background) {
+        cranpose_services::SystemBarIcons::Light
+    } else {
+        cranpose_services::SystemBarIcons::Dark
     });
     BoxWithConstraints(
         Modifier::empty()
