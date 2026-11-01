@@ -12,6 +12,7 @@ Store status was verified on November 1, 2026. The [0.1.93 record](../store/rele
 | Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | macOS 0.1.93 (153) submitted for review; iOS 0.1.93 (154) submitted for review |
 | Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.93 MSIX ready for upload in Partner Center |
 | Arch User Repository | [Source](https://aur.archlinux.org/packages/cranamp), [binary](https://aur.archlinux.org/packages/cranamp-bin) | `cranamp`, `cranamp-bin` | Both updated to 0.1.93-1 on November 1 |
+| Snap Store | [cranamp](https://snapcraft.io/cranamp) | `cranamp`, publisher `dmitriisamoilenko` | 0.1.93 revision 1 on `latest/stable` since November 1 |
 
 GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
 
