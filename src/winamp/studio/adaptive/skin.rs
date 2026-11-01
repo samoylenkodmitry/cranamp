@@ -71,10 +71,12 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 );
                 if side {
                     desktop::ListRow(
-                        Some(icon),
-                        name.into(),
-                        String::new(),
-                        String::new(),
+                        desktop::ListRowFace {
+                            icon: Some(icon),
+                            label: name.into(),
+                            hint: String::new(),
+                            metadata: String::new(),
+                        },
                         at,
                         i == selected || i == 0 && selected == 1,
                         ui.hints,
@@ -162,10 +164,12 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                             {
                                 let next = ui.skin_section;
                                 desktop::ListRow(
-                                    None,
-                                    title.into(),
-                                    String::new(),
-                                    String::new(),
+                                    desktop::ListRowFace {
+                                        icon: None,
+                                        label: title.into(),
+                                        hint: String::new(),
+                                        metadata: String::new(),
+                                    },
                                     Area::new(
                                         8. + index as f32 * (inner.w - 16.) / 2.,
                                         4.,
@@ -797,10 +801,12 @@ fn Font(ui: Ui, area: Area, preview_below: bool) {
         }
         let next = ui.clone();
         desktop::ListRow(
-            Some(Icon::Text),
-            "Build classic text font".into(),
-            "Replace the bitmap font on the active paint layer".into(),
-            String::new(),
+            desktop::ListRowFace {
+                icon: Some(Icon::Text),
+                label: "Build classic text font".into(),
+                hint: "Replace the bitmap font on the active paint layer".into(),
+                metadata: String::new(),
+            },
             Area::new(12., actions_y, area.w - 24., 44.),
             false,
             ui.hints,
@@ -812,10 +818,12 @@ fn Font(ui: Ui, area: Area, preview_below: bool) {
         );
         let next = ui.clone();
         desktop::ListRow(
-            Some(Icon::Brush),
-            "Edit font pixels".into(),
-            String::new(),
-            String::new(),
+            desktop::ListRowFace {
+                icon: Some(Icon::Brush),
+                label: "Edit font pixels".into(),
+                hint: String::new(),
+                metadata: String::new(),
+            },
             Area::new(12., actions_y + 52., area.w - 24., 44.),
             false,
             ui.hints,
@@ -908,10 +916,12 @@ fn Windows(ui: Ui, area: Area) {
                 let next = ui.clone();
                 let w = (area.w - 24.) / 2.;
                 desktop::ListRow(
-                    Some(icon),
-                    name.into(),
-                    String::new(),
-                    String::new(),
+                    desktop::ListRowFace {
+                        icon: Some(icon),
+                        label: name.into(),
+                        hint: String::new(),
+                        metadata: String::new(),
+                    },
                     Area::new(12. + j as f32 * w, y + 120., w, 44.),
                     false,
                     ui.hints,
@@ -959,10 +969,12 @@ fn Cursors(ui: Ui, area: Area) {
             if missing {
                 let next = ui.clone();
                 desktop::ListRow(
-                    Some(Icon::Add),
-                    "Draw missing cursors".into(),
-                    "Use the skin's colours; existing cursors stay unchanged".into(),
-                    String::new(),
+                    desktop::ListRowFace {
+                        icon: Some(Icon::Add),
+                        label: "Draw missing cursors".into(),
+                        hint: "Use the skin's colours; existing cursors stay unchanged".into(),
+                        metadata: String::new(),
+                    },
                     Area::new(12., 72., area.w - 24., 44.),
                     false,
                     ui.hints,
@@ -1038,10 +1050,12 @@ pub(super) fn CursorCanvas(ui: Ui, area: Area) {
         }
         let next = ui.clone();
         desktop::ListRow(
-            Some(Icon::Hand),
-            "Choose cursor".into(),
-            String::new(),
-            String::new(),
+            desktop::ListRowFace {
+                icon: Some(Icon::Hand),
+                label: "Choose cursor".into(),
+                hint: String::new(),
+                metadata: String::new(),
+            },
             Area::new(12., 124., area.w - 24., 44.),
             false,
             ui.hints,
@@ -1107,13 +1121,15 @@ pub(super) fn Hotspot(ui: Ui, role: String, cursor: serde_json::Value, area: Are
     }
     let next = ui.clone();
     Control(
-        Icon::Brush,
-        "Paint cursor".into(),
-        String::new(),
+        ControlFace {
+            icon: Icon::Brush,
+            label: "Paint cursor".into(),
+            detail: String::new(),
+            placement: ControlLabel::Hint,
+        },
         Area::new(area.x + cell * 2. + 4., area.y + 24., 44., 44.),
         false,
         true,
-        false,
         ui.hints,
         move || {
             update(

@@ -76,7 +76,6 @@ pub(super) fn Divider(area: Area) {
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 #[composable]
 pub(super) fn LayerRow(
     ui: Ui,
@@ -170,7 +169,6 @@ pub(super) fn ToolSample(ui: Ui, area: Area) {
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 #[composable]
 pub(super) fn ToolCard(
     ui: Ui,
@@ -245,7 +243,6 @@ pub(super) fn ToolCard(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 #[composable]
 pub(super) fn AssetRow(
     ui: Ui,

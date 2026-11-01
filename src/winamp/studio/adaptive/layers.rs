@@ -39,13 +39,15 @@ pub(super) fn Destination(ui: Ui, area: Area) {
         .to_owned();
     let next = ui.clone();
     Control(
-        Icon::Layers,
-        "Painting layers".into(),
-        "Choose where new paint goes".into(),
+        ControlFace {
+            icon: Icon::Layers,
+            label: "Painting layers".into(),
+            detail: "Choose where new paint goes".into(),
+            placement: ControlLabel::Hint,
+        },
         Area::new(area.x + area.w - 44., area.y, 36., area.h),
         false,
         true,
-        false,
         ui.hints,
         move || next.open_sheet(Sheet::Layers),
     );
@@ -101,13 +103,15 @@ pub(super) fn Panel(ui: Ui, area: Area) {
             let next = ui.clone();
             let key = id.clone();
             Control(
-                Icon::Check,
-                "Rename layer".into(),
-                "Apply the name in the field".into(),
+                ControlFace {
+                    icon: Icon::Check,
+                    label: "Rename layer".into(),
+                    detail: "Apply the name in the field".into(),
+                    placement: ControlLabel::Hint,
+                },
                 Area::new(area.w - 56., 22., 44., 44.),
                 false,
                 true,
-                false,
                 ui.hints,
                 move || command(&next, json!({"action":"set","id":key,"name":field.text()})),
             );
@@ -181,19 +185,21 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                 let next = ui.clone();
                 let key = id.clone();
                 Control(
-                    icon,
-                    label.into(),
-                    match action {
-                        "up" => "Draw this layer above the next layer",
-                        "down" => "Draw this layer below the previous layer",
-                        "merge_down" => "Combine this layer with the layer below",
-                        _ => "Undo restores this layer",
-                    }
-                    .into(),
+                    ControlFace {
+                        icon,
+                        label: label.into(),
+                        detail: match action {
+                            "up" => "Draw this layer above the next layer",
+                            "down" => "Draw this layer below the previous layer",
+                            "merge_down" => "Combine this layer with the layer below",
+                            _ => "Undo restores this layer",
+                        }
+                        .into(),
+                        placement: ControlLabel::Hint,
+                    },
                     Area::new(12. + i as f32 * (area.w - 24.) / 4., 156., 44., 44.),
                     false,
                     enabled,
-                    false,
                     ui.hints,
                     move || {
                         command(
@@ -212,10 +218,12 @@ pub(super) fn Panel(ui: Ui, area: Area) {
             let clipped = layer["clip_below"] == true;
             let next = ui.clone();
             desktop::ListRow(
-                None,
-                "Clip to layer below".into(),
-                "Keep paint inside the visible pixels of the layer below".into(),
-                if clipped { "On" } else { "Off" }.into(),
+                desktop::ListRowFace {
+                    icon: None,
+                    label: "Clip to layer below".into(),
+                    hint: "Keep paint inside the visible pixels of the layer below".into(),
+                    metadata: if clipped { "On" } else { "Off" }.into(),
+                },
                 Area::new(4., 204., area.w - 8., 44.),
                 clipped,
                 ui.hints,
@@ -249,13 +257,15 @@ pub(super) fn Panel(ui: Ui, area: Area) {
         );
         let next = ui.clone();
         Control(
-            Icon::Add,
-            "Add layer".into(),
-            "Create a layer above the artwork".into(),
+            ControlFace {
+                icon: Icon::Add,
+                label: "Add layer".into(),
+                detail: "Create a layer above the artwork".into(),
+                placement: ControlLabel::Hint,
+            },
             Area::new(area.w - 56., details_h, 44., 44.),
             false,
             true,
-            false,
             ui.hints,
             move || command(&next, json!({"action":"add"})),
         );
@@ -294,13 +304,15 @@ pub(super) fn Panel(ui: Ui, area: Area) {
                     "Lock"
                 };
                 Control(
-                    icon,
-                    format!("{label} {name}"),
-                    String::new(),
+                    ControlFace {
+                        icon,
+                        label: format!("{label} {name}"),
+                        detail: String::new(),
+                        placement: ControlLabel::Hint,
+                    },
                     Area::new(area.w - 96. + i as f32 * 44., y, 44., 44.),
                     on,
                     true,
-                    false,
                     ui.hints,
                     move || command(&next, json!({"action":"set","id":key,prop:!on})),
                 );

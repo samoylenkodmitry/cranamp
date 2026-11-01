@@ -26,16 +26,14 @@ pub(super) fn bottom_inset(state: &WinampState) -> f32 {
 
 #[composable]
 pub(super) fn Label(
-    text: impl Into<String>,
     modifier: Modifier,
+    text: impl Into<String>,
     size: f32,
     color: Color,
-    bold: bool,
+    weight: FontWeight,
 ) {
     let mut style = settings_text_style(size, color);
-    if bold {
-        style.span_style.font_weight = Some(cranpose_ui::text::FontWeight(600));
-    }
+    style.span_style.font_weight = Some(weight);
     BasicText(
         text.into(),
         modifier,
@@ -68,11 +66,11 @@ pub(super) fn Section(title: &'static str, content: impl FnMut() + 'static) {
         ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(8.0)),
         move || {
             Label(
-                title.to_uppercase(),
                 Modifier::empty().padding_symmetric(3.0, 0.0),
+                title.to_uppercase(),
                 12.0,
                 colors.secondary_label,
-                false,
+                FontWeight::NORMAL,
             );
             let content = content.clone();
             Column(
@@ -121,11 +119,11 @@ pub(super) fn ActionRow(
                 move || {
                     icons::Icon(icon, None, 22.0, color);
                     Label(
-                        label.clone(),
                         Modifier::empty().weight(1.0),
+                        label.clone(),
                         16.0,
                         color,
-                        false,
+                        FontWeight::NORMAL,
                     );
                 },
             );
@@ -199,7 +197,7 @@ pub(super) fn Artwork(track: Track, size: f32) {
 }
 
 #[composable]
-pub(super) fn MiniPlayer(player: MutableState<WinampState>, modifier: Modifier) {
+pub(super) fn MiniPlayer(modifier: Modifier, player: MutableState<WinampState>) {
     use cranpose_coroflow::StateFlowCollect;
     let _revision = crate::library::revision().collectAsState().get();
     let snapshot = player.get();
@@ -249,18 +247,18 @@ pub(super) fn MiniPlayer(player: MutableState<WinampState>, modifier: Modifier) 
                                             .vertical_arrangement(LinearArrangement::SpacedBy(3.)),
                                         move || {
                                             Label(
-                                                parsed_track_title(&track.title),
                                                 Modifier::empty().fill_max_width(),
+                                                parsed_track_title(&track.title),
                                                 13.,
                                                 colors.label,
-                                                true,
+                                                FontWeight::SEMI_BOLD,
                                             );
                                             Label(
-                                                library::track_subtitle(&track),
                                                 Modifier::empty().fill_max_width(),
+                                                library::track_subtitle(&track),
                                                 11.,
                                                 colors.secondary_label,
-                                                false,
+                                                FontWeight::NORMAL,
                                             );
                                         },
                                     );

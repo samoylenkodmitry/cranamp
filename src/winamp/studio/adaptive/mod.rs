@@ -21,7 +21,9 @@ mod skin;
 mod viewport;
 mod workbench;
 use canvas::{CanvasState, EditorCanvas};
-use controls::{control_cursor, Control, Hint, HintOverlay, Hints, Icon};
+use controls::{
+    control_cursor, Control, ControlFace, ControlLabel, Hint, HintOverlay, Hints, Icon,
+};
 use layout::{Area, Layout, WidthClass};
 use panels::*;
 use viewport::Viewport;
@@ -729,9 +731,12 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                     {
                                         let viewport = ui.viewport;
                                         Control(
-                                            icon,
-                                            label.into(),
-                                            "Zoom the canvas".into(),
+                                            ControlFace {
+                                                icon,
+                                                label: label.into(),
+                                                detail: "Zoom the canvas".into(),
+                                                placement: ControlLabel::Hint,
+                                            },
                                             Area::new(
                                                 canvas.x + canvas.w - 132. + i as f32 * 44.,
                                                 y,
@@ -740,7 +745,6 @@ fn Workspace(ui: Ui, actions: Actions, layout: Layout, hosted: bool, busy: bool)
                                             ),
                                             false,
                                             true,
-                                            false,
                                             ui.hints,
                                             move || {
                                                 viewport.update(|v| {
@@ -858,27 +862,29 @@ fn Header(ui: Ui, layout: Layout, name: String, dirty: bool) {
     };
     let button = ui.clone();
     Control(
-        if screen == Screen::Projects {
-            Icon::Help
-        } else {
-            Icon::Back
+        ControlFace {
+            icon: if screen == Screen::Projects {
+                Icon::Help
+            } else {
+                Icon::Back
+            },
+            label: if screen == Screen::Projects {
+                "Studio help"
+            } else {
+                "Back"
+            }
+            .into(),
+            detail: if screen == Screen::Projects {
+                "Instructions for editing and saving"
+            } else {
+                ""
+            }
+            .into(),
+            placement: ControlLabel::Hint,
         },
-        if screen == Screen::Projects {
-            "Studio help"
-        } else {
-            "Back"
-        }
-        .into(),
-        if screen == Screen::Projects {
-            "Instructions for editing and saving"
-        } else {
-            ""
-        }
-        .into(),
         Area::new(4., 6., 44., 44.),
         false,
         true,
-        false,
         ui.hints,
         move || {
             if screen == Screen::Projects {
@@ -983,19 +989,21 @@ fn Header(ui: Ui, layout: Layout, name: String, dirty: bool) {
             #[cfg(any(target_os = "ios", target_os = "android", target_arch = "wasm32"))]
             let selected = false;
             Control(
-                icon,
-                label.into(),
-                match i {
-                    0 => "Undo the last edit",
-                    1 => "Redo the last undone edit",
-                    2 => "Project tools and help",
-                    _ => "Connect an MCP agent to this canvas",
-                }
-                .into(),
+                ControlFace {
+                    icon,
+                    label: label.into(),
+                    detail: match i {
+                        0 => "Undo the last edit",
+                        1 => "Redo the last undone edit",
+                        2 => "Project tools and help",
+                        _ => "Connect an MCP agent to this canvas",
+                    }
+                    .into(),
+                    placement: ControlLabel::Hint,
+                },
                 Area::new(x, 6., 44., 44.),
                 selected,
                 enabled,
-                false,
                 ui.hints,
                 move || {
                     if i == 3 {
@@ -1017,13 +1025,15 @@ fn Header(ui: Ui, layout: Layout, name: String, dirty: bool) {
     } else if screen == Screen::Preview {
         let ui = ui.clone();
         Control(
-            Icon::Share,
-            "Save and share".into(),
-            "Save the layered project or export a skin".into(),
+            ControlFace {
+                icon: Icon::Share,
+                label: "Save and share".into(),
+                detail: "Save the layered project or export a skin".into(),
+                placement: ControlLabel::Hint,
+            },
             Area::new(layout.width - 56., 8., 48., 48.),
             false,
             true,
-            false,
             ui.hints,
             move || ui.show(Screen::Save),
         );

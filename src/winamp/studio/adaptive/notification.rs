@@ -49,13 +49,15 @@ pub(super) fn Notification(notice: Option<(u64, String)>, width: f32, height: f3
                 text_style(12., studio_fg()),
             );
             Control(
-                Icon::Close,
-                "Dismiss notification".into(),
-                String::new(),
+                ControlFace {
+                    icon: Icon::Close,
+                    label: "Dismiss notification".into(),
+                    detail: String::new(),
+                    placement: ControlLabel::Hint,
+                },
                 Area::new(w - 44., 6., 36., 44.),
                 false,
                 true,
-                false,
                 controls::hint_context().current().expect("Studio hints"),
                 move || visible.set(false),
             );

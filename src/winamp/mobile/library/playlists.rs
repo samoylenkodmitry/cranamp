@@ -300,6 +300,7 @@ pub(super) fn Screen(player: MutableState<WinampState>, ui: LibraryUi) {
                                         ColumnSpec::default(),
                                         move || {
                                             chrome::Label(
+                                                Modifier::empty(),
                                                 if picker {
                                                     "Add tracks".into()
                                                 } else {
@@ -308,13 +309,13 @@ pub(super) fn Screen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                         |list| list.name.clone(),
                                                     )
                                                 },
-                                                Modifier::empty(),
                                                 if compact { 24. } else { 28. },
                                                 colors.label,
-                                                true,
+                                                FontWeight::SEMI_BOLD,
                                             );
                                             if !compact {
                                                 chrome::Label(
+                                                    Modifier::empty(),
                                                     if picker {
                                                         format!(
                                                             "{} selected",
@@ -336,10 +337,9 @@ pub(super) fn Screen(player: MutableState<WinampState>, ui: LibraryUi) {
                                                             |list| library_summary(&list.tracks),
                                                         )
                                                     },
-                                                    Modifier::empty(),
                                                     14.,
                                                     colors.secondary_label,
-                                                    false,
+                                                    FontWeight::NORMAL,
                                                 );
                                             }
                                         },
@@ -658,15 +658,15 @@ fn Pill(label: &'static str, icon: &'static str, action: impl Fn() + 'static) {
                 move || {
                     icons::Icon(icon, None, 18., colors.accent);
                     chrome::Label(
+                        Modifier::empty(),
                         if label == "Play playlist" {
                             "Play"
                         } else {
                             "Shuffle"
                         },
-                        Modifier::empty(),
                         16.,
                         colors.accent,
-                        true,
+                        FontWeight::SEMI_BOLD,
                     );
                 },
             );
@@ -687,7 +687,13 @@ fn Empty(
         ColumnSpec::default().vertical_arrangement(LinearArrangement::SpacedBy(14.)),
         move || {
             icons::Icon(icons::LIST, None, 42., colors.accent);
-            chrome::Label(title, Modifier::empty(), 25., colors.label, true);
+            chrome::Label(
+                Modifier::empty(),
+                title,
+                25.,
+                colors.label,
+                FontWeight::SEMI_BOLD,
+            );
             Text(
                 body,
                 Modifier::empty().fill_max_width(),
@@ -808,18 +814,18 @@ fn Overview(player: MutableState<WinampState>, ui: LibraryUi, data: Rc<Collectio
                                                 ),
                                                 move || {
                                                     chrome::Label(
-                                                        list.name.clone(),
                                                         Modifier::empty(),
+                                                        list.name.clone(),
                                                         17.,
                                                         colors.label,
-                                                        true,
+                                                        FontWeight::SEMI_BOLD,
                                                     );
                                                     chrome::Label(
-                                                        library_summary(&list.tracks),
                                                         Modifier::empty(),
+                                                        library_summary(&list.tracks),
                                                         13.,
                                                         colors.secondary_label,
-                                                        false,
+                                                        FontWeight::NORMAL,
                                                     );
                                                 },
                                             );
@@ -875,11 +881,11 @@ fn SelectionControls(ui: LibraryUi, id: u64) {
             .vertical_alignment(VerticalAlignment::CenterVertically),
         move || {
             chrome::Label(
-                format!("{} selected", selected.len()),
                 Modifier::empty(),
+                format!("{} selected", selected.len()),
                 14.,
                 liquid_colors().secondary_label,
-                false,
+                FontWeight::NORMAL,
             );
             let matching = matching.clone();
             TextButton(
@@ -1066,22 +1072,22 @@ fn TrackList(
                                                 ),
                                                 move || {
                                                     chrome::Label(
-                                                        crate::library::title(&track),
                                                         Modifier::empty(),
+                                                        crate::library::title(&track),
                                                         16.,
                                                         colors.label,
-                                                        false,
+                                                        FontWeight::NORMAL,
                                                     );
                                                     chrome::Label(
+                                                        Modifier::empty(),
                                                         if present {
                                                             "Already added".into()
                                                         } else {
                                                             track_subtitle(&track)
                                                         },
-                                                        Modifier::empty(),
                                                         13.,
                                                         colors.secondary_label,
-                                                        false,
+                                                        FontWeight::NORMAL,
                                                     );
                                                 },
                                             );
@@ -1228,11 +1234,11 @@ fn DialogContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 return;
             };
             chrome::Label(
-                list.name.clone(),
                 Modifier::empty(),
+                list.name.clone(),
                 22.,
                 colors.label,
-                true,
+                FontWeight::SEMI_BOLD,
             );
             SheetAction("Add tracks", move || {
                 ui.saved.dialog.set(Dialog::None);
@@ -1298,11 +1304,11 @@ fn DialogContents(player: MutableState<WinampState>, ui: LibraryUi) {
                 return;
             };
             chrome::Label(
-                crate::library::title(track),
                 Modifier::empty(),
+                crate::library::title(track),
                 22.,
                 colors.label,
-                true,
+                FontWeight::SEMI_BOLD,
             );
             for (label, to) in [
                 ("Move up", index.checked_sub(1)),

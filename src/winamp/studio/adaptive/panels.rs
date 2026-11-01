@@ -81,10 +81,12 @@ fn RowAction(
     action: impl Fn() + 'static,
 ) {
     desktop::ListRow(
-        Some(icon),
-        label,
-        detail.into(),
-        String::new(),
+        desktop::ListRowFace {
+            icon: Some(icon),
+            label,
+            hint: detail.into(),
+            metadata: String::new(),
+        },
         area,
         false,
         hints,
@@ -395,10 +397,12 @@ pub(super) fn ToolSettings(ui: Ui, area: Area) {
         }
         let shared = ui.shared.clone();
         desktop::ListRow(
-            Some(Icon::Grid),
-            "Pixel grid".into(),
-            "Show pixel boundaries".into(),
-            if view.grid { "On" } else { "Off" }.into(),
+            desktop::ListRowFace {
+                icon: Some(Icon::Grid),
+                label: "Pixel grid".into(),
+                hint: "Show pixel boundaries".into(),
+                metadata: if view.grid { "On" } else { "Off" }.into(),
+            },
             Area::new(0., y + 48., area.w, 44.),
             view.grid,
             ui.hints,
@@ -480,13 +484,15 @@ pub(super) fn SheetPanel(ui: Ui, area: Area, sheet: Sheet, revision: u64) {
             desktop::RowLabel(heading.clone(), 12., 16., area.w - 64., 16., studio_fg());
             let close = ui.clone();
             Control(
-                Icon::Close,
-                "Close panel".into(),
-                "Return to the canvas".into(),
+                ControlFace {
+                    icon: Icon::Close,
+                    label: "Close panel".into(),
+                    detail: "Return to the canvas".into(),
+                    placement: ControlLabel::Hint,
+                },
                 Area::new(area.w - 48., 4., 44., 40.),
                 false,
                 true,
-                false,
                 ui.hints,
                 move || close.open_sheet(Sheet::None),
             );
@@ -529,10 +535,12 @@ fn ScopeList(ui: Ui, area: Area) {
         {
             let next = ui.clone();
             desktop::ListRow(
-                Some(icon),
-                name.into(),
-                String::new(),
-                String::new(),
+                desktop::ListRowFace {
+                    icon: Some(icon),
+                    label: name.into(),
+                    hint: String::new(),
+                    metadata: String::new(),
+                },
                 Area::new(8., i as f32 * 48., area.w - 16., 44.),
                 ui.screen.get() == screen,
                 ui.hints,
@@ -715,9 +723,12 @@ pub(super) fn Preview(ui: Ui, layout: Layout, revision: u64) {
             }
         };
         Control(
-            icon,
-            label.into(),
-            "Inspect the skin in this visual state".into(),
+            ControlFace {
+                icon,
+                label: label.into(),
+                detail: "Inspect the skin in this visual state".into(),
+                placement: ControlLabel::Caption,
+            },
             Area::new(
                 layout.width / 2. - 104. + i as f32 * 108.,
                 layout.height - 88.,
@@ -725,7 +736,6 @@ pub(super) fn Preview(ui: Ui, layout: Layout, revision: u64) {
                 60.,
             ),
             on,
-            true,
             true,
             ui.hints,
             move || state(&d, json!({key:!on})),
@@ -863,10 +873,12 @@ fn History(ui: Ui, area: Area) {
             let cursor = entry["cursor"].as_u64().unwrap_or(0) as usize;
             let next = ui.clone();
             desktop::ListRow(
-                Some(Icon::History),
-                entry["label"].as_str().unwrap_or("Edit").to_owned(),
-                entry["source"].as_str().unwrap_or("").to_owned(),
-                String::new(),
+                desktop::ListRowFace {
+                    icon: Some(Icon::History),
+                    label: entry["label"].as_str().unwrap_or("Edit").to_owned(),
+                    hint: entry["source"].as_str().unwrap_or("").to_owned(),
+                    metadata: String::new(),
+                },
                 Area::new(4., 40. + index as f32 * 52., area.w - 8., 48.),
                 entry["current"] == true,
                 ui.hints,

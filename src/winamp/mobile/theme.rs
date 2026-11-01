@@ -85,7 +85,7 @@ impl Ui {
 }
 
 #[composable]
-pub(super) fn remember_theme() -> Ui {
+pub(super) fn rememberTheme() -> Ui {
     let ui = cranpose_core::remember(|| Ui {
         mode: cranpose_core::mutableStateOf(Mode::Auto),
         error: cranpose_core::mutableStateOf(String::new()),

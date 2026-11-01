@@ -111,9 +111,12 @@ pub(super) fn Tools(ui: Ui, layout: Layout) {
                 };
                 let next = ui.clone();
                 Control(
-                    icon,
-                    name.into(),
-                    tool_hint(key).into(),
+                    ControlFace {
+                        icon,
+                        label: name.into(),
+                        detail: tool_hint(key).into(),
+                        placement: ControlLabel::Hint,
+                    },
                     button,
                     if key == "pan" {
                         ui.hand.get()
@@ -121,7 +124,6 @@ pub(super) fn Tools(ui: Ui, layout: Layout) {
                         !ui.hand.get() && view.brush == key
                     },
                     true,
-                    false,
                     ui.hints,
                     move || match key {
                         "colour" => next.open_sheet(Sheet::Colour),
@@ -231,13 +233,15 @@ pub(super) fn ContextBar(ui: Ui, layout: Layout) {
             }
             let next = ui.clone();
             Control(
-                Icon::State,
-                "Canvas frames".into(),
-                "Slider positions, digits and paint scope".into(),
+                ControlFace {
+                    icon: Icon::State,
+                    label: "Canvas frames".into(),
+                    detail: "Slider positions, digits and paint scope".into(),
+                    placement: ControlLabel::Hint,
+                },
                 Area::new(area.x + area.w - 92., area.y + 2., 44., 44.),
                 false,
                 true,
-                false,
                 ui.hints,
                 move || next.open_sheet(Sheet::CanvasState),
             );
@@ -260,10 +264,12 @@ pub(super) fn ContextBar(ui: Ui, layout: Layout) {
         };
         let next = ui.clone();
         desktop::ListRow(
-            Some(Icon::Parts),
-            label,
-            "Choose what to edit".into(),
-            String::new(),
+            desktop::ListRowFace {
+                icon: Some(Icon::Parts),
+                label,
+                hint: "Choose what to edit".into(),
+                metadata: String::new(),
+            },
             Area::new(
                 area.x,
                 area.y + 2.,
@@ -284,26 +290,28 @@ pub(super) fn ContextBar(ui: Ui, layout: Layout) {
             let next = ui.clone();
             let view = ui.shared.lock().unwrap().view.clone();
             Control(
-                if screen == Screen::States {
-                    Icon::Brush
-                } else {
-                    Icon::State
+                ControlFace {
+                    icon: if screen == Screen::States {
+                        Icon::Brush
+                    } else {
+                        Icon::State
+                    },
+                    label: if screen == Screen::States {
+                        "Edit sprite"
+                    } else {
+                        "Canvas state"
+                    }
+                    .into(),
+                    detail: format!(
+                        "{} / {}",
+                        if view.active { "Active" } else { "Inactive" },
+                        if view.pressed { "Pressed" } else { "Released" }
+                    ),
+                    placement: ControlLabel::Hint,
                 },
-                if screen == Screen::States {
-                    "Edit sprite"
-                } else {
-                    "Canvas state"
-                }
-                .into(),
-                format!(
-                    "{} / {}",
-                    if view.active { "Active" } else { "Inactive" },
-                    if view.pressed { "Pressed" } else { "Released" }
-                ),
                 Area::new(area.x + area.w - 88., area.y + 2., 44., 44.),
                 false,
                 true,
-                false,
                 ui.hints,
                 move || {
                     if screen == Screen::States {
@@ -317,13 +325,15 @@ pub(super) fn ContextBar(ui: Ui, layout: Layout) {
     }
     let next = ui.clone();
     Control(
-        Icon::Save,
-        "Save and share".into(),
-        "Save project or export skin".into(),
+        ControlFace {
+            icon: Icon::Save,
+            label: "Save and share".into(),
+            detail: "Save project or export skin".into(),
+            placement: ControlLabel::Hint,
+        },
         Area::new(area.x + area.w - 48., area.y + 2., 44., 44.),
         false,
         true,
-        false,
         ui.hints,
         move || next.show(Screen::Save),
     );
@@ -351,15 +361,17 @@ pub(super) fn CanvasToggles(ui: Ui, area: Area) {
     {
         let d = ui.shared.clone();
         desktop::ListRow(
-            None,
-            name.into(),
-            if key == "active" {
-                "Switch active / inactive artwork"
-            } else {
-                "Switch released / pressed artwork"
-            }
-            .into(),
-            String::new(),
+            desktop::ListRowFace {
+                icon: None,
+                label: name.into(),
+                hint: if key == "active" {
+                    "Switch active / inactive artwork"
+                } else {
+                    "Switch released / pressed artwork"
+                }
+                .into(),
+                metadata: String::new(),
+            },
             Area::new(
                 area.x + i as f32 * area.w / 2.,
                 area.y + 2.,
@@ -408,10 +420,12 @@ pub(super) fn CanvasSettings(ui: Ui, area: Area) {
         {
             let d = ui.shared.clone();
             desktop::ListRow(
-                None,
-                label.into(),
-                model::scope_label(key).into(),
-                String::new(),
+                desktop::ListRowFace {
+                    icon: None,
+                    label: label.into(),
+                    hint: model::scope_label(key).into(),
+                    metadata: String::new(),
+                },
                 Area::new(
                     (i % 2) as f32 * area.w / 2.,
                     y + 28. + (i / 2) as f32 * 44.,
@@ -455,10 +469,12 @@ pub(super) fn CanvasSettings(ui: Ui, area: Area) {
         for (i, name) in ["Stopped", "Playing", "Paused"].into_iter().enumerate() {
             let d = ui.shared.clone();
             desktop::ListRow(
-                None,
-                name.into(),
-                format!("Show {name} artwork"),
-                String::new(),
+                desktop::ListRowFace {
+                    icon: None,
+                    label: name.into(),
+                    hint: format!("Show {name} artwork"),
+                    metadata: String::new(),
+                },
                 Area::new(i as f32 * area.w / 3., y + 348., area.w / 3., 44.),
                 v.playback as usize == i,
                 ui.hints,
@@ -495,19 +511,20 @@ pub(super) fn PropertyHeading(ui: Ui, area: Area) {
     );
     let next = ui.clone();
     Control(
-        Icon::Settings,
-        "Tool settings".into(),
-        String::new(),
+        ControlFace {
+            icon: Icon::Settings,
+            label: "Tool settings".into(),
+            detail: String::new(),
+            placement: ControlLabel::Hint,
+        },
         Area::new(area.x + area.w - 48., area.y, 44., 44.),
         false,
         true,
-        false,
         ui.hints,
         move || next.open_sheet(Sheet::Advanced(4)),
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 #[composable]
 pub(super) fn ValueSlider(
     ui: Ui,
@@ -646,13 +663,15 @@ pub(super) fn Properties(ui: Ui, area: Area, vertical: bool) {
         );
         let next = ui.clone();
         Control(
-            Icon::Stamp,
-            "Use copied pixels".into(),
-            "Switch to Stamp; the original stays in place".into(),
+            ControlFace {
+                icon: Icon::Stamp,
+                label: "Use copied pixels".into(),
+                detail: "Switch to Stamp; the original stays in place".into(),
+                placement: ControlLabel::Hint,
+            },
             Area::new(area.x + area.w - 52., area.y + 8., 44., 44.),
             false,
             ui.shared.lock().unwrap().cluster.is_some(),
-            false,
             ui.hints,
             move || update(&next.shared, next.tick, json!({"brush":"stamp"})),
         );
@@ -679,9 +698,12 @@ pub(super) fn Properties(ui: Ui, area: Area, vertical: bool) {
         {
             let next = ui.clone();
             Control(
-                icon,
-                label.into(),
-                "Changes the copy for the next stamp".into(),
+                ControlFace {
+                    icon,
+                    label: label.into(),
+                    detail: "Changes the copy for the next stamp".into(),
+                    placement: ControlLabel::Hint,
+                },
                 Area::new(
                     second.x + 4. + i as f32 * ((second.w - 8.) / 3.).min(44.),
                     second.y + 8.,
@@ -690,7 +712,6 @@ pub(super) fn Properties(ui: Ui, area: Area, vertical: bool) {
                 ),
                 false,
                 captured,
-                false,
                 ui.hints,
                 move || {
                     let mut d = next.shared.lock().unwrap();
@@ -821,10 +842,12 @@ pub(super) fn Properties(ui: Ui, area: Area, vertical: bool) {
         } else if matches!(view.brush.as_str(), "rect" | "ellipse") {
             let d = ui.shared.clone();
             desktop::ListRow(
-                Some(Icon::Fill),
-                "Fill shape".into(),
-                "Fill or outline".into(),
-                String::new(),
+                desktop::ListRowFace {
+                    icon: Some(Icon::Fill),
+                    label: "Fill shape".into(),
+                    hint: "Fill or outline".into(),
+                    metadata: String::new(),
+                },
                 Area::new(second.x + 4., second.y + 16., second.w - 8., 44.),
                 view.filled,
                 ui.hints,

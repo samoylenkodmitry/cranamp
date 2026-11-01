@@ -883,26 +883,39 @@ enum WinampInitialWindowPosition {
     Host(Point),
     Screen(Point),
 }
-#[composable]
-fn remember_winamp_tab_state(navigation: Navigation) -> WinampTabState {
-    let tab_state = cranpose_core::remember(|| WinampTabState {
-        player: cranpose_core::mutableStateOf(WinampState {
-            navigation,
-            ..initial_winamp_state()
-        }),
-        detached: cranpose_core::mutableStateOf(native_winamp_windows_available()),
-        inline_windows: WinampInlineWindowStates::saved_or_stacked(),
-        peer_windows: WinampPeerWindowStates {
-            main: WindowState::new(MAIN_WIDTH, MAIN_HEIGHT),
-            equalizer: WindowState::new(EQ_WIDTH, EQ_HEIGHT),
-            playlist: WindowState::new(PLAYLIST_WIDTH, PLAYLIST_HEIGHT),
-            scale: cranpose_core::mutableStateOf(1.),
+impl WinampPeerWindowStates {
+    /// The window states at `scale`, with the saved layout applied before
+    /// anything reads them.
+    fn restored(scale: f32) -> Self {
+        let windows = Self {
+            main: WindowState::new(MAIN_WIDTH * scale, MAIN_HEIGHT * scale),
+            equalizer: WindowState::new(EQ_WIDTH * scale, EQ_HEIGHT * scale),
+            playlist: WindowState::new(PLAYLIST_WIDTH * scale, PLAYLIST_HEIGHT * scale),
+            scale: cranpose_core::mutableStateOf(scale),
             stack: cranpose_core::mutableStateOf(Size::new(MAIN_WIDTH, PLAYLIST_HEIGHT)),
-        },
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(config) = load_saved_window_config() {
+            apply_saved_window_config(windows, config);
+        }
+        windows
+    }
+}
+#[composable]
+fn rememberWinampTabState(navigation: Navigation) -> WinampTabState {
+    cranpose_core::remember(|| {
+        let peer_windows = WinampPeerWindowStates::restored(1.);
+        WinampTabState {
+            player: cranpose_core::mutableStateOf(WinampState {
+                navigation,
+                ..initial_winamp_state()
+            }),
+            detached: cranpose_core::mutableStateOf(native_winamp_windows_available()),
+            inline_windows: WinampInlineWindowStates::saved_or_stacked(),
+            peer_windows,
+        }
     })
-    .with(|state| *state);
-    remember_saved_window_config(tab_state.peer_windows);
-    tab_state
+    .with(|state| *state)
 }
 #[composable]
 pub(crate) fn WinampTab(tab_state: WinampTabState) {
@@ -911,7 +924,7 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
     let native_available = native_winamp_windows_available();
     let detached = native_available && tab_state.detached.get();
     let snapshot = state.get();
-    let skin_state = remember_winamp_skin(state);
+    let skin_state = rememberWinampSkin(state);
     // Held across the inline/detached toggle on purpose: these used to live
     // inside the detached branch, so switching to inline and back forgot
     // which panes were docked and where the settings window was.
@@ -978,46 +991,47 @@ pub(crate) fn WinampTab(tab_state: WinampTabState) {
         },
     );
 }
-fn remember_winamp_skin(_state: MutableState<WinampState>) -> WinampSkinState {
-    let skin_state = cranpose_core::rememberMutableStateOf(bundled_skin);
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let skin_path = _state.get_non_reactive().skin_path;
-        cranpose_core::remember(move || {
-            let Some(path) = skin_path else { return };
-            if let Some(entry) = bundled_skin_entry(&path) {
-                if let Ok(loaded) = load_skin(entry.bytes) {
-                    skin_state.set(Ok(loaded));
-                }
-                return;
-            }
+/// The skin the player draws. A saved bundled or browser-stored skin is there
+/// from the first frame; a saved skin file loads in the background.
+#[composable]
+fn rememberWinampSkin(state: MutableState<WinampState>) -> WinampSkinState {
+    let skin_path = state.get_non_reactive().skin_path;
+    let restored = skin_path.as_deref().and_then(restored_skin);
+    let file_path = skin_path.filter(|_| restored.is_none());
+    let skin_state = cranpose_core::rememberMutableStateOf(move || match restored {
+        Some(skin) => Ok(skin),
+        None => bundled_skin(),
+    });
+    cranpose_core::LaunchedEffect((), move |_| {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(path) = file_path {
             load_skin_file_background(
-                _state,
+                state,
                 skin_state,
                 std::path::PathBuf::from(path),
                 false,
                 None,
                 false,
             );
-        });
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = file_path;
+    });
+    skin_state
+}
+/// The saved skin that loads without waiting: a bundled one, or on the web one
+/// kept in the browser's storage.
+fn restored_skin(path: &str) -> Option<WinampSkin> {
+    if let Some(entry) = bundled_skin_entry(path) {
+        return load_skin(entry.bytes).ok();
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let skin_path = _state.get_non_reactive().skin_path;
-        cranpose_core::remember(move || {
-            if let Some(path) = skin_path {
-                apply_library_skin(
-                    _state,
-                    skin_state,
-                    &LibrarySkin {
-                        label: path.rsplit('/').next().unwrap_or("Saved skin").to_string(),
-                        path: Some(path.into()),
-                    },
-                );
-            }
-        });
+        let bytes = browser_skins::load(cranpose_services::preferences().as_ref(), path).ok()?;
+        return load_skin(&bytes).ok();
     }
-    skin_state
+    #[cfg(not(target_arch = "wasm32"))]
+    None
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn load_skin_file_background(
@@ -2169,8 +2183,8 @@ fn WinampStudioSurfaceWithInset(
 }
 #[composable]
 pub fn WinampStackedApp() {
-    let tab_state = remember_winamp_tab_state(Navigation::External);
-    let skin_state = remember_winamp_skin(tab_state.player);
+    let tab_state = rememberWinampTabState(Navigation::External);
+    let skin_state = rememberWinampSkin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
     #[cfg(target_os = "android")]
     AndroidPlayerWindow(tab_state.player);
@@ -2213,7 +2227,7 @@ fn WinampStackedFill(
             &snapshot,
             ui_scale(),
         );
-        let drag = stacked_drag(layout, snapshot);
+        let drag = rememberStackedDrag(layout, snapshot);
         WinampStackedStage(skin.clone(), player, skin_state, layout, drag);
         SettingsModal(player, skin_state, display_color, ui_scale());
     });
@@ -2312,7 +2326,7 @@ fn AndroidPlayerWindow(player: MutableState<WinampState>) {
 
 #[cfg(target_os = "android")]
 #[composable]
-fn stacked_drag(layout: StackedLayout, snapshot: WinampState) -> StackedDrag {
+fn rememberStackedDrag(layout: StackedLayout, snapshot: WinampState) -> StackedDrag {
     let overlay_enabled = android_floating_overlay_enabled();
     if !overlay_enabled {
         return StackedDrag::Fixed;
@@ -2356,15 +2370,15 @@ fn stacked_drag(layout: StackedLayout, snapshot: WinampState) -> StackedDrag {
 }
 #[cfg(not(target_os = "android"))]
 #[composable]
-fn stacked_drag(_layout: StackedLayout, _snapshot: WinampState) -> StackedDrag {
+fn rememberStackedDrag(_layout: StackedLayout, _snapshot: WinampState) -> StackedDrag {
     StackedDrag::Fixed
 }
 #[composable]
 pub fn WinampSurfaceApp() {
-    let tab_state = remember_winamp_tab_state(Navigation::External);
-    let skin_state = remember_winamp_skin(tab_state.player);
+    let tab_state = rememberWinampTabState(Navigation::External);
+    let skin_state = rememberWinampSkin(tab_state.player);
     WinampRuntimeEffects(tab_state.player, tab_state.peer_windows, skin_state);
-    let floating = remember_floating_surface();
+    let floating = rememberFloatingSurface();
     FloatingSurfaceSize(floating, tab_state.player);
     {
         WinampStudioSurface(tab_state.player, skin_state);
@@ -2474,9 +2488,14 @@ pub fn set_floating_surface(floating: bool) {
     }
 }
 #[composable]
-fn remember_floating_surface() -> bool {
+fn rememberFloatingSurface() -> bool {
     let state = cranpose_core::rememberMutableStateOf(|| FLOATING_SURFACE.with(Cell::get));
-    FLOATING_SURFACE_STATE.with(|cell| cell.set(Some(state)));
+    cranpose_core::DisposableEffect((), move |scope| {
+        FLOATING_SURFACE_STATE.with(|cell| cell.set(Some(state)));
+        // A change that arrived before the effect ran is not lost.
+        state.set(FLOATING_SURFACE.with(Cell::get));
+        scope.on_dispose(|| FLOATING_SURFACE_STATE.with(|cell| cell.set(None)))
+    });
     state.get()
 }
 #[composable]
@@ -2556,14 +2575,7 @@ fn WinampInlineStage(
             }
             if state.get().playlist_visible {
                 PlaylistWindow(
-                    skin.pledit.clone(),
-                    skin.palette,
-                    skin.text.clone(),
-                    skin.cursors.clone(),
-                    (
-                        skin.viscolor,
-                        skin.bitmap_mode.spectrum_background(skin.viscolor),
-                    ),
+                    PlaylistSkin::of(&skin),
                     state,
                     drag(InlinePane::Playlist),
                     {
@@ -2634,14 +2646,7 @@ fn WinampStackedStage(
             if snapshot.playlist_visible {
                 pixel_grid::provide([0., playlist_y], || {
                     PlaylistWindow(
-                        skin.pledit.clone(),
-                        skin.palette,
-                        skin.text.clone(),
-                        skin.cursors.clone(),
-                        (
-                            skin.viscolor,
-                            skin.bitmap_mode.spectrum_background(skin.viscolor),
-                        ),
+                        PlaylistSkin::of(&skin),
                         state,
                         playlist_drag_target,
                         WinampWindowSize::Fixed(Size::new(
@@ -3100,14 +3105,7 @@ fn WinampWindowStack(spec: WinampWindowStackSpec) {
                             ],
                             || {
                                 PlaylistWindow(
-                                    pl_skin.pledit.clone(),
-                                    pl_skin.palette,
-                                    pl_skin.text.clone(),
-                                    pl_skin.cursors.clone(),
-                                    (
-                                        pl_skin.viscolor,
-                                        pl_skin.bitmap_mode.spectrum_background(pl_skin.viscolor),
-                                    ),
+                                    PlaylistSkin::of(&pl_skin),
                                     state,
                                     if playlist_docked {
                                         WinampDragTarget::Tearable {
@@ -3192,15 +3190,8 @@ pub fn WinampStandaloneApp() {
         navigation: Navigation::Desktop(false),
         ..initial_winamp_state()
     });
-    let peer_windows = cranpose_core::remember(move || WinampPeerWindowStates {
-        main: WindowState::new(MAIN_WIDTH * scale, MAIN_HEIGHT * scale),
-        equalizer: WindowState::new(EQ_WIDTH * scale, EQ_HEIGHT * scale),
-        playlist: WindowState::new(PLAYLIST_WIDTH * scale, PLAYLIST_HEIGHT * scale),
-        scale: cranpose_core::mutableStateOf(scale),
-        stack: cranpose_core::mutableStateOf(Size::new(MAIN_WIDTH, PLAYLIST_HEIGHT)),
-    })
-    .with(|windows| *windows);
-    remember_saved_window_config(peer_windows);
+    let peer_windows = cranpose_core::remember(move || WinampPeerWindowStates::restored(scale))
+        .with(|windows| *windows);
     let previous_scale = peer_windows.scale.get_non_reactive();
     if previous_scale != scale {
         let size = peer_windows.playlist.size_non_reactive();
@@ -3215,7 +3206,7 @@ pub fn WinampStandaloneApp() {
     }
     let settings_window = rememberWindowState(SETTINGS_WIDTH, SETTINGS_HEIGHT);
     let dock = cranpose_core::rememberMutableStateOf(WinampDock::default);
-    let skin_state = remember_winamp_skin(state);
+    let skin_state = rememberWinampSkin(state);
     WinampRuntimeEffects(state, peer_windows, skin_state);
     let snapshot = state.get();
     if snapshot.closed {
@@ -3608,9 +3599,11 @@ fn MainWindowFace(
         let state_click = state;
         PressableSprite(
             "Shuffle",
-            skin.shufrep.clone(),
-            shuffle_normal,
-            shuffle_pressed,
+            ButtonSprites {
+                image: skin.shufrep.clone(),
+                normal: shuffle_normal,
+                pressed: shuffle_pressed,
+            },
             POS_SHUFFLE.0,
             POS_SHUFFLE.1,
             scale,
@@ -3645,9 +3638,11 @@ fn MainWindowFace(
         let state_click = state;
         PressableSprite(
             "Repeat",
-            skin.shufrep.clone(),
-            repeat_normal,
-            repeat_pressed,
+            ButtonSprites {
+                image: skin.shufrep.clone(),
+                normal: repeat_normal,
+                pressed: repeat_pressed,
+            },
             POS_REPEAT.0,
             POS_REPEAT.1,
             scale,
@@ -3677,9 +3672,11 @@ fn MainWindowFace(
         let state_click = state;
         PressableSprite(
             "Show equalizer",
-            skin.shufrep.clone(),
-            eq_normal,
-            eq_pressed,
+            ButtonSprites {
+                image: skin.shufrep.clone(),
+                normal: eq_normal,
+                pressed: eq_pressed,
+            },
             POS_EQ_BUTTON.0,
             POS_EQ_BUTTON.1,
             scale,
@@ -3712,9 +3709,11 @@ fn MainWindowFace(
         let state_click = state;
         PressableSprite(
             "Show playlist",
-            skin.shufrep.clone(),
-            pl_normal,
-            pl_pressed,
+            ButtonSprites {
+                image: skin.shufrep.clone(),
+                normal: pl_normal,
+                pressed: pl_pressed,
+            },
             POS_PL_BUTTON.0,
             POS_PL_BUTTON.1,
             scale,
@@ -3803,9 +3802,11 @@ fn MainTitleButtons(
     let shaded = state.get().main_shaded;
     PressableSprite(
         "Open skin file",
-        titlebar.clone(),
-        MAIN_OPTIONS_BUTTON,
-        MAIN_OPTIONS_BUTTON_SELECTED,
+        ButtonSprites {
+            image: titlebar.clone(),
+            normal: MAIN_OPTIONS_BUTTON,
+            pressed: MAIN_OPTIONS_BUTTON_SELECTED,
+        },
         POS_OPTIONS_BUTTON.0,
         POS_OPTIONS_BUTTON.1,
         scale,
@@ -3813,9 +3814,11 @@ fn MainTitleButtons(
     );
     PressableSprite(
         "Minimize player",
-        titlebar.clone(),
-        MAIN_MINIMIZE_BUTTON,
-        MAIN_MINIMIZE_BUTTON_SELECTED,
+        ButtonSprites {
+            image: titlebar.clone(),
+            normal: MAIN_MINIMIZE_BUTTON,
+            pressed: MAIN_MINIMIZE_BUTTON_SELECTED,
+        },
         POS_MINIMIZE_BUTTON.0,
         POS_MINIMIZE_BUTTON.1,
         scale,
@@ -3828,9 +3831,11 @@ fn MainTitleButtons(
     };
     PressableSprite(
         "Toggle window shade",
-        titlebar.clone(),
-        shade,
-        shade_pressed,
+        ButtonSprites {
+            image: titlebar.clone(),
+            normal: shade,
+            pressed: shade_pressed,
+        },
         POS_SHADE_BUTTON.0,
         POS_SHADE_BUTTON.1,
         scale,
@@ -3838,9 +3843,11 @@ fn MainTitleButtons(
     );
     PressableSprite(
         "Close player",
-        titlebar,
-        MAIN_CLOSE_BUTTON,
-        MAIN_CLOSE_BUTTON_SELECTED,
+        ButtonSprites {
+            image: titlebar,
+            normal: MAIN_CLOSE_BUTTON,
+            pressed: MAIN_CLOSE_BUTTON_SELECTED,
+        },
         POS_CLOSE_BUTTON.0,
         POS_CLOSE_BUTTON.1,
         scale,
@@ -4042,9 +4049,11 @@ fn EqualizerWindow(
                 let state_click = state;
                 PressableSprite(
                     "Hide equalizer",
-                    skin.eqmain.clone(),
-                    EQ_CLOSE_BUTTON,
-                    EQ_CLOSE_BUTTON_SELECTED,
+                    ButtonSprites {
+                        image: skin.eqmain.clone(),
+                        normal: EQ_CLOSE_BUTTON,
+                        pressed: EQ_CLOSE_BUTTON_SELECTED,
+                    },
                     POS_EQ_CLOSE_BUTTON.0,
                     POS_EQ_CLOSE_BUTTON.1,
                     scale,
@@ -4071,9 +4080,11 @@ fn EqualizerWindow(
                 let state_click = state;
                 PressableSpriteHitArea(
                     "Enable equalizer",
-                    skin.eqmain.clone(),
-                    eq_on_normal,
-                    eq_on_pressed,
+                    ButtonSprites {
+                        image: skin.eqmain.clone(),
+                        normal: eq_on_normal,
+                        pressed: eq_on_pressed,
+                    },
                     PressableSpriteLayout {
                         sprite_x: POS_EQ_ON_BUTTON.0,
                         sprite_y: POS_EQ_ON_BUTTON.1,
@@ -4110,9 +4121,11 @@ fn EqualizerWindow(
                 let state_click = state;
                 PressableSpriteHitArea(
                     "Automatic equalizer",
-                    skin.eqmain.clone(),
-                    eq_auto_normal,
-                    eq_auto_pressed,
+                    ButtonSprites {
+                        image: skin.eqmain.clone(),
+                        normal: eq_auto_normal,
+                        pressed: eq_auto_pressed,
+                    },
                     PressableSpriteLayout {
                         sprite_x: POS_EQ_AUTO_BUTTON.0,
                         sprite_y: POS_EQ_AUTO_BUTTON.1,
@@ -4135,9 +4148,11 @@ fn EqualizerWindow(
                 let state_click = state;
                 PressableSpriteHitArea(
                     "Equalizer presets",
-                    skin.eqmain.clone(),
-                    EQ_PRESETS_BUTTON,
-                    EQ_PRESETS_BUTTON_SELECTED,
+                    ButtonSprites {
+                        image: skin.eqmain.clone(),
+                        normal: EQ_PRESETS_BUTTON,
+                        pressed: EQ_PRESETS_BUTTON_SELECTED,
+                    },
                     PressableSpriteLayout {
                         sprite_x: POS_EQ_PRESETS_BUTTON.0,
                         sprite_y: POS_EQ_PRESETS_BUTTON.1,
@@ -4890,19 +4905,44 @@ fn native_sprite_tiles(source: SpriteRect, width: f32, height: f32) -> Vec<(Spri
     }
     tiles
 }
-#[allow(clippy::too_many_arguments)]
-#[composable]
-fn PlaylistWindow(
+/// The parts of a skin the playlist window draws with.
+#[derive(Clone, PartialEq)]
+struct PlaylistSkin {
     pledit: ImageBitmap,
     palette: SkinPalette,
     text_atlas: ImageBitmap,
     cursors: cursors::SkinCursors,
     visualizer: (VisColor, [u8; 4]),
+}
+impl PlaylistSkin {
+    fn of(skin: &WinampSkin) -> Self {
+        Self {
+            pledit: skin.pledit.clone(),
+            palette: skin.palette,
+            text_atlas: skin.text.clone(),
+            cursors: skin.cursors.clone(),
+            visualizer: (
+                skin.viscolor,
+                skin.bitmap_mode.spectrum_background(skin.viscolor),
+            ),
+        }
+    }
+}
+#[composable]
+fn PlaylistWindow(
+    skin: PlaylistSkin,
     state: MutableState<WinampState>,
     drag_target: WinampDragTarget,
     window_size: WinampWindowSize,
     scale: f32,
 ) {
+    let PlaylistSkin {
+        pledit,
+        palette,
+        text_atlas,
+        cursors,
+        visualizer,
+    } = skin;
     let snapshot = state.get();
     let playlist_list = rememberLazyListState();
     let playlist_scroll_dragging = cranpose_core::rememberMutableStateOf(|| false);
@@ -4979,9 +5019,11 @@ fn PlaylistWindow(
                 let state_click = state;
                 PressableSpriteHitArea(
                     "Hide playlist",
-                    pledit.clone(),
-                    PLAYLIST_TOP_RIGHT_CORNER,
-                    PLAYLIST_TOP_RIGHT_CORNER,
+                    ButtonSprites {
+                        image: pledit.clone(),
+                        normal: PLAYLIST_TOP_RIGHT_CORNER,
+                        pressed: PLAYLIST_TOP_RIGHT_CORNER,
+                    },
                     PressableSpriteLayout {
                         sprite_x: width - PLAYLIST_TOP_RIGHT_CORNER.2,
                         sprite_y: 0.0,
@@ -5388,10 +5430,12 @@ fn PlaylistEntry(
             }
             PlaylistRowClickTarget(
                 label.clone(),
-                0.0,
-                0.0,
-                list_width,
-                row_height,
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: list_width,
+                    height: row_height,
+                },
                 scale,
                 row,
                 move |modifiers| handle_playlist_row_click(state, row, modifiers),
@@ -6609,27 +6653,30 @@ fn button_semantics(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-#[composable]
-fn PressableSprite(
-    label: impl Into<String>,
+/// A button's artwork: the sheet and its released and pressed cells.
+#[derive(Clone, PartialEq)]
+struct ButtonSprites {
     image: ImageBitmap,
     normal: SpriteRect,
     pressed: SpriteRect,
+}
+#[composable]
+fn PressableSprite(
+    label: impl Into<String>,
+    sprites: ButtonSprites,
     x: f32,
     y: f32,
     scale: f32,
     on_click: impl Fn() + 'static,
 ) {
+    let hit_area = (x, y, sprites.normal.2, sprites.normal.3);
     PressableSpriteHitArea(
         label,
-        image,
-        normal,
-        pressed,
+        sprites,
         PressableSpriteLayout {
             sprite_x: x,
             sprite_y: y,
-            hit_area: (x, y, normal.2, normal.3),
+            hit_area,
         },
         scale,
         on_click,
@@ -6638,13 +6685,16 @@ fn PressableSprite(
 #[composable]
 fn PressableSpriteHitArea(
     label: impl Into<String>,
-    image: ImageBitmap,
-    normal: SpriteRect,
-    pressed: SpriteRect,
+    sprites: ButtonSprites,
     layout: PressableSpriteLayout,
     scale: f32,
     on_click: impl Fn() + 'static,
 ) {
+    let ButtonSprites {
+        image,
+        normal,
+        pressed,
+    } = sprites;
     let interaction_source = cranpose_ui::rememberMutableInteractionSource();
     let is_pressed = cranpose_ui::collect_is_pressed_as_state(&interaction_source);
     let on_click: Rc<dyn Fn()> = Rc::new(on_click);
@@ -6714,14 +6764,10 @@ fn ClickTarget(
         || {},
     );
 }
-#[allow(clippy::too_many_arguments)]
 #[composable]
 pub fn PlaylistRowClickTarget(
     label: String,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
+    bounds: Rect,
     scale: f32,
     row_key: usize,
     on_click: impl Fn(Modifiers) + 'static,
@@ -6730,12 +6776,12 @@ pub fn PlaylistRowClickTarget(
     let on_click = Rc::new(on_click);
     let activate = on_click.clone();
     let semantics = button_semantics(label, Rc::new(move || activate(Modifiers::NONE)));
-    let w = scaled(width, scale);
-    let h = scaled(height, scale);
+    let w = scaled(bounds.width, scale);
+    let h = scaled(bounds.height, scale);
     Box(
         Modifier::empty()
             .size_points(w, h)
-            .absolute_offset(scaled(x, scale), scaled(y, scale))
+            .absolute_offset(scaled(bounds.x, scale), scaled(bounds.y, scale))
             .stable_semantics(semantics)
             .focusable()
             .pointer_input(row_key, move |scope: PointerInputScope| async move {
@@ -7456,9 +7502,11 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
         let state_click = state;
         PressableSprite(
             "Previous track",
-            cbuttons.clone(),
-            PREV_BUTTON,
-            PREV_BUTTON_ACTIVE,
+            ButtonSprites {
+                image: cbuttons.clone(),
+                normal: PREV_BUTTON,
+                pressed: PREV_BUTTON_ACTIVE,
+            },
             POS_CBUTTONS.0,
             POS_CBUTTONS.1,
             scale,
@@ -7471,9 +7519,11 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
         let state_click = state;
         PressableSprite(
             "Play",
-            cbuttons.clone(),
-            PLAY_BUTTON,
-            PLAY_BUTTON_ACTIVE,
+            ButtonSprites {
+                image: cbuttons.clone(),
+                normal: PLAY_BUTTON,
+                pressed: PLAY_BUTTON_ACTIVE,
+            },
             POS_CBUTTONS.0 + 23.0,
             POS_CBUTTONS.1,
             scale,
@@ -7486,9 +7536,11 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
         let state_click = state;
         PressableSprite(
             "Pause",
-            cbuttons.clone(),
-            PAUSE_BUTTON,
-            PAUSE_BUTTON_ACTIVE,
+            ButtonSprites {
+                image: cbuttons.clone(),
+                normal: PAUSE_BUTTON,
+                pressed: PAUSE_BUTTON_ACTIVE,
+            },
             POS_CBUTTONS.0 + 46.0,
             POS_CBUTTONS.1,
             scale,
@@ -7501,9 +7553,11 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
         let state_click = state;
         PressableSprite(
             "Stop",
-            cbuttons.clone(),
-            STOP_BUTTON,
-            STOP_BUTTON_ACTIVE,
+            ButtonSprites {
+                image: cbuttons.clone(),
+                normal: STOP_BUTTON,
+                pressed: STOP_BUTTON_ACTIVE,
+            },
             POS_CBUTTONS.0 + 69.0,
             POS_CBUTTONS.1,
             scale,
@@ -7516,9 +7570,11 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
         let state_click = state;
         PressableSprite(
             "Next track",
-            cbuttons.clone(),
-            NEXT_BUTTON,
-            NEXT_BUTTON_ACTIVE,
+            ButtonSprites {
+                image: cbuttons.clone(),
+                normal: NEXT_BUTTON,
+                pressed: NEXT_BUTTON_ACTIVE,
+            },
             POS_CBUTTONS.0 + 92.0,
             POS_CBUTTONS.1,
             scale,
@@ -7531,9 +7587,11 @@ fn TransportButtons(cbuttons: ImageBitmap, state: MutableState<WinampState>, sca
         let state_click = state;
         PressableSprite(
             "Open audio files",
-            cbuttons,
-            EJECT_BUTTON,
-            EJECT_BUTTON_ACTIVE,
+            ButtonSprites {
+                image: cbuttons,
+                normal: EJECT_BUTTON,
+                pressed: EJECT_BUTTON_ACTIVE,
+            },
             POS_EJECT.0,
             POS_EJECT.1,
             scale,
@@ -9692,21 +9750,6 @@ impl SavedWinampWindowConfig {
                 size: Some(peer_windows.stack.get_non_reactive()),
             },
         }
-    }
-}
-#[composable]
-fn remember_saved_window_config(peer_windows: WinampPeerWindowStates) {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        cranpose_core::remember(move || {
-            if let Some(config) = load_saved_window_config() {
-                apply_saved_window_config(peer_windows, config);
-            }
-        });
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = peer_windows;
     }
 }
 #[composable]

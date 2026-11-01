@@ -445,10 +445,12 @@ fn playlist_row_click_reports_shift_and_ctrl_from_the_pointer_event() {
         let captured = Rc::clone(&captured_for_app);
         cranamp::winamp::PlaylistRowClickTarget(
             "Test track".into(),
-            0.0,
-            0.0,
-            100.0,
-            20.0,
+            cranpose_ui_graphics::Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 20.0,
+            },
             1.0,
             0,
             move |modifiers| {

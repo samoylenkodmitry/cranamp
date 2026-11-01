@@ -1,6 +1,7 @@
 //! Shared phone and tablet navigation. The skin remains a separate, unmodified surface.
 use super::*;
 use cranpose::liquid::prelude::*;
+use cranpose_ui::text::FontWeight;
 mod chrome;
 mod desktop;
 pub(super) use desktop::{DesktopNavigation, DesktopWorkspace};
@@ -211,7 +212,7 @@ impl Destination {
 #[composable]
 pub fn WinampMobileApp() {
     BoxWithConstraints(Modifier::empty().fill_max_size(), move |scope| {
-        let tabs = remember_winamp_tab_state(Navigation::mobile(scope.max_width().0));
+        let tabs = rememberWinampTabState(Navigation::mobile(scope.max_width().0));
         let initial = Navigation::mobile(scope.max_width().0);
         if scope.max_width().0.is_finite()
             && scope.max_width().0 > 0.
@@ -226,9 +227,9 @@ pub fn WinampMobileApp() {
                 })
             });
         }
-        let skin = remember_winamp_skin(tabs.player);
+        let skin = rememberWinampSkin(tabs.player);
         WinampRuntimeEffects(tabs.player, tabs.peer_windows, skin);
-        let appearance = theme::remember_theme();
+        let appearance = theme::rememberTheme();
         theme::Theme(appearance, skin, move || {
             MobileShell(tabs.player, skin, appearance)
         });
@@ -237,7 +238,7 @@ pub fn WinampMobileApp() {
 
 #[composable]
 fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appearance: theme::Ui) {
-    let library = library::remember_library_ui();
+    let library = library::rememberLibraryUi();
     library::PlaylistEffects(player, library);
     let insets = cranpose_ui::window_insets();
     // Paint the whole viewport, including the status bar and home indicator.
@@ -300,20 +301,20 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
                 && player.get().current_index.is_some()
             {
                 chrome::MiniPlayer(
-                    player,
                     Modifier::empty()
                         .absolute_offset(
                             (width - nav_width) * 0.5,
                             (nav_top - chrome::MINI_HEIGHT + 4.0).max(0.0),
                         )
                         .size_points(nav_width, 58.0),
+                    player,
                 );
             }
             if nav_visible {
                 NavigationBar(
-                    player,
                     Modifier::empty()
                         .absolute_offset((width - nav_width) * 0.5, nav_top + NAV_TOP_INSET),
+                    player,
                     nav_width,
                 );
             }
@@ -323,7 +324,7 @@ fn MobileShell(player: MutableState<WinampState>, skin: WinampSkinState, appeara
 
 /// One tab bar for mobile screens and desktop companion windows.
 #[composable]
-fn NavigationBar(player: MutableState<WinampState>, modifier: Modifier, width: f32) {
+fn NavigationBar(modifier: Modifier, player: MutableState<WinampState>, width: f32) {
     let focus = cranpose_ui::local_focus_manager().current();
     LiquidTabBar(
         modifier.width(width),

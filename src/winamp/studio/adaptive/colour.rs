@@ -401,14 +401,17 @@ fn Body(ui: Ui, width: f32, target: Target) {
     {
         let d = shared.clone();
         Control(
-            icon,
-            label.into(),
-            match i {
-                0 => "Add current colour to saved colours",
-                1 => "Replace the selected swatch with current colour",
-                _ => "Remove the selected swatch",
-            }
-            .into(),
+            ControlFace {
+                icon,
+                label: label.into(),
+                detail: match i {
+                    0 => "Add current colour to saved colours",
+                    1 => "Replace the selected swatch with current colour",
+                    _ => "Remove the selected swatch",
+                }
+                .into(),
+                placement: ControlLabel::Hint,
+            },
             Area::new(width - 120. + i as f32 * 36., 240., 36., 36.),
             false,
             if i == 0 {
@@ -416,7 +419,6 @@ fn Body(ui: Ui, width: f32, target: Target) {
             } else {
                 slot.is_some()
             },
-            false,
             ui.hints,
             move || {
                 let v = d.lock().unwrap().view.clone();
