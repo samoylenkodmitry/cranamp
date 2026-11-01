@@ -46,6 +46,8 @@ Three more inputs publish packages from a successful signed run without building
 - `msstore_upload_run` submits `microsoft-store-msix` through the Microsoft Store CLI. It replaces the package and keeps the current listing; change listing text and screenshots in Partner Center. It uses the `CRANAMP_MS_STORE_TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET` and `SELLER_ID` secrets of the `cranamp-store-submission` app in the `DmitriiSamoilenko.onmicrosoft.com` directory, which has the Developer role in Partner Center.
 - `aur_publish_run` attaches the source and x86_64 store archives of `linux-repository-packages` to the `vVERSION` release, then pushes both recipes with the `faceless33` key in `CRANAMP_AUR_SSH_KEY`. The release must exist; the recipe checksums name those exact archives.
 
+- `snap_publish_run` releases the `snap-store` artifact to the Snap Store stable channel with the `CRANAMP_SNAPCRAFT_STORE_CREDENTIALS` secret. The Snap job packs the Linux store tarball of the same run with `platform/snap/snapcraft.yaml` (core24, strict confinement, GNOME extension).
+
 The keys also live in the encrypted Vault folder for local use; none is in this repository.
 
 ## 0.1.88 listing preparation

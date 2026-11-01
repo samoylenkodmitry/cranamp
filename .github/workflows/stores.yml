@@ -53,6 +53,10 @@ on:
         description: Submit the MSIX from this Store packages run to the Microsoft Store
         type: string
         default: ''
+      snap_publish_run:
+        description: Release the snap from this Store packages run to the Snap Store stable channel
+        type: string
+        default: ''
       aur_publish_run:
         description: Attach the Linux archives from this Store packages run to the release and push both AUR recipes
         type: string
@@ -300,6 +304,35 @@ jobs:
             git -C "$RUNNER_TEMP/$repo" commit -m "Update to Cranamp $version"
             git -C "$RUNNER_TEMP/$repo" push origin HEAD:master
           done
+  snap-publish:
+    if: inputs.snap_publish_run != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: snap-publish
+    steps:
+      - name: Check source package job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.snap_publish_run }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+          gh api "repos/$SOURCE_REPO/actions/runs/$SOURCE_RUN/jobs" --paginate --jq '.jobs[] | select(.name == "Snap") | .conclusion' | grep -qx success
+      - uses: actions/download-artifact@v8
+        with:
+          name: snap-store
+          path: snap-publish
+          run-id: ${{ inputs.snap_publish_run }}
+          github-token: ${{ github.token }}
+      - name: Find the snap
+        id: snap
+        run: echo "file=$(find snap-publish -name '*.snap' -type f)" >> "$GITHUB_OUTPUT"
+      - uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.CRANAMP_SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.snap.outputs.file }}
+          release: stable
   apple-status:
     if: inputs.apple_status_only == true
     runs-on: ubuntu-latest
@@ -316,7 +349,7 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.CRANAMP_ASC_API_ISSUER_ID }}
         run: python3 scripts/distribution/apple-status.py
   android:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
     name: Google Play AAB
     runs-on: ubuntu-latest
     steps:
@@ -387,7 +420,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/play-upload.jks"
 
   apple:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
     name: Apple ${{ matrix.platform }}
     runs-on: macos-latest
     strategy:
@@ -445,7 +478,7 @@ jobs:
           if [ -n "${CRANAMP_INSTALLED_PROFILE:-}" ]; then rm -f "$CRANAMP_INSTALLED_PROFILE"; fi
 
   windows:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
     name: Microsoft Store MSIX
     runs-on: windows-latest
     env:
@@ -496,8 +529,38 @@ jobs:
           path: store-artifacts/
           if-no-files-found: warn
 
+  snap:
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
+    name: Snap
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-repository-packages
+          path: linux
+      - name: Stage the snap project
+        run: |
+          set -euo pipefail
+          version=$(python3 scripts/distribution/version.py)
+          mkdir snap-build
+          cp platform/snap/snapcraft.yaml snap-build/
+          cp "linux/cranamp-$version-linux-x86_64-store.tar.gz" snap-build/cranamp-linux-x86_64-store.tar.gz
+          tar -xzf snap-build/cranamp-linux-x86_64-store.tar.gz -C "$RUNNER_TEMP" usr/share/icons/hicolor/512x512/apps/io.cranamp.app.png
+          cp "$RUNNER_TEMP/usr/share/icons/hicolor/512x512/apps/io.cranamp.app.png" snap-build/
+          echo "$version" > snap-build/version.txt
+      - uses: snapcore/action-build@v1
+        id: build
+        with:
+          path: snap-build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snap-store
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
   linux:
-    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == ''
+    if: inputs.apple_status_only != true && inputs.apple_upload_run == '' && inputs.apple_listing_platform == '' && inputs.play_upload_run == '' && inputs.msstore_upload_run == '' && inputs.aur_publish_run == '' && inputs.snap_publish_run == ''
     name: Linux DEB, RPM and AUR source package
     runs-on: ubuntu-22.04
     steps:

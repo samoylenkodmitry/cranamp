@@ -1,0 +1,51 @@
+name: cranamp
+title: Cranamp
+summary: Music player with WSZ skins and a pixel Skin Studio
+description: |
+  Cranamp plays your music in a compact player with original Catamp pixel
+  skins. Import compatible WSZ or ZIP skins, or make your own in Skin Studio.
+  It plays local files, folders, WebDAV folders and direct audio streams,
+  with a ten-band equalizer, playlists and a spectrum analyzer.
+license: Apache-2.0
+website: https://cranamp.dmitrysamoylenko.in/
+source-code: https://github.com/samoylenkodmitry/cranamp
+issues: https://github.com/samoylenkodmitry/cranamp/issues
+icon: io.cranamp.app.png
+base: core24
+grade: stable
+confinement: strict
+adopt-info: cranamp
+platforms:
+  amd64:
+
+apps:
+  cranamp:
+    command: usr/bin/cranamp
+    desktop: usr/share/applications/io.cranamp.app.desktop
+    common-id: io.cranamp.app
+    extensions: [gnome]
+    plugs:
+      - audio-playback
+      - network
+      - home
+      - removable-media
+      - mount-observe
+
+parts:
+  cranamp:
+    # The store tarball of the Linux job, built from the same commit.
+    plugin: dump
+    source: cranamp-linux-x86_64-store.tar.gz
+    stage-packages:
+      - libasound2t64
+      - libvulkan1
+      - mesa-vulkan-drivers
+      - libxkbcommon-x11-0
+      - libxi6
+    override-pull: |
+      craftctl default
+      craftctl set version="$(cat "$CRAFT_PROJECT_DIR/version.txt")"
+    override-prime: |
+      craftctl default
+      sed -i 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/512x512/apps/io.cranamp.app.png|' \
+        usr/share/applications/io.cranamp.app.desktop
