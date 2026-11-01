@@ -139,3 +139,66 @@ fn summary_does_not_present_partial_durations_as_the_playlist_total() {
     assert_eq!(library_summary(&tracks), "4 tracks");
     assert_eq!(library_summary(&[]), "0 tracks");
 }
+
+fn network_folder(name: &str) -> NetworkFolder {
+    NetworkFolder {
+        name: name.into(),
+        address: format!("http://drive/{name}/"),
+    }
+}
+
+#[test]
+fn browsing_keeps_the_way_back_and_asks_for_each_folder_again() {
+    let mut browse = Browse::default();
+    browse.start(network_folder("Tailscale Drive"));
+    browse.listing = Listing::Ready(vec![network_folder("server")]);
+    let started = browse.generation;
+
+    browse.enter(network_folder("server"));
+    browse.enter(network_folder("music"));
+    assert_eq!(browse.path(), "Tailscale Drive / server / music");
+    assert_eq!(browse.listing, Listing::Loading);
+    assert_eq!(browse.generation, started.wrapping_add(2));
+
+    browse.up();
+    assert_eq!(browse.path(), "Tailscale Drive / server");
+    assert_eq!(browse.trail.last(), Some(&network_folder("server")));
+
+    browse.up();
+    let at_root = browse.generation;
+    browse.up();
+    assert_eq!(browse.path(), "Tailscale Drive");
+    assert_eq!(
+        browse.generation, at_root,
+        "the first folder has nothing above it"
+    );
+}
+
+#[test]
+fn only_subfolders_are_listed_by_name_without_regard_to_case() {
+    let folder = |address: &str| {
+        cranpose_services::ContentEntry::Folder(
+            cranpose_services::WebDavFolder::new(address, cranpose_services::default_http_client())
+                .expect("a WebDAV address")
+                .handle(),
+        )
+    };
+    let entries = vec![
+        folder("http://drive/share/beta/"),
+        cranpose_services::ContentEntry::File(cranpose_services::file_content("/music/a.mp3")),
+        folder("http://drive/share/Alpha/"),
+        folder("http://drive/share/gamma%20ray/"),
+    ];
+    let listed = subfolders(entries);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|folder| (folder.name.as_str(), folder.address.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("Alpha", "http://drive/share/Alpha/"),
+            ("beta", "http://drive/share/beta/"),
+            ("gamma ray", "http://drive/share/gamma%20ray/"),
+        ]
+    );
+}

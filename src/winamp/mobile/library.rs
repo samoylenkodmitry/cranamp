@@ -15,6 +15,7 @@ enum Sheet {
     Remove(Removal),
     Import,
     Address(bool),
+    Browse,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -57,6 +58,7 @@ pub(super) struct LibraryUi {
     editing: MutableState<bool>,
     sheet: MutableState<Sheet>,
     notice: MutableState<String>,
+    browse: MutableState<Browse>,
     list: LazyListState,
 }
 
@@ -72,9 +74,140 @@ pub(super) fn rememberLibraryUi() -> LibraryUi {
         editing: cranpose_core::mutableStateOf(false),
         sheet: cranpose_core::mutableStateOf(Sheet::None),
         notice: cranpose_core::mutableStateOf(String::new()),
+        browse: cranpose_core::mutableStateOf(Browse::default()),
         list: LazyListState::new(0, 0.0),
     })
     .with(|ui| *ui)
+}
+
+// Taildrive's WebDAV address on every device that runs Tailscale. The
+// system folder picker cannot choose folders in Tailscale's Files location.
+const TAILDRIVE: &str = "http://100.100.100.100:8080/";
+const BROWSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A WebDAV folder that the Browse sheet lists or opens.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct NetworkFolder {
+    pub(super) name: String,
+    pub(super) address: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) enum Listing {
+    #[default]
+    Loading,
+    Ready(Vec<NetworkFolder>),
+    Failed(String),
+}
+
+/// The folders from where browsing started to the folder shown, and what
+/// that folder holds.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct Browse {
+    pub(super) trail: Vec<NetworkFolder>,
+    pub(super) listing: Listing,
+    // Tells a listing that arrives late which folder it belongs to.
+    pub(super) generation: u64,
+}
+
+impl Browse {
+    pub(super) fn start(&mut self, root: NetworkFolder) {
+        self.trail = vec![root];
+        self.reload();
+    }
+
+    pub(super) fn enter(&mut self, folder: NetworkFolder) {
+        self.trail.push(folder);
+        self.reload();
+    }
+
+    pub(super) fn up(&mut self) {
+        if self.trail.len() > 1 {
+            self.trail.pop();
+            self.reload();
+        }
+    }
+
+    pub(super) fn path(&self) -> String {
+        self.trail
+            .iter()
+            .map(|folder| folder.name.as_str())
+            .collect::<Vec<_>>()
+            .join(" / ")
+    }
+
+    fn reload(&mut self) {
+        self.listing = Listing::Loading;
+        self.generation = self.generation.wrapping_add(1);
+    }
+}
+
+/// The subfolders among `entries`, by name without regard to case.
+pub(super) fn subfolders(entries: Vec<cranpose_services::ContentEntry>) -> Vec<NetworkFolder> {
+    let mut folders: Vec<NetworkFolder> = entries
+        .into_iter()
+        .filter_map(|entry| match entry {
+            cranpose_services::ContentEntry::Folder(folder) => {
+                let metadata = folder.metadata();
+                Some(NetworkFolder {
+                    name: metadata.name,
+                    address: metadata.identifier,
+                })
+            }
+            cranpose_services::ContentEntry::File(_) => None,
+        })
+        .filter(|folder| !folder.name.is_empty())
+        .collect();
+    folders.sort_by_cached_key(|folder| folder.name.to_lowercase());
+    folders
+}
+
+fn browse_from(ui: LibraryUi, address: String) {
+    let name = if address == TAILDRIVE {
+        "Tailscale Drive".to_owned()
+    } else {
+        address.clone()
+    };
+    ui.browse
+        .update(|browse| browse.start(NetworkFolder { name, address }));
+    list_browsed(ui);
+}
+
+fn list_browsed(ui: LibraryUi) {
+    let browse = ui.browse.get_non_reactive();
+    let Some(folder) = browse.trail.last().cloned() else {
+        return;
+    };
+    let generation = browse.generation;
+    cranpose_core::spawn_ui_task(async move {
+        let listing = match cranpose_services::WebDavFolder::new(
+            &folder.address,
+            cranpose_services::default_http_client(),
+        ) {
+            Err(error) => Listing::Failed(error.to_string()),
+            Ok(handle) => {
+                let handle = handle.handle();
+                let listed =
+                    futures_lite::future::race(async { Some(handle.entries().await) }, async {
+                        cranpose_core::delay(BROWSE_TIMEOUT).await;
+                        None
+                    })
+                    .await;
+                match listed {
+                    Some(Ok(entries)) => Listing::Ready(subfolders(entries)),
+                    Some(Err(error)) => Listing::Failed(error.to_string()),
+                    None => {
+                        Listing::Failed("The folder did not answer within 10 seconds.".to_owned())
+                    }
+                }
+            }
+        };
+        ui.browse.update(|browse| {
+            if browse.generation == generation {
+                browse.listing = listing;
+            }
+        });
+    });
 }
 
 #[derive(Default)]
@@ -977,18 +1110,22 @@ fn LibrarySheet(player: MutableState<WinampState>, ui: LibraryUi) {
         sheet,
         move || ui.sheet.set(Sheet::None),
         move || {
-            scroll::SheetColumn(move || {
-                SheetContents(player, ui);
-                chrome::Divider();
-                GlassButton(
-                    Modifier::empty()
-                        .fill_max_width()
-                        .height(48.)
-                        .content_description("Cancel"),
-                    GlassButtonSpec::plain(),
-                    move || ui.sheet.set(Sheet::None),
-                    || GlassButtonLabel("Cancel".into(), GlassButtonSpec::plain()),
-                );
+            // Each folder listing opens at the top, where its actions are.
+            let listing = ui.browse.get().generation;
+            cranpose_core::key(listing, || {
+                scroll::SheetColumn(move || {
+                    SheetContents(player, ui);
+                    chrome::Divider();
+                    GlassButton(
+                        Modifier::empty()
+                            .fill_max_width()
+                            .height(48.)
+                            .content_description("Cancel"),
+                        GlassButtonSpec::plain(),
+                        move || ui.sheet.set(Sheet::None),
+                        || GlassButtonLabel("Cancel".into(), GlassButtonSpec::plain()),
+                    );
+                });
             });
         },
     );
@@ -1025,6 +1162,11 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
             SheetAction("Open a network folder", move || {
                 set_text_field_text(&ui.address, "");
                 ui.sheet.set(Sheet::Address(true));
+            });
+            SheetAction("Browse Tailscale Drive folders", move || {
+                ui.notice.set(String::new());
+                ui.sheet.set(Sheet::Browse);
+                browse_from(ui, TAILDRIVE.to_owned());
             });
         }
         Sheet::Manage => {
@@ -1261,6 +1403,20 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                     ..Default::default()
                 },
             );
+            if folder {
+                SheetAction("Browse folders at this address", move || {
+                    let address = ui.address.text().trim().to_owned();
+                    ui.sheet.set(Sheet::Browse);
+                    browse_from(
+                        ui,
+                        if address.is_empty() {
+                            TAILDRIVE.to_owned()
+                        } else {
+                            address
+                        },
+                    );
+                });
+            }
             SheetAction("Open address", move || {
                 let address = ui.address.text().trim().to_owned();
                 if address.is_empty() {
@@ -1274,6 +1430,64 @@ fn SheetContents(player: MutableState<WinampState>, ui: LibraryUi) {
                     open_url(player, address);
                 }
             });
+        }
+        Sheet::Browse => {
+            let browse = ui.browse.get();
+            Heading("Network folder");
+            Text(
+                browse.path(),
+                Modifier::empty().fill_max_width(),
+                settings_text_style(15.0, colors.secondary_label),
+            );
+            if let Some(current) = browse.trail.last().cloned() {
+                SheetAction("Use this folder", move || {
+                    ui.notice.set(String::new());
+                    ui.sheet.set(Sheet::None);
+                    open_network_folder(player, current.address.clone());
+                });
+            }
+            if browse.trail.len() > 1 {
+                SheetAction("Up one folder", move || {
+                    ui.browse.update(Browse::up);
+                    list_browsed(ui);
+                });
+            }
+            match browse.listing.clone() {
+                Listing::Loading => {
+                    Text(
+                        "Loading folders",
+                        Modifier::empty().fill_max_width(),
+                        settings_text_style(15.0, colors.secondary_label),
+                    );
+                }
+                Listing::Failed(error) => {
+                    Text(
+                        format!("{error} Check that Tailscale is connected and that Taildrive shares this folder."),
+                        Modifier::empty().fill_max_width(),
+                        settings_text_style(15.0, colors.secondary_label),
+                    );
+                }
+                Listing::Ready(folders) => {
+                    if folders.is_empty() {
+                        Text(
+                            "No subfolders here.",
+                            Modifier::empty().fill_max_width(),
+                            settings_text_style(15.0, colors.secondary_label),
+                        );
+                    }
+                    for folder in folders {
+                        chrome::ActionRow(
+                            folder.name.clone(),
+                            icons::FOLDER,
+                            chrome::ActionRole::Default,
+                            move || {
+                                ui.browse.update(|browse| browse.enter(folder.clone()));
+                                list_browsed(ui);
+                            },
+                        );
+                    }
+                }
+            }
         }
     }
 }

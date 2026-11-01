@@ -675,6 +675,195 @@ final class PickerProviders: XCTestCase {
         print("REMOTE PLAYBACK elapsed: " + elapsed)
     }
 
+    /// Walks the folder picker into a Taildrive share and reports whether
+    /// the share's folders and the picker's Open button are enabled. Tailscale's
+    /// Files location decides what the folder picker may choose; this shows
+    /// that decision on the phone the test runs on.
+    // The Taildrive folders from the tailnet account to the music library, such
+    // as `machine/share/music`. The tests skip when it is not set.
+    private func taildriveFolders() throws -> [String] {
+        guard let path = ProcessInfo.processInfo.environment["CRANAMP_TEST_TAILDRIVE_PATH"] else {
+            throw XCTSkip("Set TEST_RUNNER_CRANAMP_TEST_TAILDRIVE_PATH to the Taildrive folders below the account")
+        }
+        return path.split(separator: "/").map(String.init)
+    }
+
+    func testTailscaleFolderSelectable() throws {
+        let folders = try taildriveFolders()
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        app.launch()
+        let library = app.buttons.matching(identifier: "Library")
+        XCTAssertTrue(library.firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+        library.element(boundBy: library.count - 1).tap()
+        let add = app.buttons["Add music"].exists ? app.buttons["Add music"] : app.buttons["Add music to Library"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10), app.debugDescription)
+        add.tap()
+        let choose = app.buttons["Choose a music folder"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 10), app.debugDescription)
+        choose.tap()
+        let browse = app.buttons["Browse"]
+        if browse.waitForExistence(timeout: 20) && browse.isHittable { browse.tap() }
+        for _ in 0..<8 {
+            if app.cells["DOC.sidebar.item.Tailscale"].exists { break }
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            guard back.exists && back.isHittable && back.label != "Cancel" else { break }
+            back.tap()
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        let provider = app.cells["DOC.sidebar.item.Tailscale"]
+        guard provider.waitForExistence(timeout: 10) else {
+            XCTFail("No Tailscale location in the picker: " + app.debugDescription)
+            return
+        }
+        provider.tap()
+        let account = app.cells.matching(NSPredicate(format: "label CONTAINS %@", "@")).firstMatch
+        guard account.waitForExistence(timeout: 15) else {
+            attach("tailscale-root")
+            XCTFail("The Tailscale location did not list the tailnet")
+            return
+        }
+        print("TAILNET cell enabled=\(account.isEnabled) label=\(account.label)")
+        account.tap()
+        for name in folders {
+            let entry = app.cells.containing(.staticText, identifier: name).firstMatch
+            let text = app.staticTexts[name].firstMatch
+            for _ in 0..<10 {
+                if text.exists && text.isHittable { break }
+                app.collectionViews.firstMatch.swipeUp()
+            }
+            guard text.waitForExistence(timeout: 15) else {
+                attach("missing-\(name)")
+                XCTFail("Missing \(name): " + app.debugDescription)
+                return
+            }
+            print("FOLDER \(name) cell enabled=\(entry.exists ? String(entry.isEnabled) : "no cell") text enabled=\(text.isEnabled)")
+            attach("before-\(name)")
+            (entry.exists && entry.isHittable ? entry : text).tap()
+            // The title shows the folder once the picker has entered it.
+            // Entering a folder replaces the listing that showed its name.
+            var inside = false
+            for attempt in 0..<20 {
+                if !text.exists || !text.isHittable { inside = true; break }
+                if attempt == 10 { text.tap() }
+                Thread.sleep(forTimeInterval: 1.0)
+            }
+            Thread.sleep(forTimeInterval: 2.0)
+            print("ENTERED \(name)=\(inside)")
+        }
+        let open = app.buttons["Open"].firstMatch
+        let enabled = NSPredicate(format: "enabled == true")
+        expectation(for: enabled, evaluatedWith: open)
+        waitForExpectations(timeout: 10) { _ in }
+        print("OPEN button exists=\(open.exists) enabled=\(open.exists ? String(open.isEnabled) : "-")")
+        attach("inside-music")
+        guard open.exists && open.isEnabled else {
+            XCTFail("The picker did not let the folder be opened: " + app.debugDescription)
+            return
+        }
+        open.tap()
+        // The Library header counts the tracks; a folder of music changes it.
+        let counted = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ tracks? · .*"))
+        let deadline = Date().addingTimeInterval(60)
+        var summary = ""
+        while Date() < deadline {
+            if counted.count > 0 { summary = counted.firstMatch.label }
+            if summary.hasPrefix("1 track") == false && !summary.isEmpty { break }
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        attach("after-open")
+        print("LIBRARY after open: \(summary)")
+        XCTAssertFalse(summary.isEmpty || summary.hasPrefix("1 track "), "The folder added no tracks: " + app.debugDescription)
+    }
+
+    /// Chooses a Taildrive folder in Cranamp's own WebDAV browser, which
+    /// works where the system picker cannot choose Tailscale folders, and
+    /// checks that the folder's music reaches the Library.
+    func testTaildriveBrowseFolder() throws {
+        let folders = try taildriveFolders()
+        let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
+        // CRANAMP_UITEST_ATTACH keeps an app that devicectl started with its
+        // console attached, so its log reaches the Mac.
+        if ProcessInfo.processInfo.environment["CRANAMP_UITEST_ATTACH"] == nil {
+            app.launch()
+        } else {
+            app.activate()
+        }
+        let library = app.buttons.matching(identifier: "Library")
+        XCTAssertTrue(library.firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+        library.element(boundBy: library.count - 1).tap()
+        let counted = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ tracks? · .*"))
+        let before = counted.firstMatch.waitForExistence(timeout: 10) ? counted.firstMatch.label : ""
+        let add = app.buttons["Add music"].exists ? app.buttons["Add music"] : app.buttons["Add music to Library"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10), app.debugDescription)
+        add.tap()
+        func press(_ label: String) -> Bool {
+            let button = app.buttons[label].firstMatch
+            guard button.waitForExistence(timeout: 15) else { return false }
+            for _ in 0..<12 {
+                if button.isHittable { break }
+                if button.frame.midY < app.frame.midY { app.swipeDown() } else { app.swipeUp() }
+            }
+            // Cranpose runs its own scroll inertia: tap once the row has held
+            // still for three samples.
+            var previous = button.frame
+            var still = 0
+            for _ in 0..<30 where still < 3 {
+                Thread.sleep(forTimeInterval: 0.3)
+                still = button.frame == previous ? still + 1 : 0
+                previous = button.frame
+            }
+            button.tap()
+            return true
+        }
+        // The sheet names the folder it shows; a tap on a moving list can
+        // open the neighbouring folder, so each step checks the name.
+        func enter(_ name: String) -> Bool {
+            let shown = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "/ " + name)).firstMatch
+            for _ in 0..<3 {
+                guard press(name) else { return false }
+                if shown.waitForExistence(timeout: 10) { return true }
+                _ = press("Up one folder")
+            }
+            return false
+        }
+        XCTAssertTrue(press("Browse Tailscale Drive folders"), app.debugDescription)
+        let account = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "@")).firstMatch
+        XCTAssertTrue(account.waitForExistence(timeout: 15), app.debugDescription)
+        for name in [account.label] + folders {
+            guard enter(name) else {
+                attach("browse-missing-\(name)")
+                XCTFail("The browser did not list \(name): " + app.debugDescription)
+                return
+            }
+        }
+        attach("browse-music")
+        XCTAssertTrue(press("Use this folder"), app.debugDescription)
+        let deadline = Date().addingTimeInterval(90)
+        var after = before
+        while Date() < deadline {
+            if counted.count > 0 { after = counted.firstMatch.label }
+            if after != before && !after.isEmpty { break }
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        attach("browse-after")
+        let player = app.buttons.matching(identifier: "Player")
+        player.element(boundBy: player.count - 1).tap()
+        Thread.sleep(forTimeInterval: 2.0)
+        attach("browse-player")
+        // The scan starts playback; the test leaves the phone quiet.
+        app.terminate()
+        print("PLAYER texts: " + app.staticTexts.allElementsBoundByIndex.prefix(12).map { $0.label }.joined(separator: " | "))
+        print("LIBRARY before: \(before) after: \(after)")
+        XCTAssertNotEqual(after, before, "The Taildrive folder added no tracks: " + app.debugDescription)
+    }
+
+    private func attach(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     private func report(argument: String, label: String) {
         let app = XCUIApplication(bundleIdentifier: Self.appBundleId)
         app.launchArguments = [argument]
