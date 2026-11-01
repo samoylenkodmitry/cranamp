@@ -30,7 +30,7 @@ other native app targets do. The native picker still uses `UTTypeFolder` with
 accessed through Add Network when they expose WebDAV.
 
 The Tailscale file provider lets the picker open its folders but keeps Open
-disabled for a folder. Add music therefore offers Browse Tailscale Drive folders.
+disabled for a folder. Add music therefore offers Browse Taildrive folders.
 It lists Taildrive at `http://100.100.100.100:8080/` one folder at a time, and
 Use this folder opens the shown folder as a WebDAV folder. On 2026-11-01 the
 paired iPhone opened the original library this way. Discovery found 2,096 audio
