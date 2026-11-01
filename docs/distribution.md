@@ -4,14 +4,14 @@ Cranamp is a music player in Rust with WSZ support and its own Skin Studio. The 
 
 ## Registered apps
 
-Store status was verified on October 26, 2026:
+Store status was verified on November 1, 2026. The [0.1.93 record](../store/releases/0.1.93/validation.md) lists the packages and checks.
 
 | Store | App record | Identity | Status |
 | --- | --- | --- | --- |
-| Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | 0.1.88 (10088) published with a 100% production rollout |
-| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | macOS 0.1.89 (76) and iOS 0.1.88 (6) waiting for review |
-| Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.89.0 published; submission 4 is live |
-| Arch User Repository | [Source](https://aur.archlinux.org/packages/cranamp), [binary](https://aur.archlinux.org/packages/cranamp-bin) | `cranamp`, `cranamp-bin` | Both updated to 0.1.89-1 on October 26 |
+| Google Play | [Cranamp dashboard](https://play.google.com/console/u/4/developers/5537543190610439587/app/4972717649659015464/app-dashboard) | `com.cranamp.app` | 0.1.93 (10093) AAB ready for upload in Play Console |
+| Apple App Store | [Cranamp distribution](https://appstoreconnect.apple.com/apps/6818451356/distribution) | `io.cranamp.app`; app ID `6818451356`; team `YP97W9MQC8` | macOS 0.1.93 (153) submitted for review; iOS 0.1.93 (154) submitted for review |
+| Microsoft Store | [Cranamp overview](https://partner.microsoft.com/en-US/dashboard/products/9N0XTC9PGM8X/overview) | Store ID `9N0XTC9PGM8X` | 0.1.93 MSIX ready for upload in Partner Center |
+| Arch User Repository | [Source](https://aur.archlinux.org/packages/cranamp), [binary](https://aur.archlinux.org/packages/cranamp-bin) | `cranamp`, `cranamp-bin` | Both updated to 0.1.93-1 on November 1 |
 
 GitHub repository variables contain the registered Apple bundle ID and the exact Microsoft manifest values:
 
