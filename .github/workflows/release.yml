@@ -219,6 +219,8 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build widget
         run: ./build-web.sh
+      - name: Check the wasm features
+        run: scripts/wasm_feature_floor.sh dist/pkg/cranamp_bg.wasm
       - name: Package
         run: |
           version="${GITHUB_REF_NAME#v}"

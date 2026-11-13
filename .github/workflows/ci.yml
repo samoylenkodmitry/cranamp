@@ -73,6 +73,10 @@ jobs:
         run: node --test test/web_host.mjs test/release_workflow.mjs
       - name: Build wasm widget
         run: ./build-web.sh
+      - name: Check the wasm features
+        # WebKit before Safari 18 rejects a module with a feature it lacks, in
+        # every iOS browser.
+        run: scripts/wasm_feature_floor.sh dist/pkg/cranamp_bg.wasm
 
   ios:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
