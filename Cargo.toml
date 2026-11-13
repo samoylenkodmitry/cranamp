@@ -8,8 +8,12 @@ repository = "https://github.com/samoylenkodmitry/cranamp"
 publish = false
 autotests = false
 
+# The `--enable-*` features are the ones rustc emits for wasm32. Safari 15 has
+# all of them. Any feature past them, such as the typed function references of
+# `--all-features`, makes WebKit before Safari 18 reject the whole module.
+# `scripts/wasm_feature_floor.sh` checks the built module.
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-Oz", "--all-features"]
+wasm-opt = ["-Oz", "--mvp-features", "--enable-bulk-memory", "--enable-multivalue", "--enable-mutable-globals", "--enable-nontrapping-float-to-int", "--enable-reference-types", "--enable-sign-ext"]
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]

@@ -47,6 +47,10 @@ jobs:
           features: web,renderer-wgpu
       - name: Build widget
         run: ./build-web.sh
+      - name: Check the wasm features
+        # WebKit before Safari 18 rejects a module with a feature it lacks, in
+        # every iOS browser, so such a module must not replace the deployed site.
+        run: scripts/wasm_feature_floor.sh dist/pkg/cranamp_bg.wasm
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
